@@ -80,6 +80,7 @@ type PeerInfo struct {
 	height                uint64
 	rw                    p2p.MsgReadWriter
 	protocol, witProtocol uint
+	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -140,12 +141,13 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &PeerInfo{
-		peer:      peer,
-		rw:        rw,
-		removed:   make(chan struct{}),
-		tasks:     make(chan func(), 32),
-		ctx:       ctx,
-		ctxCancel: cancel,
+		peer:           peer,
+		rw:             rw,
+		knownWitnesses: wit.NewKnownCache(wit.MaxKnownWitnesses),
+		removed:        make(chan struct{}),
+		tasks:          make(chan func(), 32),
+		ctx:            ctx,
+		ctxCancel:      cancel,
 	}
 
 	p.lock.RLock()
@@ -267,6 +269,12 @@ func (pi *PeerInfo) RemoveReason() *p2p.PeerError {
 	default:
 		return nil
 	}
+}
+
+func (pi *PeerInfo) AddKnownWitness(hash common.Hash) {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	pi.knownWitnesses.Add(hash)
 }
 
 // ConvertH512ToPeerID() ensures the return type is [64]byte
@@ -593,7 +601,7 @@ func runWitPeer(
 		}
 
 		switch msg.Code {
-		case wit.NewWitnessMsg | wit.GetMsgWitness | wit.MsgWitness | wit.NewWitnessHashesMsg:
+		case wit.GetMsgWitness | wit.MsgWitness:
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -603,6 +611,40 @@ func runWitPeer(
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
+		case wit.NewWitnessMsg:
+			// add hashes to peer
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+
+			var query wit.NewWitnessPacket
+			if err := rlp.DecodeBytes(b, &query); err != nil {
+				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+			}
+
+			peerInfo.AddKnownWitness(query.Witness.Header().Hash())
+
+			// send to client to add witness to db
+			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			send(wit.ToProto[protocol][msg.Code], peerID, b)
+		case wit.NewWitnessHashesMsg:
+			// add hashes to peer
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+
+			var query wit.NewWitnessHashesPacket
+			if err := rlp.DecodeBytes(b, &query); err != nil {
+				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+			}
+
+			for _, hash := range query.Hashes {
+				peerInfo.AddKnownWitness(hash)
+			}
 		default:
 			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(peerID[:]), msg.Code))
 		}

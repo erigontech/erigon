@@ -84,7 +84,6 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
 		wit.ToProto[direct.WIT0][wit.GetMsgWitness],
-		wit.ToProto[direct.WIT0][wit.NewWitnessHashesMsg],
 		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
@@ -767,11 +766,6 @@ func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.Inbou
 	return nil
 }
 
-func (cs *MultiClient) newWitnessHash(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
-	// TODO: known hashes to peer
-	return nil
-}
-
 func MakeInboundMessage() *proto_sentry.InboundMessage {
 	return new(proto_sentry.InboundMessage)
 }
@@ -820,8 +814,6 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.getReceipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_NEW_WITNESS_W0:
 		return cs.newWitness(ctx, inreq, sentry)
-	case proto_sentry.MessageId_NEW_WITNESS_HASHES_W0:
-		return cs.newWitnessHash(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0:
 		return cs.getBlockWitnesses(ctx, inreq, sentry)
 	default:
