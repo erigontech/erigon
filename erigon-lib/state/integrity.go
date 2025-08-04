@@ -165,12 +165,13 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 
 		i, minc, maxc := 0, 0, 0
 		var s multiencseq.SequenceReader
-		var k, encodedSeq []byte
+		//var k, encodedSeq []byte
 
 		for g.HasNext() {
-			k, _ := g.Next(k[:0])
+			k, _ := g.NextUncompressed()
+			_ = k
 
-			encodedSeq, _ := g.Next(encodedSeq[:0])
+			encodedSeq, _ := g.Next()
 			s.Reset(item.startTxNum, encodedSeq)
 
 			if s.Count() == 0 {
