@@ -1678,10 +1678,6 @@ func (s *Ethereum) Start() error {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
-	if s.chainConfig.Bor != nil {
-		s.engine.(*bor.Bor).Start(s.chainDB)
-	}
-
 	if s.silkwormRPCDaemonService != nil {
 		if err := s.silkwormRPCDaemonService.Start(); err != nil {
 			s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
