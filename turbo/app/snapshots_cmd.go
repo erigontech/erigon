@@ -2149,6 +2149,9 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 			hv, offset2 := hreader.Next(nil)
 			hvc := bytes.Clone(hv)
 			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+			hv, offset2 = hreader.Next(nil)
+			hvc = bytes.Clone(hv)
+			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
 			fmt.Println()
 			i++
 		}
