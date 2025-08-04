@@ -19,7 +19,7 @@ replace (
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.8
+	github.com/erigontech/mdbx-go v0.39.9
 	github.com/erigontech/secp256k1 v1.2.0
 	github.com/erigontech/silkworm-go v0.24.0
 )
@@ -74,7 +74,6 @@ require (
 	github.com/libp2p/go-libp2p v0.37.2
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.11.0
-	github.com/maticnetwork/crand v1.0.2
 	github.com/multiformats/go-multiaddr v0.13.0
 	github.com/nxadm/tail v1.4.11
 	github.com/pelletier/go-toml v1.9.5

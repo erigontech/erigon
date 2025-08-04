@@ -12,6 +12,7 @@ const acceptedWorkflows = [
     'QA - Sync from scratch (minimal node)',
     'QA - Sync with external CL',
     'QA - Tip tracking',
+    'QA - Tip tracking & migration',
     'QA - Tip tracking (Gnosis)',
     'QA - Tip tracking (Polygon)',
     'QA - Constrained Tip tracking',

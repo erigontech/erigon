@@ -32,7 +32,9 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-// StateAsOfIter - returns state range at given time in history
+// HistoryRangeAsOfFiles - Returns the state as it existed AT a specific txNum (before txNum executed)
+// For each key, finds the latest value that was valid at startTxNum.
+// USAGE: RangeAsOf() - "What was the state at txNum=X?" - so we can execute txNum=X on this state
 type HistoryRangeAsOfFiles struct {
 	hc    *HistoryRoTx
 	limit int
@@ -117,7 +119,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			continue
 		}
 
-		if bytes.Equal(key, hi.nextKey) {
+		if bytes.Equal(key, hi.nextKey) { // deduplication
 			continue
 		}
 
@@ -367,11 +369,13 @@ func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
+// HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
+// Performs multi-way Union of frozen files. Later files override earlier files for same key
 type HistoryChangesIterFiles struct {
 	hc         *HistoryRoTx
 	nextVal    []byte
 	nextKey    []byte
-	h          ReconHeap
+	h          ReconHeap // Multi-way merge heap across frozen files
 	startTxNum uint64
 	endTxNum   int
 	startTxKey [8]byte
@@ -398,7 +402,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			heap.Push(&hi.h, top)
 		}
 
-		if bytes.Equal(key, hi.nextKey) {
+		if bytes.Equal(key, hi.nextKey) { // deduplication
 			continue
 		}
 		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)

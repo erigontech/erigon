@@ -17,6 +17,21 @@ jobs:
     runs-on:
       group: hive
     steps:
+      - name: Clean docker system
+        run: |
+          echo "Force stopping and removing all containers..."
+          if [ -n "$(docker ps -aq)" ]; then
+            docker kill $(docker ps -aq) || true
+            docker rm -f $(docker ps -aq) || true
+          fi
+          echo "Pruning all images..."
+          docker image prune -af || true
+          if [ -n "$(docker images -aq)" ]; then
+            echo "Force removing all images..."
+            docker rmi -f $(docker images -aq) || true
+          fi
+          echo "Pruning docker system..."
+          docker system prune -af --volumes
       - name: Checkout Hive
         uses: actions/checkout@v4
         with:
@@ -55,11 +70,12 @@ jobs:
       - name: Run hive tests and parse output
         run: |
           cd hive
+          docker ps
           run_suite() {
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=10 --client erigon  --docker.nocache=true --sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -74,9 +90,9 @@ jobs:
             failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
 
             echo -e "\n"
-            echo "-----------   Results for ${1}    -----------" 
-            echo "Tests: $tests, Failed: $failed"
-            echo -e "\n\n============================================================"
+            message="-----------   Results for ${1}    -----------\nTests: $tests, Failed: $failed\n\n============================================================"
+            echo -e "$message"
+            echo -e "$message" >> result.log
 
             if (( tests < 4 )); then
               echo "Too few tests run for suite ${1} - ${tests} tests"
@@ -96,13 +112,16 @@ jobs:
         with:
           name: hive-workspace-log
           path: hive/workspace/logs
-      - name: Check for failures
+      - name: Test Results
         run: |
+          cat hive/result.log
           if grep -q "failed" hive/failed.log; then
             echo "One or more tests failed."
             exit 1
           fi
           echo "All tests passed successfully."
+
+
 
       # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
       # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
@@ -116,6 +135,10 @@ jobs:
       # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
       - name: Prune docker
         run: |
+          echo "Stopping and removing all containers..."
+          docker rm -f $(docker ps -aq) || true
+          echo "Removing all images..."
+          docker rmi -f $(docker images -aq) || true
           echo "Pruning docker..."
           docker system prune -af --volumes
         if: always()
