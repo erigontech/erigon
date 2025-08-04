@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -259,14 +260,19 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 
 		// Recover blobs from the matrix
 		blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
+		blobCommitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](int(d.beaconConfig.MaxBlobCommittmentsPerBlock), length.Bytes48)
 		for blobIndex, blobEntries := range blobMatrix {
 			var (
 				blob           cltypes.Blob
 				kzgCommitment  common.Bytes48
 				kzgProof       common.Bytes48
-				inclusionProof solid.HashVectorSSZ = solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth) // TODO
+				inclusionProof solid.HashVectorSSZ = solid.NewHashVector(cltypes.CommitmentBranchSize)
 			)
 			// blob
+			if len(blobEntries) != int(d.beaconConfig.NumberOfColumns) {
+				log.Warn("[blobsRecover] invalid blob entries", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot, "blobEntries", len(blobEntries))
+				return
+			}
 			for i := range len(blobEntries) / 2 {
 				if copied := copy(blob[i*cltypes.BytesPerCell:], blobEntries[i].Cell[:]); copied != cltypes.BytesPerCell {
 					log.Warn("[blobsRecover] failed to copy cell", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
@@ -291,6 +297,19 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				anyColumnSidecar.SignedBlockHeader,
 				inclusionProof)
 			blobSidecars = append(blobSidecars, blobSidecar)
+			commitment := cltypes.KZGCommitment(kzgCommitment)
+			blobCommitments.Append(&commitment)
+		}
+		// inclusion proof
+		for i := range len(blobSidecars) {
+			branchProof := blobCommitments.ElementProof(i)
+			p := blobSidecars[i].CommitmentInclusionProof
+			for index := range branchProof {
+				p.Set(index, branchProof[index])
+			}
+			for index := range anyColumnSidecar.KzgCommitmentsInclusionProof.Length() {
+				p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
+			}
 		}
 
 		// Save blobs
@@ -313,6 +332,48 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				}
 			}
 		}
+		// add custody data column if it doesn't exist
+		for columnIndex := range custodyColumns {
+			exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
+			if err != nil {
+				log.Warn("[blobsRecover] failed to check if column sidecar exists", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+				continue
+			}
+			if !exist {
+				blobSize := anyColumnSidecar.Column.Len()
+				sidecar := cltypes.NewDataColumnSidecar()
+				sidecar.Index = columnIndex
+				sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
+				sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
+				sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
+				for i := range blobSize {
+					// cell
+					sidecar.Column.Append(&blobMatrix[i][columnIndex].Cell)
+					// kzg proof
+					sidecar.KzgProofs.Append(&blobMatrix[i][columnIndex].KzgProof)
+				}
+				// verify the sidecar
+				if !VerifyDataColumnSidecar(sidecar) {
+					log.Warn("[blobsRecover] failed to verify column sidecar", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
+				if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+					log.Warn("[blobsRecover] failed to verify column sidecar inclusion proof", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
+				if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+					log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
+				// save the sidecar to the column storage
+				if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), sidecar); err != nil {
+					log.Warn("[blobsRecover] failed to write column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+					continue
+				}
+				log.Debug("[blobsRecover] added a custody data column", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+			}
+		}
+
 		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin))
 	}
 
