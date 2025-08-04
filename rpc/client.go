@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -576,7 +578,14 @@ func (c *Client) dispatch(codec ServerCodec) {
 					conn.handler.logger.Warn("[rpc] batch limit exceeded", "limit", c.batchLimit, "requested", len(op.msgs))
 					// Send error response
 					errMsg := errorMessage(batchErr)
-					_ = conn.codec.WriteJSON(context.Background(), errMsg)
+					if err := conn.codec.WriteJSON(context.Background(), errMsg); err != nil {
+						conn.handler.logger.Debug("Failed to send batch limit error", "err", err)
+					}
+					// For WebSocket connections, send a proper close message before closing
+					if wc, ok := conn.codec.(*websocketCodec); ok {
+						wc.conn.SetWriteDeadline(time.Now().Add(time.Second))
+						wc.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "batch limit exceeded"))
+					}
 					// Then close the connection
 					conn.close(batchErr, lastOp)
 					continue
