@@ -170,11 +170,19 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 			k, _ := g.NextUncompressed()
 			_ = k
 
+			dprint := filepath.Clean(g.FileName()) == filepath.Clean("v2.0-accounts.1896-1900.ef")
+			if dprint {
+				fmt.Println("fund match")
+			}
+
 			encodedSeq, _ := g.NextUncompressed()
 			s.Reset(item.startTxNum, encodedSeq)
 
 			if s.Count() == 0 {
 				continue
+			}
+			if dprint {
+				fmt.Println("item.start item.end s.min s.max", item.startTxNum, item.endTxNum, s.Min(), s.Max())
 			}
 			if item.startTxNum > s.Min() {
 				if minc == 0 {
