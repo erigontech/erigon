@@ -30,7 +30,7 @@ func (e *MaxCheckpointLengthExceededError) Error() string {
 		"Start: %d and end block: %d exceed max allowed checkpoint length: %d",
 		e.Start,
 		e.End,
-		MaxCheckpointLength,
+		maxCheckpointLength,
 	)
 }
 
