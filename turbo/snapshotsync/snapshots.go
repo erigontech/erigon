@@ -370,6 +370,14 @@ func (s *DirtySegment) Open(dir string) (err error) {
 	}
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
+		// be robust for 1-file-missed and 1-file-broken cases
+		// such segment will not be added to VisibleFiles list
+		// and Erigon may re-generate or re-download it
+		if errors.Is(err, os.ErrNotExist) ||
+			errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+			log.Debug("[snapshots] skipping file", "reason", err)
+			return nil
+		}
 		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
 	}
 	return nil
@@ -444,8 +452,15 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 			continue
 		}
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
-
 		if err != nil {
+			// be robust for 1-file-missed and 1-file-broken cases
+			// such segment will not be added to VisibleFiles list
+			// and Erigon may re-generate or re-download it
+			if errors.Is(err, os.ErrNotExist) ||
+				errors.Is(err, recsplit.IncompatibleErr) {
+				log.Debug("[snapshots] skipping file", "reason", err)
+				continue
+			}
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
