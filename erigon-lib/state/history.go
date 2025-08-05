@@ -1580,31 +1580,6 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	return result, nil
 }
 
-// Simple iterator for returning key-value pairs
-type simpleKVIterator struct {
-	addrs  [][]byte
-	values [][]byte
-	idx    int
-}
-
-func (it *simpleKVIterator) HasNext() bool {
-	return it.idx < len(it.addrs)
-}
-
-func (it *simpleKVIterator) Next() ([]byte, []byte, error) {
-	if it.idx >= len(it.addrs) {
-		return nil, nil, nil
-	}
-	key := it.addrs[it.idx]
-	value := it.values[it.idx]
-	it.idx++
-	return key, value, nil
-}
-
-func (it *simpleKVIterator) Close() {
-	// Nothing to close
-}
-
 // HistoryRange producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
 func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if asc == order.Desc {
