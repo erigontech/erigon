@@ -346,7 +346,26 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 		// post-indore: block8Time=400,block10Time=500 => event4 falls in block10 (toTime=currentSprintBlockTime-delay=500-1=499)
 		Time: time.Unix(498, 0),
 	}
-	events := []*EventRecordWithTime{event1, event2, event3, event4}
+	event5 := &EventRecordWithTime{
+		EventRecord: EventRecord{
+			ID:      5,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x04"),
+		},
+		// post-indore: block10Time=500,block12Time=600 => event4 falls in block12 (toTime=currentSprintBlockTime-delay=600-1=599)
+		Time: time.Unix(598, 0),
+	}
+	event6 := &EventRecordWithTime{
+		EventRecord: EventRecord{
+			ID:      6,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x04"),
+		},
+		// post-indore: block12Time=600,block14Time=700 => event4 falls in block14 (toTime=currentSprintBlockTime-delay=700-1=699)
+		Time: time.Unix(698, 0),
+	}
+
+	events := []*EventRecordWithTime{event1, event2, event3, event4, event5, event6}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
