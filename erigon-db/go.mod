@@ -15,12 +15,12 @@ replace (
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
-	github.com/anacrolix/chansync v0.6.0
+	github.com/anacrolix/chansync v0.6.1-0.20250805140455-89f141559964
 	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.58.2-0.20250801135146-59b411afcd4b
+	github.com/anacrolix/torrent v1.58.2-0.20250805140032-23f52690acff
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/go-quicktest/qt v1.101.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
