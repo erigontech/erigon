@@ -107,6 +107,9 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 
 	if c.Version() == poshttp.HeimdallV2 {
 		url, err := makeURL(c.UrlString, fetchSpanLatestV2, "")
+		if err != nil {
+			return nil, err
+		}
 		response, err := poshttp.FetchWithRetry[SpanResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return nil, err
