@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1243,12 +1244,27 @@ func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
 			fmt.Sprintf("%d (%d.%d) RD", blockNum, txIndex, txIncarnation), txIO.ReadSet(txIndex).Len(),
 			"WRT", len(txIO.WriteSet(txIndex)))
 
+		var reads []*state.VersionedRead
 		txIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "RD", vr.String())
+			reads = append(reads, vr)
 			return true
 		})
 
+		slices.SortFunc(reads, func(a, b *state.VersionedRead) int { return a.Address.Cmp(b.Address) })
+
+		for _, vr := range reads {
+			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "RD", vr.String())
+		}
+
+		var writes []*state.VersionedWrite
+
 		for _, vw := range txIO.WriteSet(txIndex) {
+			writes = append(writes, vw)
+		}
+
+		slices.SortFunc(writes, func(a, b *state.VersionedWrite) int { return a.Address.Cmp(b.Address) })
+
+		for _, vw := range writes {
 			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "WRT", vw.String())
 		}
 	}
