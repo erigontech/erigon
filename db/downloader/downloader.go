@@ -272,7 +272,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 	defer db.Close()
 
-	var addWebSeedOpts []torrent.AddWebSeedsOpt
+	var addWebSeedOpts []torrent.AddWebSeedsOpt //nolint:prealloc
 
 	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter() {
 		addWebSeedOpts = append(
@@ -561,13 +561,13 @@ func (d *Downloader) ReCalcStats() {
 		log.Debug("[snapshots] downloading",
 			"len", stats.NumTorrents,
 			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)), //nolint
 			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)), //nolint
 			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)), //nolint
 			"downloaded", common.ByteCount(stats.BytesDownload),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)), //nolint
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -898,7 +898,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
 ) error {
@@ -916,7 +916,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHashHint g.Option[metainfo.Hash],
 	name string,
 ) (t *torrent.Torrent, err error) {
