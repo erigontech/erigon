@@ -720,6 +720,16 @@ func ExecV3(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
+	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
+		execType := "serial"
+		if parallel {
+			execType = "parallel"
+		}
+
+		log.Info(fmt.Sprintf("[%s] %s starting", execType, execStage.LogPrefix()),
+			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "fromTxNum", doms.TxNum(), "initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
+	}
+
 	if !parallel {
 		execErr = func() error {
 			// Only needed by bor chains
@@ -990,11 +1000,12 @@ func ExecV3(ctx context.Context,
 
 		applyResults := make(chan applyResult, 100_000)
 
+		maxExecBlockNum := maxBlockNum
 		if blockLimit > 0 && blockNum+uint64(blockLimit) < maxBlockNum {
-			maxBlockNum = blockNum + blockLimit
+			maxExecBlockNum = blockNum + blockLimit - 1
 		}
 
-		if err := executor.executeBlocks(executorContext, asyncTx, blockNum, maxBlockNum, readAhead, applyResults); err != nil {
+		if err := executor.executeBlocks(executorContext, asyncTx, blockNum, maxExecBlockNum, readAhead, applyResults); err != nil {
 			return err
 		}
 
@@ -1079,7 +1090,7 @@ func ExecV3(ctx context.Context,
 						flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
 						if !dbg.DiscardCommitment() {
-							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
+							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxExecBlockNum ||
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 								if dbg.TraceApply && dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
@@ -1131,17 +1142,14 @@ func ExecV3(ctx context.Context,
 							return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
 						}
 
-						if maxBlockNum == applyResult.BlockNum {
-							return nil
-						}
-
-						if blockLimit > 0 && applyResult.BlockNum-startBlockNum+1 >= blockLimit {
-							return &ErrLoopExhausted{From: startBlockNum, To: applyResult.BlockNum, Reason: "block limit reached"}
-						}
-
-						if !initialCycle {
-							if state2.AggTx(applyTx).CanPrune(applyTx, outputTxNum.Load()) {
-								return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
+						if applyResult.BlockNum == maxExecBlockNum {
+							switch {
+							case applyResult.BlockNum == maxBlockNum:
+								return nil
+							case blockLimit > 0:
+								return &ErrLoopExhausted{From: startBlockNum, To: applyResult.BlockNum, Reason: "block limit reached"}
+							default:
+								return nil
 							}
 						}
 
@@ -1162,12 +1170,12 @@ func ExecV3(ctx context.Context,
 					}
 				case <-flushEvery.C:
 					if flushPending {
-						if applyTx, err = pe.flushAndCommit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
-							return fmt.Errorf("flush failed: %w", err)
-						}
-
 						if !initialCycle {
 							return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+						}
+
+						if applyTx, err = pe.flushAndCommit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
+							return fmt.Errorf("flush failed: %w", err)
 						}
 
 						flushPending = false
