@@ -338,19 +338,16 @@ type Bor struct {
 
 	execCtx context.Context // context of caller execution stage
 
-	spanner        Spanner
-	stateReceiver  StateReceiver
-	HeimdallClient heimdall.Client
-	spanReader     spanReader
-	bridgeReader   bridgeReader
+	spanner       Spanner
+	stateReceiver StateReceiver
+	spanReader    spanReader
+	bridgeReader  bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 
-	closeOnce      sync.Once
 	logger         log.Logger
-	closeCh        chan struct{} // Channel to signal the background processes to exit
 	rootHashCache  *lru.ARCCache[string, string]
 	headerProgress HeaderProgress
 }
@@ -365,7 +362,6 @@ func New(
 	chainConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient heimdall.Client,
 	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
@@ -384,19 +380,17 @@ func New(
 	dependencies, _ := lru.NewARC[common.Hash, [][]int](128)
 
 	c := &Bor{
-		chainConfig:    chainConfig,
-		config:         borConfig,
-		blockReader:    blockReader,
-		Signatures:     signatures,
-		Dependencies:   dependencies,
-		spanner:        spanner,
-		stateReceiver:  genesisContracts,
-		HeimdallClient: heimdallClient,
-		execCtx:        context.Background(),
-		logger:         logger,
-		closeCh:        make(chan struct{}),
-		bridgeReader:   bridgeReader,
-		spanReader:     spanReader,
+		chainConfig:   chainConfig,
+		config:        borConfig,
+		blockReader:   blockReader,
+		Signatures:    signatures,
+		Dependencies:  dependencies,
+		spanner:       spanner,
+		stateReceiver: genesisContracts,
+		execCtx:       context.Background(),
+		logger:        logger,
+		bridgeReader:  bridgeReader,
+		spanReader:    spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -438,7 +432,6 @@ func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logg
 		Dependencies: dependencies,
 		Signatures:   signatures,
 		execCtx:      context.Background(),
-		closeCh:      make(chan struct{}),
 	}
 }
 
@@ -1138,29 +1131,8 @@ func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{}
 }
 
-type FinalityAPI interface {
-	GetRootHash(start uint64, end uint64) (string, error)
-}
-
-type FinalityAPIFunc func(start uint64, end uint64) (string, error)
-
-func (f FinalityAPIFunc) GetRootHash(start uint64, end uint64) (string, error) {
-	return f(start, end)
-}
-
-func (c *Bor) Start(chainDB kv.RwDB) {
-
-}
-
+// Only needed to satisfy the consensus.Engine interface
 func (c *Bor) Close() error {
-	c.closeOnce.Do(func() {
-		if c.HeimdallClient != nil {
-			c.HeimdallClient.Close()
-		}
-		// Close all bg processes
-		close(c.closeCh)
-	})
-
 	return nil
 }
 
@@ -1361,57 +1333,6 @@ func (c *Bor) CommitStates(
 		}
 	}
 	return nil
-}
-
-func (c *Bor) SetHeimdallClient(h heimdall.Client) {
-	c.HeimdallClient = h
-}
-
-//
-// Private methods
-//
-
-func (c *Bor) getNextHeimdallSpanForTest(
-	newSpanID uint64,
-	state *state.IntraBlockState,
-	header *types.Header,
-	chain statefull.ChainContext,
-	syscall consensus.SystemCall,
-) (*heimdall.Span, error) {
-	headerNumber := header.Number.Uint64()
-
-	spanBor, err := c.spanner.GetCurrentSpan(syscall)
-	if err != nil {
-		return nil, err
-	}
-
-	validatorSet, err := c.spanReader.Producers(context.Background(), headerNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	// new span
-	spanBor.Id = heimdall.SpanId(newSpanID)
-	if spanBor.EndBlock == 0 {
-		spanBor.StartBlock = 256
-	} else {
-		spanBor.StartBlock = spanBor.EndBlock + 1
-	}
-
-	spanBor.EndBlock = spanBor.StartBlock + (100 * c.config.CalculateSprintLength(headerNumber)) - 1
-
-	selectedProducers := make([]valset.Validator, len(validatorSet.Validators))
-	for i, v := range validatorSet.Validators {
-		selectedProducers[i] = *v
-	}
-
-	heimdallSpan := *spanBor
-
-	heimdallSpan.ValidatorSet = *validatorSet
-	heimdallSpan.SelectedProducers = selectedProducers
-	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
-
-	return &heimdallSpan, nil
 }
 
 // BorTransfer transfer in Bor
