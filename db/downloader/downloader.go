@@ -561,13 +561,13 @@ func (d *Downloader) ReCalcStats() {
 		log.Debug("[snapshots] downloading",
 			"len", stats.NumTorrents,
 			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)), //nolint
+			"hash-rate", common.ByteCount(stats.HashRate)+"/s",
 			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)), //nolint
+			"completion-rate", common.ByteCount(stats.CompletionRate)+"/s",
 			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)), //nolint
+			"flush-rate", common.ByteCount(stats.FlushRate)+"/s",
 			"downloaded", common.ByteCount(stats.BytesDownload),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)), //nolint
+			"download-rate", common.ByteCount(stats.DownloadRate)+"/s",
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -717,7 +717,7 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 				webseedRates = append(
 					webseedRates,
 					strings.TrimSuffix(shortUrl, "/"),
-					fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))),
+					common.ByteCount(uint64(stats.DownloadRate))+"/s",
 				)
 			}
 		}
@@ -746,7 +746,7 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 		}
 		setCommonPeerSegmentFields(&peer.Peer, &stats, &segPeer)
 		peers = append(peers, segPeer)
-		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))))
+		rates = append(rates, url, common.ByteCount(uint64(stats.DownloadRate))+"/s")
 	}
 
 	return rates, peers
@@ -898,7 +898,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
 ) error {
@@ -916,7 +916,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHashHint g.Option[metainfo.Hash],
 	name string,
 ) (t *torrent.Torrent, err error) {
@@ -1009,7 +1009,7 @@ func (d *Downloader) shouldAddTorrent(
 			}
 		}
 	} else if d.alreadyHaveThisName(name) {
-		return false, fmt.Errorf("name exists with different torrent hash")
+		return false, errors.New("name exists with different torrent hash")
 	}
 	return !ok, nil
 }
@@ -1303,8 +1303,8 @@ func (d *Downloader) logProgress() {
 			}(),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
-			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
+			"download-rate", common.ByteCount(d.stats.DownloadRate)+"/s",
+			"hashing-rate", common.ByteCount(d.stats.HashRate)+"/s",
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys),
 		)

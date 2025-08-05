@@ -203,7 +203,8 @@ func (w *WebSeedCheckReport) ToString(full bool) string {
 		}
 		b.WriteString(fmt.Sprintf("# %s\n", titles[ti]))
 		for _, name := range names {
-			b.WriteString(fmt.Sprintf("%s\n", name))
+			b.WriteString(name)
+			b.WriteByte(10)
 		}
 		if ti != len(fnamess)-1 {
 			b.WriteByte(10)
