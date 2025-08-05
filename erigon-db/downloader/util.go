@@ -351,6 +351,7 @@ func (d *Downloader) afterAdd() {
 	for _, t := range d.torrentClient.Torrents() {
 		// add webseed first - otherwise opts will be ignored
 		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+		// Should be disabled by no download rate or the disable trackers flag.
 		t.AddTrackers(Trackers)
 		t.AllowDataDownload()
 		t.AllowDataUpload()

@@ -140,10 +140,6 @@ func New(
 ) (_ *Cfg, err error) {
 	torrentConfig := defaultTorrentClientConfig()
 
-	for value := range opts.DisableTrackers.Iter() {
-		torrentConfig.DisableTrackers = value
-	}
-
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
@@ -164,7 +160,13 @@ func New(
 		if value == 0 {
 			torrentConfig.DialForPeerConns = false
 			torrentConfig.AcceptPeerConnections = false
+			torrentConfig.DisableTrackers = true
 		}
+	}
+
+	// Override value set by download rate-limit.
+	for value := range opts.DisableTrackers.Iter() {
+		torrentConfig.DisableTrackers = value
 	}
 
 	var analogLevel analog.Level
