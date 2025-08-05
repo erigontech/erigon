@@ -19,8 +19,6 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
-	"os"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -66,14 +64,6 @@ func baseIdRange(base, indexer, len int) []uint64 {
 func TestDump(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
-	}
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win")
-	}
-
-	if os.Getenv("SKIP_FLAKY_TESTS") != "" {
-		t.Skip("skipping flaky tests")
 	}
 
 	type test struct {
