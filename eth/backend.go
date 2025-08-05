@@ -646,7 +646,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.heimdallService = heimdallService
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
@@ -995,7 +995,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, signatures, logger, tracer)
+		blockReader, blockRetire, backend.silkworm, backend.forkValidator, signatures, logger, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 

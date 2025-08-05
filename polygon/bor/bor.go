@@ -293,11 +293,10 @@ type Bor struct {
 
 	execCtx context.Context // context of caller execution stage
 
-	spanner        Spanner
-	stateReceiver  StateReceiver
-	HeimdallClient heimdall.Client
-	spanReader     spanReader
-	bridgeReader   bridgeReader
+	spanner       Spanner
+	stateReceiver StateReceiver
+	spanReader    spanReader
+	bridgeReader  bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -320,7 +319,6 @@ func New(
 	chainConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient heimdall.Client,
 	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
@@ -339,19 +337,18 @@ func New(
 	dependencies, _ := lru.NewARC[common.Hash, [][]int](128)
 
 	c := &Bor{
-		chainConfig:    chainConfig,
-		config:         borConfig,
-		blockReader:    blockReader,
-		Signatures:     signatures,
-		Dependencies:   dependencies,
-		spanner:        spanner,
-		stateReceiver:  genesisContracts,
-		HeimdallClient: heimdallClient,
-		execCtx:        context.Background(),
-		logger:         logger,
-		closeCh:        make(chan struct{}),
-		bridgeReader:   bridgeReader,
-		spanReader:     spanReader,
+		chainConfig:   chainConfig,
+		config:        borConfig,
+		blockReader:   blockReader,
+		Signatures:    signatures,
+		Dependencies:  dependencies,
+		spanner:       spanner,
+		stateReceiver: genesisContracts,
+		execCtx:       context.Background(),
+		logger:        logger,
+		closeCh:       make(chan struct{}),
+		bridgeReader:  bridgeReader,
+		spanReader:    spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1082,9 +1079,6 @@ func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 func (c *Bor) Close() error {
 	c.closeOnce.Do(func() {
-		if c.HeimdallClient != nil {
-			c.HeimdallClient.Close()
-		}
 		// Close all bg processes
 		close(c.closeCh)
 	})
@@ -1275,10 +1269,6 @@ func (c *Bor) CommitStates(
 		}
 	}
 	return nil
-}
-
-func (c *Bor) SetHeimdallClient(h heimdall.Client) {
-	c.HeimdallClient = h
 }
 
 // BorTransfer transfer in Bor
