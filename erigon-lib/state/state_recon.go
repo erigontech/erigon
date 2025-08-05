@@ -20,7 +20,6 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/seg"
 )
 

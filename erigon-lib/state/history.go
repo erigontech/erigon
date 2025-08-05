@@ -1618,7 +1618,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if err != nil {
 		return nil, err
 	}
-	return stream.UnionKV(itOnDB, itOnFiles, asc, limit), nil
+	return stream.UnionKV(itOnDB, itOnFiles, limit), nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDBForStep(key []byte, step uint64, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
