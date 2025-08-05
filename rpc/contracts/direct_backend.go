@@ -113,11 +113,11 @@ func (b DirectBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuer
 			Address:     log.Address,
 			Topics:      log.Topics,
 			Data:        log.Data,
-			BlockNumber: uint64(log.BlockNumber),
+			BlockNumber: log.BlockNumber,
 			TxHash:      log.TxHash,
-			TxIndex:     uint(log.TxIndex),
+			TxIndex:     log.TxIndex,
 			BlockHash:   log.BlockHash,
-			Index:       uint(log.Index),
+			Index:       log.Index,
 			Removed:     log.Removed,
 		}
 	}
