@@ -23,7 +23,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -75,11 +75,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.useBridgeReader {
-			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
-		} else {
-			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
-		}
+		blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -738,15 +734,8 @@ func (api *TraceAPIImpl) callBlock(
 		blockHash := block.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
-		var ok bool
-		var err error
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
-
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
-		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -855,15 +844,7 @@ func (api *TraceAPIImpl) callTransaction(
 		blockHash := header.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
-		var ok bool
-		var err error
-
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
-
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
-		}
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, err
 		}

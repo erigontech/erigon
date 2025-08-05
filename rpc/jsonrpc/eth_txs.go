@@ -22,15 +22,14 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/rawdb"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	borrawdb "github.com/erigontech/erigon/polygon/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -57,12 +56,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	// Private API returns 0 if transaction is not found.
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 	if isBorStateSyncTx {
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
-		}
-
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		if err != nil {
 			return nil, err
 		}
@@ -218,18 +212,15 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 			return nil, nil // not error
 		}
 		var borTx types2.Transaction
-		if api.useBridgeReader {
-			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				borTx = bortypes.NewBorTransaction()
-			}
-		} else {
-			borTx = borrawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
+		possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		if err != nil {
+			return nil, err
 		}
+		if ok {
+			borTx = bortypes.NewBorTransaction()
+		}
+
 		if borTx == nil {
 			return nil, nil // not error
 		}
@@ -293,18 +284,15 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 			return nil, nil // not error
 		}
 		var borTx types2.Transaction
-		if api.useBridgeReader {
-			possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
-			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				borTx = bortypes.NewBorTransaction()
-			}
-		} else {
-			borTx = borrawdb.ReadBorTransactionForBlock(tx, blockNum)
+		possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		if err != nil {
+			return nil, err
 		}
+		if ok {
+			borTx = bortypes.NewBorTransaction()
+		}
+
 		if borTx == nil {
 			return nil, nil
 		}

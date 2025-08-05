@@ -35,26 +35,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func TestUseBridgeReader(t *testing.T) {
-	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
-	var br *mockBridgeReader
-	bor := New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
-	require.False(t, bor.useBridgeReader)
-	br = &mockBridgeReader{}
-	bor = New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
-	require.True(t, bor.useBridgeReader)
-}
-
-func TestUseSpanReader(t *testing.T) {
-	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
-	var sr *mockSpanReader
-	b := New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
-	require.False(t, b.useSpanReader)
-	sr = &mockSpanReader{}
-	b = New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
-	require.True(t, b.useSpanReader)
-}
-
 var _ bridgeReader = mockBridgeReader{}
 
 type mockBridgeReader struct{}
@@ -88,7 +68,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),
@@ -130,10 +110,7 @@ func TestCommitStatesIndore(t *testing.T) {
 		return nil, nil
 	}
 
-	err := bor.CommitStates(nil, header, statefull.ChainContext{
-		Chain: cr,
-	}, syscall, nil, true)
-
+	err := bor.CommitStates(header, statefull.ChainContext{Chain: cr}, syscall, true)
 	require.NoError(t, err)
 	require.Equal(t, 1, called)
 }

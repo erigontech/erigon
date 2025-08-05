@@ -32,8 +32,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-db/downloader"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -42,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/turbo/logging"

@@ -31,8 +31,6 @@ import (
 	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -317,13 +315,11 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
 		heimdall.chainConfig,
-		memdb.New("", kv.ChainDB),
 		nil, /* blockReader */
 		&spanner{
 			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
-		heimdall,
 		stateReceiver,
 		logger,
 		nil,

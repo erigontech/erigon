@@ -5,7 +5,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -15,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/consensus"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/services"

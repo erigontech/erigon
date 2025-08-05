@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/turbo/services"
 )
 

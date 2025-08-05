@@ -45,11 +45,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -91,6 +86,11 @@ import (
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -119,7 +119,6 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/finality/flags"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -645,11 +644,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		backend.polygonBridge = polygonBridge
 		backend.heimdallService = heimdallService
-
-		flags.Milestone = false
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
@@ -704,7 +701,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil || config.ElBlockDownloaderV2
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -843,14 +840,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 
-	var (
-		snapDb     kv.RwDB
-		recents    *lru.ARCCache[common.Hash, *bor.Snapshot]
-		signatures *lru.ARCCache[common.Hash, common.Address]
-	)
+	var signatures *lru.ARCCache[common.Hash, common.Address]
+
 	if bor, ok := backend.engine.(*bor.Bor); ok {
-		snapDb = bor.DB
-		recents = bor.Recents
 		signatures = bor.Signatures
 	}
 
@@ -1002,8 +994,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
+	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+		blockReader, blockRetire, backend.silkworm, backend.forkValidator, signatures, logger, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
@@ -1032,7 +1024,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		engine_block_downloader.NewEngineBlockDownloader(ctx,
 			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
-			backend.chainDB, chainConfig, tmpdir, config.Sync),
+			backend.chainDB, chainConfig, tmpdir, config.Sync, config.ElBlockDownloaderV2, sentryMux(sentries), statusDataProvider),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		false,
 		config.Miner.EnabledPOS,
@@ -1070,7 +1062,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config,
 			logger,
 			chainConfig,
-			polygonSyncSentry(sentries),
+			sentryMux(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			executionRpc,
@@ -1135,7 +1127,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	var err error
 
 	if chainConfig.Bor == nil {
-		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+		if !config.ElBlockDownloaderV2 {
+			s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+		}
 	}
 
 	emptyBadHash := config.BadBlockHash == common.Hash{}
@@ -1684,10 +1678,6 @@ func (s *Ethereum) Start() error {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
-	if s.chainConfig.Bor != nil {
-		s.engine.(*bor.Bor).Start(s.chainDB)
-	}
-
 	if s.silkwormRPCDaemonService != nil {
 		if err := s.silkwormRPCDaemonService.Start(); err != nil {
 			s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
@@ -1909,7 +1899,7 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 	}
 }
 
-func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryClient {
+func sentryMux(sentries []protosentry.SentryClient) protosentry.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
 }
 

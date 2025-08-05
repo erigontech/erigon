@@ -18,16 +18,12 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"math"
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -35,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -263,21 +260,16 @@ type EthHardForkConfig struct {
 	ActivationTime  uint64                    `json:"activationTime"`
 	BlobSchedule    params.BlobConfig         `json:"blobSchedule"`
 	ChainId         hexutil.Uint              `json:"chainId"`
-	Precompiles     map[common.Address]string `json:"precompiles"`
+	ForkId          hexutil.Bytes             `json:"forkId"`
+	Precompiles     map[string]common.Address `json:"precompiles"`
 	SystemContracts map[string]common.Address `json:"systemContracts"`
 }
 
 // EthConfigResp is the response type of eth_config
 type EthConfigResp struct {
-	Current       *EthHardForkConfig `json:"current"`
-	CurrentHash   hexutil.Bytes      `json:"currentHash"`
-	CurrentForkId hexutil.Bytes      `json:"currentForkId"`
-	Next          *EthHardForkConfig `json:"next"`
-	NextHash      *hexutil.Bytes     `json:"nextHash"`
-	NextForkId    *hexutil.Bytes     `json:"nextForkId"`
-	Last          *EthHardForkConfig `json:"last"`
-	LastHash      *hexutil.Bytes     `json:"lastHash"`
-	LastForkId    *hexutil.Bytes     `json:"lastForkId"`
+	Current *EthHardForkConfig `json:"current"`
+	Next    *EthHardForkConfig `json:"next"`
+	Last    *EthHardForkConfig `json:"last"`
 }
 
 // Config returns the HardFork config for current and upcoming forks:
@@ -307,12 +299,7 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, genesis.Time())
 	// current fork config
 	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, timeUnix)
-	response.CurrentForkId = currentForkId.Hash[:]
-	response.Current = fillForkConfig(chainConfig, currentForkId.Activation)
-	response.CurrentHash, err = checkSumConfig(response.Current)
-	if err != nil {
-		return nil, err
-	}
+	response.Current = fillForkConfig(chainConfig, currentForkId.Hash, currentForkId.Activation)
 
 	// next fork config
 	if currentForkId.Next == 0 {
@@ -321,55 +308,30 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 	}
 
 	nextForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentForkId.Next)
-	response.Next = fillForkConfig(chainConfig, nextForkId.Activation)
-	nextForkHash, err := checkSumConfig(response.Next)
-	if err != nil {
-		return nil, err
-	}
-
-	nextForkIdBytes := hexutil.Bytes(nextForkId.Hash[:])
-	response.NextForkId = &nextForkIdBytes
-	response.NextHash = &nextForkHash
+	response.Next = fillForkConfig(chainConfig, nextForkId.Hash, nextForkId.Activation)
 
 	// last fork config
 	lastForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, math.MaxUint64)
-	response.Last = fillForkConfig(chainConfig, lastForkId.Activation)
-	lastForkHash, err := checkSumConfig(response.Last)
-	if err != nil {
-		return nil, err
-	}
-
-	lastForkIdBytes := hexutil.Bytes(lastForkId.Hash[:])
-	response.LastForkId = &lastForkIdBytes
-	response.LastHash = &lastForkHash
+	response.Last = fillForkConfig(chainConfig, lastForkId.Hash, lastForkId.Activation)
 
 	return &response, nil
 }
 
 var ErrForkTimeBeforeCancun = errors.New("fork time before cancun")
 
-func fillForkConfig(chainConfig *chain.Config, activationTime uint64) *EthHardForkConfig {
+func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime uint64) *EthHardForkConfig {
 	forkConfig := EthHardForkConfig{}
 	forkConfig.ActivationTime = activationTime
 	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime)
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
+	forkConfig.ForkId = forkId[:]
 	precompiles := vm.Precompiles(chainConfig.Rules(math.MaxUint64, activationTime))
-	forkConfig.Precompiles = make(map[common.Address]string, len(precompiles))
+	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
-		forkConfig.Precompiles[addr] = precompile.Name()
+		forkConfig.Precompiles[precompile.Name()] = addr
 	}
 	forkConfig.SystemContracts = chainConfig.SystemContracts(activationTime)
 	return &forkConfig
-}
-
-func checkSumConfig(ehfc *EthHardForkConfig) (hexutil.Bytes, error) {
-	ms, err := json.Marshal(ehfc)
-	if err != nil {
-		return nil, fmt.Errorf("checkSumConfig: error occurred while json marshalling config: %w", err)
-	}
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, crc32.ChecksumIEEE(ms))
-	return b, nil
 }
 
 type GasPriceOracleBackend struct {

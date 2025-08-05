@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	libchain "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -50,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/stages/mock"

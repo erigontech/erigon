@@ -399,7 +399,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 
 	if chainConfig.Bor != nil {
-		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
 		}

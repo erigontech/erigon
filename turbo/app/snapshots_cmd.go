@@ -37,13 +37,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -68,6 +65,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
@@ -820,14 +820,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
-		case integrity.BorMilestones:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorMilestones skipped because not bor chain")
-				continue
-			}
-			if err := integrity.ValidateBorMilestones(ctx, logger, dirs, borSnaps, failFast); err != nil {
-				return err
-			}
 		case integrity.ReceiptsNoDups:
 			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
@@ -1099,8 +1091,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if err != nil {
 				return err
 			}
+
 			oldVersion := versioned.GetVersions().II.DataEF.Current
 			expectedFileName := strings.Replace(res.Name(), "accounts", snapType, 1)
+			expectedFileName = version.ReplaceVersion(expectedFileName, res.Version, oldVersion)
 
 			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))

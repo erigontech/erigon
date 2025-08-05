@@ -26,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/aa"
@@ -149,6 +149,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			return err
 		}
 
+		interrupt := cfg.interrupt
 		const amount = 50
 		for {
 			txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
@@ -157,7 +158,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 
 			if len(txns) > 0 {
-				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, interrupt, cfg.payloadId, logger)
 				if err != nil {
 					return err
 				}
@@ -171,7 +172,13 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 			// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
 			if len(txns) < amount {
-				break
+				if interrupt != nil && atomic.LoadInt32(interrupt) == 0 {
+					// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
+					// since there may be new txns that can arrive
+					time.Sleep(50 * time.Millisecond)
+				} else {
+					break
+				}
 			}
 		}
 

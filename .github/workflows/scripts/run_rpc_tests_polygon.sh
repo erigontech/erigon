@@ -10,7 +10,7 @@ RESULT_DIR="$2"
 DISABLED_TEST_LIST=(
   bor_getAuthor
   bor_getSnapshot
-  eth_getTransactionReceipt/test_01.json
+  eth_getTransactionReceipt/test_01.json 
 )
 
 # Transform the array into a comma-separated string

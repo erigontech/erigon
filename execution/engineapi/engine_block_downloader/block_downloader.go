@@ -25,19 +25,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/bbd"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -60,7 +63,7 @@ type EngineBlockDownloader struct {
 	bodyReqSend RequestBodyFunction
 
 	// current status of the downloading process, aka: is it doing anything?
-	status atomic.Value // it is a headerdownload.SyncStatus
+	status atomic.Value // it is a Status
 
 	// data reader
 	blockPropagator adapter.BlockPropagator
@@ -81,15 +84,28 @@ type EngineBlockDownloader struct {
 
 	// logs
 	logger log.Logger
+
+	// V2 downloader
+	v2    bool
+	bbdV2 *bbd.BackwardBlockDownloader
 }
 
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
-	tmpdir string, syncCfg ethconfig.Sync) *EngineBlockDownloader {
+	tmpdir string, syncCfg ethconfig.Sync,
+	v2 bool,
+	sentryClient sentryproto.SentryClient,
+	statusDataProvider *sentry.StatusDataProvider,
+) *EngineBlockDownloader {
 	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
-	s.Store(headerdownload.Idle)
+	s.Store(Idle)
+	var bbdV2 *bbd.BackwardBlockDownloader
+	if v2 {
+		hr := headerReader{db: db, blockReader: blockReader}
+		bbdV2 = bbd.NewBackwardBlockDownloader(logger, sentryClient, statusDataProvider.GetStatusData, hr, tmpdir)
+	}
 	return &EngineBlockDownloader{
 		bacgroundCtx:    ctx,
 		hd:              hd,
@@ -105,7 +121,18 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		timeout:         timeout,
 		bodyReqSend:     bodyReqSend,
 		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		v2:              v2,
+		bbdV2:           bbdV2,
 	}
+}
+
+func (e *EngineBlockDownloader) Run(ctx context.Context) error {
+	if e.v2 {
+		e.logger.Info("[EngineBlockDownloader] running")
+		defer e.logger.Info("[EngineBlockDownloader] stopped")
+		return e.bbdV2.Run(ctx)
+	}
+	return nil
 }
 
 func (e *EngineBlockDownloader) scheduleHeadersDownload(
