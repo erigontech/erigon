@@ -71,6 +71,10 @@ func DialDecryptionKeysSender(ctx context.Context, logger log.Logger, port int, 
 	return DecryptionKeysSender{logger: logger, host: p2pHost, topic: topic}, nil
 }
 
+func (dks DecryptionKeysSender) InterfaceListenAddresses() ([]multiaddr.Multiaddr, error) {
+	return dks.host.Network().InterfaceListenAddresses()
+}
+
 func (dks DecryptionKeysSender) WaitExternalPeerConnection(ctx context.Context, peerId peer.ID) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

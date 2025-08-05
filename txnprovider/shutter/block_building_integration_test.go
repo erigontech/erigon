@@ -21,7 +21,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"math/big"
 	"path"
 	"runtime"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -339,7 +339,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanNode(ethNode))
 
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	err = copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	require.NoError(t, err)
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
@@ -485,7 +486,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	t.Cleanup(cleanNode(ethNode))
 
-	// wait for shutter validator to connect to our test decryptionKeySender bootstrap node
+	// wait for shutter validator to connect to our test keySender bootstrap node
 	shutterValidatorP2pPrivKeyBytes := make([]byte, 32)
 	shutterConfig.PrivateKey.D.FillBytes(shutterValidatorP2pPrivKeyBytes)
 	shutterValidatorP2pPrivKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(shutterValidatorP2pPrivKeyBytes)

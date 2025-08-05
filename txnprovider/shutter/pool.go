@@ -22,9 +22,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 var _ txnprovider.TxnProvider = (*Pool)(nil)
@@ -48,6 +49,7 @@ type Pool struct {
 	encryptedTxnsPool       *EncryptedTxnsPool
 	decryptedTxnsPool       *DecryptedTxnsPool
 	slotCalculator          SlotCalculator
+	stopped                 atomic.Bool
 }
 
 func NewPool(
@@ -90,10 +92,13 @@ func NewPool(
 	}
 }
 
-func (p Pool) Run(ctx context.Context) error {
-	defer p.logger.Info("pool stopped")
-	p.logger.Info("running pool")
+func (p *Pool) Run(ctx context.Context) error {
+	defer func() {
+		p.stopped.Store(true)
+		p.logger.Info("pool stopped")
+	}()
 
+	p.logger.Info("running pool")
 	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {
 		p.decryptionKeysProcessor.Enqueue(msg)
 	})
@@ -152,7 +157,12 @@ func (p Pool) Run(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if p.stopped.Load() {
+		p.logger.Error("cannot provide shutter transactions - pool stopped")
+		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+	}
+
 	provideOpts := txnprovider.ApplyProvideOptions(opts...)
 	blockTime := provideOpts.BlockTime
 	if blockTime == 0 {
