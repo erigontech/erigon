@@ -2,9 +2,9 @@ name: All tests (with -race)
 
 on:
   push:
-  branches:
-    - release/*
-    - main
+    branches:
+      - release/*
+      - main
   workflow_dispatch:
 
 jobs:
