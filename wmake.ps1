@@ -37,6 +37,7 @@ Param(
         "state",
         "test-short",
         "test-all",
+        "test-all-race",
         "txpool",
         "all"
     )]
@@ -545,7 +546,7 @@ if ($BuildTarget -eq "db-tools") {
         Write-Host "`n Tests completed"
     }
 } elseif ($BuildTarget -eq "test-all-race") {
-     Write-Host " Running all tests ..."
+    Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
     $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m -race ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
