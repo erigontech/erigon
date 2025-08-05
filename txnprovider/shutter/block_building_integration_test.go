@@ -486,7 +486,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	t.Cleanup(cleanNode(ethNode))
 
-	// wait for shutter validator to connect to our test keySender bootstrap node
+	// wait for shutter validator to connect to our test decryptionKeySender bootstrap node
 	shutterValidatorP2pPrivKeyBytes := make([]byte, 32)
 	shutterConfig.PrivateKey.D.FillBytes(shutterValidatorP2pPrivKeyBytes)
 	shutterValidatorP2pPrivKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(shutterValidatorP2pPrivKeyBytes)
