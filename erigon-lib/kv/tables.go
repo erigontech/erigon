@@ -24,6 +24,17 @@ import (
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
+// Table format Notation: blockNum:u64 + blockHash:32b -> [txNum:u64]
+//   Key is: concatenation of `blockNum` and `blockHash`
+//     `blockHash` type is `32 bytes`
+//     If type not specified - then it's `[]byte` (some bytes)
+//  Value is: list of `txNum`
+//     `u64`: usually means `BigEndian(uint64)`
+//   Use self-describing variable names: `blockHash` better than `hash` (because notation likely will be used in various contexts)
+//
+//   More complex exampe: `^step:u64 + k + txNum:u64 -> v`
+//     `^step` - inverteted step
+
 // DBSchemaVersion versions list
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
