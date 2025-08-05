@@ -14,7 +14,7 @@ replace (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.5.0
+	github.com/RoaringBitmap/roaring/v2 v2.6.0
 	github.com/anacrolix/chansync v0.6.0
 	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647
 	github.com/anacrolix/go-libutp v1.3.2
@@ -29,7 +29,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/sync v0.16.0
-	golang.org/x/time v0.0.0-20220609170525-579cf78fd858
+	golang.org/x/time v0.12.0
 	google.golang.org/grpc v1.72.1
 	google.golang.org/protobuf v1.36.6
 )
