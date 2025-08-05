@@ -66,8 +66,10 @@ var (
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
 	napoliInstructionSet           = newNapoliInstructionSet()
+	bhilaiInstructionSet           = newBhilaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
+	osakaInstructionSet            = newOsakaInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -108,6 +110,13 @@ func newCancunInstructionSet() JumpTable {
 	instructionSet := newNapoliInstructionSet()
 	enable4844(&instructionSet) // BLOBHASH opcode
 	enable7516(&instructionSet) // BLOBBASEFEE opcode
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newBhilaiInstructionSet() JumpTable {
+	instructionSet := newNapoliInstructionSet()
+	enable7702(&instructionSet) // EIP-7702: set code tx
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -278,6 +287,13 @@ func newHomesteadInstructionSet() JumpTable {
 		memorySize:  memoryDelegateCall,
 		string:      stDelegateCall,
 	}
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newOsakaInstructionSet() JumpTable {
+	instructionSet := newPragueInstructionSet()
+	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

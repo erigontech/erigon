@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
@@ -168,37 +169,37 @@ func TestService(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.Events(ctx, 2)
+	res, err := b.Events(ctx, blocks[1].Hash(), 2)
 	require.NoError(t, err)
 	require.Empty(t, res)
 
-	res, err = b.Events(ctx, 4)
+	res, err = b.Events(ctx, blocks[3].Hash(), 4)
 	require.NoError(t, err)
 	require.Len(t, res, 2)                      // have first two events
 	require.Equal(t, event1Data, res[0].Data()) // check data fields
 	require.Equal(t, event2Data, res[1].Data())
 
-	res, err = b.Events(ctx, 6)
+	res, err = b.Events(ctx, blocks[5].Hash(), 6)
 	require.NoError(t, err)
 	require.Len(t, res, 1)                      // have third event
 	require.Equal(t, event3Data, res[0].Data()) // check data fields
 
-	res, err = b.Events(ctx, 10)
+	res, err = b.Events(ctx, blocks[9].Hash(), 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)                      // have fourth event
 	require.Equal(t, event4Data, res[0].Data()) // check data fields
 
 	// get non-sprint block
-	res, err = b.Events(ctx, 1)
+	res, err = b.Events(ctx, blocks[0].Hash(), 1)
 	require.Empty(t, res)
 	require.NoError(t, err)
 
-	res, err = b.Events(ctx, 3)
+	res, err = b.Events(ctx, blocks[2].Hash(), 3)
 	require.Empty(t, res)
 	require.NoError(t, err)
 
 	// check block 0
-	res, err = b.Events(ctx, 0)
+	res, err = b.Events(ctx, libcommon.Hash{}, 0)
 	require.Empty(t, res)
 	require.NoError(t, err)
 
@@ -280,26 +281,26 @@ func TestService_Unwind(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.Events(ctx, 4)
+	res, err := b.Events(ctx, blocks[3].Hash(), 4)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
-	res, err = b.Events(ctx, 6)
+	res, err = b.Events(ctx, blocks[5].Hash(), 6)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
-	res, err = b.Events(ctx, 10)
+	res, err = b.Events(ctx, blocks[9].Hash(), 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 
 	err = b.Unwind(ctx, 5)
 	require.NoError(t, err)
 
-	res, err = b.Events(ctx, 4)
+	res, err = b.Events(ctx, blocks[3].Hash(), 4)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
-	res, err = b.Events(ctx, 6)
+	res, err = b.Events(ctx, blocks[5].Hash(), 6)
 	require.NoError(t, err)
 	require.Empty(t, res)
-	res, err = b.Events(ctx, 10)
+	res, err = b.Events(ctx, blocks[9].Hash(), 10)
 	require.NoError(t, err)
 	require.Empty(t, res)
 
@@ -307,7 +308,7 @@ func TestService_Unwind(t *testing.T) {
 	wg.Wait()
 }
 
-func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) *Service {
+func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) (*Service, []*types.Block) {
 	heimdallClient, b := setup(t, borConfig)
 	event1 := &EventRecordWithTime{
 		EventRecord: EventRecord{
@@ -345,7 +346,6 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 		// post-indore: block8Time=400,block10Time=500 => event4 falls in block10 (toTime=currentSprintBlockTime-delay=500-1=499)
 		Time: time.Unix(498, 0),
 	}
-
 	events := []*EventRecordWithTime{event1, event2, event3, event4}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
@@ -377,11 +377,11 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
-	blocks := getBlocks(t, 10)
+	blocks := getBlocks(t, 20)
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	return b
+	return b, blocks
 }
 
 func TestService_ProcessNewBlocksWithOverride(t *testing.T) {
@@ -390,20 +390,35 @@ func TestService_ProcessNewBlocksWithOverride(t *testing.T) {
 
 	var wg sync.WaitGroup
 	borCfg := defaultBorConfig
-	borCfg.OverrideStateSyncRecords = map[string]int{"4": 1}
-	b := setupOverrideTest(t, ctx, borCfg, &wg)
+	borCfg.OverrideStateSyncRecords = map[string]int{
+		"4":       1,
+		"r.12-14": 0,
+	}
+	b, blocks := setupOverrideTest(t, ctx, borCfg, &wg)
 
-	res, err := b.Events(ctx, 4) // should only have event1 as event2 is skipped and is present in block 6
+	res, err := b.Events(ctx, blocks[3].Hash(), 4) // should only have event1 as event2 is skipped and is present in block 6
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 
-	res, err = b.Events(ctx, 6)
+	res, err = b.Events(ctx, blocks[5].Hash(), 6)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 
-	res, err = b.Events(ctx, 10)
+	res, err = b.Events(ctx, blocks[9].Hash(), 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
+
+	res, err = b.Events(ctx, blocks[11].Hash(), 12)
+	require.NoError(t, err)
+	require.Len(t, res, 0) // because we skip it for r.12-14 interval
+
+	res, err = b.Events(ctx, blocks[13].Hash(), 14)
+	require.NoError(t, err)
+	require.Len(t, res, 0) // because we skip it for r.12-14 interval
+
+	res, err = b.Events(ctx, blocks[15].Hash(), 16)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
 
 	cancel()
 	wg.Wait()
@@ -416,17 +431,17 @@ func TestService_ProcessNewBlocksWithZeroOverride(t *testing.T) {
 	var wg sync.WaitGroup
 	borCfg := defaultBorConfig
 	borCfg.OverrideStateSyncRecords = map[string]int{"4": 0}
-	b := setupOverrideTest(t, ctx, borCfg, &wg)
+	b, blocks := setupOverrideTest(t, ctx, borCfg, &wg)
 
-	res, err := b.Events(ctx, 4) // both event1 and event2 are in block 6
+	res, err := b.Events(ctx, blocks[3].Hash(), 4) // both event1 and event2 are in block 6
 	require.NoError(t, err)
 	require.Empty(t, res)
 
-	res, err = b.Events(ctx, 6)
+	res, err = b.Events(ctx, blocks[5].Hash(), 6)
 	require.NoError(t, err)
 	require.Len(t, res, 3)
 
-	res, err = b.Events(ctx, 10)
+	res, err = b.Events(ctx, blocks[9].Hash(), 10)
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 

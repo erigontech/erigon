@@ -8,12 +8,12 @@ import (
 
 	silkworm_go "github.com/erigontech/silkworm-go"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/state"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -125,14 +125,14 @@ func (r *SnapshotsRepository) updateBlocks(view *freezeblocks.View) error {
 	return nil
 }
 
-func makeInvertedIndexSnapshot(item state.FilesItem) InvertedIndexSnapshot {
+func makeInvertedIndexSnapshot(item *state.FilesItem) InvertedIndexSnapshot {
 	return InvertedIndexSnapshot{
 		Segment:       memoryMappedFile(item.Segment()),
 		AccessorIndex: memoryMappedFile(item.AccessorIndex()),
 	}
 }
 
-func makeHistorySnapshot(historyItem state.FilesItem, iiItem state.FilesItem) HistorySnapshot {
+func makeHistorySnapshot(historyItem *state.FilesItem, iiItem *state.FilesItem) HistorySnapshot {
 	return HistorySnapshot{
 		Segment:       memoryMappedFile(historyItem.Segment()),
 		AccessorIndex: memoryMappedFile(historyItem.AccessorIndex()),
@@ -140,7 +140,7 @@ func makeHistorySnapshot(historyItem state.FilesItem, iiItem state.FilesItem) Hi
 	}
 }
 
-func makeDomainSnapshot(item state.FilesItem) DomainSnapshot {
+func makeDomainSnapshot(item *state.FilesItem) DomainSnapshot {
 	var accessorIndexOpt *silkworm_go.MemoryMappedFile
 	if item.AccessorIndex() != nil {
 		accessorIndex := memoryMappedFile(item.AccessorIndex())

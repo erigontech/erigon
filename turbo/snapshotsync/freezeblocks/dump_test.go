@@ -19,10 +19,10 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -36,10 +36,10 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -66,20 +66,18 @@ func TestDump(t *testing.T) {
 		t.Skip()
 	}
 
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win")
-	}
-
 	type test struct {
 		chainConfig *chain.Config
 		chainSize   int
 	}
 
-	withConfig := func(config chain.Config, sprints map[string]uint64) *chain.Config {
+	withConfig := func(config *chain.Config, sprints map[string]uint64) *chain.Config {
+		var copy chain.Config
+		copier.Copy(&copy, config)
 		bor := *config.Bor.(*borcfg.BorConfig)
 		bor.Sprint = sprints
-		config.Bor = &bor
-		return &config
+		copy.Bor = &bor
+		return &copy
 	}
 
 	tests := []test{
@@ -93,15 +91,15 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize:   1000,
-			chainConfig: params.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnetChainConfig,
 		},
 		{
 			chainSize:   2000,
-			chainConfig: params.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnetChainConfig,
 		},
 		{
 			chainSize: 1000,
-			chainConfig: withConfig(*params.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -110,7 +108,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 2000,
-			chainConfig: withConfig(*params.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -259,7 +257,7 @@ func TestDump(t *testing.T) {
 			logger := log.New()
 
 			tmpDir, snapDir := t.TempDir(), t.TempDir()
-			snConfig := snapcfg.KnownCfg(networkname.Mainnet)
+			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
 			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)

@@ -28,10 +28,10 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -40,9 +40,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -56,9 +57,9 @@ var debugTraceTransactionTests = []struct {
 	failed      bool
 	returnValue string
 }{
-	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, ""},
-	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0000000000000000000000000000000000000000000000000000000000000001"},
-	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 38899, false, ""},
+	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, "0x"},
+	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0x0000000000000000000000000000000000000000000000000000000000000001"},
+	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 38899, false, "0x"},
 }
 
 var debugTraceTransactionNoRefundTests = []struct {
@@ -67,9 +68,9 @@ var debugTraceTransactionNoRefundTests = []struct {
 	failed      bool
 	returnValue string
 }{
-	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, ""},
-	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0000000000000000000000000000000000000000000000000000000000000001"},
-	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, ""},
+	{"3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea", 21000, false, "0x"},
+	{"f588c6426861d9ad25d5ccc12324a8d213f35ef1ed4153193f0c13eb81ca7f4a", 49189, false, "0x0000000000000000000000000000000000000000000000000000000000000001"},
+	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, "0x"},
 }
 
 func TestTraceBlockByNumber(t *testing.T) {
@@ -80,7 +81,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -95,11 +96,11 @@ func TestTraceBlockByNumber(t *testing.T) {
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracersConfig.TraceConfig{}, stream)
+		err = api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er []ethapi.ExecutionResult
@@ -111,12 +112,12 @@ func TestTraceBlockByNumber(t *testing.T) {
 		}
 	}
 	var buf bytes.Buffer
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, stream)
+	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, s)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
 	}
-	if err = stream.Flush(); err != nil {
+	if err = s.Flush(); err != nil {
 		t.Fatalf("error flusing: %v", err)
 	}
 	var er []ethapi.ExecutionResult
@@ -131,7 +132,7 @@ func TestTraceBlockByHash(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -140,11 +141,11 @@ func TestTraceBlockByHash(t *testing.T) {
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByHash(m.Ctx, *tx.BlockHash, &tracersConfig.TraceConfig{}, stream)
+		err = api.TraceBlockByHash(m.Ctx, *tx.BlockHash, &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er []ethapi.ExecutionResult
@@ -162,12 +163,12 @@ func TestTraceTransaction(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{}, stream)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er ethapi.ExecutionResult
@@ -191,13 +192,13 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 		var norefunds = true
-		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, stream)
+		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		if err = stream.Flush(); err != nil {
+		if err = s.Flush(); err != nil {
 			t.Fatalf("error flusing: %v", err)
 		}
 		var er ethapi.ExecutionResult
@@ -553,7 +554,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
-		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		signer1 := types.MakeSigner(chainspec.MainnetChainConfig, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
 				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

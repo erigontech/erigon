@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var ( // Compile time interface checks
@@ -247,6 +248,26 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 		return fmt.Errorf("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
+}
+
+func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
+}
+
+func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
+	panic("not implemented")
+}
+
+func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
+	panic("not implemented")
 }
 
 func (tx *RwTx) WarmupDB(force bool) error {
@@ -533,16 +554,39 @@ func (db *DB) ReloadSalt() error                         { return db.agg.ReloadS
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.agg.InvertedIdxTables(domain...)
 }
+func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
+	return db.agg.BuildMissedAccessors(ctx, workers)
+}
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
+	db.agg.MadvNormal()
+	return db
+}
+
+func (db *DB) DisableReadAhead() {
+	db.agg.DisableReadAhead()
+}
+
+func (db *DB) Files() []string { return db.agg.Files() }
+
+func (db *DB) MergeLoop(ctx context.Context) error { return db.agg.MergeLoop(ctx) }
 
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
+func (tx *Tx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
+}
+
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
 
 func (tx *RwTx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
+	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
@@ -552,4 +596,34 @@ func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error 
 }
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
+}
+func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.Tx)
+}
+func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
+	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.Tx)
+}
+func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
+	return tx.aggtx.IIProgress(domain, tx.RwTx)
+}
+func (tx *Tx) StepSize() uint64 {
+	return tx.aggtx.StepSize()
+}
+func (tx *RwTx) StepSize() uint64 {
+	return tx.aggtx.StepSize()
+}
+func (tx *Tx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.Tx)
+}
+func (tx *RwTx) CanUnwindToBlockNum() (uint64, error) {
+	return tx.aggtx.CanUnwindToBlockNum(tx.RwTx)
+}
+func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.Tx)
+}
+func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
 }

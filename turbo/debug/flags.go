@@ -27,18 +27,17 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/metrics"
-
+	"github.com/felixge/fgprof"
 	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/fdlimit"
+	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -197,7 +196,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 }
 
 // SetupTracerCtx performs the tracing setup according to the parameters
-// containted in the given urfave context.
+// contained in the given urfave context.
 func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
 	tracerName := ctx.String(vmTraceFlag.Name)
 	if tracerName == "" {
@@ -277,6 +276,7 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		pprofMux.Handle("/debug/fgprof", fgprof.Handler())
 
 		pprofServer := &http.Server{
 			Addr:    address,

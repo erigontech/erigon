@@ -22,6 +22,17 @@ type testAggConfig struct {
 
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
+	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
+	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
+
+	// build files out of db
+	err := agg.BuildFiles(uint64(txCount))
+	require.NoError(tb, err)
+	return db, agg
+}
+
+func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
+	tb.Helper()
 	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	db := wrapDbWithCtx(_db, agg)
 
@@ -42,13 +53,12 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	require.NoError(tb, err)
 	defer domains.Close()
 
-	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
-
 	keys, vals := generateInputData(tb, length.Addr, 5, txCount)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
+	var txNum, blockNum uint64
 	for i := 0; i < len(vals); i++ {
-		txNum := uint64(i)
+		txNum = uint64(i)
 		domains.SetTxNum(txNum)
 
 		for j := 0; j < len(keys); j++ {
@@ -66,7 +76,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 			require.NoError(tb, err)
 			require.NotEmpty(tb, rh)
 		}
@@ -78,9 +88,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 
 	require.NoError(tb, rwTx.Commit())
 
-	// build files out of db
-	err = agg.BuildFiles(uint64(txCount))
-	require.NoError(tb, err)
 	return db, agg
 }
 
@@ -101,8 +108,9 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
+	var blockNum uint64
 	// get latest commited root
-	latestRoot, err := domains.ComputeCommitment(context.Background(), rwTx, false, domains.BlockNum(), "")
+	latestRoot, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
@@ -110,7 +118,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	// now do the squeeze
 	agg.commitmentValuesTransform = true
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = true
-	err = SqueezeCommitmentFiles(AggTx(rwTx), log.New())
+	err = SqueezeCommitmentFiles(context.Background(), AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
 	agg.recalcVisibleFiles(math.MaxUint64)
@@ -137,7 +145,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	// check if the commitment is the same
-	root, err := domains.ComputeCommitment(context.Background(), rwTx, false, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)

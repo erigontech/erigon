@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentryClient {

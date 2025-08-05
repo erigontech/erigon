@@ -30,7 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-p2p/pipes"
+	"github.com/erigontech/erigon/p2p/pipes"
 )
 
 func TestProtocolHandshake(t *testing.T) {

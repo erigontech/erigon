@@ -9,9 +9,9 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -23,7 +23,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader bloc
 	var cc *chain.Config
 
 	if db == nil {
-		genesis := core.BorMainnetGenesisBlock()
+		genesis := polychain.BorMainnetGenesisBlock()
 		cc = genesis.Config
 	} else {
 		err = db.View(ctx, func(tx kv.Tx) error {

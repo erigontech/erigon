@@ -1879,6 +1879,45 @@ func (c *MockBeaconStateGetBeaconProposerIndexCall) DoAndReturn(f func() (uint64
 	return c
 }
 
+// GetBeaconProposerIndices mocks base method.
+func (m *MockBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBeaconProposerIndices", epoch)
+	ret0, _ := ret[0].([]uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBeaconProposerIndices indicates an expected call of GetBeaconProposerIndices.
+func (mr *MockBeaconStateMockRecorder) GetBeaconProposerIndices(epoch any) *MockBeaconStateGetBeaconProposerIndicesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBeaconProposerIndices", reflect.TypeOf((*MockBeaconState)(nil).GetBeaconProposerIndices), epoch)
+	return &MockBeaconStateGetBeaconProposerIndicesCall{Call: call}
+}
+
+// MockBeaconStateGetBeaconProposerIndicesCall wrap *gomock.Call
+type MockBeaconStateGetBeaconProposerIndicesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetBeaconProposerIndicesCall) Return(arg0 []uint64, arg1 error) *MockBeaconStateGetBeaconProposerIndicesCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetBeaconProposerIndicesCall) Do(f func(uint64) ([]uint64, error)) *MockBeaconStateGetBeaconProposerIndicesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetBeaconProposerIndicesCall) DoAndReturn(f func(uint64) ([]uint64, error)) *MockBeaconStateGetBeaconProposerIndicesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetBlockRootAtSlot mocks base method.
 func (m *MockBeaconState) GetBlockRootAtSlot(slot uint64) (common.Hash, error) {
 	m.ctrl.T.Helper()
@@ -2219,6 +2258,44 @@ func (c *MockBeaconStateGetPendingPartialWithdrawalsCall) Do(f func() *solid.Lis
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateGetPendingPartialWithdrawalsCall) DoAndReturn(f func() *solid.ListSSZ[*solid.PendingPartialWithdrawal]) *MockBeaconStateGetPendingPartialWithdrawalsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetProposerLookahead mocks base method.
+func (m *MockBeaconState) GetProposerLookahead() solid.Uint64VectorSSZ {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetProposerLookahead")
+	ret0, _ := ret[0].(solid.Uint64VectorSSZ)
+	return ret0
+}
+
+// GetProposerLookahead indicates an expected call of GetProposerLookahead.
+func (mr *MockBeaconStateMockRecorder) GetProposerLookahead() *MockBeaconStateGetProposerLookaheadCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetProposerLookahead", reflect.TypeOf((*MockBeaconState)(nil).GetProposerLookahead))
+	return &MockBeaconStateGetProposerLookaheadCall{Call: call}
+}
+
+// MockBeaconStateGetProposerLookaheadCall wrap *gomock.Call
+type MockBeaconStateGetProposerLookaheadCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetProposerLookaheadCall) Return(arg0 solid.Uint64VectorSSZ) *MockBeaconStateGetProposerLookaheadCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetProposerLookaheadCall) Do(f func() solid.Uint64VectorSSZ) *MockBeaconStateGetProposerLookaheadCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetProposerLookaheadCall) DoAndReturn(f func() solid.Uint64VectorSSZ) *MockBeaconStateGetProposerLookaheadCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -4280,6 +4357,42 @@ func (c *MockBeaconStateSetPreviousStateRootCall) DoAndReturn(f func(common.Hash
 	return c
 }
 
+// SetProposerLookahead mocks base method.
+func (m *MockBeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetProposerLookahead", proposerLookahead)
+}
+
+// SetProposerLookahead indicates an expected call of SetProposerLookahead.
+func (mr *MockBeaconStateMockRecorder) SetProposerLookahead(proposerLookahead any) *MockBeaconStateSetProposerLookaheadCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetProposerLookahead", reflect.TypeOf((*MockBeaconState)(nil).SetProposerLookahead), proposerLookahead)
+	return &MockBeaconStateSetProposerLookaheadCall{Call: call}
+}
+
+// MockBeaconStateSetProposerLookaheadCall wrap *gomock.Call
+type MockBeaconStateSetProposerLookaheadCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetProposerLookaheadCall) Return() *MockBeaconStateSetProposerLookaheadCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetProposerLookaheadCall) Do(f func(solid.Uint64VectorSSZ)) *MockBeaconStateSetProposerLookaheadCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetProposerLookaheadCall) DoAndReturn(f func(solid.Uint64VectorSSZ)) *MockBeaconStateSetProposerLookaheadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetRandaoMixAt mocks base method.
 func (m *MockBeaconState) SetRandaoMixAt(index int, mix common.Hash) {
 	m.ctrl.T.Helper()
@@ -5367,6 +5480,44 @@ func (c *MockBeaconStateUpgradeToElectraCall) Do(f func() error) *MockBeaconStat
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateUpgradeToElectraCall) DoAndReturn(f func() error) *MockBeaconStateUpgradeToElectraCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// UpgradeToFulu mocks base method.
+func (m *MockBeaconState) UpgradeToFulu() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpgradeToFulu")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpgradeToFulu indicates an expected call of UpgradeToFulu.
+func (mr *MockBeaconStateMockRecorder) UpgradeToFulu() *MockBeaconStateUpgradeToFuluCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpgradeToFulu", reflect.TypeOf((*MockBeaconState)(nil).UpgradeToFulu))
+	return &MockBeaconStateUpgradeToFuluCall{Call: call}
+}
+
+// MockBeaconStateUpgradeToFuluCall wrap *gomock.Call
+type MockBeaconStateUpgradeToFuluCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateUpgradeToFuluCall) Return(arg0 error) *MockBeaconStateUpgradeToFuluCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateUpgradeToFuluCall) Do(f func() error) *MockBeaconStateUpgradeToFuluCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateUpgradeToFuluCall) DoAndReturn(f func() error) *MockBeaconStateUpgradeToFuluCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

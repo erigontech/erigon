@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
@@ -155,20 +155,16 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check the history
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey1, roTx)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
 	require.NoError(t, err)
-	require.Truef(t, ex, "key %x not found", commKey1)
-
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-	v, _, ex, err = AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey2, roTx)
+	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 	require.NoError(t, err)
-	require.Truef(t, ex, "key %x not found", commKey2)
-
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
@@ -256,7 +252,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
+	checkDirtyFiles := func(dirtyFiles []*FilesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
 		if disabled {
 			expectedLen = 0
 		}
@@ -301,6 +297,9 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
+		t.Skip()
+	}
+	if !AggregatorSqueezeCommitmentValues {
 		t.Skip()
 	}
 
@@ -351,7 +350,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, "")
+			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
 			require.NoError(t, err)
 		}
 
@@ -447,7 +446,9 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite uint64
 	addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
-	for txNum := uint64(1); txNum <= txs; txNum++ {
+	var txNum, blockNum uint64
+	for i := uint64(1); i <= txs; i++ {
+		txNum = i
 		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
@@ -476,7 +477,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
-	_, err = domains.ComputeCommitment(ctx, tx, true, domains.BlockNum(), "")
+	_, err = domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 	require.NoError(t, err)
 
 	err = domains.Flush(context.Background(), tx)
@@ -524,10 +525,8 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, someKey, roTx)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
 	require.NoError(t, err)
-	require.True(t, ex)
-
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
@@ -588,9 +587,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		accountsRange    map[string][]byte
 		storageRange     map[string][]byte
 		codeRange        map[string][]byte
-		accountHistRange map[string]vs
-		storageHistRange map[string]vs
-		codeHistRange    map[string]vs
+		accountHistRange map[string][]byte
+		storageHistRange map[string][]byte
+		codeHistRange    map[string][]byte
 	)
 	maxInt := math.MaxInt
 	{
@@ -608,13 +607,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 		its, err := AggTx(tx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
-		accountHistRange = extractKVSErrIterator(t, its)
+		accountHistRange = extractKVErrIterator(t, its)
 		its, err = AggTx(tx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
-		codeHistRange = extractKVSErrIterator(t, its)
+		codeHistRange = extractKVErrIterator(t, its)
 		its, err = AggTx(tx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
-		storageHistRange = extractKVSErrIterator(t, its)
+		storageHistRange = extractKVErrIterator(t, its)
 	}
 
 	err = tx.Commit()
@@ -643,9 +642,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		accountsRangeAfter    map[string][]byte
 		storageRangeAfter     map[string][]byte
 		codeRangeAfter        map[string][]byte
-		accountHistRangeAfter map[string]vs
-		storageHistRangeAfter map[string]vs
-		codeHistRangeAfter    map[string]vs
+		accountHistRangeAfter map[string][]byte
+		storageHistRangeAfter map[string][]byte
+		codeHistRangeAfter    map[string][]byte
 	)
 
 	{
@@ -663,13 +662,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 		its, err := AggTx(afterTx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
-		accountHistRangeAfter = extractKVSErrIterator(t, its)
+		accountHistRangeAfter = extractKVErrIterator(t, its)
 		its, err = AggTx(afterTx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
-		codeHistRangeAfter = extractKVSErrIterator(t, its)
+		codeHistRangeAfter = extractKVErrIterator(t, its)
 		its, err = AggTx(afterTx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
-		storageHistRangeAfter = extractKVSErrIterator(t, its)
+		storageHistRangeAfter = extractKVErrIterator(t, its)
 	}
 
 	{
@@ -677,52 +676,24 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		compareMapsBytes(t, accountsRange, accountsRangeAfter)
 		compareMapsBytes(t, storageRange, storageRangeAfter)
 		compareMapsBytes(t, codeRange, codeRangeAfter)
-		compareMapsBytes2(t, accountHistRange, accountHistRangeAfter)
-		compareMapsBytes2(t, storageHistRange, storageHistRangeAfter)
-		compareMapsBytes2(t, codeHistRange, codeHistRangeAfter)
+		compareMapsBytes(t, accountHistRange, accountHistRangeAfter)
+		compareMapsBytes(t, storageHistRange, storageHistRangeAfter)
+		compareMapsBytes(t, codeHistRange, codeHistRangeAfter)
 	}
 
-}
-
-func compareMapsBytes2(t *testing.T, m1, m2 map[string]vs) {
-	t.Helper()
-	for k, v := range m1 {
-		v2, ok := m2[k]
-		require.Truef(t, ok, "key %x not found", k)
-		require.Equal(t, v.s, v2.s)
-		if !bytes.Equal(v.v, v2.v) { // empty value==nil
-			t.Logf("key %x expected '%x' but got '%x'\n", k, v, m2[k])
-		}
-		delete(m2, k)
-	}
-	require.Emptyf(t, m2, "m2 should be empty got %d: %v", len(m2), m2)
 }
 
 func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {
 	t.Helper()
 	for k, v := range m1 {
-		require.Equal(t, v, m2[k])
+		if len(v) == 0 {
+			require.Equal(t, []byte{}, v)
+		} else {
+			require.Equal(t, m2[k], v)
+		}
 		delete(m2, k)
 	}
 	require.Emptyf(t, m2, "m2 should be empty got %d: %v", len(m2), m2)
-}
-
-type vs struct {
-	v []byte
-	s uint64
-}
-
-func extractKVSErrIterator(t *testing.T, it stream.KVS) map[string]vs {
-	t.Helper()
-
-	accounts := make(map[string]vs)
-	for it.HasNext() {
-		k, v, s, err := it.Next()
-		require.NoError(t, err)
-		accounts[hex.EncodeToString(k)] = vs{v: common.Copy(v), s: s}
-	}
-
-	return accounts
 }
 
 func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
@@ -757,7 +728,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, tx kv.Tx
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), tx, true, txNum/commitEvery, "")
+			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "")
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			t.Logf("commitment %x txn=%d", rh, txNum)
 		}
@@ -995,9 +966,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		storedV, _, found, err := AggTx(tx).GetLatest(kv.StorageDomain, key, tx)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
 		require.NoError(t, err)
-		require.True(t, found)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
 		_ = storedV[0]
@@ -1092,7 +1062,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, step, _, err := AggTx(tx).d[kv.StorageDomain].GetLatest(keys[txNum-1-half], tx)
+		prev, step, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
 		require.NoError(t, err)
@@ -1105,8 +1075,9 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	defer tx.Rollback()
 
 	for i, key := range keys {
-		storedV, _, found, err := AggTx(tx).d[kv.StorageDomain].GetLatest(key, tx)
-		require.Truef(t, found, "key %x not found %d", key, i)
+
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		require.NotNil(t, storedV, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
 		require.Equal(t, key[length.Addr], storedV[1])
@@ -1218,7 +1189,8 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	ps := background.NewProgressSet()
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
-	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
+	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
+	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -1288,6 +1260,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	roots := make([][]byte, 0, 10)
 	var pruneFrom uint64 = 5
 
+	blockNum := uint64(0)
 	for i = 0; i < len(vals); i++ {
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
@@ -1313,7 +1286,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -1335,7 +1308,9 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	for idx := range changesetAt5.Diffs {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
+	err = rwTx.Unwind(ctx, pruneFrom, &diffs)
+	domains.SetTxNum(pruneFrom)
+	//err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
@@ -1360,7 +1335,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
@@ -1384,7 +1359,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	for idx := range changesetAt3.Diffs {
 		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
+	err = rwTx.Unwind(context.Background(), pruneFrom, &diffs)
+	domains.SetTxNum(pruneFrom)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
@@ -1408,7 +1384,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
@@ -1440,7 +1416,6 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
@@ -1454,13 +1429,13 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	roots := make([]common.Hash, 0)
 
 	// collect latest root from each available file
-	compression := ac.d[kv.CommitmentDomain].d.Compression
+	dt := ac.d[kv.CommitmentDomain]
 	fnames := []string{}
-	for _, f := range ac.d[kv.CommitmentDomain].files {
+	for _, f := range dt.files {
 		var k, stateVal []byte
-		if ac.d[kv.CommitmentDomain].d.Accessors.Has(AccessorHashMap) {
+		if dt.d.Accessors.Has(AccessorHashMap) {
 			idx := f.src.index.GetReaderFromPool()
-			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
+			r := dt.dataReader(f.src.decompressor)
 
 			offset, ok := idx.TwoLayerLookup(keyCommitmentState)
 			require.True(t, ok)
@@ -1470,7 +1445,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		} else {
 			var found bool
 			var err error
-			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
+			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, dt.dataReader(f.src.decompressor))
 			require.NoError(t, err)
 			require.True(t, found)
 			require.Equal(t, keyCommitmentState, k)
@@ -1521,4 +1496,201 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
 
 	require.Equal(t, roots[len(roots)-1][:], finalRoot[:])
+}
+
+func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
+	stepSize := uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	generateAccountsFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCodeFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateStorageFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}})
+
+	require.NoError(t, agg.OpenFolder())
+
+	tdb := wrapDbWithCtx(db, agg)
+	defer tdb.Close()
+	tx, err := tdb.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggTx := AggTx(tx)
+
+	checkFn := func(files visibleFiles, merged bool) {
+		if merged {
+			require.Equal(t, 1, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[0].endTxNum/stepSize)
+		} else {
+			require.Equal(t, 2, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(1), files[0].endTxNum/stepSize)
+			require.Equal(t, uint64(1), files[1].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[1].endTxNum/stepSize)
+		}
+	}
+
+	checkFn(aggTx.d[kv.AccountsDomain].ht.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.files, true)
+	checkFn(aggTx.d[kv.StorageDomain].ht.files, true)
+	checkFn(aggTx.d[kv.AccountsDomain].ht.iit.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.iit.files, true)
+	checkFn(aggTx.d[kv.StorageDomain].ht.iit.files, true)
+
+	tx.Rollback()
+
+	// delete merged code history file
+	codeMergedFile := filepath.Join(agg.dirs.SnapHistory, "v1.0-code.0-2.v")
+	exist, err := dir.FileExist(codeMergedFile)
+	require.NoError(t, err)
+	require.True(t, exist)
+	agg.closeDirtyFiles() // because windows
+
+	require.NoError(t, os.Remove(codeMergedFile))
+
+	require.NoError(t, agg.OpenFolder())
+	tx, err = tdb.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggTx = AggTx(tx)
+
+	checkFn(aggTx.d[kv.AccountsDomain].ht.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.files, false)
+	checkFn(aggTx.d[kv.StorageDomain].ht.files, true)
+	checkFn(aggTx.d[kv.AccountsDomain].ht.iit.files, true)
+	checkFn(aggTx.d[kv.CodeDomain].ht.iit.files, false)
+	checkFn(aggTx.d[kv.StorageDomain].ht.iit.files, true)
+}
+
+func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
+	stepSize := uint64(10)
+	// testDbAggregatorWithNoFiles(t,  stepSize * 32, &testAggConfig{
+	// 	stepSize:                         10,
+	// 	disableCommitmentBranchTransform: false,
+	// })
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	require.NotNil(t, agg.d[kv.AccountsDomain].checker)
+	require.NotNil(t, agg.d[kv.StorageDomain].checker)
+	require.NotNil(t, agg.checker)
+	require.Nil(t, agg.d[kv.CommitmentDomain].checker)
+
+	generateAccountsFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCodeFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateStorageFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	generateCommitmentFile(t, agg.dirs, []testFileRange{{0, 1}, {1, 2}})
+
+	require.NoError(t, agg.OpenFolder())
+
+	tdb := wrapDbWithCtx(db, agg)
+	defer tdb.Close()
+	tx, err := tdb.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	aggTx := AggTx(tx)
+	checkFn := func(files visibleFiles, merged bool) {
+		if merged {
+			require.Equal(t, 1, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[0].endTxNum/stepSize)
+		} else {
+			require.Equal(t, 2, len(files))
+			require.Equal(t, uint64(0), files[0].startTxNum/stepSize)
+			require.Equal(t, uint64(1), files[0].endTxNum/stepSize)
+			require.Equal(t, uint64(1), files[1].startTxNum/stepSize)
+			require.Equal(t, uint64(2), files[1].endTxNum/stepSize)
+		}
+	}
+	checkFn(aggTx.d[kv.AccountsDomain].files, false)
+	checkFn(aggTx.d[kv.CodeDomain].files, true)
+	checkFn(aggTx.d[kv.StorageDomain].files, false)
+	checkFn(aggTx.d[kv.CommitmentDomain].files, false)
+}
+
+func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
+		accessors := AccessorBTree | AccessorExistence
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
+			BtIndex().Existence().
+			Build()
+		return name, schema
+	})
+	defer domainR.Close()
+	populateFiles2(t, dirs, domainR, ranges)
+
+	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
+		accessors := AccessorHashMap
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone).
+			Accessor(dirs.SnapAccessors).
+			Build()
+		return name, schema
+	})
+	defer domainHR.Close()
+	populateFiles2(t, dirs, domainHR, ranges)
+
+	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
+		accessors := AccessorHashMap
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone).
+			Accessor(dirs.SnapAccessors).
+			Build()
+		return name, schema
+	})
+	defer domainII.Close()
+	populateFiles2(t, dirs, domainII, ranges)
+}
+
+func generateAccountsFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	generateDomainFiles(t, "accounts", dirs, ranges)
+}
+
+func generateCodeFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	generateDomainFiles(t, "code", dirs, ranges)
+}
+
+func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	generateDomainFiles(t, "storage", dirs, ranges)
+}
+
+func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		accessors := AccessorHashMap
+		name = "commitment"
+		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
+			Accessor(dirs.SnapDomain).
+			Build()
+		return name, schema
+	})
+	defer commitmentR.Close()
+	populateFiles2(t, dirs, commitmentR, ranges)
+}
+
+func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {
+	t.Helper()
+	stepSize := uint64(10)
+	name, schema := genRepo(stepSize, dirs)
+
+	createConfig := SnapshotCreationConfig{
+		RootNumPerStep: stepSize,
+		MergeStages:    []uint64{20, 40, 80},
+		MinimumSize:    10,
+		SafetyMargin:   5,
+	}
+	d, err := kv.String2Domain(name)
+	require.NoError(t, err)
+	return NewSnapshotRepo(name, FromDomain(d), &SnapshotConfig{
+		SnapshotCreationConfig: &createConfig,
+		Schema:                 schema,
+	}, log.New())
 }

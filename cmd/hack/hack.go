@@ -35,8 +35,6 @@ import (
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
@@ -51,13 +49,17 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var (
@@ -665,7 +667,7 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	chainConfig := params.ChainConfigByChainName(name)
+	chainConfig := chainspec.ChainConfigByChainName(name)
 	if chainConfig == nil {
 		return fmt.Errorf("unknown name: %s", name)
 	}

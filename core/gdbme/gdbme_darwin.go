@@ -4,11 +4,12 @@ package gdbme
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon/cmd/utils"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 const lldbPath = "/usr/bin/lldb"
@@ -69,9 +70,9 @@ quit
 	defer os.Remove(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(lldbScript)
-	tmpFile.Close()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: could not write LLDB script:", err)
+	closeErr := tmpFile.Close()
+	if err != nil || closeErr != nil {
+		fmt.Fprintln(os.Stderr, "Error: could not write or close LLDB script:", err, closeErr)
 		os.Exit(1)
 	}
 

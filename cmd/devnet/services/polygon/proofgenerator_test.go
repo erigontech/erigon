@@ -30,7 +30,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/pion/randutil"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -45,14 +44,15 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/polygon/bor"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -62,6 +62,7 @@ type requestGenerator struct {
 	sentry     *mock.MockSentry
 	bor        *bor.Bor
 	chain      *core.ChainPack
+	db         kv.RwDB
 	txBlockMap map[common.Hash]*types.Block
 }
 
@@ -84,20 +85,20 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 	}
 
 	return &requestGenerator{
+		db:         db,
 		chain:      chain,
 		sentry:     sentry,
-		bor:        bor.NewRo(params.BorDevnetChainConfig, db, reader, log.Root()),
+		bor:        bor.NewRo(polychain.BorDevnetChainConfig, reader, log.Root()),
 		txBlockMap: map[common.Hash]*types.Block{},
 	}, nil
 }
 
 func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
-	tx, err := rg.bor.DB.BeginRo(context.Background())
+	tx, err := rg.db.BeginRo(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}
 	defer tx.Rollback()
-
 	result, err := rg.bor.GetRootHash(ctx, tx, startBlock, endBlock)
 
 	if err != nil {
@@ -141,7 +142,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 	}
 
 	engine := rg.bor
-	chainConfig := params.BorDevnetChainConfig
+	chainConfig := polychain.BorDevnetChainConfig
 
 	reader := blockReader{
 		chain: rg.chain,
@@ -165,19 +166,15 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := reader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return reader.Header(ctx, tx, hash, number)
 	}
 
 	header := block.Header()
+	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
-
-		ibs.SetTxContext(i)
+		ibs.SetTxContext(blockNum, i)
 
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &gasUsed, &usedBlobGas, vm.Config{})
 

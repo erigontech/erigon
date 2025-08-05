@@ -23,20 +23,20 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -406,7 +406,7 @@ const (
 )
 
 func GetPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
+	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
 	if blockReader.BorSnapshots() == nil {
 		snapProgress = blockReader.FrozenBlocks()
 	}

@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -61,7 +60,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 	}
 	cfg.hist.iiCfg.salt.Store(&salt)
-
+	cfg.hist.iiCfg.Accessors = AccessorHashMap
 	cfg.hist.historyLargeValues = largeValues
 
 	//perf of tests
@@ -113,8 +112,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
 
-			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.Compression)
-			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+			efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
+			hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -227,13 +226,13 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(3, c.efHistoryComp.Count()/2)
-		require.Equal(page.WordsAmount2PagesAmount(6, h.historyValuesOnCompressedPage), c.historyComp.Count())
+		require.Equal(seg.WordsAmount2PagesAmount(6, h.historyValuesOnCompressedPage), c.historyComp.Count())
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -258,16 +257,25 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
 		for i := 0; i < len(keyWords); i++ {
-			offset, ok := r.TwoLayerLookup([]byte(keyWords[i]))
-			if !ok {
-				continue
+			var offset uint64
+			var ok bool
+			if h.InvertedIndex.Accessors.Has(AccessorExistence) {
+				offset, ok = r.Lookup([]byte(keyWords[i]))
+				if !ok {
+					continue
+				}
+			} else {
+				offset, ok = r.TwoLayerLookup([]byte(keyWords[i]))
+				if !ok {
+					continue
+				}
 			}
 			ge.Reset(offset)
 			w, _ := ge.Next(nil)
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
+		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
@@ -922,7 +930,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			require.NoError(err)
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
-			h.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
+			h.integrateMergedDirtyFiles(indexIn, historyIn)
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
@@ -993,7 +1001,7 @@ func TestHistoryScanFiles(t *testing.T) {
 	})
 }
 
-func TestIterateChanged(t *testing.T) {
+func TestHistoryRange1(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1015,18 +1023,16 @@ func TestIterateChanged(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 		var keys, vals []string
-		var steps []uint64
 		ic := h.BeginFilesRo()
 		defer ic.Close()
 
 		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
 		require.NoError(err)
 		for it.HasNext() {
-			k, v, step, err := it.Next()
+			k, v, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
-			steps = append(steps, step)
 		}
 		require.Equal([]string{
 			"0100000000000001",
@@ -1068,16 +1074,15 @@ func TestIterateChanged(t *testing.T) {
 			"",
 			"",
 			""}, vals)
-		require.Equal(make([]uint64, 19), steps)
+
 		it, err = ic.HistoryRange(995, 1000, order.Asc, -1, tx)
 		require.NoError(err)
-		keys, vals, steps = keys[:0], vals[:0], steps[:0]
+		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
-			k, v, step, err := it.Next()
+			k, v, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
-			steps = append(steps, step)
 		}
 		require.Equal([]string{
 			"0100000000000001",
@@ -1102,52 +1107,45 @@ func TestIterateChanged(t *testing.T) {
 			"ff00000000000052",
 			"ff00000000000024"}, vals)
 
-		require.Equal(make([]uint64, 9), steps)
-
 		// no upper bound
 		it, err = ic.HistoryRange(995, -1, order.Asc, -1, tx)
 		require.NoError(err)
-		keys, vals, steps = keys[:0], vals[:0], steps[:0]
+		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
-			k, v, step, err := it.Next()
+			k, v, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
-			steps = append(steps, step)
 		}
 		require.Equal([]string{"0100000000000001", "0100000000000002", "0100000000000003", "0100000000000004", "0100000000000005", "0100000000000006", "0100000000000008", "0100000000000009", "010000000000000a", "010000000000000c", "0100000000000014", "0100000000000019", "010000000000001b"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1", "ff0000000000014b", "ff000000000000f8", "ff000000000000c6", "ff000000000000a5", "ff0000000000007c", "ff0000000000006e", "ff00000000000063", "ff00000000000052", "ff00000000000031", "ff00000000000027", "ff00000000000024"}, vals)
-		require.Equal(make([]uint64, 13), steps)
 
 		// no upper bound, limit=2
 		it, err = ic.HistoryRange(995, -1, order.Asc, 2, tx)
 		require.NoError(err)
-		keys, vals, steps = keys[:0], vals[:0], steps[:0]
+		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
-			k, v, step, err := it.Next()
+			k, v, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
-			steps = append(steps, step)
 		}
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1"}, vals)
-		require.Equal(make([]uint64, 2), steps)
 
 		// no lower bound, limit=2
 		it, err = ic.HistoryRange(-1, 1000, order.Asc, 2, tx)
 		require.NoError(err)
-		keys, vals, steps = keys[:0], vals[:0], steps[:0]
+		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
-			k, v, step, err := it.Next()
+			k, v, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
-			steps = append(steps, step)
 		}
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
-		require.Equal(make([]uint64, 2), steps)
+
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
@@ -1159,7 +1157,7 @@ func TestIterateChanged(t *testing.T) {
 	})
 }
 
-func TestIterateChanged2(t *testing.T) {
+func TestHistoryRange2(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1193,7 +1191,6 @@ func TestIterateChanged2(t *testing.T) {
 		firstKey[0] = 1 //mark key to simplify debug
 
 		var keys, vals []string
-		var steps []uint64
 		t.Run("before merge", func(t *testing.T) {
 			hc, require := h.BeginFilesRo(), require.New(t)
 			defer hc.Close()
@@ -1217,11 +1214,10 @@ func TestIterateChanged2(t *testing.T) {
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, v, step, err := it.Next()
+				k, v, err := it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
-				steps = append(steps, step)
 			}
 			require.NoError(err)
 			require.Equal([]string{
@@ -1264,17 +1260,15 @@ func TestIterateChanged2(t *testing.T) {
 				"",
 				"",
 				""}, vals)
-			require.Equal(make([]uint64, 19), steps)
-			keys, vals, steps = keys[:0], vals[:0], steps[:0]
+			keys, vals = keys[:0], vals[:0]
 
 			it, err = hc.HistoryRange(995, 1000, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, v, step, err := it.Next()
+				k, v, err := it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
-				steps = append(steps, step)
 			}
 			require.NoError(err)
 			require.Equal([]string{
@@ -1299,8 +1293,6 @@ func TestIterateChanged2(t *testing.T) {
 				"ff0000000000006e",
 				"ff00000000000052",
 				"ff00000000000024"}, vals)
-
-			require.Equal(make([]uint64, 9), steps)
 
 			// single Get test-cases
 			tx, err := db.BeginRo(ctx)
@@ -1330,7 +1322,7 @@ func TestIterateChanged2(t *testing.T) {
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, _, _, err := it.Next()
+				k, _, err := it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 			}
@@ -1390,7 +1382,6 @@ func TestScanStaticFilesH(t *testing.T) {
 
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
-		d.History.InvertedIndex.integrity = nil
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
@@ -1408,12 +1399,8 @@ func TestScanStaticFilesH(t *testing.T) {
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
-
-	h.dirtyFiles.Clear()
-	h.integrity = func(fromStep, toStep uint64) bool { return false }
-	h.scanDirtyFiles(files)
-	require.Equal(t, 0, h.dirtyFiles.Len())
-
+	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+	require.Equal(t, 0, len(h._visible.files))
 }
 
 func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, [][]byte, uint64) {
@@ -1510,7 +1497,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 
 		keys := make([][]byte, 0)
 		for iter.HasNext() {
-			k, _, _, err := iter.Next()
+			k, _, err := iter.Next()
 			require.NoError(err)
 			keys = append(keys, k)
 			//vals = append(vals, fmt.Sprintf("%x", v))

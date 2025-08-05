@@ -24,11 +24,9 @@ import (
 	"fmt"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
-
-	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/types"
@@ -41,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type BlockGetter interface {
@@ -53,9 +52,9 @@ type BlockGetter interface {
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader interfaces.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, header.Number.Uint64(), txIndex, cfg.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 	}
@@ -63,9 +62,8 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	getHeader := func(hash common.Hash, n uint64) *types.Header {
-		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
-		return h
+	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
+		return headerReader.HeaderByNumber(ctx, dbtx, n)
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
@@ -80,7 +78,7 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 // ComputeTxContext returns the execution environment of a certain transaction.
 func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
-	statedb.SetTxContext(txIndex)
+	statedb.SetTxContext(block.NumberU64(), txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 	txContext := core.NewEVMTxContext(msg)
 	return msg, txContext, nil
@@ -101,7 +99,7 @@ func TraceTx(
 	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
-	stream *jsoniter.Stream,
+	stream jsonstream.Stream,
 	callTimeout time.Duration,
 ) (gasUsed uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
@@ -144,7 +142,7 @@ func AssembleTracer(
 	txHash common.Hash,
 	blockHash common.Hash,
 	txnIndex int,
-	stream *jsoniter.Stream,
+	stream jsonstream.Stream,
 	callTimeout time.Duration,
 ) (*tracers.Tracer, bool, context.CancelFunc, error) {
 	// Assemble the structured logger or the JavaScript tracer
@@ -179,9 +177,11 @@ func AssembleTracer(
 
 		return tracer, false, cancel, nil
 	case config == nil:
-		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, func() {}, nil
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, cancel, nil
 	default:
-		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, func() {}, nil
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, cancel, nil
 	}
 }
 
@@ -191,7 +191,7 @@ func ExecuteTraceTx(
 	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
-	stream *jsoniter.Stream,
+	stream jsonstream.Stream,
 	tracer *tracers.Tracer,
 	streaming bool,
 	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
@@ -205,18 +205,9 @@ func ExecuteTraceTx(
 		refunds = false
 	}
 
-	if streaming {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("structLogs")
-		stream.WriteArrayStart()
-	}
-
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		if streaming {
-			stream.WriteArrayEnd()
-			stream.WriteObjectEnd()
-		} else {
+		if !streaming {
 			stream.WriteNil()
 		}
 		return fmt.Errorf("tracing failed: %w", err)
@@ -238,7 +229,7 @@ func ExecuteTraceTx(
 			returnVal = hex.EncodeToString(result.Revert())
 		}
 		stream.WriteObjectField("returnValue")
-		stream.WriteString(returnVal)
+		stream.WriteString("0x" + returnVal)
 		stream.WriteObjectEnd()
 	} else {
 		r, err := tracer.GetResult()

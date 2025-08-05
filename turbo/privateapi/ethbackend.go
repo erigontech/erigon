@@ -31,7 +31,6 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
@@ -39,14 +38,13 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // EthBackendAPIVersion
@@ -82,6 +80,7 @@ type EthBackend interface {
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 	Peers(ctx context.Context) (*remote.PeersReply, error)
 	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
+	RemovePeer(ctx context.Context, url *remote.RemovePeerRequest) (*remote.RemovePeerReply, error)
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
@@ -305,10 +304,16 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	if err != nil {
 		return nil, err
 	}
+
+	if block == nil {
+		return &remote.BlockReply{}, nil
+	}
+
 	blockRlp, err := rlp.EncodeToBytes(block)
 	if err != nil {
 		return nil, err
 	}
+
 	sendersBytes := make([]byte, 20*len(senders))
 	for i, sender := range senders {
 		copy(sendersBytes[i*20:], sender[:])
@@ -388,6 +393,10 @@ func (s *EthBackendServer) AddPeer(ctx context.Context, req *remote.AddPeerReque
 	return s.eth.AddPeer(ctx, req)
 }
 
+func (s *EthBackendServer) RemovePeer(ctx context.Context, req *remote.RemovePeerRequest) (*remote.RemovePeerReply, error) {
+	return s.eth.RemovePeer(ctx, req)
+}
+
 func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
@@ -452,7 +461,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx.(kv.TemporalTx))
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, s.blockReader))
+	txNumsReader := s.blockReader.TxnumReader(ctx)
 	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
@@ -489,4 +498,18 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	}
 
 	return &remote.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
+}
+
+func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remote.BlockForTxNumRequest) (*remote.BlockForTxNumResponse, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, ok, err := s.blockReader.BlockForTxNum(ctx, tx, req.Txnum)
+	return &remote.BlockForTxNumResponse{
+		BlockNumber: blockNum,
+		Present:     ok,
+	}, err
 }

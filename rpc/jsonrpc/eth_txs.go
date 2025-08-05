@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/rawdb"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -47,7 +47,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
@@ -57,7 +57,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 	if isBorStateSyncTx {
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +143,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -196,7 +195,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockHashAndIndex
 	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
@@ -221,6 +220,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if ok {
 			borTx = bortypes.NewBorTransaction()
 		}
+
 		if borTx == nil {
 			return nil, nil // not error
 		}
@@ -239,7 +239,6 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockHashAndIndex
 	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
@@ -263,7 +262,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
@@ -293,6 +292,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if ok {
 			borTx = bortypes.NewBorTransaction()
 		}
+
 		if borTx == nil {
 			return nil, nil
 		}
@@ -311,7 +311,6 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockNumberAndIndex
 	block, err := api.blockByRPCNumber(ctx, blockNr, tx)
 	if err != nil {
 		return nil, err

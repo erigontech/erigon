@@ -68,7 +68,7 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 
 		reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
 
-		response, err := poshttp.FetchWithRetry[StateSyncEventsResponse](reqCtx, c.Client, url, c.Logger)
+		response, err := poshttp.FetchWithRetry[StateSyncEventsResponseV2](reqCtx, c.Client, url, c.Logger)
 		if err != nil {
 			if errors.Is(err, poshttp.ErrNoResponse) {
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993
@@ -81,14 +81,17 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 			return nil, err
 		}
 
-		if response == nil || response.Result == nil {
+		if response == nil || response.EventRecords == nil {
 			// status 204
 			break
 		}
+		records, err := response.GetEventRecords()
+		if err != nil {
+			return nil, err
+		}
+		eventRecords = append(eventRecords, records...)
 
-		eventRecords = append(eventRecords, response.Result...)
-
-		if len(response.Result) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
+		if len(records) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
 			break
 		}
 

@@ -241,6 +241,10 @@ func (s *EthBackendClientDirect) AddPeer(ctx context.Context, in *remote.AddPeer
 	return s.server.AddPeer(ctx, in)
 }
 
+func (s *EthBackendClientDirect) RemovePeer(ctx context.Context, in *remote.RemovePeerRequest, opts ...grpc.CallOption) (*remote.RemovePeerReply, error) {
+	return s.server.RemovePeer(ctx, in)
+}
+
 func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PendingBlockReply, error) {
 	return s.server.PendingBlock(ctx, in)
 }
@@ -255,4 +259,8 @@ func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEv
 
 func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remote.AAValidationRequest, opts ...grpc.CallOption) (*remote.AAValidationReply, error) {
 	return s.server.AAValidation(ctx, in)
+}
+
+func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remote.BlockForTxNumRequest, opts ...grpc.CallOption) (*remote.BlockForTxNumResponse, error) {
+	return s.server.BlockForTxNum(ctx, in)
 }

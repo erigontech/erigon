@@ -23,10 +23,10 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -252,7 +253,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, -1)
+			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, kv.Unlim)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
@@ -263,18 +264,18 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, -1)
+			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, kv.Unlim)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, -1)
+		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, -1)
+		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
 	}
 
 	// Special case - if no addresses specified, take all traces
@@ -291,7 +292,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream jsonstream.Stream) error {
 	if gasBailOut == nil {
 		//nolint
 		gasBailOut = new(bool) // false by default
@@ -326,7 +327,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 
@@ -593,7 +594,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		ibs.SetTxContext(txIndex)
+		ibs.SetTxContext(blockNum, txIndex)
 		ibs.SetHooks(ot.Tracer().Hooks)
 
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
@@ -733,10 +734,8 @@ func (api *TraceAPIImpl) callBlock(
 		blockHash := block.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
-		var ok bool
-		var err error
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -755,7 +754,7 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, cfg.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -803,7 +802,7 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	traces, tracingHooks, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
+	traces, _, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
 
 	if cmErr != nil {
@@ -811,7 +810,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks, vm.Config{})
+		ret, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
 
@@ -845,10 +844,7 @@ func (api *TraceAPIImpl) callTransaction(
 		blockHash := header.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
-		var ok bool
-		var err error
-
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, err
 		}
@@ -871,7 +867,7 @@ func (api *TraceAPIImpl) callTransaction(
 		RequireCanonical: true,
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, cfg.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/backup"
 	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon/turbo/debug"
 )
@@ -436,12 +436,12 @@ MainLoop:
 }
 
 func CheckSaltFilesExist(dirs datadir.Dirs) error {
-	ok, err := ee.CheckSaltFilesExist(dirs)
+	ok, err := state.CheckSaltFilesExist(dirs)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return ee.ErrCannotStartWithoutSaltFiles
+		return state.ErrCannotStartWithoutSaltFiles
 	}
 	return nil
 }

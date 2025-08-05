@@ -2,8 +2,6 @@ package heimdall
 
 import (
 	"context"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +16,7 @@ const (
 )
 
 type heimdallClient interface {
-	FetchStatus(ctx context.Context) (*Status, error)
+	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
 }
 
 type versionMonitor struct {
@@ -68,24 +66,9 @@ func (vm *versionMonitor) Version() HeimdallVersion {
 }
 
 func (vm *versionMonitor) resolveVersion() {
-	status, err := vm.heimdall.FetchStatus(vm.ctx)
+	status, err := vm.heimdall.FetchChainManagerStatus(vm.ctx)
 	if err != nil {
 		vm.logger.Error("Failed attempt to resolve heimdall version", "err", err)
-		return
-	}
-
-	// Current Heimdall API does not provide a good way to detect if it is HeimdallV1 or Heimdall V2. The next
-	// code is what bor client does as well. Probably we d'like to raise a question with them about better endpoints.
-	version := status.NodeInfo.Version
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
-		vm.logger.Error("Failed resolve version: unexpected version format", "version", version)
-		return
-	}
-
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		vm.logger.Error("Failed resolve version: unexpected version format", "version", version)
 		return
 	}
 
@@ -93,7 +76,7 @@ func (vm *versionMonitor) resolveVersion() {
 	defer vm.m.Unlock()
 
 	// We should monitor upgrade and downgrade both, because it is a valid scenario
-	if minor >= 38 {
+	if status.Params.ChainParams.PolTokenAddress != nil {
 		vm.currentVersion = HeimdallV2
 	} else {
 		vm.currentVersion = HeimdallV1

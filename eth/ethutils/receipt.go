@@ -36,6 +36,7 @@ func MarshalReceipt(
 	header *types.Header,
 	txnHash common.Hash,
 	signed bool,
+	withBlockTimestamp bool,
 ) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
@@ -53,6 +54,26 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
+	var logsToMarshal interface{}
+
+	if withBlockTimestamp {
+		if receipt.Logs != nil {
+			rpcLogs := []*RPCTransactionLog{}
+			for _, l := range receipt.Logs {
+				rpcLogs = append(rpcLogs, toRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
+			}
+			logsToMarshal = rpcLogs
+		} else {
+			logsToMarshal = make([]*RPCTransactionLog, 0)
+		}
+	} else {
+		if receipt.Logs == nil {
+			logsToMarshal = make([]*types.Log, 0)
+		} else {
+			logsToMarshal = receipt.Logs
+		}
+	}
+
 	fields := map[string]interface{}{
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
@@ -64,7 +85,7 @@ func MarshalReceipt(
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
-		"logs":              receipt.Logs,
+		"logs":              logsToMarshal,
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
@@ -78,9 +99,6 @@ func MarshalReceipt(
 
 	// Assign receipt status.
 	fields["status"] = hexutil.Uint64(receipt.Status)
-	if receipt.Logs == nil {
-		fields["logs"] = [][]*types.Log{}
-	}
 
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {

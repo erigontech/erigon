@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type ChainReaderWriterEth1 struct {
@@ -329,7 +329,7 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 		return context.DeadlineExceeded
 	}
 	if response.Result != execution.ExecutionStatus_Success {
-		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
+		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", response.Result.String())
 	}
 	return nil
 }
@@ -354,12 +354,16 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 	return resp.ValidationStatus, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash) (execution.ExecutionStatus, *string, common.Hash, error) {
+func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execution.ExecutionStatus, *string, common.Hash, error) {
+	timeout := c.fcuTimeoutMillis
+	if len(timeoutOverride) > 0 {
+		timeout = timeoutOverride[0]
+	}
 	resp, err := c.executionModule.UpdateForkChoice(ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizeHash),
-		Timeout:            c.fcuTimeoutMillis,
+		Timeout:            timeout,
 	})
 	if err != nil {
 		return 0, nil, common.Hash{}, err

@@ -300,10 +300,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	var prevK, prevV []byte
 
+	var i int
 	// Main loading loop
 	for h.Len() > 0 {
-		if err := common.Stopped(args.Quit); err != nil {
-			return err
+		i++
+		if i%1024 == 0 {
+			if err := common.Stopped(args.Quit); err != nil {
+				return err
+			}
 		}
 
 		element := heapPop(h)

@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {

@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
-var ErrNilToFieldTx = errors.New("Tx: field 'To' can not be 'nil'")
+var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
 
 type BlobTx struct {
 	DynamicFeeTransaction
@@ -45,7 +45,7 @@ func (stx *BlobTx) GetBlobHashes() []common.Hash {
 }
 
 func (stx *BlobTx) GetBlobGas() uint64 {
-	return params.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
+	return params.GasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {

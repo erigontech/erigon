@@ -30,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 )
 
+var ErrTimeout = errors.New("timeout")
+
 var requestBlobBatchExpiration = 15 * time.Second
 
 // This is just a bunch of functions to handle blobs
@@ -127,7 +129,7 @@ Loop:
 			return nil, ctx.Err()
 		case <-timer.C:
 			log.Trace("RequestBlobsFrantically: timeout")
-			return nil, errors.New("timeout")
+			return nil, ErrTimeout
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 				break Loop

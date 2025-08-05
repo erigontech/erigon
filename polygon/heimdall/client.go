@@ -26,6 +26,7 @@ type Client interface {
 	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
 	FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error)
 
+	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
 	FetchStatus(ctx context.Context) (*Status, error)
 
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)

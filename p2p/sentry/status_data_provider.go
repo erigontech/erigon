@@ -24,7 +24,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -32,7 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-p2p/forkid"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/p2p/forkid"
 )
 
 var ErrNoHead = errors.New("ReadChainHead: ReadCurrentHeader error")
