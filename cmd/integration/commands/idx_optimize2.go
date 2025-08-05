@@ -130,7 +130,7 @@ var idxOptimize2 = &cobra.Command{
 			return
 		}
 
-		logger.Info(fmt.Sprintf("Optimized file!!!"))
+		logger.Info("Optimized file!!!")
 	},
 }
 
