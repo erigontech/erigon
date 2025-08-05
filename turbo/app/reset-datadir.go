@@ -10,7 +10,6 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -19,6 +18,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/urfave/cli/v2"
 )
