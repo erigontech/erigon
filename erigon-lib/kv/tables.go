@@ -32,7 +32,7 @@ import (
 //     `u64`: usually means `BigEndian(uint64)`
 //   Use self-describing variable names: `blockHash` better than `hash` (because notation likely will be used in various contexts)
 //
-//   More complex exampe: `^step:u64 + k + txNum:u64 -> v`
+//   More complex exampe: ^step:u64 + k + txNum:u64 -> v
 //     `^step` - inverteted step
 
 // DBSchemaVersion versions list
