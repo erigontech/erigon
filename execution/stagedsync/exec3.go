@@ -1064,6 +1064,7 @@ func ExecV3(ctx context.Context,
 
 							if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 								b.HeaderNoCopy(), pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+								dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 								return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 							}
 						}
@@ -1110,22 +1111,7 @@ func ExecV3(ctx context.Context,
 											fmt.Println(line)
 										}
 
-										maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
-
-										for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
-											fmt.Println(
-												fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), applyResult.TxIO.ReadSet(txIndex).Len(),
-												"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
-
-											applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-												fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "RD", vr.String())
-												return true
-											})
-
-											for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
-												fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "WRT", vw.String())
-											}
-										}
+										dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 									}
 									return fmt.Errorf("wrong trie root: %d", applyResult.BlockNum)
 								}
@@ -1245,6 +1231,25 @@ func ExecV3(ctx context.Context,
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	return nil
+}
+
+func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
+	maxTxIndex := len(txIO.Inputs()) - 1
+
+	for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
+		fmt.Println(
+			fmt.Sprintf("%d (%d) RD", blockNum, txIndex), txIO.ReadSet(txIndex).Len(),
+			"WRT", len(txIO.WriteSet(txIndex)))
+
+		txIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
+			fmt.Println(fmt.Sprintf("%d (%d)", blockNum, txIndex), "RD", vr.String())
+			return true
+		})
+
+		for _, vw := range txIO.WriteSet(txIndex) {
+			fmt.Println(fmt.Sprintf("%d (%d)", blockNum, txIndex), "WRT", vw.String())
+		}
+	}
 }
 
 // nolint
