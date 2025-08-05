@@ -431,6 +431,45 @@ func (c *MockSentryServerPenalizePeerCall) DoAndReturn(f func(context.Context, *
 	return c
 }
 
+// RemovePeer mocks base method.
+func (m *MockSentryServer) RemovePeer(arg0 context.Context, arg1 *RemovePeerRequest) (*RemovePeerReply, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemovePeer", arg0, arg1)
+	ret0, _ := ret[0].(*RemovePeerReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemovePeer indicates an expected call of RemovePeer.
+func (mr *MockSentryServerMockRecorder) RemovePeer(arg0, arg1 any) *MockSentryServerRemovePeerCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemovePeer", reflect.TypeOf((*MockSentryServer)(nil).RemovePeer), arg0, arg1)
+	return &MockSentryServerRemovePeerCall{Call: call}
+}
+
+// MockSentryServerRemovePeerCall wrap *gomock.Call
+type MockSentryServerRemovePeerCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryServerRemovePeerCall) Return(arg0 *RemovePeerReply, arg1 error) *MockSentryServerRemovePeerCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryServerRemovePeerCall) Do(f func(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)) *MockSentryServerRemovePeerCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryServerRemovePeerCall) DoAndReturn(f func(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)) *MockSentryServerRemovePeerCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SendMessageById mocks base method.
 func (m *MockSentryServer) SendMessageById(arg0 context.Context, arg1 *SendMessageByIdRequest) (*SentPeers, error) {
 	m.ctrl.T.Helper()

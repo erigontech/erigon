@@ -9,8 +9,7 @@ replace (
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250714121110-aad6c75a92b9
-	github.com/erigontech/interfaces v0.0.0-20250630094144-bb8edbef4801
-	github.com/erigontech/mdbx-go v0.39.8
+	github.com/erigontech/mdbx-go v0.39.9
 	github.com/erigontech/secp256k1 v1.2.0
 )
 
@@ -31,7 +30,6 @@ require (
 	github.com/elastic/go-freelru v0.16.0
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
-	github.com/go-test/deep v1.1.1
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/btree v1.1.3
@@ -48,14 +46,12 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.1
-	github.com/protolambda/ztyp v0.2.2
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.12
-	github.com/valyala/fastjson v1.6.4
 	go.uber.org/mock v0.5.0
 	golang.org/x/crypto v0.39.0
 	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476
@@ -63,7 +59,6 @@ require (
 	golang.org/x/sync v0.15.0
 	golang.org/x/sys v0.33.0
 	google.golang.org/grpc v1.72.1
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.6
 )
 
@@ -74,8 +69,6 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
-	golang.org/x/mod v0.25.0 // indirect
-	golang.org/x/tools v0.34.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 )
 

@@ -180,20 +180,11 @@ test-erigon-lib-all:
 test-erigon-lib-all-race:
 	@cd erigon-lib && $(MAKE) test-all-race
 
-test-erigon-db-short:
-	@cd erigon-db && $(MAKE) test-short
-
-test-erigon-db-all:
-	@cd erigon-db && $(MAKE) test-all
-
-test-erigon-db-all-race:
-	@cd erigon-db && $(MAKE) test-all-race
-
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short test-erigon-db-short
+test-short: test-erigon-lib-short
 	@{ \
 		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -202,7 +193,7 @@ test-short: test-erigon-lib-short test-erigon-db-short
 	}
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all test-erigon-db-all
+test-all: test-erigon-lib-all
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -211,7 +202,7 @@ test-all: test-erigon-lib-all test-erigon-db-all
 	}
 
 ## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race test-erigon-db-all-race
+test-all-race: test-erigon-lib-all-race
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
 		STATUS=$$?; \
@@ -291,7 +282,7 @@ eest-hive:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg branch=hive fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
@@ -336,12 +327,10 @@ lint:
 	@cd erigon-lib && $(MAKE) lint
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
-	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## tidy:                              `go mod tidy`
 tidy:
 	cd erigon-lib && go mod tidy
-	cd erigon-db && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir

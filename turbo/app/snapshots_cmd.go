@@ -37,13 +37,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -68,6 +65,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
@@ -270,22 +270,21 @@ var snapshotCommand = cli.Command{
 					return err
 				}
 				defer l.Unlock()
-				return dirs.RenameOldVersions()
+				return dirs.RenameOldVersions(true)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:        "reset",
-			Description: "Reset state to resumable initial sync.",
-			Action:      resetCliAction,
+			Name:   "reset",
+			Usage:  "Reset state to resumable initial sync",
+			Action: resetCliAction,
 			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
 			Flags: append(
 				slices.Clone(logging.Flags),
 				&utils.DataDirFlag,
 				&utils.ChainFlag,
 				&dryRunFlag,
-				&removeUnknownFlag,
-				&chaindataFlag,
+				&removeLocalFlag,
 			),
 		},
 		{
@@ -306,6 +305,15 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.PathFlag{Name: "dst", Required: true},
+			}),
+		},
+		{
+			Name:   "txnum",
+			Action: doBlkTxNum,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Int64Flag{Name: "block", Value: -1},
+				&cli.Int64Flag{Name: "txnum", Value: -1},
 			}),
 		},
 		{
@@ -812,14 +820,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
-		case integrity.BorMilestones:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorMilestones skipped because not bor chain")
-				continue
-			}
-			if err := integrity.ValidateBorMilestones(ctx, logger, dirs, borSnaps, failFast); err != nil {
-				return err
-			}
 		case integrity.ReceiptsNoDups:
 			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
@@ -1091,8 +1091,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if err != nil {
 				return err
 			}
+
 			oldVersion := versioned.GetVersions().II.DataEF.Current
 			expectedFileName := strings.Replace(res.Name(), "accounts", snapType, 1)
+			expectedFileName = version.ReplaceVersion(expectedFileName, res.Version, oldVersion)
 
 			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
@@ -1259,6 +1261,78 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 
 		return nil
 	})
+}
+
+func doBlkTxNum(cliCtx *cli.Context) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	blkNumber := cliCtx.Int64("block")
+	txNum := cliCtx.Int64("txnum")
+
+	if blkNumber < 0 && txNum < 0 {
+		return errors.New("provide atleast one positive value -- either block or txnum")
+	}
+	if blkNumber >= 0 && txNum >= 0 {
+		return errors.New("both block and txnum can't be provided")
+	}
+
+	ctx := cliCtx.Context
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	_, _, _, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	reader, _ := br.IO()
+	txNumReader := reader.TxnumReader(ctx)
+
+	if blkNumber >= 0 {
+		min, err := txNumReader.Min(tx, uint64(blkNumber))
+		if err != nil {
+			return err
+		}
+		max, err := txNumReader.Max(tx, uint64(blkNumber))
+		if err != nil {
+			return err
+		}
+		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max)
+	} else {
+		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			blk2, txNum2, err := txNumReader.Last(tx)
+			if err != nil {
+				return err
+			}
+			logger.Info("didn't find block for txNum", "txNum", txNum, "maxBlock", blk2, "maxTxNum", txNum2)
+		}
+		logger.Info("out", "txNum", txNum, "block", blk)
+	}
+	return nil
 }
 
 func doDiff(cliCtx *cli.Context) error {

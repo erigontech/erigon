@@ -719,6 +719,15 @@ func (vals *ValidatorSet) GetSignerSuccessionNumber(signer common.Address, numbe
 	return indexDiff, nil
 }
 
+// Get slice of addresses for this validator set
+func (vals *ValidatorSet) Signers() []common.Address {
+	sigs := make([]common.Address, 0, len(vals.Validators))
+	for _, sig := range vals.Validators {
+		sigs = append(sigs, sig.Address)
+	}
+	return sigs
+}
+
 //-----------------
 // ErrTooMuchChange
 

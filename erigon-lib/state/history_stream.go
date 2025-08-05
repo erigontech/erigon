@@ -32,7 +32,9 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-// StateAsOfIter - returns state range at given time in history
+// HistoryRangeAsOfFiles - Returns the state as it existed AT a specific txNum (before txNum executed)
+// For each key, finds the latest value that was valid at startTxNum.
+// USAGE: RangeAsOf() - "What was the state at txNum=X?" - so we can execute txNum=X on this state
 type HistoryRangeAsOfFiles struct {
 	hc    *HistoryRoTx
 	limit int
@@ -76,8 +78,14 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 		}
 		g.Reset(offset)
 		if g.HasNext() {
-			key, offset := g.Next(nil)
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+			wrapper := NewSegReaderWrapper(g)
+			if wrapper.HasNext() {
+				key, val, err := wrapper.Next()
+				if err != nil {
+					return err
+				}
+				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			}
 		}
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
@@ -92,18 +100,15 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key := top.key
-		var idxVal []byte
-		//if hi.compressVals {
-		idxVal, _ = top.g.Next(nil)
-		//} else {
-		//	idxVal, _ = top.g.NextUncompressed()
-		//}
+		idxVal := top.val
+
+		// Get the next key-value pair for the next iteration
 		if top.g.HasNext() {
-			//if hi.compressVals {
-			top.key, _ = top.g.Next(nil)
-			//} else {
-			//	top.key, _ = top.g.NextUncompressed()
-			//}
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				return err
+			}
 			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
 				heap.Push(&hi.h, top)
 			}
@@ -113,9 +118,10 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			continue
 		}
 
-		if bytes.Equal(key, hi.nextKey) {
+		if bytes.Equal(key, hi.nextKey) { // deduplication
 			continue
 		}
+
 		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
 		if !ok {
 			continue
@@ -370,11 +376,13 @@ func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
+// HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
+// Performs multi-way Union of frozen files. Later files override earlier files for same key
 type HistoryChangesIterFiles struct {
 	hc         *HistoryRoTx
 	nextVal    []byte
 	nextKey    []byte
-	h          ReconHeap
+	h          ReconHeap // Multi-way merge heap across frozen files
 	startTxNum uint64
 	endTxNum   int
 	startTxKey [8]byte
@@ -391,23 +399,17 @@ func (hi *HistoryChangesIterFiles) Close() {
 func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
-		key := top.key
-		var idxVal []byte
-		//if hi.compressVals {
-		idxVal, _ = top.g.Next(nil)
-		//} else {
-		//	idxVal, _ = top.g.NextUncompressed()
-		//}
+		key, idxVal := top.key, top.val
 		if top.g.HasNext() {
-			//if hi.compressVals {
-			top.key, _ = top.g.Next(nil)
-			//} else {
-			//	top.key, _ = top.g.NextUncompressed()
-			//}
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				return err
+			}
 			heap.Push(&hi.h, top)
 		}
 
-		if bytes.Equal(key, hi.nextKey) {
+		if bytes.Equal(key, hi.nextKey) { // deduplication
 			continue
 		}
 		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)

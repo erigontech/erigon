@@ -567,6 +567,10 @@ func (db *DB) DisableReadAhead() {
 	db.agg.DisableReadAhead()
 }
 
+func (db *DB) Files() []string { return db.agg.Files() }
+
+func (db *DB) MergeLoop(ctx context.Context) error { return db.agg.MergeLoop(ctx) }
+
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
