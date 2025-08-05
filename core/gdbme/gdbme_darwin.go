@@ -14,7 +14,7 @@ import (
 
 const lldbPath = "/usr/bin/lldb"
 
-// RestartUnderLLDB restart erigon under lldb, keeping all the arguments.
+// RestartUnderGDB restart erigon under gdb, keeping all the arguments.
 func RestartUnderGDB() {
 	exePath, err := os.Executable()
 	if err != nil {

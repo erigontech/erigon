@@ -12,7 +12,7 @@ import (
 
 const gdbPath = "/usr/bin/gdb"
 
-// restartUnderGDB relaunches the current process under GDB for debugging purposes.
+// RestartUnderGDB relaunches the current process under GDB for debugging purposes.
 func RestartUnderGDB() {
 	exePath, err := os.Executable()
 	if err != nil {
