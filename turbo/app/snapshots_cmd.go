@@ -2105,7 +2105,8 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 		return err
 	}
 	defer hdecomp.Close()
-	hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(hdecomp)
+	hreader, _ := state.Schema.GetDomainCfg(kv.AccountsDomain).GetPagedReader(hdecomp)
+	//hreader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(hdecomp)
 	seq := &multiencseq.SequenceReader{}
 	iiReader.Reset(0)
 	hreader.Reset(0)
@@ -2152,6 +2153,10 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 			hv, offset2 = hreader.Next(nil)
 			hvc = bytes.Clone(hv)
 			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+
+			hreader.Reset(offset2)
+			k, v, _, _ := hreader.Next2(nil)
+			fmt.Printf("...............", hexutil.Encode(k), hexutil.Encode(v))
 			fmt.Println()
 			i++
 		}
