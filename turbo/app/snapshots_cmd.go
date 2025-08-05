@@ -820,14 +820,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
-		case integrity.BorMilestones:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorMilestones skipped because not bor chain")
-				continue
-			}
-			if err := integrity.ValidateBorMilestones(ctx, logger, dirs, borSnaps, failFast); err != nil {
-				return err
-			}
 		case integrity.ReceiptsNoDups:
 			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
