@@ -3,7 +3,7 @@ name: Hive EEST tests
 on:
   push:
     branches:
-        - release/*
+        - 'release/**'
         - main
   workflow_dispatch:
 
