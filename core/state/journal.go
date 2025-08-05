@@ -424,20 +424,22 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		var commited uint256.Int
 		obj.GetState(ch.key, &val)
 		obj.GetCommittedState(ch.key, &commited)
-		fmt.Printf("%s Revert State %x %x: %x, prev: %x, orig: %x, commited: %v\n", tracePrefix, *ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
+		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, *ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
 	}
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
-					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, *ch.account, v.Val, ch.prevalue)
+					val := v.Val.(uint256.Int)
+					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, *ch.account, &val, &ch.prevalue)
 				}
 			}
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				if trace {
-					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, *ch.account, v.Val, ch.prevalue)
+					val := v.Val.(uint256.Int)
+					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, *ch.account, &val, &ch.prevalue)
 				}
 				v.Val = ch.prevalue
 			}
