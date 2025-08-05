@@ -31,8 +31,9 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
