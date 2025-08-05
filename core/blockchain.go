@@ -434,7 +434,7 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 
 	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
 		result := logReceipts(receipts, txns, chainConfig, h, logger)
-		fmt.Println(h.Number.Uint64(), "reciepts", result)
+		fmt.Println(h.Number.Uint64(), "receipts", result)
 	}
 
 	return nil

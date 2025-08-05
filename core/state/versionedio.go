@@ -155,7 +155,7 @@ type VersionedRead struct {
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("%x %s (%s): %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.VersionedString(vr.Version), valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("(%s) %x %s: %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.VersionedString(vr.Version), valueString(vr.Path, vr.Val))
 }
 
 type VersionedWrite struct {
@@ -556,13 +556,13 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs     []ReadSet
+	inputs     []versionedReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
 	outputsSet []map[common.Address]map[AccountKey]struct{}
 	allOutputs []VersionedWrites // entire write sets in MVHashMap. allOutputs should always be a parent set of outputs
 }
 
-func (io *VersionedIO) Inputs() []ReadSet {
+func (io *VersionedIO) Inputs() []versionedReadSet {
 	return io.inputs
 }
 
@@ -570,7 +570,19 @@ func (io *VersionedIO) ReadSet(txnIdx int) ReadSet {
 	if len(io.inputs) <= txnIdx+1 {
 		return nil
 	}
-	return io.inputs[txnIdx+1]
+	return io.inputs[txnIdx+1].readSet
+}
+
+func (io *VersionedIO) ReadSetIncarnation(txnIdx int) int {
+	if len(io.inputs) <= txnIdx+1 {
+		return -1
+	}
+
+	if io.inputs[txnIdx+1].readSet != nil {
+		return io.inputs[txnIdx+1].incarnation
+	}
+
+	return -1
 }
 
 func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
@@ -597,8 +609,8 @@ func (io *VersionedIO) WriteCount() (count int64) {
 
 func (io *VersionedIO) ReadCount() (count int64) {
 	for _, input := range io.inputs {
-		if input != nil {
-			count += int64(input.Len())
+		if input.readSet != nil {
+			count += int64(input.readSet.Len())
 		}
 	}
 
@@ -606,10 +618,10 @@ func (io *VersionedIO) ReadCount() (count int64) {
 }
 
 func (io *VersionedIO) HasReads(txnIdx int) bool {
-	if len(io.outputsSet) <= txnIdx+1 {
+	if len(io.inputs) <= txnIdx+1 {
 		return false
 	}
-	return len(io.outputsSet[txnIdx+1]) > 0
+	return len(io.inputs[txnIdx+1].readSet) > 0
 }
 
 func (io *VersionedIO) HasWritten(txnIdx int, addr common.Address, path AccountPath, key common.Hash) bool {
@@ -620,23 +632,36 @@ func (io *VersionedIO) HasWritten(txnIdx int, addr common.Address, path AccountP
 	return ok
 }
 
+type versionedReadSet struct {
+	incarnation int
+	readSet     ReadSet
+}
+
+func (s versionedReadSet) Scan(yield func(input *VersionedRead) bool) {
+	if s.readSet != nil {
+		s.readSet.Scan(yield)
+	}
+}
+
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:     make([]ReadSet, numTx+1),
+		inputs:     make([]versionedReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
 		outputsSet: make([]map[common.Address]map[AccountKey]struct{}, numTx+1),
 		allOutputs: make([]VersionedWrites, numTx+1),
 	}
 }
 
-func (io *VersionedIO) RecordReads(txId int, input ReadSet) {
-	if len(io.inputs) <= txId+1 {
-		io.inputs = append(io.inputs, make([]ReadSet, txId+2-len(io.inputs))...)
+func (io *VersionedIO) RecordReads(txVersion Version, input ReadSet) {
+	if len(io.inputs) <= txVersion.TxIndex+1 {
+		io.inputs = append(io.inputs, make([]versionedReadSet, txVersion.TxIndex+2-len(io.inputs))...)
 	}
-	io.inputs[txId+1] = input
+	io.inputs[txVersion.TxIndex+1] = versionedReadSet{txVersion.Incarnation, input}
 }
 
-func (io *VersionedIO) RecordWrites(txId int, output VersionedWrites) {
+func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
+	txId := txVersion.TxIndex
+
 	if len(io.outputs) <= txId+1 {
 		io.outputs = append(io.outputs, make([]VersionedWrites, txId+2-len(io.outputs))...)
 	}
@@ -657,7 +682,9 @@ func (io *VersionedIO) RecordWrites(txId int, output VersionedWrites) {
 	}
 }
 
-func (io *VersionedIO) RecordAllWrites(txId int, output VersionedWrites) {
+func (io *VersionedIO) RecordAllWrites(txVersion Version, output VersionedWrites) {
+	txId := txVersion.TxIndex
+
 	if len(io.allOutputs) <= txId+1 {
 		io.allOutputs = append(io.allOutputs, make([]VersionedWrites, txId+2-len(io.allOutputs))...)
 	}
@@ -702,7 +729,7 @@ func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {
 		for j := i - 1; j >= 0; j-- {
 			txFrom := deps.allOutputs[j]
 
-			if HasReadDep(txFrom, txTo) {
+			if HasReadDep(txFrom, txTo.readSet) {
 				var txFromId string
 				if _, ok := ids[j]; ok {
 					txFromId = ids[j]
@@ -763,7 +790,7 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 		for j := 0; j <= i-1; j++ {
 			txFrom := deps.allOutputs[j]
 
-			newDependencies = depsHelper(newDependencies, txFrom, txTo, i, j)
+			newDependencies = depsHelper(newDependencies, txFrom, txTo.readSet, i, j)
 		}
 	}
 

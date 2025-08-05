@@ -720,7 +720,7 @@ func ExecV3(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	if !parallel {
-		err = func() error {
+		execErr = func() error {
 			// Only needed by bor chains
 			shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 			havePartialBlock := false
@@ -1001,7 +1001,7 @@ func ExecV3(ctx context.Context,
 		var uncommittedGas int64
 		var flushPending bool
 
-		err = func() error {
+		execErr = func() error {
 			defer func() {
 				if rec := recover(); rec != nil {
 					pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
@@ -1177,9 +1177,9 @@ func ExecV3(ctx context.Context,
 
 		executorCancel()
 
-		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				return err
+		if execErr != nil {
+			if !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+				return execErr
 			}
 		}
 
@@ -1230,24 +1230,26 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
-	return nil
+	return execErr
 }
 
 func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
 	maxTxIndex := len(txIO.Inputs()) - 1
 
 	for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
+		txIncarnation := txIO.ReadSetIncarnation(txIndex)
+
 		fmt.Println(
-			fmt.Sprintf("%d (%d) RD", blockNum, txIndex), txIO.ReadSet(txIndex).Len(),
+			fmt.Sprintf("%d (%d.%d) RD", blockNum, txIndex, txIncarnation), txIO.ReadSet(txIndex).Len(),
 			"WRT", len(txIO.WriteSet(txIndex)))
 
 		txIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-			fmt.Println(fmt.Sprintf("%d (%d)", blockNum, txIndex), "RD", vr.String())
+			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "RD", vr.String())
 			return true
 		})
 
 		for _, vw := range txIO.WriteSet(txIndex) {
-			fmt.Println(fmt.Sprintf("%d (%d)", blockNum, txIndex), "WRT", vw.String())
+			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "WRT", vw.String())
 		}
 	}
 }
