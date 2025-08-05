@@ -155,7 +155,7 @@ type VersionedRead struct {
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("(%s) %x %s: %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.VersionedString(vr.Version), valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("(%s) %x %s: %s", vr.Source.VersionedString(vr.Version), vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
 }
 
 type VersionedWrite struct {
@@ -582,7 +582,7 @@ func (io *VersionedIO) ReadSetIncarnation(txnIdx int) int {
 		return io.inputs[txnIdx+1].incarnation
 	}
 
-	return -1
+	return 0
 }
 
 func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
