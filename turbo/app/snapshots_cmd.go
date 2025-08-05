@@ -1836,36 +1836,36 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	// if !exists {
 	// 	return fmt.Errorf("file %s does not exist", sourcefile)
 	// }
-	ctx := cliCtx.Context
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
+	// ctx := cliCtx.Context
+	// chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	// defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	// chainConfig := fromdb.ChainConfig(chainDB)
+	// cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	defer clean()
+	// _, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	// if err != nil {
+	// 	return err
+	// }
+	// defer clean()
 
-	tdb, err := temporal.New(chainDB, agg)
-	if err != nil {
-		return err
-	}
-	defer tdb.Close()
+	// tdb, err := temporal.New(chainDB, agg)
+	// if err != nil {
+	// 	return err
+	// }
+	// defer tdb.Close()
 
-	rotx, err := tdb.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer rotx.Rollback()
+	// rotx, err := tdb.BeginTemporalRo(ctx)
+	// if err != nil {
+	// 	return err
+	// }
+	// defer rotx.Rollback()
 
-	v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2963611881)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s %d\n", hexutil.Encode(v), ok)
+	// v, ok, err := rotx.HistorySeek(kv.AccountsDomain, hexutil.FromHex("0x0000000000000000000000000000000000000000"), 2963611881)
+	// if err != nil {
+	// 	return err
+	// }
+	// fmt.Printf("%s %d\n", hexutil.Encode(v), ok)
 
 	return readAttempt3(sourcefile, effile, vifile, dirs)
 	//return readAttempt1(sourcefile)
@@ -1873,57 +1873,6 @@ func doInspectHistory(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	//return nil
 
-}
-
-func readAttempt2(sourcefile string) error {
-	// assuming account
-	cfg := state.Schema.GetDomainCfg(kv.AccountsDomain)
-
-	decomp, err := seg.NewDecompressor(sourcefile)
-	if err != nil {
-		return err
-	}
-	defer decomp.Close()
-
-	reader, ninpage := cfg.GetPagedReader(decomp)
-	reader.Reset(0)
-
-	i := 0
-
-	for reader.HasNextPage() {
-		var j int
-		for j = 0; j < ninpage && reader.HasNextOnPage(); j++ {
-			k, v, _, _ := reader.Next2(nil)
-			fmt.Println(hexutil.Encode(k), len(k), hexutil.Encode(v), len(v))
-			i++
-			if i > 20 {
-				break
-			}
-		}
-		fmt.Println("j is", j, ninpage)
-		if i > 20 {
-			break
-		}
-		if reader.HasNextOnPage() {
-			panic("has next on page")
-		}
-		if reader.HasNextPage() {
-			reader.NextPage()
-		}
-	}
-
-	for reader.HasNext() {
-		k, v, _, _ := reader.Next2(nil)
-		fmt.Println(hexutil.Encode(k), len(k), hexutil.Encode(v), len(v))
-		i++
-		if i > 20 {
-			break
-		}
-	}
-	//0x000a02fd9dfa554baca2dee70000
-	//
-
-	return nil
 }
 
 func readAttempt4(vfile, effile, vifile string, dirs datadir.Dirs) error {
@@ -1989,59 +1938,12 @@ func readAttempt4(vfile, effile, vifile string, dirs datadir.Dirs) error {
 		buf, offset = hreader.Next(nil)
 		buf2, offset2 = hreader.Next(nil)
 		fmt.Println("k offset", hexutil.Encode(buf), len(buf), offset, hexutil.Encode(buf2), len(buf2), offset2)
-		if i > 5 {
+		if i > 20 {
 			break
 		}
 
 		i++
 	}
-
-	// iiReader.Reset(0)
-	// for iiReader.HasNext() {
-	// 	k, offset := iiReader.NextUncompressed()
-	// 	kc := bytes.Clone(k)
-	// 	if i > 5 {
-	// 		break
-	// 	}
-	// 	efv, _ := iiReader.NextUncompressed()
-
-	// 	seq.Reset(baseTxNum, efv)
-	// 	if seq.Count() == 0 {
-	// 		continue
-	// 	}
-	// 	fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max())
-
-	// 	it := seq.Iterator(0)
-
-	// 	for it.HasNext() {
-	// 		txNum, err := it.Next()
-	// 		if err != nil {
-	// 			return nil
-	// 		}
-
-	// 		// txNum, ok = multiencseq.Seek(baseTxNum, efv, txNum)
-	// 		// if !ok {
-	// 		// 	break
-	// 		// }
-
-	// 		key := historyKey(txNum, kc[:], nil)
-	// 		offset2, ok2 := ireader.Lookup(key)
-	// 		if !ok2 {
-	// 			panic("fails")
-	// 		}
-	// 		fmt.Println("k txNum offset", hexutil.Encode(kc), txNum, offset2)
-	// 		// 	hreader.Reset(offset2)
-	// 		hv, offset2 := hreader.Next(hv[:0])
-	// 		hvc := bytes.Clone(hv)
-	// 		fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
-	// 		hv, offset2 = hreader.Next(hv[:0])
-	// 		hvc = bytes.Clone(hv)
-	// 		fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
-	// 		fmt.Println()
-	// 	}
-	// 	i++
-	// 	fmt.Println("hello-----------------")
-	// }
 	return nil
 }
 
@@ -2074,20 +1976,29 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	}
 	ireader := index.GetReaderFromPool()
 
-	re := regexp.MustCompile(`\.(\d{4})-(\d{4})\.`)
-	matches := re.FindStringSubmatch(vifile)
-	var result string
-	if len(matches) > 1 {
-		result = matches[1] // "1896"
+	res, _, ok := snaptype.ParseFileName(dirs.SnapHistory, vfile)
+	if !ok {
+		return fmt.Errorf("can't parse file: %s", vfile)
 	}
+	res.From *= config3.DefaultStepSize
+	res.To *= config3.DefaultStepSize
 
-	startstep, err := strconv.ParseUint(result, 10, 64)
-	if err != nil {
-		return nil
-	}
+	// re := regexp.MustCompile(`\.(\d{4})-(\d{4})\.`)
+	// matches := re.FindStringSubmatch(vifile)
+	// var result string
+	// if len(matches) > 1 {
+	// 	result = matches[1] // "1896"
+	// }
 
-	fmt.Println("the start step is", startstep, result)
-	baseTxNum := uint64(startstep * config3.DefaultStepSize)
+	// startstep, err := strconv.ParseUint(result, 10, 64)
+	// if err != nil {
+	// 	return nil
+	// }
+
+	// fmt.Println("the start step is", startstep, result)
+	// baseTxNum := uint64(startstep * config3.DefaultStepSize)
+	baseTxNum := res.From
+	fmt.Printf("start: %d end:%d %d\n", res.From, res.To, ireader.BaseDataID())
 
 	decomp, err := seg.NewDecompressor(eff)
 	if err != nil {
@@ -2111,60 +2022,73 @@ func readAttempt3(vfile, effile, vifile string, dirs datadir.Dirs) error {
 	iiReader.Reset(0)
 	hreader.Reset(0)
 	for iiReader.HasNext() {
-		k, offset := iiReader.NextUncompressed()
-		kc := bytes.Clone(k)
-		if i > 5 {
-			break
-		}
+		_, _ = iiReader.NextUncompressed()
+		// kc := bytes.Clone(k)
+		// if i > 5 {
+		// 	break
+		// }
 		efv, _ := iiReader.NextUncompressed()
 
 		seq.Reset(baseTxNum, efv)
 		if seq.Count() == 0 {
 			continue
 		}
-		fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max(), seq.Count())
+		//fmt.Println(hexutil.Encode(kc), len(kc), offset, i, seq.Min(), seq.Max(), seq.Count())
 
 		it := seq.Iterator(0)
+		count := 0
+		j1 := 0
+		j2 := 0
 
 		for it.HasNext() {
-			if i > 5 {
-				break
-			}
+			// if i > 5 {
+			// 	break
+			// }
 			txNum, err := it.Next()
 			if err != nil {
 				return nil
 			}
+
+			if txNum < res.From || txNum >= res.To {
+				//fmt.Println("error error", hexutil.Encode(kc), res.From, txNum, res.To)
+				j1++
+			}
+
+			if seq.Min() < res.From || seq.Max() >= res.To {
+				//fmt.Println("error error2", hexutil.Encode(kc), res.From, seq.Min(), seq.Max(), res.To)
+				j2++
+			}
+			count++
 
 			// txNum, ok = multiencseq.Seek(baseTxNum, efv, txNum)
 			// if !ok {
 			// 	break
 			// }
 
-			key := historyKey(txNum, kc[:], nil)
-			offset2, ok2 := ireader.Lookup(key)
-			if !ok2 {
-				panic("fails")
-			}
-			fmt.Println("txNum offset", txNum, offset2)
-			hreader.Reset(offset2)
-			hv, offset2 := hreader.Next(nil)
-			hvc := bytes.Clone(hv)
-			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
-			hv, offset2 = hreader.Next(nil)
-			hvc = bytes.Clone(hv)
-			fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+			// key := historyKey(txNum, kc[:], nil)
+			// offset2, ok2 := ireader.Lookup(key)
+			// if !ok2 {
+			// 	panic("fails")
+			// }
+			// fmt.Println("txNum offset", txNum, offset2)
+			// hreader.Reset(offset2)
+			// hv, offset2 := hreader.Next(nil)
+			// hvc := bytes.Clone(hv)
+			// fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
+			// hv, offset2 = hreader.Next(nil)
+			// hvc = bytes.Clone(hv)
+			// fmt.Println("..............", hexutil.Encode(hvc), len(hvc), offset2)
 
-			hreader.Reset(offset2)
-			k, v, _, _ := hreader.Next2(nil)
-			fmt.Printf("...............", hexutil.Encode(k), hexutil.Encode(v))
-			fmt.Println()
+			// hreader.Reset(offset2)
+			// k, v, _, _ := hreader.Next2(nil)
+			// fmt.Printf("...............", hexutil.Encode(k), hexutil.Encode(v))
+			// fmt.Println()
 			i++
 		}
-		if i > 5 {
-			break
-		}
 
-		fmt.Println("hello-----------------")
+		if j1 != 0 || j2 != 0 {
+			fmt.Println("count j1 j2", count, j1, j2)
+		}
 	}
 	return nil
 }
@@ -2177,30 +2101,6 @@ func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 	binary.BigEndian.PutUint64(buf, txNum)
 	copy(buf[8:], key)
 	return buf
-}
-
-func readAttempt1(sourcefile string) error {
-	decomp, err := seg.NewDecompressor(sourcefile)
-	if err != nil {
-		return err
-	}
-	defer decomp.Close()
-
-	reader := state.Schema.GetDomainCfg(kv.AccountsDomain).GetNewReader(decomp)
-	//reader.Reset(0)
-	i := 0
-	for reader.HasNext() {
-		v, offset := reader.Next(nil)
-		fmt.Println(hexutil.Encode(v), len(v), offset)
-		if i > 20 {
-			break
-		}
-		i++
-		reader.Skip()
-
-	}
-
-	return nil
 }
 
 func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
