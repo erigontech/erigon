@@ -3,7 +3,7 @@ name: All tests (with -race)
 on:
   push:
     branches:
-      - release/*
+      - 'release/**'
       - main
   workflow_dispatch:
 
