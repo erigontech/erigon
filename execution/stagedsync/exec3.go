@@ -726,7 +726,7 @@ func ExecV3(ctx context.Context,
 			execType = "parallel"
 		}
 
-		log.Info(fmt.Sprintf("[%s] %s starting", execType, execStage.LogPrefix()),
+		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), execType),
 			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "fromTxNum", doms.TxNum(), "initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
