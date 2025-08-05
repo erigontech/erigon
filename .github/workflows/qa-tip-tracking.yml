@@ -52,7 +52,9 @@ jobs:
     - name: Run the datadir upgrade procedure
       working-directory: ${{ github.workspace }}
       run: |
+        find $ERIGON_TESTBED_DATA_DIR
         ./build/bin/erigon seg update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+        find $ERIGON_TESTBED_DATA_DIR
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
@@ -141,7 +143,9 @@ jobs:
     - name: Run the datadir downgrade procedure
       working-directory: ${{ github.workspace }}
       run: |
+        find $ERIGON_TESTBED_DATA_DIR
         ./build/bin/erigon seg reset-to-old-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+        find $ERIGON_TESTBED_DATA_DIR
 
     - name: Run previous Erigon version, wait sync and check ability to maintain sync
       id: downgrade_test_step
