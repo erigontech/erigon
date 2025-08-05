@@ -138,9 +138,8 @@ Running `make help` will list and describe the convenience commands available in
     * Just upgrade Erigon binary - it will work on old files
     * Upgrade binary and data:
         * upgrade Erigon version
-        * run `./build/bin/erigon snapshot reset --datadir /your-datadir` . After this command: at next start of
-          Erigon -
-          will download latest files (but re-use unchanged files)
+        * run `./build/bin/erigon snapshots reset --datadir /your-datadir --chain your-chain` . After this command: at
+        next start of Erigon - will download latest files (but re-use unchanged files)
         * start Erigon - it will download changed files
         * it will take many hours (can increase speed by `--torrent.download.rate=1g`)
 

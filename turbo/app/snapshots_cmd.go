@@ -93,8 +93,8 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 }
 
 var snapshotCommand = cli.Command{
-	Name:    "seg",
-	Aliases: []string{"snapshots", "segments"},
+	Name:    "snapshots",
+	Aliases: []string{"seg", "snapshot", "segments", "segment"},
 	Usage:   `Managing historical data segments (partitions)`,
 	Before: func(cliCtx *cli.Context) error {
 		go mem.LogMemStats(cliCtx.Context, log.New())
@@ -214,7 +214,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
-			Usage:  "erigon seg uncompress a.seg | erigon seg compress b.seg",
+			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
