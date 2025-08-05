@@ -29,7 +29,6 @@ const (
 	BorEvents          Check = "BorEvents"
 	BorSpans           Check = "BorSpans"
 	BorCheckpoints     Check = "BorCheckpoints"
-	BorMilestones      Check = "BorMilestones" // this check is informational, and we don't run it by default (e.g. gaps may exist but that is ok)
 )
 
 var AllChecks = []Check{
@@ -37,6 +36,5 @@ var AllChecks = []Check{
 }
 
 var NonDefaultChecks = []Check{
-	BorMilestones,
 	RCacheNoDups,
 }

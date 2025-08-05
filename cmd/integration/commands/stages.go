@@ -1244,7 +1244,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	cfg.Snapshot = allSn.Cfg()
 
 	blockReader, blockWriter := blocksIO(db, logger)
-	engine, heimdallClient := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
+	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1293,7 +1293,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 
 	stageList := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
-		heimdallClient, heimdallStore, bridgeStore, signatures, logger, nil)
+		signatures, logger, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
@@ -1354,7 +1354,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 	return res
 }
 
-func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine, heimdallClient heimdall.Client) {
+func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -1365,14 +1365,11 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 	} else if cc.Bor != nil {
 		consensusConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
-		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, heimdall.WithApiVersioner(ctx))
-		}
 	} else {
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, nil, nil), heimdallClient
+		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, nil, nil)
 }
 
 func readGenesis(chain string) *types.Genesis {

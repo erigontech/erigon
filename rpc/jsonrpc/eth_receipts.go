@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/RoaringBitmap/roaring/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -272,7 +273,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					}
 				}
 				// check for state sync event logs
-				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
+				events, err := api.bridgeReader.Events(ctx, header.Hash(), blockNum)
 				if err != nil {
 					return logs, err
 				}
@@ -436,14 +437,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 
 	if isBorStateSyncTx {
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
-		}
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		if err != nil {
 			return nil, err
 		}
@@ -471,7 +465,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
 
-		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -540,7 +534,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	if chainConfig.Bor != nil {
-		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
 		}
