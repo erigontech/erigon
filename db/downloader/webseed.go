@@ -30,9 +30,9 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/hashicorp/go-retryablehttp"
 
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 )
 
 // WebSeeds - allow use HTTP-based infrastructure to support Bittorrent network
@@ -203,7 +203,8 @@ func (w *WebSeedCheckReport) ToString(full bool) string {
 		}
 		b.WriteString(fmt.Sprintf("# %s\n", titles[ti]))
 		for _, name := range names {
-			b.WriteString(fmt.Sprintf("%s\n", name))
+			b.WriteString(name)
+			b.WriteByte(10)
 		}
 		if ti != len(fnamess)-1 {
 			b.WriteByte(10)

@@ -320,7 +320,6 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
-		heimdall,
 		stateReceiver,
 		logger,
 		nil,

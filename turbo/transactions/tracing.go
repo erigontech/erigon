@@ -205,12 +205,6 @@ func ExecuteTraceTx(
 		refunds = false
 	}
 
-	if streaming {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("structLogs")
-		stream.WriteArrayStart()
-	}
-
 	result, err := execCb(evm, refunds)
 	if err != nil {
 		if !streaming {

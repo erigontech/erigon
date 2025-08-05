@@ -56,6 +56,10 @@ import (
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
+// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
+// allowed to produce in order to speed up calculations.
+const estimateGasErrorRatio = 0.015
+
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -255,7 +259,30 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	// First try with highest gas possible
+	// If the transaction is a plain value transfer, short circuit estimation and
+	// directly try 21000. Returning 21000 without any execution is dangerous as
+	// some tx field combos might bump the price up even for plain transfers (e.g.
+	// unused access list items). Ever so slightly wasteful, but safer overall.
+
+	if args.Data == nil {
+		state := state.New(stateReader)
+		if state == nil {
+			return 0, errors.New("can't get the current state")
+		}
+		codeSize, err := state.GetCodeSize(*args.To)
+		if err != nil {
+			return 0, errors.New("getCodeSize failed")
+		}
+		if args.To != nil && codeSize == 0 {
+			result, err := caller.DoCallWithNewGas(ctx, params.TxGas, engine, overrides)
+			if err == nil && result != nil && !result.Failed() {
+				return hexutil.Uint64(params.TxGas), nil
+			}
+		}
+	}
+
+	// We first execute the transaction at the highest allowable gas limit, since if this fails we
+	// can return error immediately.
 	result, err := caller.DoCallWithNewGas(ctx, hi, engine, overrides)
 	if err != nil || result == nil {
 		return 0, err
@@ -270,20 +297,36 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// Otherwise, the specified gas cap is too low
 		return 0, fmt.Errorf("gas required exceeds allowance (%d)", hi)
 	}
-	// Assuming a contract can freely run all the instructions, we have
-	// the true amount of gas it wants to consume to execute fully.
-	// We want to ensure that the gas used doesn't fall below this
-	trueGas := result.GasUsed // Must not fall below this
-	lo = max(trueGas+result.EvmRefund-1, params.TxGas-1)
 
-	i := 0
-	// Execute the binary search and hone in on an executable gas limit
-	for lo+1 < hi {
-		mid := (hi + lo) / 2
-		if mid < trueGas {
-			lo = mid
-			continue
+	// above lower-bounds the gas limit required for it to succeed. One exception
+	// is those that explicitly check gas remaining in order to execute within a
+	// given limit, but we probably don't want to return the lowest possible gas
+	// limit for these cases anyway.
+	lo = result.GasUsed - 1
+
+	// There's a high probability that the transaction will successfully
+	// execute using the 'usedGas' from the first execution as the gasLimit.
+	// We explicitly check this value and use it as the upper bound for the
+	// binary search.
+	optimisticGasLimit := (result.GasUsed + params.CallStipend) * 64 / 63
+	if optimisticGasLimit < hi {
+		result, err := caller.DoCallWithNewGas(ctx, optimisticGasLimit, engine, overrides)
+		if err != nil || result == nil {
+			return 0, err
 		}
+		if result.Failed() {
+			lo = optimisticGasLimit
+		} else {
+			hi = optimisticGasLimit
+		}
+	}
+
+	// Binary search for the smallest gas limit that allows the tx to execute successfully.
+	for lo+1 < hi {
+		if float64(hi-lo)/float64(hi) < estimateGasErrorRatio {
+			break
+		}
+		mid := (hi + lo) / 2
 		result, err := caller.DoCallWithNewGas(ctx, mid, engine, overrides)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
@@ -291,12 +334,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.GasUsed < trueGas {
+		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() {
 			lo = mid
 		} else {
 			hi = mid
 		}
-		i++
 	}
 	return hexutil.Uint64(hi), nil
 }
