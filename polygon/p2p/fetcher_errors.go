@@ -26,6 +26,7 @@ import (
 )
 
 var ErrInvalidFetchBlocksAmount = errors.New("invalid fetch blocks amount")
+var ErrInvalidFetchHeadersAmount = errors.New("invalid fetch headers amount")
 
 type ErrInvalidFetchHeadersRange struct {
 	start uint64

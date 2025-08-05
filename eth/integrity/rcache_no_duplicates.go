@@ -39,7 +39,9 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 	{
 		log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
-		if accProgress != rcacheDomainProgress {
+		diff := int(rcacheDomainProgress - accProgress)
+		if diff != 0 && diff != 1 {
+			// if no system tx -- nil is stored in rcache; so it might be atmost 1 ahead of accounts.
 			var execProgressBlock, execStartTxNum, execEndTxNum uint64
 			if execProgressBlock, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 				return err

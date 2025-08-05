@@ -36,24 +36,25 @@ import (
 // registered services, instead those can use utility methods to create/access
 // databases or flat files
 type Dirs struct {
-	DataDir          string
-	RelativeDataDir  string // like dataDir, but without filepath.Abs() resolution
-	Chaindata        string
-	Tmp              string
-	Snap             string
-	SnapIdx          string
-	SnapHistory      string
-	SnapDomain       string
-	SnapAccessors    string
-	SnapCaplin       string
-	Downloader       string
-	TxPool           string
-	Nodes            string
-	CaplinBlobs      string
-	CaplinColumnData string
-	CaplinIndexing   string
-	CaplinLatest     string
-	CaplinGenesis    string
+	DataDir                   string
+	RelativeDataDir           string // like dataDir, but without filepath.Abs() resolution
+	Chaindata                 string
+	Tmp                       string
+	Snap                      string
+	SnapIdx                   string
+	SnapHistory               string
+	SnapDomain                string
+	SnapAccessors             string
+	SnapCaplin                string
+	Downloader                string
+	TxPool                    string
+	Nodes                     string
+	CaplinBlobs               string
+	CaplinBlobRecoveryRequest string
+	CaplinColumnData          string
+	CaplinIndexing            string
+	CaplinLatest              string
+	CaplinGenesis             string
 }
 
 func New(datadir string) Dirs {
@@ -75,6 +76,7 @@ func New(datadir string) Dirs {
 		dirs.CaplinLatest,
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
+		dirs.CaplinBlobRecoveryRequest,
 	)
 
 	return dirs
@@ -93,24 +95,25 @@ func Open(datadir string) Dirs {
 	}
 
 	dirs := Dirs{
-		RelativeDataDir:  relativeDataDir,
-		DataDir:          datadir,
-		Chaindata:        filepath.Join(datadir, "chaindata"),
-		Tmp:              filepath.Join(datadir, "temp"),
-		Snap:             filepath.Join(datadir, "snapshots"),
-		SnapIdx:          filepath.Join(datadir, "snapshots", "idx"),
-		SnapHistory:      filepath.Join(datadir, "snapshots", "history"),
-		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
-		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
-		SnapCaplin:       filepath.Join(datadir, "snapshots", "caplin"),
-		Downloader:       filepath.Join(datadir, "downloader"),
-		TxPool:           filepath.Join(datadir, "txpool"),
-		Nodes:            filepath.Join(datadir, "nodes"),
-		CaplinBlobs:      filepath.Join(datadir, "caplin", "blobs"),
-		CaplinColumnData: filepath.Join(datadir, "caplin", "column"),
-		CaplinIndexing:   filepath.Join(datadir, "caplin", "indexing"),
-		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
-		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
+		RelativeDataDir:           relativeDataDir,
+		DataDir:                   datadir,
+		Chaindata:                 filepath.Join(datadir, "chaindata"),
+		Tmp:                       filepath.Join(datadir, "temp"),
+		Snap:                      filepath.Join(datadir, "snapshots"),
+		SnapIdx:                   filepath.Join(datadir, "snapshots", "idx"),
+		SnapHistory:               filepath.Join(datadir, "snapshots", "history"),
+		SnapDomain:                filepath.Join(datadir, "snapshots", "domain"),
+		SnapAccessors:             filepath.Join(datadir, "snapshots", "accessor"),
+		SnapCaplin:                filepath.Join(datadir, "snapshots", "caplin"),
+		Downloader:                filepath.Join(datadir, "downloader"),
+		TxPool:                    filepath.Join(datadir, "txpool"),
+		Nodes:                     filepath.Join(datadir, "nodes"),
+		CaplinBlobs:               filepath.Join(datadir, "caplin", "blobs"),
+		CaplinColumnData:          filepath.Join(datadir, "caplin", "column"),
+		CaplinBlobRecoveryRequest: filepath.Join(datadir, "caplin", "blob-recovery-request"),
+		CaplinIndexing:            filepath.Join(datadir, "caplin", "indexing"),
+		CaplinLatest:              filepath.Join(datadir, "caplin", "latest"),
+		CaplinGenesis:             filepath.Join(datadir, "caplin", "genesis-state"),
 	}
 	return dirs
 }
@@ -259,7 +262,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData, d.CaplinBlobRecoveryRequest,
 	}
 	renamed := 0
 	torrentsRemoved := 0
@@ -324,7 +327,7 @@ func (d Dirs) RenameNewVersions() error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData, d.CaplinBlobRecoveryRequest,
 	}
 
 	for _, dirPath := range directories {

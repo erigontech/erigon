@@ -69,6 +69,7 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: l.OnTxStart,
+			OnExit:    l.OnExit,
 			OnOpcode:  l.OnOpcode,
 		},
 	}
@@ -76,6 +77,15 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 
 func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	l.env = env
+}
+
+func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	// no log entry are producer
+	if l.firstCapture {
+		l.stream.WriteObjectStart()
+		l.stream.WriteObjectField("structLogs")
+		l.stream.WriteArrayStart()
+	}
 }
 
 // OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
@@ -97,6 +107,10 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	if !l.firstCapture {
 		l.stream.WriteMore()
 	} else {
+		l.stream.WriteObjectStart()
+		l.stream.WriteObjectField("structLogs")
+		l.stream.WriteArrayStart()
+
 		l.firstCapture = false
 	}
 	var outputStorage bool
