@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
-	 bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
 var (
