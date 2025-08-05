@@ -302,9 +302,7 @@ type Bor struct {
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 
-	closeOnce      sync.Once
 	logger         log.Logger
-	closeCh        chan struct{} // Channel to signal the background processes to exit
 	rootHashCache  *lru.ARCCache[string, string]
 	headerProgress HeaderProgress
 }
@@ -346,7 +344,6 @@ func New(
 		stateReceiver: genesisContracts,
 		execCtx:       context.Background(),
 		logger:        logger,
-		closeCh:       make(chan struct{}),
 		bridgeReader:  bridgeReader,
 		spanReader:    spanReader,
 	}
@@ -390,7 +387,6 @@ func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logg
 		Dependencies: dependencies,
 		Signatures:   signatures,
 		execCtx:      context.Background(),
-		closeCh:      make(chan struct{}),
 	}
 }
 
@@ -1077,12 +1073,8 @@ func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{}
 }
 
+// Only needed to satisfy the consensus.Engine interface
 func (c *Bor) Close() error {
-	c.closeOnce.Do(func() {
-		// Close all bg processes
-		close(c.closeCh)
-	})
-
 	return nil
 }
 
