@@ -4,47 +4,57 @@ import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/erigontech/erigon-lib/state"
+	"slices"
 )
 
-// SelectorModel is a Bubble Tea model for selecting domains and extensions in two columns
-// and confirming or cancelling
+// SelectorModel is a Bubble Tea model for selecting domains and extensions
+// with include/exclude logic and confirming or cancelling
 
 type SelectorModel struct {
 	domains  []string
 	exts     []string
 	selected map[string]struct{}
 
-	// cursor positions and modes
-	cursorCol     int
-	cursorRow     int
-	confirmCursor int
-	confirmMode   bool
-	canceled      bool
+	cursorCol      int
+	cursorRow      int
+	confirmCursor  int
+	confirmMode    bool
+	canceled       bool
+	domainTypesMap map[string]string
 }
 
-// NewSelectorModel initializes with defaults and exclusions
-func NewSelectorModel(excludedDomains, excludedExts []string) *SelectorModel {
-	domains := []string{"accounts", "storage", "code", "commitment", "receipt", "rcache", "logaddrs", "logtopics", "tracesfrom", "tracesto"}
-	exts := []string{".kv", ".bt", ".kvi", ".efi", ".ef", ".vi", ".v"}
-	sel := make(map[string]struct{})
+// NewSelectorModel initializes based on include/exclude lists
+func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts []string) *SelectorModel {
+	res, domains := getNames(state.Schema)
+	exts := make([]string, 0, 10)
+	exts = append(exts, extCfgMap[domainType]...)
+	exts = append(exts, extCfgMap[idxType]...)
+
+	sel := map[string]struct{}{}
+	// determine domains to show
 	for _, d := range domains {
-		if !contains(excludedDomains, d) {
+		if len(includeDomains) > 0 {
+			if slices.Contains(includeDomains, d) {
+				sel[d] = struct{}{}
+			}
+		} else if !slices.Contains(excludeDomains, d) {
 			sel[d] = struct{}{}
 		}
 	}
-	for _, e := range exts {
-		if !contains(excludedExts, e) {
-			sel[e] = struct{}{}
+	// determine exts to show
+	for selected, _ := range sel {
+		for _, e := range extCfgMap[res[selected]] {
+			if len(includeExts) > 0 {
+				if slices.Contains(includeExts, e) {
+					sel[e] = struct{}{}
+				}
+			} else if !slices.Contains(excludeExts, e) {
+				sel[e] = struct{}{}
+			}
 		}
 	}
-	return &SelectorModel{
-		domains:     domains,
-		exts:        exts,
-		selected:    sel,
-		cursorCol:   0,
-		cursorRow:   0,
-		confirmMode: false,
-	}
+	return &SelectorModel{domains: domains, exts: exts, selected: sel, domainTypesMap: res}
 }
 
 func (m *SelectorModel) Init() tea.Cmd { return nil }
@@ -79,10 +89,8 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.confirmCursor > 0 {
 					m.confirmCursor--
 				}
-			} else {
-				if m.cursorRow > 0 {
-					m.cursorRow--
-				}
+			} else if m.cursorRow > 0 {
+				m.cursorRow--
 			}
 		case "down", "j":
 			if m.confirmMode {
@@ -109,22 +117,15 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmMode = !m.confirmMode
 			m.confirmCursor = 0
 		}
-	case tea.MouseMsg:
-		if msg.Type == tea.MouseLeft {
-			// TODO: implement click support mapping X/Y to col/row or confirm
-		}
 	}
 	return m, nil
 }
 
 func (m *SelectorModel) View() string {
 	header := "←/→ to switch columns or OK/Cancel, ↑/↓ to move, enter/space to toggle, tab to confirm"
-	style := lipgloss.NewStyle().Margin(1, 2)
-	s := style.Render(header) + "\n"
-
+	s := lipgloss.NewStyle().Margin(1, 2).Render(header) + "\n"
 	maxRows := max(len(m.domains), len(m.exts))
 	for i := 0; i < maxRows; i++ {
-		// domains
 		left := "   "
 		if m.cursorCol == 0 && m.cursorRow == i && !m.confirmMode {
 			left = "> "
@@ -136,10 +137,7 @@ func (m *SelectorModel) View() string {
 				leftChecked = "[x]"
 			}
 			left = fmt.Sprintf("%s %s %s", left, leftChecked, d)
-		} else {
-			left = ""
 		}
-		// extensions
 		right := ""
 		if i < len(m.exts) {
 			prefix := "   "
@@ -179,6 +177,9 @@ func (m *SelectorModel) toggleCurrent() {
 			delete(m.selected, key)
 		} else {
 			m.selected[key] = struct{}{}
+			for _, e := range extCfgMap[m.domainTypesMap[key]] {
+				m.selected[e] = struct{}{}
+			}
 		}
 	} else if m.cursorCol == 1 && m.cursorRow < len(m.exts) {
 		key := m.exts[m.cursorRow]
@@ -210,20 +211,4 @@ func (m *SelectorModel) GetSelection() ([]string, []string) {
 		}
 	}
 	return ds, es
-}
-
-func contains(slice []string, item string) bool {
-	for _, v := range slice {
-		if v == item {
-			return true
-		}
-	}
-	return false
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

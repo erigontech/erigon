@@ -7,15 +7,15 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "versioner",
+	Use:   "schema-tool",
 	Short: "Manage schema versions and file renaming",
-	Long: `versioner is a CLI to:
- 1) Rename files containing new versions but named with old versions
- 2) Bump schema versions in code during PR prep
+	Long: `schema-tool is a CLI to:
+ 1) Rename files with version mismatches
+ 2) Bump schema versions in code
+ 3) Inspect schema fields via reflection
 `,
 }
 
-// Execute adds all child commands to the root and sets flags appropriately.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -24,7 +24,7 @@ func Execute() {
 }
 
 func init() {
-	// Add subcommands
 	rootCmd.AddCommand(renameCmd)
 	rootCmd.AddCommand(bumpCmd)
+	rootCmd.AddCommand(inspectCmd)
 }

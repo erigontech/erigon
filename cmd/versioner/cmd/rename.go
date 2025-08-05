@@ -6,9 +6,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var datadir string
-var excludeDomains []string
-var excludeExts []string
+var (
+	datadir        string
+	includeDomains []string
+	includeExts    []string
+	excludeDomains []string
+	excludeExts    []string
+)
 
 var renameCmd = &cobra.Command{
 	Use:   "rename",
@@ -17,7 +21,7 @@ var renameCmd = &cobra.Command{
 		if datadir == "" {
 			return fmt.Errorf("--datadir flag is required")
 		}
-		p := tea.NewProgram(NewSelectorModel(excludeDomains, excludeExts), tea.WithAltScreen())
+		p := tea.NewProgram(NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts), tea.WithAltScreen())
 		finalModel, err := p.Run()
 		if err != nil {
 			return err
@@ -29,13 +33,27 @@ var renameCmd = &cobra.Command{
 		}
 		domains, exts := sel.GetSelection()
 		fmt.Printf("Renaming in %s, selected domains: %v, extensions: %v\n", datadir, domains, exts)
-		// TODO: walk files under datadir, parse internal version, and rename accordingly
+
+		// collect rename operations
+		var changedFiles []string
+		// TODO: implement file walking and renaming, appending to changedFiles
+
+		if len(changedFiles) > 0 {
+			fmt.Println("Renamed files:")
+			for _, f := range changedFiles {
+				fmt.Printf(" - %s\n", f)
+			}
+		} else {
+			fmt.Println("No files were renamed.")
+		}
 		return nil
 	},
 }
 
 func init() {
 	renameCmd.Flags().StringVar(&datadir, "datadir", "", "Directory containing versioned files")
-	renameCmd.Flags().StringSliceVar(&excludeDomains, "exclude-domains", []string{}, "Domains to skip")
-	renameCmd.Flags().StringSliceVar(&excludeExts, "exclude-exts", []string{}, "Extensions to skip (e.g. .efi)")
+	renameCmd.Flags().StringSliceVar(&includeDomains, "include-domains", []string{}, "Domains to include (default: all)")
+	renameCmd.Flags().StringSliceVar(&excludeDomains, "exclude-domains", []string{}, "Domains to exclude")
+	renameCmd.Flags().StringSliceVar(&includeExts, "include-exts", []string{}, "Extensions to include (default: all)")
+	renameCmd.Flags().StringSliceVar(&excludeExts, "exclude-exts", []string{}, "Extensions to exclude")
 }
