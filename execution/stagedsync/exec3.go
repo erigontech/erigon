@@ -1130,6 +1130,10 @@ func ExecV3(ctx context.Context,
 							return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
 						}
 
+						if maxBlockNum == applyResult.BlockNum {
+							return nil
+						}
+
 						if blockLimit > 0 && applyResult.BlockNum-startBlockNum+1 >= blockLimit {
 							return &ErrLoopExhausted{From: startBlockNum, To: applyResult.BlockNum, Reason: "block limit reached"}
 						}
@@ -1138,10 +1142,6 @@ func ExecV3(ctx context.Context,
 							if state2.AggTx(applyTx).CanPrune(applyTx, outputTxNum.Load()) {
 								return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
 							}
-						}
-
-						if maxBlockNum == applyResult.BlockNum {
-							return nil
 						}
 
 						if shouldGenerateChangesets && blockNum > 0 {
@@ -1178,7 +1178,7 @@ func ExecV3(ctx context.Context,
 		executorCancel()
 
 		if execErr != nil {
-			if !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+			if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
 				return execErr
 			}
 		}
