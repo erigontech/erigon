@@ -606,13 +606,13 @@ func (d *Downloader) ReCalcStats() {
 		log.Debug("[snapshots] downloading",
 			"len", stats.NumTorrents,
 			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", common.ByteCount(stats.HashRate)+"/s",
+			"hash-rate", common.ByteCount(stats.HashRate)+"/s", //nolint
 			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", common.ByteCount(stats.CompletionRate)+"/s",
+			"completion-rate", common.ByteCount(stats.CompletionRate)+"/s", //nolint
 			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", common.ByteCount(stats.FlushRate)+"/s",
+			"flush-rate", common.ByteCount(stats.FlushRate)+"/s", //nolint
 			"downloaded", common.ByteCount(stats.BytesDownload),
-			"download-rate", common.ByteCount(stats.DownloadRate)+"/s",
+			"download-rate", common.ByteCount(stats.DownloadRate)+"/s", //nolint
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -950,7 +950,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
 ) error {
@@ -970,7 +970,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHashHint g.Option[metainfo.Hash],
 	name string,
 ) (t *torrent.Torrent, err error) {
