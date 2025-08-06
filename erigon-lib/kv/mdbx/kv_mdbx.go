@@ -297,6 +297,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		}
 	}
 
+	fmt.Println("LAL opts.path:", opts.path)
+
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, stack2.Trace().String())
