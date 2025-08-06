@@ -236,40 +236,45 @@ func (c *MockDataColumnStorageRemoveAllColumnSidecarsCall) DoAndReturn(f func(co
 	return c
 }
 
-// RemoveColumnSidecar mocks base method.
-func (m *MockDataColumnStorage) RemoveColumnSidecar(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error {
+// RemoveColumnSidecars mocks base method.
+func (m *MockDataColumnStorage) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RemoveColumnSidecar", ctx, slot, blockRoot, columnIndex)
+	varargs := []any{ctx, slot, blockRoot}
+	for _, a := range columnIndices {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "RemoveColumnSidecars", varargs...)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// RemoveColumnSidecar indicates an expected call of RemoveColumnSidecar.
-func (mr *MockDataColumnStorageMockRecorder) RemoveColumnSidecar(ctx, slot, blockRoot, columnIndex any) *MockDataColumnStorageRemoveColumnSidecarCall {
+// RemoveColumnSidecars indicates an expected call of RemoveColumnSidecars.
+func (mr *MockDataColumnStorageMockRecorder) RemoveColumnSidecars(ctx, slot, blockRoot any, columnIndices ...any) *MockDataColumnStorageRemoveColumnSidecarsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveColumnSidecar", reflect.TypeOf((*MockDataColumnStorage)(nil).RemoveColumnSidecar), ctx, slot, blockRoot, columnIndex)
-	return &MockDataColumnStorageRemoveColumnSidecarCall{Call: call}
+	varargs := append([]any{ctx, slot, blockRoot}, columnIndices...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveColumnSidecars", reflect.TypeOf((*MockDataColumnStorage)(nil).RemoveColumnSidecars), varargs...)
+	return &MockDataColumnStorageRemoveColumnSidecarsCall{Call: call}
 }
 
-// MockDataColumnStorageRemoveColumnSidecarCall wrap *gomock.Call
-type MockDataColumnStorageRemoveColumnSidecarCall struct {
+// MockDataColumnStorageRemoveColumnSidecarsCall wrap *gomock.Call
+type MockDataColumnStorageRemoveColumnSidecarsCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockDataColumnStorageRemoveColumnSidecarCall) Return(arg0 error) *MockDataColumnStorageRemoveColumnSidecarCall {
+func (c *MockDataColumnStorageRemoveColumnSidecarsCall) Return(arg0 error) *MockDataColumnStorageRemoveColumnSidecarsCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockDataColumnStorageRemoveColumnSidecarCall) Do(f func(context.Context, uint64, common.Hash, int64) error) *MockDataColumnStorageRemoveColumnSidecarCall {
+func (c *MockDataColumnStorageRemoveColumnSidecarsCall) Do(f func(context.Context, uint64, common.Hash, ...int64) error) *MockDataColumnStorageRemoveColumnSidecarsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDataColumnStorageRemoveColumnSidecarCall) DoAndReturn(f func(context.Context, uint64, common.Hash, int64) error) *MockDataColumnStorageRemoveColumnSidecarCall {
+func (c *MockDataColumnStorageRemoveColumnSidecarsCall) DoAndReturn(f func(context.Context, uint64, common.Hash, ...int64) error) *MockDataColumnStorageRemoveColumnSidecarsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

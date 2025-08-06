@@ -633,12 +633,17 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 
 	stateId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusBadRequest,
+			err)
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusInternalServerError,
+			fmt.Errorf("failed to read indicies db: %w", err),
+		)
 	}
 	defer tx.Rollback()
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, stateId)
@@ -648,21 +653,39 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusInternalServerError,
+			fmt.Errorf("failed to read block slot: %w", err),
+		)
 	}
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusNotFound,
+			fmt.Errorf("could not read block slot: %x", blockRoot),
+		)
 	}
 
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusInternalServerError,
+			fmt.Errorf("failed to read canonical block root: %w", err),
+		)
 	}
 
-	//proposerLookahead := solid.NewUint64VectorSSZ(int(a.beaconChainCfg.MinSeedLookahead+1) * int(a.beaconChainCfg.SlotsPerEpoch))
-	proposerLookahead, ok := a.forkchoiceStore.GetProposerLookahead(blockRoot)
+	proposerLookahead, ok := a.forkchoiceStore.GetProposerLookahead(*slot)
 	if !ok {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no proposer lookahead found for block root: %x", blockRoot))
+		stateView := a.caplinStateSnapshots.View()
+		defer stateView.Close()
+		// read epoch data
+		epochData, err := state_accessors.ReadEpochData(state_accessors.GetValFnTxAndSnapshot(tx, stateView), *slot/a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusInternalServerError,
+				fmt.Errorf("failed to read historical epoch data: %w", err),
+			)
+		}
+		proposerLookahead = epochData.ProposerLookahead
 	}
 
 	respProposerLookahead := []string{}
