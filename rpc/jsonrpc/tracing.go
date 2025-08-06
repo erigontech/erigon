@@ -240,7 +240,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 			return nil
 		}
 
-		// otherwise this may be a bor state sync transaction - check
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		if err != nil {
 			stream.WriteNil()

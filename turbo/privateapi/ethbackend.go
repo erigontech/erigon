@@ -411,7 +411,6 @@ func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnL
 	}
 	defer tx.Rollback()
 
-	// otherwise this may be a bor state sync transaction - check
 	blockNum, ok, err := s.bridgeStore.EventTxnToBlockNum(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 	if err != nil {
 		return nil, err
