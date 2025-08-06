@@ -125,8 +125,8 @@ func (node *NodeArgs) GetName() string {
 }
 
 func (node *NodeArgs) ChainID() *big.Int {
-	spec := chainspec.ChainSpecByName(node.Chain)
-	if spec.IsEmpty() {
+	spec, err := chainspec.ChainSpecByName(node.Chain)
+	if err != nil {
 		return nil
 	}
 	return spec.Config.ChainID

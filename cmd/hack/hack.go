@@ -667,9 +667,9 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	spec := chainspec.ChainSpecByName(name)
-	if spec.IsEmpty() {
-		return fmt.Errorf("unknown name: %s", name)
+	spec, err := chainspec.ChainSpecByName(name)
+	if err != nil {
+		return err
 	}
 	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {

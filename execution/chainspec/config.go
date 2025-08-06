@@ -22,6 +22,7 @@ package chainspec
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/big"
@@ -29,8 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func init() {
@@ -56,18 +57,20 @@ func init() {
 		if spec.GenesisStateRoot == (common.Hash{}) {
 			spec.GenesisStateRoot = empty.RootHash
 		}
-		//spec.Config = spec.Genesis.Config
+
 		if spec.Config == nil {
 			panic("chain config is not set for chain " + spec.Name)
 		}
-		//spec.Genesis.Config = spec.Config // for testing networks
 
 		registeredChainsByName[spec.Name] = spec
 		registeredChainsByGenesisHash[spec.GenesisHash] = spec
 	}
 
 	for _, name := range chainNamesPoS {
-		s := ChainSpecByName(name)
+		s, err := ChainSpecByName(name)
+		if err != nil {
+			panic(fmt.Sprintf("chain %s is not registered: %v", name, err))
+		}
 		chainIdsPoS = append(chainIdsPoS, s.Config.ChainID)
 	}
 }
@@ -92,23 +95,24 @@ func ReadChainConfig(fileSys fs.FS, filename string) *chain.Config {
 	return spec
 }
 
+var ErrChainSpecUnknown = errors.New("unknown chain spec")
+
 // ChainSpecByName returns the chain spec for the given chain name
-func ChainSpecByName(chainName string) Spec {
+func ChainSpecByName(chainName string) (Spec, error) {
 	spec, ok := registeredChainsByName[chainName]
 	if !ok || spec.IsEmpty() {
-		panic("spec not found for chain: " + chainName)
-		//return Spec{}
+		return Spec{}, fmt.Errorf("%w with name %s", ErrChainSpecUnknown, chainName)
 	}
-	return spec
+	return spec, nil
 }
 
 // ChainSpecByGenesisHash returns the chain spec for the given genesis hash
-func ChainSpecByGenesisHash(genesisHash common.Hash) Spec {
+func ChainSpecByGenesisHash(genesisHash common.Hash) (Spec, error) {
 	spec, ok := registeredChainsByGenesisHash[genesisHash]
 	if !ok || spec.IsEmpty() {
-		return Spec{}
+		return Spec{}, fmt.Errorf("%w with genesis %x", ErrChainSpecUnknown, genesisHash)
 	}
-	return spec
+	return spec, nil
 }
 
 // RegisterChainSpec registers a new chain spec with the given name and spec.

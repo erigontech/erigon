@@ -87,9 +87,9 @@ func NewCrawler(
 	saveQueue := utils.NewTaskQueue("Crawler.saveQueue", config.ConcurrencyLimit*2, saveQueueLogFuncProvider)
 
 	chain := config.Chain
-	spec := chainspec.ChainSpecByName(chain)
-	if spec.IsEmpty() {
-		return nil, fmt.Errorf("unknown chain %s", chain)
+	spec, err := chainspec.ChainSpecByName(chain)
+	if err != nil {
+		return nil, err
 	}
 
 	// TODO(yperbasis) This might be a problem for chains that have a time-based fork (Shanghai, Cancun, etc)

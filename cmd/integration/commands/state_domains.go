@@ -99,8 +99,8 @@ var readDomains = &cobra.Command{
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
 
-		spec := chainspec.ChainSpecByName(chain)
-		if spec.IsEmpty() {
+		spec, err := chainspec.ChainSpecByName(chain)
+		if err != nil {
 			utils.Fatalf("unknown chain %s", chain)
 		}
 		ethConfig.Genesis = spec.Genesis

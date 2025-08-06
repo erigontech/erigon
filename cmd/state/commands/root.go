@@ -88,7 +88,7 @@ func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Con
 	if name == "" {
 		name = networkname.Mainnet
 	}
-	spec := chainspec.ChainSpecByName(name)
+	spec, _ := chainspec.ChainSpecByName(name)
 	return spec.Genesis, spec.Config
 }
 

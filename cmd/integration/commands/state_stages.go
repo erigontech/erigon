@@ -71,8 +71,8 @@ Examples:
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		spec := chainspec.ChainSpecByName(chain)
-		if spec.IsEmpty() {
+		spec, err := chainspec.ChainSpecByName(chain)
+		if err != nil {
 			utils.Fatalf("unknown chain %s", chain)
 		}
 		ethConfig.Genesis = spec.Genesis
@@ -183,9 +183,9 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	notifications := shards.NewNotifications(nil)
 
-	spec := chainspec.ChainSpecByName(chain)
-	if spec.IsEmpty() {
-		return fmt.Errorf("unknown chain %s", chain)
+	spec, err := chainspec.ChainSpecByName(chain)
+	if err != nil {
+		return err
 	}
 
 	br, _ := blocksIO(db, logger1)
@@ -409,8 +409,8 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	spec := chainspec.ChainSpecByName(chain)
-	if spec.IsEmpty() {
+	spec, err := chainspec.ChainSpecByName(chain)
+	if err != nil {
 		return fmt.Errorf("unknown chain %s", chain)
 	}
 

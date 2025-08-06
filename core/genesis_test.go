@@ -53,16 +53,17 @@ func TestGenesisBlockHashes(t *testing.T) {
 	logger := log.New()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
-		spec := chainspec.ChainSpecByName(network)
+		spec, err := chainspec.ChainSpecByName(network)
+		require.NoError(t, err)
 		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer tx.Rollback()
 
 		_, block, err := core.WriteGenesisBlock(tx, spec.Genesis, nil, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
-		expect := chainspec.ChainSpecByName(network)
+
+		expect, err := chainspec.ChainSpecByName(network)
+		require.NoError(t, err)
 		require.NotNil(t, expect, network)
 		require.Equal(t, block.Hash(), expect.GenesisHash, network)
 	}
@@ -85,7 +86,8 @@ func TestGenesisBlockRoots(t *testing.T) {
 		networkname.Chiado,
 		networkname.Test,
 	} {
-		spec := chainspec.ChainSpecByName(netw)
+		spec, err := chainspec.ChainSpecByName(netw)
+		require.NoError(err)
 		require.False(spec.IsEmpty())
 
 		block, _, err = core.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())

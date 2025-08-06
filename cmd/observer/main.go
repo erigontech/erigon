@@ -48,9 +48,9 @@ func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.
 		return err
 	}
 
-	spec := chainspec.ChainSpecByName(flags.Chain)
-	if spec.IsEmpty() {
-		return fmt.Errorf("unknown chain: %s", flags.Chain)
+	spec, err := chainspec.ChainSpecByName(flags.Chain)
+	if err != nil {
+		return err
 	}
 	networkID := spec.Config.ChainID.Uint64()
 
@@ -90,9 +90,9 @@ func reportWithFlags(ctx context.Context, flags reports.CommandFlags) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	spec := chainspec.ChainSpecByName(flags.Chain)
-	if spec.IsEmpty() {
-		return fmt.Errorf("unknown chain: %s", flags.Chain)
+	spec, err := chainspec.ChainSpecByName(flags.Chain)
+	if err != nil {
+		return err
 	}
 	networkID := spec.Config.ChainID.Uint64()
 

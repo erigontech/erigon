@@ -122,9 +122,9 @@ func (intake *Intake) Run(ctx context.Context) error {
 			return err
 		}
 
-		spec := chainspec.ChainSpecByName(intake.chain)
-		if spec.IsEmpty() {
-			return fmt.Errorf("unknown chain name %s", intake.chain)
+		spec, err := chainspec.ChainSpecByName(intake.chain)
+		if err != nil {
+			return err
 		}
 		networkID := spec.Config.ChainID.Uint64()
 		isCompatFork := true
