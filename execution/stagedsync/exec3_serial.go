@@ -96,7 +96,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 	}
 
 	var gasPool *core.GasPool
-	for _, task := range tasks {
+	for taskIndex, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
@@ -243,13 +243,14 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				var lastReceipt *types.Receipt
 				// get last receipt and store the last log index + 1
-				if len(blockReceipts) >= txTask.TxIndex {
-					lastReceipt = blockReceipts[txTask.TxIndex-1]
+				fmt.Println("LAST REC", len(blockReceipts), txTask.TxIndex-startTxIndex, txTask.TxIndex-startTxIndex-1)
+				if len(blockReceipts) >= txTask.TxIndex-startTxIndex {
+					lastReceipt = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				}
 
 				if lastReceipt == nil {
 					if startTxIndex > 0 {
-						// if we're in the startup block and the last tx has been skilled we'll
+						// if we're in the startup block and the last tx has been skipped we'll
 						// need to run it as a historic tx to recover its logs
 						prevTask := *txTask
 						prevTask.HistoryExecution = true

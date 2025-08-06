@@ -17,9 +17,6 @@
 package bor
 
 import (
-	"fmt"
-
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/holiman/uint256"
 
 	common "github.com/erigontech/erigon-lib/common"
@@ -45,7 +42,6 @@ func addTransferLog(
 	output1,
 	output2 uint256.Int,
 ) {
-	fmt.Println(state.BlockNumber(), state.TxIndex(), "Bor log", sender.Hex(), recipient.Hex(), &amount, &input1, &input2, &output1, &output2, dbg.Stack())
 	// ignore if amount is 0
 	if amount.IsZero() {
 		return
