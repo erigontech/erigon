@@ -28,12 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type eventFetcher interface {
@@ -54,7 +53,7 @@ func NewService(config ServiceConfig) *Service {
 		borConfig:           config.BorConfig,
 		eventFetcher:        config.EventFetcher,
 		reader:              NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress()),
-		transientErrors:     heimdall.TransientErrors,
+		transientErrors:     poshttp.TransientErrors,
 		fetchedEventsSignal: make(chan struct{}),
 	}
 }

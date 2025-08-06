@@ -30,27 +30,9 @@ import (
 )
 
 var (
-	// ErrShutdownDetected is returned if a shutdown was detected
-	ErrShutdownDetected      = errors.New("shutdown detected")
-	ErrNoResponse            = errors.New("got a nil response")
-	ErrNotSuccessfulResponse = errors.New("error while fetching data from Heimdall")
-	ErrNotInRejectedList     = errors.New("milestoneId doesn't exist in rejected list")
-	ErrNotInMilestoneList    = errors.New("milestoneId doesn't exist in Heimdall")
-	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
-	ErrBadGateway            = errors.New("bad gateway")
-	ErrServiceUnavailable    = errors.New("service unavailable")
-	ErrCloudflareAccessNoApp = errors.New("cloudflare access - no application")
-	ErrOperationTimeout      = errors.New("operation timed out, check internet connection")
-	ErrNoHost                = errors.New("no such host, check internet connection")
-
-	TransientErrors = []error{
-		ErrBadGateway,
-		ErrServiceUnavailable,
-		ErrCloudflareAccessNoApp,
-		ErrOperationTimeout,
-		ErrNoHost,
-		context.DeadlineExceeded,
-	}
+	ErrNotInRejectedList   = errors.New("milestoneId doesn't exist in rejected list")
+	ErrNotInMilestoneList  = errors.New("milestoneId doesn't exist in Heimdall")
+	ErrNotInCheckpointList = errors.New("checkpontId doesn't exist in Heimdall")
 )
 
 const (
@@ -253,7 +235,7 @@ func (c *HttpClient) FetchCheckpoints(ctx context.Context, page uint64, limit ui
 }
 
 func isInvalidMilestoneIndexError(err error) bool {
-	return errors.Is(err, ErrNotSuccessfulResponse) &&
+	return errors.Is(err, poshttp.ErrNotSuccessfulResponse) &&
 		strings.Contains(err.Error(), "Invalid milestone index")
 }
 

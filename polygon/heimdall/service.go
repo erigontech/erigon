@@ -70,7 +70,7 @@ func NewService(config ServiceConfig) *Service {
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
-		TransientErrors,
+		poshttp.TransientErrors,
 		logger,
 	)
 
@@ -79,7 +79,7 @@ func NewService(config ServiceConfig) *Service {
 	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
-	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, TransientErrors...)
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, poshttp.TransientErrors...)
 	milestoneScraper := NewScraper(
 		"milestones",
 		store.Milestones(),
@@ -94,7 +94,7 @@ func NewService(config ServiceConfig) *Service {
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
-		TransientErrors,
+		poshttp.TransientErrors,
 		logger,
 	)
 
