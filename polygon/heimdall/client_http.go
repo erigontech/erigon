@@ -46,7 +46,7 @@ type HttpClient struct {
 
 func NewHttpClient(urlString string, logger log.Logger, opts ...poshttp.ClientOption) *HttpClient {
 	return &HttpClient{
-		poshttp.NewClient(urlString, logger, poshttp.HeimdallLogPrefix, opts...),
+		poshttp.NewClient(urlString, logger, heimdallLogPrefix, opts...),
 	}
 }
 
@@ -255,7 +255,7 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 		firstNum, err := c.FetchFirstMilestoneNum(ctx)
 		if err != nil {
 			c.Logger.Warn(
-				poshttp.HeimdallLogPrefix("issue fetching milestone count when deciding if invalid index err is recoverable"),
+				heimdallLogPrefix("issue fetching milestone count when deciding if invalid index err is recoverable"),
 				"err", err,
 			)
 

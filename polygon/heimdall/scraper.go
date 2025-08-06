@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type Scraper[TEntity Entity] struct {
@@ -61,7 +60,7 @@ func NewScraper[TEntity Entity](
 }
 
 func (s *Scraper[TEntity]) Run(ctx context.Context) error {
-	s.logger.Info(poshttp.HeimdallLogPrefix("running scraper component"), "name", s.name)
+	s.logger.Info(heimdallLogPrefix("running scraper component"), "name", s.name)
 
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
@@ -80,7 +79,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 		idRange, err := s.fetcher.FetchEntityIdRange(ctx)
 		if err != nil {
 			if commonerrors.IsOneOf(err, s.transientErrors) {
-				s.logger.Warn(poshttp.HeimdallLogPrefix("scraper transient err occurred when fetching id range"), "err", err)
+				s.logger.Warn(heimdallLogPrefix("scraper transient err occurred when fetching id range"), "err", err)
 				continue
 			}
 
@@ -105,7 +104,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 					// we persist the partially fetched range entities before it occurred
 					// and continue scrapping again from there onwards
 					s.logger.Warn(
-						poshttp.HeimdallLogPrefix("scraper transient err occurred when fetching entities"),
+						heimdallLogPrefix("scraper transient err occurred when fetching entities"),
 						"atId", idRange.Start+uint64(len(entities)),
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,
@@ -128,7 +127,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 			case <-progressLogTicker.C:
 				if len(entities) > 0 {
 					s.logger.Info(
-						poshttp.HeimdallLogPrefix("scraper progress"),
+						heimdallLogPrefix("scraper progress"),
 						"name", s.name,
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,

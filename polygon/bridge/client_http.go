@@ -61,7 +61,7 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 				return nil, err
 			}
 
-			c.Logger.Trace(poshttp.HeimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+			c.Logger.Trace(bridgeLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
 
 			reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
 
@@ -70,7 +70,7 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 				if errors.Is(err, poshttp.ErrNoResponse) {
 					// for more info check https://github.com/maticnetwork/heimdall/pull/993
 					c.Logger.Warn(
-						poshttp.HeimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+						bridgeLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
 						"path", url.Path,
 						"queryParams", url.RawQuery,
 					)
@@ -110,7 +110,7 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 			return nil, err
 		}
 
-		c.Logger.Trace(poshttp.HeimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+		c.Logger.Trace(bridgeLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
 
 		reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
 
@@ -119,7 +119,7 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 			if errors.Is(err, poshttp.ErrNoResponse) {
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993
 				c.Logger.Warn(
-					poshttp.HeimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+					bridgeLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
 					"path", url.Path,
 					"queryParams", url.RawQuery,
 				)
