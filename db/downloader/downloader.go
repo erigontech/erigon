@@ -1271,7 +1271,7 @@ func (d *Downloader) logTorrentClientParams() {
 		"[Downloader] Running with",
 		"ipv6-enabled", !cfg.DisableIPv6,
 		"ipv4-enabled", !cfg.DisableIPv4,
-		"download.rate", rateLimitString(cfg.DownloadRateLimiter.Limit()),
+		"download.rate", rateLimitString(torrent.EffectiveDownloadRateLimit(cfg.DownloadRateLimiter)),
 		"webseed-download-rate", func() string {
 			opt := d.cfg.SeparateWebseedDownloadRateLimit
 			if opt.Ok {

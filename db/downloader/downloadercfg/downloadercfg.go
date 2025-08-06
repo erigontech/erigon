@@ -156,11 +156,16 @@ func New(
 		torrentConfig.UploadRateLimiter = rate.NewLimiter(opts.UploadRateLimit.Value, 0)
 	}
 	for value := range opts.DownloadRateLimit.Iter() {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(value, 0)
-		if value == 0 {
+		switch value {
+		case rate.Inf:
+			torrentConfig.DownloadRateLimiter = nil
+		case 0:
 			torrentConfig.DialForPeerConns = false
 			torrentConfig.AcceptPeerConnections = false
 			torrentConfig.DisableTrackers = true
+			fallthrough
+		default:
+			torrentConfig.DownloadRateLimiter = rate.NewLimiter(value, 0)
 		}
 	}
 
