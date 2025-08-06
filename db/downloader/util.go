@@ -341,6 +341,12 @@ func (d *Downloader) addTorrentSpec(
 	if err != nil {
 		return
 	}
+	// This is rough, but we intend to download everything added to completion, so this is a good
+	// time to start the clock. We shouldn't just do it on Torrent.DownloadAll because we might also
+	// need to fetch the metainfo (source).
+	if !t.Complete().Bool() {
+		d.setStartTime()
+	}
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
 	panicif.Eq(first, hadOld)

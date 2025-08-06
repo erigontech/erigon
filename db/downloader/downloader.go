@@ -443,62 +443,33 @@ func (d *Downloader) MainLoopInBackground(logSeeding bool) {
 func (d *Downloader) loggerRoutine() error {
 restart:
 	nextLog := time.Now()
-	step := time.Second
+	var step time.Duration
 	reset := d.resetLogInterval.Signaled()
 	for {
 		select {
 		case <-d.ctx.Done():
 			return d.ctx.Err()
 		case <-time.After(time.Until(nextLog)):
-			d.messyLogWrapper()
+			d.ReCalcStats()
+			d.logStats()
+			switch s := d.state(); s {
+			case Idle, Seeding:
+				step = max(step*2, time.Minute)
+			case Syncing:
+				step = min(max(step, time.Second)*2, 30*time.Second)
+			default:
+				panic(s)
+			}
 			nextLog = nextLog.Add(step)
-			step = min(step*2, 30*time.Second)
 		case <-reset:
 			goto restart
 		}
 	}
 }
 
-func (d *Downloader) messyLogWrapper() {
-	d.ReCalcStats()
-	if !d.stats.AllTorrentsComplete() {
-		d.logProgress()
-	}
-
-	// TODO: The rest of this function either needs be merged into a single Downloader state logger,
-	// or put in its own routine on its own timer.
-
-	// Or files==0?
-	if !d.logSeeding {
-		return
-	}
-
-	stats := d.Stats()
-
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-
-	if stats.AllTorrentsComplete() && stats.FilesTotal > 0 {
-		d.logger.Info("[snapshots] Seeding",
-			"up", common.ByteCount(stats.UploadRate)+"/s",
-			"peers", stats.PeersUnique,
-			"conns", stats.ConnectionsTotal,
-			"files", stats.FilesTotal,
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-		return
-	}
-
-	if stats.PeersUnique == 0 {
-		ips := d.TorrentClient().BadPeerIPs()
-		if len(ips) > 0 {
-			d.logger.Info("[snapshots] Stats", "banned", ips)
-		}
-	}
-}
-
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
+// TODO: Zero start-time when true. We're done for now. Return true for this on required torrents?
 func (d *Downloader) allTorrentsComplete() (ret bool) {
 	ret = true
 	for _, t := range d.torrentClient.Torrents() {
@@ -530,7 +501,9 @@ func (d *Downloader) allTorrentsComplete() (ret bool) {
 // Basic checks and fixes for a snapshot torrent claiming it's complete from experiments. If passed
 // is false, come back later and check again. You could ask why this isn't in the torrent lib. This
 // is an extra level of pedantry due to some file modification I saw from outside the torrent lib.
-// It may go away with only writing torrent files and preverified after completion.
+// It may go away with only writing torrent files and preverified after completion. TODO: Revisit
+// this now partial files support is stable. Should be sufficient to tell the Client to reverify
+// data.
 func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool) {
 	passed = true
 	// This has to be available if it's complete.
@@ -964,6 +937,7 @@ func (d *Downloader) RequestSnapshot(
 	panicif.Nil(t)
 	g.MakeMapIfNil(&d.requiredTorrents)
 	g.MapInsert(d.requiredTorrents, t, struct{}{})
+	d.setStartTime()
 	return nil
 }
 
@@ -1038,6 +1012,8 @@ func (d *Downloader) addPreverifiedTorrent(
 				// Maybe we could replace the torrent with the infoHashHint?
 			}
 		})
+	} else {
+		d.setStartTime()
 	}
 
 	d.afterAddNewTorrent(metainfoOnDisk, t)
@@ -1314,34 +1290,51 @@ func (d *Downloader) SetLogPrefix(prefix string) {
 	d.logPrefix = prefix
 }
 
-// Currently only called if not all torrents are complete.
-func (d *Downloader) logProgress() {
-	var m runtime.MemStats
-	prefix := d.logPrefix
+// Collects Downloader states in a loggable form (the "task"). Used for logging intervals etc.
+type DownloaderState string
 
-	if d.logPrefix == "" {
-		prefix = "snapshots"
+const (
+	Idle    DownloaderState = "Idle"
+	Syncing DownloaderState = "Syncing"
+	Seeding DownloaderState = "Seeding"
+)
+
+func (d *Downloader) state() DownloaderState {
+	if !d.stats.AllTorrentsComplete() {
+		return Syncing
 	}
+	if d.stats.NumTorrents > 0 && d.cfg.ClientConfig.Seed && d.logSeeding {
+		return Seeding
+	}
+	return Idle
+}
 
-	dbg.ReadMemStats(&m)
-
+// Currently only called if not all torrents are complete.
+func (d *Downloader) logStats() {
 	bytesDone := d.stats.BytesCompleted
-
 	percentDone := float32(100) * (float32(bytesDone) / float32(d.stats.BytesTotal))
-	rate := d.stats.CompletionRate
 	remainingBytes := d.stats.BytesTotal - bytesDone
-
-	timeLeft := calculateTime(remainingBytes, rate)
 
 	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
 
-	// TODO: This condition is not ideal as it means we log even if we're not blocked on initial
-	// sync. This decision belongs in the sync stage.
-	if !d.stats.AllTorrentsComplete() {
-		// We have work to do so start timing.
-		d.setStartTime()
+	var logCtx []any
+
+	addCtx := func(ctx ...any) {
+		logCtx = append(logCtx, ctx...)
+	}
+
+	stats := &d.stats
+	if stats.PeersUnique == 0 {
+		ips := d.TorrentClient().BadPeerIPs()
+		if len(ips) > 0 {
+			addCtx("banned peers", len(ips))
+		}
+	}
+	state := d.state()
+	switch state {
+	case Syncing:
 		// TODO: Include what we're syncing.
-		log.Info(fmt.Sprintf("[%s] Syncing", prefix),
+		addCtx(
 			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
 			"files", fmt.Sprintf(
 				"%d/%d",
@@ -1361,17 +1354,28 @@ func (d *Downloader) logProgress() {
 					return common.ByteCount(bytesDone)
 				}
 			}(),
-			"time-left", timeLeft,
+			// TODO: Reset on each stage.
+			"time-left", calculateTime(remainingBytes, d.stats.CompletionRate),
 			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
 			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.ClientWebseedBytesDownloadRate)),
 			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)),
-			"combined-download-todo-remove", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
-			"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)),
 			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
-			"alloc", common.ByteCount(m.Alloc),
-			"sys", common.ByteCount(m.Sys),
 		)
+		panicif.NotEq(d.stats.ClientWebseedBytesDownloadRate+d.stats.PeerConnBytesDownloadRate, d.stats.DownloadRate)
 	}
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+
+	addCtx(
+		"peers", d.stats.PeersUnique,
+		"conns", d.stats.ConnectionsTotal,
+		"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)),
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
+	)
+
+	log.Info(fmt.Sprintf("[%s] %s", cmp.Or(d.logPrefix, "snapshots"), state), logCtx...)
 
 	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 		Downloaded:           bytesDone,

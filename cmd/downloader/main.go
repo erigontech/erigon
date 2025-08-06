@@ -330,7 +330,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	d.MainLoopInBackground(false)
+	// I'm kinda curious... but it was false before.
+	d.MainLoopInBackground(true)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)
