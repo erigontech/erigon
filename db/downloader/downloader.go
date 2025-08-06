@@ -1363,11 +1363,11 @@ func (d *Downloader) logProgress() {
 			}(),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
-			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.ClientWebseedBytesDownloadRate)),
-			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)),
-			"combined-download-todo-remove", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
-			"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)),
-			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
+			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.ClientWebseedBytesDownloadRate)), //nolint
+			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)), //nolint
+			"combined-download-todo-remove", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)), //nolint
+			"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)), //nolint
+			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)), //nolint
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys),
 		)
