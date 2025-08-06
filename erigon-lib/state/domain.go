@@ -1214,7 +1214,7 @@ func BuildHashMapAccessor(ctx context.Context, d *seg.Reader, idxPath string, va
 	return buildHashMapAccessor(ctx, d, idxPath, values, cfg, ps, logger)
 }
 
-func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
 	if !values {
@@ -1226,7 +1226,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 	defer g.MadvNormal().DisableReadAhead()
 
 	var rs *recsplit.RecSplit
-	var err error
 	cfg.KeyCount = count
 	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)

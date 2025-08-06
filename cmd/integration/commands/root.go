@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/node/migrations"
+	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )

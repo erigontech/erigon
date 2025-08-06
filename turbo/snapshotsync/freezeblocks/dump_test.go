@@ -19,8 +19,6 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
-	"os"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -36,9 +34,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -66,14 +64,6 @@ func baseIdRange(base, indexer, len int) []uint64 {
 func TestDump(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
-	}
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win")
-	}
-
-	if os.Getenv("SKIP_FLAKY_TESTS") != "" {
-		t.Skip("skipping flaky tests")
 	}
 
 	type test struct {

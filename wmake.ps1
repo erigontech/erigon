@@ -37,6 +37,7 @@ Param(
         "state",
         "test-short",
         "test-all",
+        "test-all-race",
         "txpool",
         "all"
     )]
@@ -544,7 +545,17 @@ if ($BuildTarget -eq "db-tools") {
     } else {
         Write-Host "`n Tests completed"
     }
-
+} elseif ($BuildTarget -eq "test-all-race") {
+    Write-Host " Running all tests ..."
+    $env:GODEBUG = "cgocheck=0"
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m -race ./..."
+    Invoke-Expression -Command $TestCommand | Out-Host
+    if (!($?)) {
+        Write-Host " ERROR : Tests failed"
+        exit 1
+    } else {
+        Write-Host "`n Tests completed"
+    }
 } else {
 
     # This has a naive assumption every target has a compilation unit with the same name

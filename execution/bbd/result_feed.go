@@ -19,7 +19,7 @@ package bbd
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type ResultFeed struct {

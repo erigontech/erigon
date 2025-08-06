@@ -27,8 +27,8 @@ import (
 	"go.uber.org/mock/gomock"
 
 	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -68,7 +68,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, nil, br, nil)
+	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),

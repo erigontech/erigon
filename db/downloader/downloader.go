@@ -55,7 +55,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -65,6 +64,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 )
 
 var debugWebseed = false
@@ -272,7 +272,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 	defer db.Close()
 
-	var addWebSeedOpts []torrent.AddWebSeedsOpt
+	var addWebSeedOpts []torrent.AddWebSeedsOpt //nolint:prealloc
 
 	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter() {
 		addWebSeedOpts = append(
@@ -561,13 +561,13 @@ func (d *Downloader) ReCalcStats() {
 		log.Debug("[snapshots] downloading",
 			"len", stats.NumTorrents,
 			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"hash-rate", common.ByteCount(stats.HashRate)+"/s",
 			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"completion-rate", common.ByteCount(stats.CompletionRate)+"/s",
 			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"flush-rate", common.ByteCount(stats.FlushRate)+"/s",
 			"downloaded", common.ByteCount(stats.BytesDownload),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)),
+			"download-rate", common.ByteCount(stats.DownloadRate)+"/s",
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -717,7 +717,7 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 				webseedRates = append(
 					webseedRates,
 					strings.TrimSuffix(shortUrl, "/"),
-					fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))),
+					common.ByteCount(uint64(stats.DownloadRate))+"/s",
 				)
 			}
 		}
@@ -746,7 +746,7 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 		}
 		setCommonPeerSegmentFields(&peer.Peer, &stats, &segPeer)
 		peers = append(peers, segPeer)
-		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))))
+		rates = append(rates, url, common.ByteCount(uint64(stats.DownloadRate))+"/s")
 	}
 
 	return rates, peers
@@ -1009,7 +1009,7 @@ func (d *Downloader) shouldAddTorrent(
 			}
 		}
 	} else if d.alreadyHaveThisName(name) {
-		return false, fmt.Errorf("name exists with different torrent hash")
+		return false, errors.New("name exists with different torrent hash")
 	}
 	return !ok, nil
 }
@@ -1303,8 +1303,8 @@ func (d *Downloader) logProgress() {
 			}(),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
-			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
+			"download-rate", common.ByteCount(d.stats.DownloadRate)+"/s",
+			"hashing-rate", common.ByteCount(d.stats.HashRate)+"/s",
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys),
 		)
