@@ -207,7 +207,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 }
 
 func IsTorrentPartial(ext string) bool {
-	return strings.HasPrefix(".torrent", ext) && len(ext) > len(".torrent")
+	return strings.HasPrefix(ext, ".torrent") && len(ext) > len(".torrent")
 }
 
 func ParseFileNameOld(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
