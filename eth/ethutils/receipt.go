@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func MarshalReceipt(
@@ -58,13 +58,13 @@ func MarshalReceipt(
 
 	if withBlockTimestamp {
 		if receipt.Logs != nil {
-			rpcLogs := []*RPCTransactionLog{}
+			rpcLogs := []*types.RPCLog{}
 			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, toRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
+				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
 			}
 			logsToMarshal = rpcLogs
 		} else {
-			logsToMarshal = make([]*RPCTransactionLog, 0)
+			logsToMarshal = make([]*types.RPCLog, 0)
 		}
 	} else {
 		if receipt.Logs == nil {
