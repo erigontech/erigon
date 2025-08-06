@@ -51,6 +51,7 @@ const (
 var (
 	noop                 = state.NewNoopWriter()
 	SpecialZeroIndexHash = common.HexToHash("0x27AE5BA08D7291C96C8CBDDCC148BF48A6D68C7974B94356F53754EF6171D757")
+	EmptyWithdrawalsHash = common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 )
 
 type HasChangeSetWriter interface {
@@ -330,6 +331,10 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 
 	if !chainConfig.IsNormalcy(previousBlockNumber + 1) {
 		header.GasLimit = utils.GetBlockGasLimitForFork(forkId)
+	}
+
+	if chainConfig.IsShanghai(header.Time) {
+		header.WithdrawalsHash = &EmptyWithdrawalsHash
 	}
 
 	header.Coinbase = coinbase

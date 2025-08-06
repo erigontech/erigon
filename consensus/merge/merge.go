@@ -162,12 +162,12 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) {
-		rs = make(types.FlatRequests, 0)
-		allLogs := make(types.Logs, 0)
-		for _, rec := range receipts {
-			allLogs = append(allLogs, rec.Logs...)
-		}
 		// [ cdk ] removed as we have no beacon chain
+		// rs = make(types.FlatRequests, 0)
+		// allLogs := make(types.Logs, 0)
+		// for _, rec := range receipts {
+		// 	allLogs = append(allLogs, rec.Logs...)
+		// }
 		//depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
 		//if err != nil {
 		//	return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
@@ -175,20 +175,20 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		//if depositReqs != nil {
 		//	rs = append(rs, *depositReqs)
 		//}
-		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
-		if withdrawalReq != nil {
-			rs = append(rs, *withdrawalReq)
-		}
-		consolidations := misc.DequeueConsolidationRequests7251(syscall)
-		if consolidations != nil {
-			rs = append(rs, *consolidations)
-		}
-		if header.RequestsHash != nil {
-			rh := rs.Hash()
-			if *header.RequestsHash != *rh {
-				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
-			}
-		}
+		// withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
+		// if withdrawalReq != nil {
+		// 	rs = append(rs, *withdrawalReq)
+		// }
+		// consolidations := misc.DequeueConsolidationRequests7251(syscall)
+		// if consolidations != nil {
+		// 	rs = append(rs, *consolidations)
+		// }
+		// if header.RequestsHash != nil {
+		// 	rh := rs.Hash()
+		// 	if *header.RequestsHash != *rh {
+		// 		return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
+		// 	}
+		// }
 	}
 
 	return txs, receipts, rs, nil
