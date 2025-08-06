@@ -114,10 +114,6 @@ func (cr ChainReader) FrozenBorBlocks(align bool) uint64 {
 	return cr.BlockReader.FrozenBorBlocks(align)
 }
 
-func (cr ChainReader) BorStartEventId(_ common.Hash, _ uint64) uint64 {
-	panic("bor events by block not implemented")
-}
-
 func (cr ChainReader) BorSpan(spanId uint64) *heimdall.Span {
 	span, _, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
 	if err != nil {
