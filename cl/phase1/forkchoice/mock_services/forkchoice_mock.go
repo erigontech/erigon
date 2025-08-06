@@ -433,6 +433,6 @@ func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Ha
 	return nil, false
 }
 
-func (f *ForkChoiceStorageMock) GetProposerLookahead(blockRoot common.Hash) (solid.Uint64VectorSSZ, bool) {
+func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
 	return nil, false
 }

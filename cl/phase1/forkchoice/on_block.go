@@ -244,7 +244,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations())
 	f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits())
 	f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals())
-	f.addProposerLookahead(blockRoot, lastProcessedState.ProposerLookahead())
+	f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead())
 
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints
