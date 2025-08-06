@@ -33,13 +33,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
@@ -78,6 +78,7 @@ type EthBackend interface {
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 	Peers(ctx context.Context) (*remote.PeersReply, error)
 	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
+	RemovePeer(ctx context.Context, url *remote.RemovePeerRequest) (*remote.RemovePeerReply, error)
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
@@ -387,6 +388,10 @@ func (s *EthBackendServer) Peers(ctx context.Context, _ *emptypb.Empty) (*remote
 
 func (s *EthBackendServer) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
 	return s.eth.AddPeer(ctx, req)
+}
+
+func (s *EthBackendServer) RemovePeer(ctx context.Context, req *remote.RemovePeerRequest) (*remote.RemovePeerReply, error) {
+	return s.eth.RemovePeer(ctx, req)
 }
 
 func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {

@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -37,8 +36,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/privateapi"
@@ -428,6 +428,14 @@ func (back *RemoteBackend) AddPeer(ctx context.Context, request *remote.AddPeerR
 	result, err := back.remoteEthBackend.AddPeer(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("ETHBACKENDClient.AddPeer() error: %w", err)
+	}
+	return result, nil
+}
+
+func (back *RemoteBackend) RemovePeer(ctx context.Context, request *remote.RemovePeerRequest) (*remote.RemovePeerReply, error) {
+	result, err := back.remoteEthBackend.RemovePeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.RemovePeer() error: %w", err)
 	}
 	return result, nil
 }

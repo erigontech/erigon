@@ -1279,6 +1279,21 @@ func (ss *GrpcServer) AddPeer(_ context.Context, req *proto_sentry.AddPeerReques
 	return &proto_sentry.AddPeerReply{Success: true}, nil
 }
 
+func (ss *GrpcServer) RemovePeer(_ context.Context, req *proto_sentry.RemovePeerRequest) (*proto_sentry.RemovePeerReply, error) {
+	node, err := enode.Parse(enode.ValidSchemes, req.Url)
+	if err != nil {
+		return nil, err
+	}
+
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+	p2pServer.RemovePeer(node)
+
+	return &proto_sentry.RemovePeerReply{Success: true}, nil
+}
+
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {
 	p2pServer := ss.getP2PServer()
 	if p2pServer == nil {
