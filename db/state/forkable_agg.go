@@ -646,7 +646,7 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 
 	localTimeout := time.NewTicker(timeout)
 	defer localTimeout.Stop()
-	timeoutErr := fmt.Errorf("prune timeout")
+	timeoutErr := errors.New("prune timeout")
 
 	aggLogEvery := time.NewTicker(600 * time.Second)
 	defer aggLogEvery.Stop()
