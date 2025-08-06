@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )

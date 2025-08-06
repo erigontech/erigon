@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type IdleClient struct {

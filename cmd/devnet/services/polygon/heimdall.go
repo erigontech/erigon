@@ -40,10 +40,10 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type BridgeEvent string

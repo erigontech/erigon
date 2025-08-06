@@ -19,7 +19,7 @@ package heimdall
 import (
 	"context"
 
-	"github.com/erigontech/erigon/polygon/bor/poshttp"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 //go:generate mockgen -typed=true -destination=./client_mock.go -package=heimdall . Client

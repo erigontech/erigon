@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/poshttp"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type Scraper[TEntity Entity] struct {

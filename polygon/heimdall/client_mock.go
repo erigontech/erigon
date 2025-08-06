@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	poshttp "github.com/erigontech/erigon/polygon/bor/poshttp"
+	poshttp "github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	gomock "go.uber.org/mock/gomock"
 )
 

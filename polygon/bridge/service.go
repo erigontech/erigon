@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
