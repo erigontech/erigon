@@ -1422,26 +1422,9 @@ func TestRebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	// collect latest root from each available file
 	fnames := []string{}
-	dc := ac.d[kv.CommitmentDomain]
-	for _, f := range dc.files {
-		var k, stateVal []byte
-		r := dc.dataReader(f.src.decompressor)
-		if dc.d.Accessors.Has(AccessorHashMap) {
-			idx := f.src.index.GetReaderFromPool()
-
-			offset, ok := idx.TwoLayerLookup(keyCommitmentState)
-			require.True(t, ok)
-			r.Reset(offset)
-			k, stateVal, _, _, _ = r.Next2(nil, nil)
-		} else {
-			var found bool
-			var err error
-			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, r)
-			require.NoError(t, err)
-			require.True(t, found)
-			require.Equal(t, keyCommitmentState, k)
-		}
-		require.Equal(t, string(keyCommitmentState), string(k))
+	for i, f := range dt.files {
+		stateVal, ok, _, _ := dt.getLatestFromFile(i, keyCommitmentState)
+		require.True(t, ok)
 		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
 

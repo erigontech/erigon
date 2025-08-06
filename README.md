@@ -803,6 +803,6 @@ Add to `/etc/sysctl.conf` (or add .conf file in `/etc/sysctl.d/`)
 
 ```
 vm.overcommit_memory = 1 
-vm.max_map_count = 8388608 
+vm.max_map_count = 16777216 
 ```
 ---------

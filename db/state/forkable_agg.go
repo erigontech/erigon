@@ -646,7 +646,7 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 
 	localTimeout := time.NewTicker(timeout)
 	defer localTimeout.Stop()
-	timeoutErr := fmt.Errorf("prune timeout")
+	timeoutErr := errors.New("prune timeout")
 
 	aggLogEvery := time.NewTicker(600 * time.Second)
 	defer aggLogEvery.Stop()
@@ -765,7 +765,7 @@ func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", Registry.String(forId)))
+	panic("no forkable with id " + Registry.String(forId))
 }
 
 func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
@@ -799,5 +799,5 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 		}
 	}
 
-	panic(fmt.Sprintf("no forkable with id %s", Registry.Name(forId)))
+	panic("no forkable with id " + Registry.Name(forId))
 }

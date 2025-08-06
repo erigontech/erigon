@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -11,9 +13,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/spf13/cobra"
 )
 
 var idxOptimize2 = &cobra.Command{

@@ -39,9 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	downloadertype "github.com/erigontech/erigon-lib/snaptype"
-	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/state"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -175,7 +175,7 @@ var compactDomains = &cobra.Command{
 			return
 		}
 		defer tx.Rollback()
-		defer statelib.AggTx(tx).MadvNormal().DisableReadAhead()
+		defer dbstate.AggTx(tx).MadvNormal().DisableReadAhead()
 
 		// Iterate over all the files in  dirs.SnapDomain and print them
 		domainDir := dirs.SnapDomain
@@ -486,7 +486,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := statelib.NewSharedDomains(temporalTx, logger)
+	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}

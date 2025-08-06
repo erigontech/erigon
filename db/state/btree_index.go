@@ -124,6 +124,10 @@ func (c *Cursor) Reset(di uint64, g *seg.PagedReader, seekKey []byte) error {
 	if c.d >= c.ef.Count() {
 		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
 	}
+	if c.getter == nil {
+		return errors.New("getter is nil")
+	}
+
 	offset := c.ef.Get(c.d)
 	c.key, c.value = c.getter.ResetAndSeekForward(seekKey, offset)
 	return nil

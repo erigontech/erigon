@@ -505,7 +505,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []byte, step uint64, err error) {
 	if tx == nil {
-		return nil, 0, fmt.Errorf("sd.GetLatest: unexpected nil tx")
+		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k, tx)

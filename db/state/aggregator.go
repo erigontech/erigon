@@ -220,7 +220,7 @@ func (a *Aggregator) ReloadSalt() error {
 	}
 
 	if salt == nil {
-		return fmt.Errorf("salt not found on ReloadSalt")
+		return errors.New("salt not found on ReloadSalt")
 	}
 
 	for _, d := range a.d {
@@ -1397,7 +1397,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		}
 	}()
 
-	at.a.logger.Info(fmt.Sprintf("[snapshots] merge state %s", r.String()))
+	at.a.logger.Info("[snapshots] merge state " + r.String())
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1458,7 +1458,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	err = g.Wait()
 	if err == nil {
 		closeFiles = false
-		at.a.logger.Info(fmt.Sprintf("[snapshots] state merge done %s", r.String()))
+		at.a.logger.Info("[snapshots] state merge done " + r.String())
 	} else if !errors.Is(err, context.Canceled) {
 		at.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
 	}

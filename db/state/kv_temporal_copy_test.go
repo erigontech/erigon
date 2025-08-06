@@ -18,7 +18,7 @@ package state
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -245,7 +245,7 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	applyTx := tx.Tx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
-		return fmt.Errorf("can't apply: transaction closed")
+		return errors.New("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
 }
@@ -292,7 +292,7 @@ func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
-		return fmt.Errorf("can't apply: transaction closed")
+		return errors.New("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
 }
@@ -302,7 +302,7 @@ func (tx *RwTx) ApplyRW(ctx context.Context, f func(tx kv.RwTx) error) error {
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
-		return fmt.Errorf("can't apply: transaction closed")
+		return errors.New("can't apply: transaction closed")
 	}
 	return applyTx.ApplyRw(ctx, f)
 }
@@ -344,7 +344,7 @@ func (tx *asyncClone) ApplyChan() mdbx.TxApplyChan {
 }
 
 func (tx *asyncClone) Commit() error {
-	return fmt.Errorf("can't commit cloned tx")
+	return errors.New("can't commit cloned tx")
 }
 func (tx *asyncClone) Rollback() {
 }

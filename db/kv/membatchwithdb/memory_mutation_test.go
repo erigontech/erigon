@@ -24,12 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
-	stateLib "github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/state"
 )
 
 func initializeDbNonDupSort(rwTx kv.RwTx) {
@@ -207,13 +206,13 @@ func TestForEach(t *testing.T) {
 	require.Equal(t, []string{"value", "value1", "value2", "value3", "value5"}, values1)
 }
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	tb.Helper()
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
 	salt := uint32(1)
-	agg, err := stateLib.NewAggregator2(context.Background(), datadir.New(tb.TempDir()), 16, &salt, db, log.New())
+	agg, err := state.NewAggregator2(context.Background(), datadir.New(tb.TempDir()), 16, &salt, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
