@@ -285,8 +285,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		// this call.
 		h2t, err := http2.ConfigureTransports(requestTransport)
 		panicif.Err(err)
+		// Some of these are the defaults, but I really don't trust Go HTTP2 at this point.
+
+		// Will this fix pings from not timing out?
+		h2t.WriteByteTimeout = 15 * time.Second
+		// If we don't read for this long, send a ping.
 		h2t.ReadIdleTimeout = 15 * time.Second
-		h2t.MaxReadFrameSize = 2 << 20 // Same as ReadBufferSize?
+		h2t.PingTimeout = 15 * time.Second
+		h2t.MaxReadFrameSize = 1 << 20 // Same as net/http.Transport.ReadBufferSize?
 	} else {
 		// Disable h2 being added automatically.
 		g.MakeMap(&requestTransport.TLSNextProto)
