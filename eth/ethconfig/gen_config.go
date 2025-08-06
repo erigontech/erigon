@@ -7,16 +7,16 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -50,9 +50,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		StateStream                         bool
 		HeimdallURL                         string
 		WithoutHeimdall                     bool
-		WithHeimdallMilestones              bool
-		WithHeimdallWaypointRecording       bool
-		PolygonSync                         bool
 		Ethstats                            string
 		InternalCL                          bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
@@ -97,9 +94,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.StateStream = c.StateStream
 	enc.HeimdallURL = c.HeimdallURL
 	enc.WithoutHeimdall = c.WithoutHeimdall
-	enc.WithHeimdallMilestones = c.WithHeimdallMilestones
-	enc.WithHeimdallWaypointRecording = c.WithHeimdallWaypointRecording
-	enc.PolygonSync = c.PolygonSync
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
@@ -148,9 +142,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		StateStream                         *bool
 		HeimdallURL                         *string
 		WithoutHeimdall                     *bool
-		WithHeimdallMilestones              *bool
 		WithHeimdallWaypointRecording       *bool
-		PolygonSync                         *bool
 		Ethstats                            *string
 		InternalCL                          *bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
@@ -247,15 +239,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.WithoutHeimdall != nil {
 		c.WithoutHeimdall = *dec.WithoutHeimdall
-	}
-	if dec.WithHeimdallMilestones != nil {
-		c.WithHeimdallMilestones = *dec.WithHeimdallMilestones
-	}
-	if dec.WithHeimdallWaypointRecording != nil {
-		c.WithHeimdallWaypointRecording = *dec.WithHeimdallWaypointRecording
-	}
-	if dec.PolygonSync != nil {
-		c.PolygonSync = *dec.PolygonSync
 	}
 	if dec.Ethstats != nil {
 		c.Ethstats = *dec.Ethstats

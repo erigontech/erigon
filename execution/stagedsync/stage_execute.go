@@ -26,8 +26,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -38,16 +36,18 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -173,7 +173,7 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
-	var domains *libstate.SharedDomains
+	var domains *state.SharedDomains
 	var tx kv.TemporalRwTx
 	if txc.Doms == nil {
 		temporalTx, ok := txc.Tx.(kv.TemporalRwTx)
@@ -181,7 +181,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			return errors.New("tx is not a temporal tx")
 		}
 		tx = temporalTx
-		domains, err = libstate.NewSharedDomains(temporalTx, logger)
+		domains, err = state.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return err
 		}
@@ -221,7 +221,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			changeset = &currentKeys
 		} else {
 			for i := range currentKeys {
-				changeset[i] = libstate.MergeDiffSets(changeset[i], currentKeys[i])
+				changeset[i] = state.MergeDiffSets(changeset[i], currentKeys[i])
 			}
 		}
 	}
@@ -236,7 +236,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
-func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.SharedDomains,
+func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedDomains,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
@@ -431,15 +431,27 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
+
+	// on chain-tip:
+	//  - can prune only between blocks (without blocking blocks processing)
+	//  - need also leave some time to prune blocks
+	//  - need keep "fsync" time of db fast
+	// Means - the best is:
+	//  - stop prune when `tx.SpaceDirty()` is big
+	//  - and set ~500ms timeout
+	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
+	quickPruneTimeout := 250 * time.Millisecond
+
 	if s.ForwardProgress > uint64(dbg.MaxReorgDepth) && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
-		pruneTimeout := 250 * time.Millisecond
+		pruneTimeout := quickPruneTimeout
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneDiffsLimitOnChainTip = math.MaxInt
 			pruneTimeout = time.Hour
 		}
+		pruneChangeSetsStartTime := time.Now()
 		if err := rawdb.PruneTable(
 			tx,
 			kv.ChangeSets3,
@@ -452,30 +464,48 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		); err != nil {
 			return err
 		}
+		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+				"duration", duration,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				"externalTx", useExternalTx,
+			)
+		}
 	}
 
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
 
-	// on chain-tip:
-	//  - can prune only between blocks (without blocking blocks processing)
-	//  - need also leave some time to prune blocks
-	//  - need keep "fsync" time of db fast
-	// Means - the best is:
-	//  - stop prune when `tx.SpaceDirty()` is big
-	//  - and set ~500ms timeout
-	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	pruneTimeout := 250 * time.Millisecond
+	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
+		greedyPruneCommitmentHistoryStartTime := time.Now()
 		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
+		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
+			logger.Debug(
+				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
+				"duration", duration,
+				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				"externalTx", useExternalTx,
+			)
+		}
 	}
 
+	pruneSmallBatchesStartTime := time.Now()
 	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
 		return err
+	}
+	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
+		logger.Debug(
+			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
+			"duration", duration,
+			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+			"externalTx", useExternalTx,
+		)
 	}
 
 	if err = s.Done(tx); err != nil {

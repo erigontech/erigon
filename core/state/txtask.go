@@ -22,17 +22,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type AAValidationResult struct {
@@ -135,19 +135,20 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
 			var err error
-			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
+			var logIndexAfterTx uint32
+			cumulativeGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
 			if err != nil {
 				panic(err)
 			}
+			firstLogIndex = logIndexAfterTx
 		}
 	}
 
 	cumulativeGasUsed += t.GasUsed
-	//if t.GasUsed == 0 { // TODO arbitrum does not need this but others do
-	//	msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
-	//	panic(msg)
-	//}
-
+	// if t.GasUsed == 0 { // TODO arbitrum does not need this but others do
+	// 	msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
+	// 	panic(msg)
+	// }
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
 }

@@ -5,27 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
+	"github.com/google/go-cmp/cmp"
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
+
 	"github.com/erigontech/nitro-erigon/arbos"
-	"github.com/google/go-cmp/cmp"
-	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {
@@ -40,6 +43,7 @@ type Generator struct {
 
 	receiptsCacheTrace bool
 	receiptCacheTrace  bool
+	evmTimeout         time.Duration
 
 	blockReader services.FullBlockReader
 	txNumReader rawdbv3.TxNumsReader
@@ -61,13 +65,13 @@ var (
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
-func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
+func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader, evmTimeout time.Duration) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
 	}
 
-	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit * 1000) // think they should be connected in some of that way
+	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
 	if err != nil {
 		panic(err)
 	}
@@ -82,6 +86,7 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
 		receiptCache:       receiptCache,
+		evmTimeout:         evmTimeout,
 
 		blockExecMutex: &loaderMutex[common.Hash]{},
 		txnExecMutex:   &loaderMutex[common.Hash]{},
@@ -137,11 +142,13 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 }
 
 func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Receipts) {
-	g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
+	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
 func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) {
-	g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
+	//g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
+	g.receiptCache.Add(hash, receipt)
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
@@ -151,7 +158,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB, receipt *types.Receipt
-	var firstLogIndex uint32
+	var firstLogIndex, logIdxAfterTx uint32
 	var cumGasUsed uint64
 
 	defer func() {
@@ -161,21 +168,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				"txHash", txnHash.String(),
 				"blockNum", blockNum,
 				"firstLogIndex", firstLogIndex,
+				"logIdxAfterTx", logIdxAfterTx,
 				"nil receipt in db", receiptFromDB == nil)
 		}
 	}()
-
-	if !rpcDisableRCache {
-		var ok bool
-		var err error
-		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txnHash, txNum)
-		if err != nil {
-			return nil, err
-		}
-		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-			return receiptFromDB, nil
-		}
-	}
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
 		return receipts[index], nil
@@ -190,12 +186,30 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
 
+	if !rpcDisableRCache {
+		var ok bool
+		var err error
+		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+			TxNum:     txNum,
+			BlockNum:  blockNum,
+			BlockHash: blockHash,
+			TxnHash:   txnHash,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+			g.addToCacheReceipt(txnHash, receiptFromDB)
+			return receiptFromDB, nil
+		}
+	}
+
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
 	if err != nil {
 		return nil, err
 	}
 
-	cumGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +223,13 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 
+		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+		defer cancel()
+		go func() {
+			<-ctx.Done()
+			evm.Cancel()
+		}()
+
 		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
 		if err != nil {
 			return nil, err
@@ -217,31 +238,39 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
+		evm := core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
+		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+		defer cancel()
+		go func() {
+			<-ctx.Done()
+			evm.Cancel()
+		}()
+
 		if cfg.IsArbitrum() {
-			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
-			vmcfg := vm.Config{
-				SkipAnalysis: core.SkipAnalysis(cfg, header.Number.Uint64()),
-			}
-			vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vmcfg)
 			var msg *types.Message
-			msg, err = txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, vmenv.ChainRules())
+			msg, err = txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, evm.ChainRules())
 			if err != nil {
 				return nil, err
 			}
-			if vmenv.ProcessingHookSet.CompareAndSwap(false, true) {
-				vmenv.ProcessingHook = arbos.NewTxProcessorIBS(vmenv, state.NewArbitrum(genEnv.ibs), msg)
+			if evm.ProcessingHookSet.CompareAndSwap(false, true) {
+				evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(genEnv.ibs), msg)
 			} else {
-				vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+				evm.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
 			}
-			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmcfg, vmenv)
+			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
 		} else {
-			receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
+			receipt, _, err = core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
 	}
 
+	if rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
+		firstLogIndex = logIdxAfterTx
+	} else {
+		firstLogIndex = logIdxAfterTx - uint32(len(receipt.Logs))
+	}
 	receipt.BlockHash = blockHash
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
@@ -252,7 +281,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(receipt.TxHash, receipt)
+	g.addToCacheReceipt(txnHash, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB)
@@ -273,6 +302,13 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				"nil receipts in db", receiptsFromDB == nil)
 		}
 	}()
+
+	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
+	defer g.blockExecMutex.unlock(mu, blockHash)
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
+		return receipts, nil
+	}
+
 	if !rpcDisableRCache {
 		var err error
 		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
@@ -280,14 +316,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			return nil, err
 		}
 		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+			g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
 			return receiptsFromDB, nil
 		}
-	}
-
-	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
-	defer g.blockExecMutex.unlock(mu, blockHash)
-	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
-		return receipts, nil
 	}
 
 	genEnv, err := g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
@@ -297,28 +328,43 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	//genEnv.ibs.SetTrace(true)
 	blockNum := block.NumberU64()
 
+	vmCfg := vm.Config{
+		JumpDestCache: vm.NewJumpDestCache(16),
+	}
+
+	evm := core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
+	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		evm.Cancel()
+	}()
+
 	for i, txn := range block.Transactions() {
-		var receipt *types.Receipt
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		evm = core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vmCfg)
 		genEnv.ibs.SetTxContext(blockNum, i)
+
+		var receipt *types.Receipt
 		if cfg.IsArbitrum() {
-			blockContext := core.NewEVMBlockContext(block.Header(), core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
-			vmcfg := vm.Config{
-				SkipAnalysis: core.SkipAnalysis(cfg, block.NumberU64()),
-			}
-			vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vmcfg)
 			var msg *types.Message
-			msg, err = txn.AsMessage(*types.MakeSigner(cfg, block.NumberU64(), block.Time()), block.BaseFee(), vmenv.ChainRules())
+			msg, err = txn.AsMessage(*types.MakeSigner(cfg, block.NumberU64(), block.Time()), block.BaseFee(), evm.ChainRules())
 			if err != nil {
 				return nil, err
 			}
-			if vmenv.ProcessingHookSet.CompareAndSwap(false, true) {
-				vmenv.ProcessingHook = arbos.NewTxProcessorIBS(vmenv, state.NewArbitrum(genEnv.ibs), msg)
+			if evm.ProcessingHookSet.CompareAndSwap(false, true) {
+				evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(genEnv.ibs), msg)
 			} else {
-				vmenv.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+				evm.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
 			}
-			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmcfg, vmenv)
+			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmcfg, evm)
 		} else {
-			receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
+			receipt, _, err = core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)

@@ -28,9 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/execution/chainspec"
+	gomock "go.uber.org/mock/gomock"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
@@ -60,6 +62,13 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	bcfg.ElectraForkEpoch = math.MaxUint64
 	bcfg.InitializeForkSchedule()
 
+	// Create mock PeerDasStateReader
+	ctrl := gomock.NewController(t)
+	mockPeerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
+	mockPeerDasStateReader.EXPECT().GetEarliestAvailableSlot().Return(uint64(0)).AnyTimes()
+	mockPeerDasStateReader.EXPECT().GetRealCgc().Return(uint64(0)).AnyTimes()
+	mockPeerDasStateReader.EXPECT().GetAdvertisedCgc().Return(uint64(0)).AnyTimes()
+
 	sentinel1, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  &bcfg,
@@ -67,7 +76,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Port:          7070,
 		EnableBlocks:  true,
 		MaxPeerCount:  9999999,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil, mockPeerDasStateReader)
 	require.NoError(t, err)
 	defer sentinel1.Stop()
 
@@ -83,7 +92,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		EnableBlocks:  true,
 		TCPPort:       9123,
 		MaxPeerCount:  9999999,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil)
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil, mockPeerDasStateReader)
 	require.NoError(t, err)
 	defer sentinel2.Stop()
 

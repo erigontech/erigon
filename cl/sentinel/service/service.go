@@ -87,6 +87,11 @@ func extractSubnetIndexByGossipTopic(name string) int {
 //BanPeer(context.Context, *Peer) (*EmptyMessage, error)
 
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
+	active, _, _ := s.sentinel.GetPeersCount()
+	if active < gracePeerCount {
+		return &sentinelrpc.EmptyMessage{}, nil
+	}
+
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
@@ -298,7 +303,29 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 		return nil, err
 	}
 	return resp, nil
+}
 
+func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *sentinelrpc.RequestDataWithPeer) (*sentinelrpc.ResponseData, error) {
+	pid, err := peer.Decode(reqWithPeer.Pid)
+	if err != nil {
+		return nil, err
+	}
+	req := &sentinelrpc.RequestData{
+		Data:  reqWithPeer.Data,
+		Topic: reqWithPeer.Topic,
+	}
+	resp, err := s.requestPeer(ctx, pid, req)
+	if err != nil {
+		if strings.Contains(err.Error(), "protocols not supported") {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+			s.sentinel.Peers().SetBanStatus(pid, true)
+		}
+		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {

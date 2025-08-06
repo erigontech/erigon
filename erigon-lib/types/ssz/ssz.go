@@ -18,6 +18,8 @@ package ssz
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -101,7 +103,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 	}
 	inPos := 4
 	if uint64(elementsNum) > _max {
-		return nil, ErrTooBigList
+		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeDynamicList: expected %d elements, got %d", _max, elementsNum))
 	}
 	objs := make([]T, elementsNum)
 	for i := range objs {
@@ -136,7 +138,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 		return nil, ErrBufferNotRounded
 	}
 	if elementsNum > _max {
-		return nil, ErrTooBigList
+		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeStaticList: expected %d elements, got %d", _max, elementsNum))
 	}
 	objs := make([]T, elementsNum)
 	for i := range objs {
@@ -159,7 +161,7 @@ func DecodeHashList(bytes []byte, start, end, _max uint32) ([]common.Hash, error
 		return nil, ErrBufferNotRounded
 	}
 	if elementsNum > _max {
-		return nil, ErrTooBigList
+		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeHashList: expected %d elements, got %d", _max, elementsNum))
 	}
 	objs := make([]common.Hash, elementsNum)
 	for i := range objs {
@@ -179,7 +181,7 @@ func DecodeNumbersList(bytes []byte, start, end uint32, _max uint64) ([]uint64, 
 		return nil, ErrBufferNotRounded
 	}
 	if elementsNum > _max {
-		return nil, ErrTooBigList
+		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeNumbersList: expected %d elements, got %d", _max, elementsNum))
 	}
 	objs := make([]uint64, elementsNum)
 	for i := range objs {
@@ -205,7 +207,7 @@ func DecodeString(bytes []byte, start, end, _max uint64) ([]byte, error) {
 	}
 	buf := bytes[start:end]
 	if uint64(len(buf)) > _max {
-		return nil, ErrTooBigList
+		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeString: expected %d bytes, got %d", _max, len(buf)))
 	}
 	return buf, nil
 }
