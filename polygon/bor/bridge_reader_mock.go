@@ -15,7 +15,6 @@ import (
 	time "time"
 
 	common "github.com/erigontech/erigon-lib/common"
-	rlp "github.com/erigontech/erigon-lib/rlp"
 	types "github.com/erigontech/erigon/execution/types"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -42,85 +41,6 @@ func NewMockbridgeReader(ctrl *gomock.Controller) *MockbridgeReader {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockbridgeReader) EXPECT() *MockbridgeReaderMockRecorder {
 	return m.recorder
-}
-
-// BorStartEventId mocks base method.
-func (m *MockbridgeReader) BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BorStartEventId", ctx, hash, blockHeight)
-	ret0, _ := ret[0].(uint64)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// BorStartEventId indicates an expected call of BorStartEventId.
-func (mr *MockbridgeReaderMockRecorder) BorStartEventId(ctx, hash, blockHeight any) *MockbridgeReaderBorStartEventIdCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BorStartEventId", reflect.TypeOf((*MockbridgeReader)(nil).BorStartEventId), ctx, hash, blockHeight)
-	return &MockbridgeReaderBorStartEventIdCall{Call: call}
-}
-
-// MockbridgeReaderBorStartEventIdCall wrap *gomock.Call
-type MockbridgeReaderBorStartEventIdCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockbridgeReaderBorStartEventIdCall) Return(arg0 uint64, arg1 error) *MockbridgeReaderBorStartEventIdCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockbridgeReaderBorStartEventIdCall) Do(f func(context.Context, common.Hash, uint64) (uint64, error)) *MockbridgeReaderBorStartEventIdCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockbridgeReaderBorStartEventIdCall) DoAndReturn(f func(context.Context, common.Hash, uint64) (uint64, error)) *MockbridgeReaderBorStartEventIdCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// EventTxnLookup mocks base method.
-func (m *MockbridgeReader) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "EventTxnLookup", ctx, borTxHash)
-	ret0, _ := ret[0].(uint64)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// EventTxnLookup indicates an expected call of EventTxnLookup.
-func (mr *MockbridgeReaderMockRecorder) EventTxnLookup(ctx, borTxHash any) *MockbridgeReaderEventTxnLookupCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EventTxnLookup", reflect.TypeOf((*MockbridgeReader)(nil).EventTxnLookup), ctx, borTxHash)
-	return &MockbridgeReaderEventTxnLookupCall{Call: call}
-}
-
-// MockbridgeReaderEventTxnLookupCall wrap *gomock.Call
-type MockbridgeReaderEventTxnLookupCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockbridgeReaderEventTxnLookupCall) Return(arg0 uint64, arg1 bool, arg2 error) *MockbridgeReaderEventTxnLookupCall {
-	c.Call = c.Call.Return(arg0, arg1, arg2)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockbridgeReaderEventTxnLookupCall) Do(f func(context.Context, common.Hash) (uint64, bool, error)) *MockbridgeReaderEventTxnLookupCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockbridgeReaderEventTxnLookupCall) DoAndReturn(f func(context.Context, common.Hash) (uint64, bool, error)) *MockbridgeReaderEventTxnLookupCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
 }
 
 // Events mocks base method.
@@ -158,45 +78,6 @@ func (c *MockbridgeReaderEventsCall) Do(f func(context.Context, common.Hash, uin
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockbridgeReaderEventsCall) DoAndReturn(f func(context.Context, common.Hash, uint64) ([]*types.Message, error)) *MockbridgeReaderEventsCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// EventsByBlock mocks base method.
-func (m *MockbridgeReader) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "EventsByBlock", ctx, hash, blockNum)
-	ret0, _ := ret[0].([]rlp.RawValue)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// EventsByBlock indicates an expected call of EventsByBlock.
-func (mr *MockbridgeReaderMockRecorder) EventsByBlock(ctx, hash, blockNum any) *MockbridgeReaderEventsByBlockCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EventsByBlock", reflect.TypeOf((*MockbridgeReader)(nil).EventsByBlock), ctx, hash, blockNum)
-	return &MockbridgeReaderEventsByBlockCall{Call: call}
-}
-
-// MockbridgeReaderEventsByBlockCall wrap *gomock.Call
-type MockbridgeReaderEventsByBlockCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockbridgeReaderEventsByBlockCall) Return(arg0 []rlp.RawValue, arg1 error) *MockbridgeReaderEventsByBlockCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockbridgeReaderEventsByBlockCall) Do(f func(context.Context, common.Hash, uint64) ([]rlp.RawValue, error)) *MockbridgeReaderEventsByBlockCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockbridgeReaderEventsByBlockCall) DoAndReturn(f func(context.Context, common.Hash, uint64) ([]rlp.RawValue, error)) *MockbridgeReaderEventsByBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

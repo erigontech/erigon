@@ -212,9 +212,6 @@ type spanReader interface {
 type bridgeReader interface {
 	Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error)
 	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)
-	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
-	EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error)
 }
 
 func ValidateHeaderTime(
