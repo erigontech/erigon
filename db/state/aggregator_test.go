@@ -1421,6 +1421,7 @@ func TestRebuildCommitmentBasedOnFiles(t *testing.T) {
 	roots := make([]common.Hash, 0)
 
 	// collect latest root from each available file
+	dt := ac.d[kv.CommitmentDomain]
 	fnames := []string{}
 	for i, f := range dt.files {
 		stateVal, ok, _, _ := dt.getLatestFromFile(i, keyCommitmentState)
