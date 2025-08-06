@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 )
 
@@ -56,4 +58,25 @@ func init() {
 	renameCmd.Flags().StringSliceVar(&excludeDomains, "exclude-domains", []string{}, "Domains to exclude")
 	renameCmd.Flags().StringSliceVar(&includeExts, "include-exts", []string{}, "Extensions to include (default: all)")
 	renameCmd.Flags().StringSliceVar(&excludeExts, "exclude-exts", []string{}, "Extensions to exclude")
+}
+
+func renameFiles(domains []string, exts []string) error {
+	renameVerMap := make(map[string]string)
+	for _, dString := range domains {
+		d, err := kv.String2Domain(dString)
+		if err == nil {
+			state.Schema.GetDomainCfg(d).GetVersions().Domain.DataKV.Current
+			state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorBT.Current
+			state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVI.Current
+			state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVEI.Current
+			state.Schema.GetDomainCfg(d).GetVersions().Hist.DataV.Current
+			state.Schema.GetDomainCfg(d).GetVersions().Hist.AccessorVI.Current
+		} else {
+			ii, _ := kv.String2InvertedIdx(dString)
+			state.Schema.GetIICfg(ii).GetVersions().II.DataEF.Current
+			state.Schema.GetIICfg(ii).GetVersions().II.AccessorEFI.Current
+		}
+	}
+
+	state.Schema.GetDomainCfg()
 }
