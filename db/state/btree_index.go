@@ -124,7 +124,7 @@ func (c *Cursor) readKV() error {
 		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
 	}
 	if c.getter == nil {
-		return fmt.Errorf("getter is nil")
+		return errors.New("getter is nil")
 	}
 
 	offset := c.ef.Get(c.d)

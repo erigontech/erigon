@@ -276,14 +276,14 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		itemGetter.Reset(offset)
 		if !itemGetter.HasNext() {
 			dt.d.logger.Warn("commitment branch key replacement seek failed",
-				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
+				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 			return nil, false
 		}
 
 		k, _ := itemGetter.Next(nil)
 		if !bytes.Equal(fullKey, k) {
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
-				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
+				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 
 			return nil, false
 		}
@@ -296,7 +296,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		_, _, offsetInFile, ok, err := item.bindex.Get(fullKey, itemGetter)
 		if err != nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement seek failed",
-				"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
+				"key", hex.EncodeToString(fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
 		}
 		if !ok {
 			return nil, false

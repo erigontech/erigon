@@ -19,7 +19,6 @@ package state
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -345,7 +344,7 @@ func (tx *asyncClone) ApplyChan() mdbx.TxApplyChan {
 }
 
 func (tx *asyncClone) Commit() error {
-	return fmt.Errorf("can't commit cloned tx")
+	return errors.New("can't commit cloned tx")
 }
 func (tx *asyncClone) Rollback() {
 }

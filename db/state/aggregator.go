@@ -220,7 +220,7 @@ func (a *Aggregator) ReloadSalt() error {
 	}
 
 	if salt == nil {
-		return fmt.Errorf("salt not found on ReloadSalt")
+		return errors.New("salt not found on ReloadSalt")
 	}
 
 	for _, d := range a.d {
