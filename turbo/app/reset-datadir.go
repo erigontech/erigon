@@ -124,7 +124,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 			kv.PolygonBridgeDB,
 		} {
 			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
-			err = os.RemoveAll(extraFullPath)
+			err = dir.RemoveAll(extraFullPath)
 			if err != nil {
 				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
 			}
