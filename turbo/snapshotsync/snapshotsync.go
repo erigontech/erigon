@@ -495,17 +495,17 @@ func SyncSnapshots(
 	}
 
 	if err := snapshots.OpenFolder(); err != nil {
-		return err
+		return fmt.Errorf("opening snapshots folder: %w", err)
 	}
 
 	if cc.Bor != nil {
 		if err := borSnapshots.OpenFolder(); err != nil {
-			return err
+			return fmt.Errorf("opening bor snapshots folder: %w", err)
 		}
 	}
 
 	if err := agg.OpenFolder(); err != nil {
-		return err
+		return fmt.Errorf("opening agg folder: %w", err)
 	}
 
 	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
