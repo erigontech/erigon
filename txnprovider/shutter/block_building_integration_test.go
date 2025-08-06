@@ -34,7 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
+	chainparams "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/race"
@@ -350,13 +350,13 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis := chainspec.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
-	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.ConsolidationRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
 		Storage: make(map[common.Hash]common.Hash, 0),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}
-	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.WithdrawalRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
 		Storage: make(map[common.Hash]common.Hash, 0),
 		Balance: big.NewInt(0),
