@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -225,10 +224,6 @@ func (h *HeimdallSimulator) FetchSpans(ctx context.Context, page uint64, limit u
 func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint64, to time.Time, limit int) ([]*bridge.EventRecordWithTime, error) {
 	events, _, err := h.bridgeStore.EventsByIdFromSnapshot(fromId, to, limit)
 	return events, err
-}
-
-func (h *HeimdallSimulator) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
-	return nil, errors.New("method FetchChainManagerStatus not implemented")
 }
 
 func (h *HeimdallSimulator) FetchStatus(ctx context.Context) (*heimdall.Status, error) {

@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type IdleClient struct {
@@ -79,10 +78,6 @@ func (c *IdleClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 
 func (c *IdleClient) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error) {
 	return nil, nil
-}
-
-func (c *IdleClient) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
-	return &poshttp.ChainManagerStatus{}, nil
 }
 
 func (c *IdleClient) FetchStatus(ctx context.Context) (*Status, error) {

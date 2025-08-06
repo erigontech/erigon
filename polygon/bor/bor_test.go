@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type test_heimdall struct {
@@ -67,10 +66,6 @@ func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
 
 func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
-}
-
-func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
-	return nil, nil
 }
 
 func (h *test_heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {

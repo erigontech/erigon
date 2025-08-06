@@ -1,4 +1,4 @@
-package heimdall_test
+package poshttp_test
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -15,7 +14,7 @@ import (
 
 func TestVersioMonitorHeimdallV2(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdall.NewMockClient(ctrl)
+	heimdallClient := poshttp.NewMockheimdallClient(ctrl)
 
 	status := &poshttp.ChainManagerStatus{}
 	status.Params.ChainParams.PolTokenAddress = new(string)
@@ -33,7 +32,7 @@ func TestVersioMonitorHeimdallV2(t *testing.T) {
 
 func TestVersioMonitorHeimdallV1(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdall.NewMockClient(ctrl)
+	heimdallClient := poshttp.NewMockheimdallClient(ctrl)
 
 	status := &poshttp.ChainManagerStatus{}
 
@@ -53,7 +52,7 @@ func TestVersioMonitorHeimdallUpgrade(t *testing.T) {
 	defer clean()
 
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdall.NewMockClient(ctrl)
+	heimdallClient := poshttp.NewMockheimdallClient(ctrl)
 
 	timeNow := time.Now()
 	var upgradeMonitoredTimes atomic.Int64
@@ -97,7 +96,7 @@ func TestVersioMonitorHeimdallDowngrade(t *testing.T) {
 	defer clean()
 
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdall.NewMockClient(ctrl)
+	heimdallClient := poshttp.NewMockheimdallClient(ctrl)
 
 	timeNow := time.Now()
 	var downgradeMonitoredTimes atomic.Int64

@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type BridgeEvent string
@@ -220,10 +219,6 @@ func (h *Heimdall) currentSprintLength() int {
 func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	return 0
 	//MainChain: 8664000
-}
-
-func (h *Heimdall) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
-	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {

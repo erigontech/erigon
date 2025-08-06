@@ -27,6 +27,7 @@ type ChainManagerStatus struct {
 	} `json:"params"`
 }
 
+//go:generate mockgen -typed=true -source=./version_monitor.go -destination=./heimdall_client_mock.go -package=poshttp heimdallClient
 type heimdallClient interface {
 	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
 }

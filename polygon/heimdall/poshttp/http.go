@@ -58,7 +58,6 @@ type Client struct {
 	Logger       log.Logger
 	apiVersioner apiVersioner
 	logPrefix    func(message string) string
-	sendMetrics  func(ctx context.Context, start time.Time, isSuccessful bool)
 }
 
 type Request struct {
