@@ -27,7 +27,6 @@ import (
 	"runtime"
 	"time"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 

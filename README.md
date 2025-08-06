@@ -157,7 +157,7 @@ datadir
 # There is 4 domains: account, storage, code, commitment 
 ```
 
-See the [lib](erigon-db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
+See the [lib](db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
 
 ### History on cheap disk
 
@@ -803,6 +803,6 @@ Add to `/etc/sysctl.conf` (or add .conf file in `/etc/sysctl.d/`)
 
 ```
 vm.overcommit_memory = 1 
-vm.max_map_count = 8388608 
+vm.max_map_count = 16777216 
 ```
 ---------
