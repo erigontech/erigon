@@ -32,9 +32,5 @@ func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to
 	return nil, nil
 }
 
-func (c *IdleClient) FetchStateSyncEvent(ctx context.Context, id uint64) (*EventRecordWithTime, error) {
-	return nil, nil
-}
-
 func (c *IdleClient) Close() {
 }
