@@ -494,6 +494,3 @@ func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool       
 func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
 func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }
-func (cr *FakeChainReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
-	return 0
-}
