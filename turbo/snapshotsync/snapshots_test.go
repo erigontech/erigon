@@ -576,6 +576,7 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1.0-022695-022696-transactions-to-block.idx.tmp.tmp.torrent.tmp": &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent":                                   &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent.tmp.tmp.tmp":                       &fstest.MapFile{},
+		"v1.0-070200-070300-bodies.seg.torrent4014494284":                  &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -646,6 +647,15 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
 	require.Equal("bodies", f.TypeString)
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-070200-070300-bodies.seg.torrent4014494284"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(f.Type.Enum(), coresnaptype.Bodies.Enum())
+	require.Equal(70200_000, int(f.From))
+	require.Equal(70300_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
+	require.Equal(".torrent4014494284", f.Ext)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef"))
 	require.True(ok)

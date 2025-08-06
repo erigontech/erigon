@@ -1053,7 +1053,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
-		if !ok || isState {
+		if !ok || isState || snaptype.IsTorrentPartial(f.Ext) {
 			continue
 		}
 		if !s.HasType(f.Type) {
