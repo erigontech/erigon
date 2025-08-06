@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	state2 "github.com/erigontech/erigon/db/state"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -121,7 +121,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
 	defer mb.Close()
-	sd, err := state2.NewSharedDomains(mb, logger)
+	sd, err := dbstate.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
 	}
