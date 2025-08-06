@@ -24,12 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
-
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv/temporal"
 )
 
 func initializeDbNonDupSort(rwTx kv.RwTx) {
