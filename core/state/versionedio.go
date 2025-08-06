@@ -213,9 +213,6 @@ func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap,
 func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(*accounts.Account); ok {
-			if addr := fmt.Sprintf("%x", address); addr == "9ead03f7136fc6b4bdb0780b00a1c14ae5a8b6d0" {
-				fmt.Println(addr, "ReadAccountData - reads", account.Nonce)
-			}
 			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
 		}
