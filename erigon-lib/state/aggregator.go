@@ -1647,6 +1647,11 @@ func (at *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc o
 	return at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
 }
 
+func (at *AggregatorRoTx) DebugDomainRange(domain kv.Domain, key []byte, fromTs, toTs int, limit int, tx kv.Tx) (it stream.U64V, err error) {
+
+	return nil, nil
+}
+
 func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (totalKeys uint64) {
 	if d >= kv.DomainLen {
 		return 0
@@ -1676,6 +1681,8 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 	r := dt.dataReader(dt.files[fi].src.decompressor)
 	return NewSegStreamReader(r, -1), nil
 }
+
+//func (at *AggregatorRoTx)
 
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)

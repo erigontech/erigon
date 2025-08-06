@@ -22,8 +22,9 @@ import (
 
 // often used shortcuts
 type (
-	U64 Uno[uint64]
-	KV  Duo[[]byte, []byte] // key,  value
+	U64  Uno[uint64]
+	KV   Duo[[]byte, []byte] // key,  value
+	U64V Duo[uint64, []byte] // txnum, value
 )
 
 var (
