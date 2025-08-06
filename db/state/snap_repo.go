@@ -443,7 +443,7 @@ func (f *SnapshotRepo) closeWhatNotInList(fNames []string) {
 
 func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 	if f.stepSize == 0 {
-		panic(fmt.Sprintf("step size if 0 for %s", f.schema.DataTag()))
+		panic("step size if 0 for " + f.schema.DataTag())
 	}
 
 	for _, ap := range aps {

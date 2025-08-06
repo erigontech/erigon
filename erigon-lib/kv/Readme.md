@@ -44,7 +44,7 @@ open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_for
 
 Then:
 turbo/snapshotsync/block_reader.go
-erigon-lib/state/aggregator_v3.go
+erigon/db/state/aggregator_v3.go
 
 Then:
 kv_temporal.go

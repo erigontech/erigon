@@ -40,7 +40,7 @@ func (ue UniversalEntity) String() string {
 	case iiCategory:
 		return fmt.Sprintf("ii:%s", kv.InvertedIdx(ue>>16))
 	case forkableCategory:
-		return fmt.Sprintf("forkable:%s", Registry.Name(kv.ForkableId(ue>>16)))
+		return "forkable:" + Registry.Name(kv.ForkableId(ue>>16))
 	default:
 		return fmt.Sprintf("unknown:%d", ue)
 	}

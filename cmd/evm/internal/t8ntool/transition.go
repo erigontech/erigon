@@ -42,14 +42,14 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -304,7 +304,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return err
 	}
@@ -657,7 +657,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 	defer c.Close()
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	domains, err := libstate.NewSharedDomains(tx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}

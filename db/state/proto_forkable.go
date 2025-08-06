@@ -151,7 +151,7 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *
 	}()
 	for i, ib := range a.builders {
 		filename := path.Base(a.snaps.schema.AccessorIdxFile(version.V1_0, from, to, uint64(i)))
-		p := ps.AddNew(fmt.Sprintf("build_index_%s", filename), 1)
+		p := ps.AddNew("build_index_"+filename, 1)
 		defer ps.Delete(p)
 		recsplitIdx, err := ib.Build(ctx, from, to, p)
 		if err != nil {

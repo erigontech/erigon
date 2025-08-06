@@ -18,7 +18,7 @@ package wrap
 
 import (
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/state"
 )
 
 func NewTxContainer(tx kv.RwTx, doms *state.SharedDomains) TxContainer {

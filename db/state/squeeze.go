@@ -252,7 +252,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 
 				select {
 				case <-logEvery.C:
-					logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
+					logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", hex.EncodeToString(k),
 						"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(cf.decompressor.Count())))
 				default:
 				}
