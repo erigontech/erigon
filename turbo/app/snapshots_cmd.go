@@ -472,12 +472,12 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					bt := strings.Replace(res.Path, ".kv", ".bt", 1)
 					_, eb := os.Stat(bt)
 					if eb == nil {
-						rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, res.Path, state.DefaultBtreeM, state.Schema.CommitmentDomain.Compression, false)
+						rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, res.Path, state.DefaultBtreeM, state.Schema.CommitmentDomain.CompressCfg, false)
 						if err != nil {
 							return err
 						}
 
-						getter := seg.NewReader(rd.MakeGetter(), state.Schema.CommitmentDomain.Compression)
+						getter := seg.NewReader(rd.MakeGetter(), state.Schema.CommitmentDomain.CompressCfg)
 						//for getter.HasNext() {
 						//	k, _ := getter.Next(nil)
 						//	if bytes.Equal(k, []byte(trieStateKey)) {
