@@ -32,16 +32,3 @@ func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir
 	logger.Info("[integrity] ValidateBorCheckpoints: done", "err", err)
 	return err
 }
-
-func ValidateBorMilestones(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *RoSnapshots, failFast bool) error {
-	baseStore := NewMdbxStore(logger, dirs.DataDir, true, 32)
-	snapshotStore := NewMilestoneSnapshotStore(baseStore.Milestones(), snaps)
-	err := snapshotStore.Prepare(ctx)
-	if err != nil {
-		return err
-	}
-	defer snapshotStore.Close()
-	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
-	logger.Info("[integrity] ValidateBorMilestones: done", "err", err)
-	return err
-}
