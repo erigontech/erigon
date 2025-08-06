@@ -119,6 +119,16 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"data", reset.stats.removed.dataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
 	if removeLocal {
+		for _, extraDir := range []string{
+			kv.HeimdallDB,
+			kv.PolygonBridgeDB,
+		} {
+			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
+			err = os.RemoveAll(extraFullPath)
+			if err != nil {
+				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
+			}
+		}
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
 			err = dir.RemoveAll(dirs.Chaindata)

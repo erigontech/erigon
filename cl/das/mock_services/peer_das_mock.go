@@ -23,7 +23,6 @@ import (
 type MockPeerDas struct {
 	ctrl     *gomock.Controller
 	recorder *MockPeerDasMockRecorder
-	isgomock struct{}
 }
 
 // MockPeerDasMockRecorder is the mock recorder for MockPeerDas.
@@ -44,17 +43,17 @@ func (m *MockPeerDas) EXPECT() *MockPeerDasMockRecorder {
 }
 
 // DownloadColumnsAndRecoverBlobs mocks base method.
-func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
+func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(arg0 context.Context, arg1 []*cltypes.SignedBlindedBeaconBlock) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DownloadColumnsAndRecoverBlobs", ctx, blocks)
+	ret := m.ctrl.Call(m, "DownloadColumnsAndRecoverBlobs", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DownloadColumnsAndRecoverBlobs indicates an expected call of DownloadColumnsAndRecoverBlobs.
-func (mr *MockPeerDasMockRecorder) DownloadColumnsAndRecoverBlobs(ctx, blocks any) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
+func (mr *MockPeerDasMockRecorder) DownloadColumnsAndRecoverBlobs(arg0, arg1 any) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadColumnsAndRecoverBlobs", reflect.TypeOf((*MockPeerDas)(nil).DownloadColumnsAndRecoverBlobs), ctx, blocks)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadColumnsAndRecoverBlobs", reflect.TypeOf((*MockPeerDas)(nil).DownloadColumnsAndRecoverBlobs), arg0, arg1)
 	return &MockPeerDasDownloadColumnsAndRecoverBlobsCall{Call: call}
 }
 
@@ -82,17 +81,17 @@ func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(conte
 }
 
 // DownloadOnlyCustodyColumns mocks base method.
-func (m *MockPeerDas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
+func (m *MockPeerDas) DownloadOnlyCustodyColumns(arg0 context.Context, arg1 []*cltypes.SignedBlindedBeaconBlock) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DownloadOnlyCustodyColumns", ctx, blocks)
+	ret := m.ctrl.Call(m, "DownloadOnlyCustodyColumns", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DownloadOnlyCustodyColumns indicates an expected call of DownloadOnlyCustodyColumns.
-func (mr *MockPeerDasMockRecorder) DownloadOnlyCustodyColumns(ctx, blocks any) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+func (mr *MockPeerDasMockRecorder) DownloadOnlyCustodyColumns(arg0, arg1 any) *MockPeerDasDownloadOnlyCustodyColumnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadOnlyCustodyColumns", reflect.TypeOf((*MockPeerDas)(nil).DownloadOnlyCustodyColumns), ctx, blocks)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadOnlyCustodyColumns", reflect.TypeOf((*MockPeerDas)(nil).DownloadOnlyCustodyColumns), arg0, arg1)
 	return &MockPeerDasDownloadOnlyCustodyColumnsCall{Call: call}
 }
 
@@ -158,17 +157,17 @@ func (c *MockPeerDasIsArchivedModeCall) DoAndReturn(f func() bool) *MockPeerDasI
 }
 
 // IsBlobAlreadyRecovered mocks base method.
-func (m *MockPeerDas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
+func (m *MockPeerDas) IsBlobAlreadyRecovered(arg0 common.Hash) bool {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsBlobAlreadyRecovered", blockRoot)
+	ret := m.ctrl.Call(m, "IsBlobAlreadyRecovered", arg0)
 	ret0, _ := ret[0].(bool)
 	return ret0
 }
 
 // IsBlobAlreadyRecovered indicates an expected call of IsBlobAlreadyRecovered.
-func (mr *MockPeerDasMockRecorder) IsBlobAlreadyRecovered(blockRoot any) *MockPeerDasIsBlobAlreadyRecoveredCall {
+func (mr *MockPeerDasMockRecorder) IsBlobAlreadyRecovered(arg0 any) *MockPeerDasIsBlobAlreadyRecoveredCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsBlobAlreadyRecovered", reflect.TypeOf((*MockPeerDas)(nil).IsBlobAlreadyRecovered), blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsBlobAlreadyRecovered", reflect.TypeOf((*MockPeerDas)(nil).IsBlobAlreadyRecovered), arg0)
 	return &MockPeerDasIsBlobAlreadyRecoveredCall{Call: call}
 }
 
@@ -196,17 +195,17 @@ func (c *MockPeerDasIsBlobAlreadyRecoveredCall) DoAndReturn(f func(common.Hash) 
 }
 
 // IsColumnOverHalf mocks base method.
-func (m *MockPeerDas) IsColumnOverHalf(blockRoot common.Hash) bool {
+func (m *MockPeerDas) IsColumnOverHalf(arg0 uint64, arg1 common.Hash) bool {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsColumnOverHalf", blockRoot)
+	ret := m.ctrl.Call(m, "IsColumnOverHalf", arg0, arg1)
 	ret0, _ := ret[0].(bool)
 	return ret0
 }
 
 // IsColumnOverHalf indicates an expected call of IsColumnOverHalf.
-func (mr *MockPeerDasMockRecorder) IsColumnOverHalf(blockRoot any) *MockPeerDasIsColumnOverHalfCall {
+func (mr *MockPeerDasMockRecorder) IsColumnOverHalf(arg0, arg1 any) *MockPeerDasIsColumnOverHalfCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsColumnOverHalf", reflect.TypeOf((*MockPeerDas)(nil).IsColumnOverHalf), blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsColumnOverHalf", reflect.TypeOf((*MockPeerDas)(nil).IsColumnOverHalf), arg0, arg1)
 	return &MockPeerDasIsColumnOverHalfCall{Call: call}
 }
 
@@ -222,30 +221,30 @@ func (c *MockPeerDasIsColumnOverHalfCall) Return(arg0 bool) *MockPeerDasIsColumn
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasIsColumnOverHalfCall) Do(f func(common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
+func (c *MockPeerDasIsColumnOverHalfCall) Do(f func(uint64, common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasIsColumnOverHalfCall) DoAndReturn(f func(common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
+func (c *MockPeerDasIsColumnOverHalfCall) DoAndReturn(f func(uint64, common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // IsDataAvailable mocks base method.
-func (m *MockPeerDas) IsDataAvailable(blockRoot common.Hash) (bool, error) {
+func (m *MockPeerDas) IsDataAvailable(arg0 uint64, arg1 common.Hash) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsDataAvailable", blockRoot)
+	ret := m.ctrl.Call(m, "IsDataAvailable", arg0, arg1)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // IsDataAvailable indicates an expected call of IsDataAvailable.
-func (mr *MockPeerDasMockRecorder) IsDataAvailable(blockRoot any) *MockPeerDasIsDataAvailableCall {
+func (mr *MockPeerDasMockRecorder) IsDataAvailable(arg0, arg1 any) *MockPeerDasIsDataAvailableCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsDataAvailable", reflect.TypeOf((*MockPeerDas)(nil).IsDataAvailable), blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsDataAvailable", reflect.TypeOf((*MockPeerDas)(nil).IsDataAvailable), arg0, arg1)
 	return &MockPeerDasIsDataAvailableCall{Call: call}
 }
 
@@ -261,29 +260,29 @@ func (c *MockPeerDasIsDataAvailableCall) Return(arg0 bool, arg1 error) *MockPeer
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasIsDataAvailableCall) Do(f func(common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
+func (c *MockPeerDasIsDataAvailableCall) Do(f func(uint64, common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasIsDataAvailableCall) DoAndReturn(f func(common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
+func (c *MockPeerDasIsDataAvailableCall) DoAndReturn(f func(uint64, common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Prune mocks base method.
-func (m *MockPeerDas) Prune(keepSlotDistance uint64) error {
+func (m *MockPeerDas) Prune(arg0 uint64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Prune", keepSlotDistance)
+	ret := m.ctrl.Call(m, "Prune", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Prune indicates an expected call of Prune.
-func (mr *MockPeerDasMockRecorder) Prune(keepSlotDistance any) *MockPeerDasPruneCall {
+func (mr *MockPeerDasMockRecorder) Prune(arg0 any) *MockPeerDasPruneCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockPeerDas)(nil).Prune), keepSlotDistance)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockPeerDas)(nil).Prune), arg0)
 	return &MockPeerDasPruneCall{Call: call}
 }
 
@@ -349,17 +348,17 @@ func (c *MockPeerDasStateReaderCall) DoAndReturn(f func() peerdasstate.PeerDasSt
 }
 
 // TryScheduleRecover mocks base method.
-func (m *MockPeerDas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
+func (m *MockPeerDas) TryScheduleRecover(arg0 uint64, arg1 common.Hash) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TryScheduleRecover", slot, blockRoot)
+	ret := m.ctrl.Call(m, "TryScheduleRecover", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // TryScheduleRecover indicates an expected call of TryScheduleRecover.
-func (mr *MockPeerDasMockRecorder) TryScheduleRecover(slot, blockRoot any) *MockPeerDasTryScheduleRecoverCall {
+func (mr *MockPeerDasMockRecorder) TryScheduleRecover(arg0, arg1 any) *MockPeerDasTryScheduleRecoverCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TryScheduleRecover", reflect.TypeOf((*MockPeerDas)(nil).TryScheduleRecover), slot, blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TryScheduleRecover", reflect.TypeOf((*MockPeerDas)(nil).TryScheduleRecover), arg0, arg1)
 	return &MockPeerDasTryScheduleRecoverCall{Call: call}
 }
 
@@ -387,15 +386,15 @@ func (c *MockPeerDasTryScheduleRecoverCall) DoAndReturn(f func(uint64, common.Ha
 }
 
 // UpdateValidatorsCustody mocks base method.
-func (m *MockPeerDas) UpdateValidatorsCustody(cgc uint64) {
+func (m *MockPeerDas) UpdateValidatorsCustody(arg0 uint64) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UpdateValidatorsCustody", cgc)
+	m.ctrl.Call(m, "UpdateValidatorsCustody", arg0)
 }
 
 // UpdateValidatorsCustody indicates an expected call of UpdateValidatorsCustody.
-func (mr *MockPeerDasMockRecorder) UpdateValidatorsCustody(cgc any) *MockPeerDasUpdateValidatorsCustodyCall {
+func (mr *MockPeerDasMockRecorder) UpdateValidatorsCustody(arg0 any) *MockPeerDasUpdateValidatorsCustodyCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateValidatorsCustody", reflect.TypeOf((*MockPeerDas)(nil).UpdateValidatorsCustody), cgc)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateValidatorsCustody", reflect.TypeOf((*MockPeerDas)(nil).UpdateValidatorsCustody), arg0)
 	return &MockPeerDasUpdateValidatorsCustodyCall{Call: call}
 }
 
