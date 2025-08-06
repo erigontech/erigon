@@ -1608,6 +1608,9 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if asserts {
 		dt.valCViewID = tx.ViewID()
 	}
+	if tx == nil {
+		panic(fmt.Errorf("DomainRoTx.valsCursor: tx is nil, DomainRoTx=%s", dt.d.filenameBase))
+	}
 	if dt.d.largeValues {
 		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
 		return dt.valsC, err
@@ -1662,9 +1665,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	}
 
 	return nil, 0, false, nil
-}
-
-// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
+} // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
 	if dt.d.disable {

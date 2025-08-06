@@ -423,6 +423,14 @@ func ExecV3(ctx context.Context,
 	computeCommitmentDuration := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
 	outputTxNum.Store(executor.domains().TxNum())
+	//for i := 0; i < 16; i++ {
+	//	ttx := agg.BeginFilesRo()
+	//	c, err := executor.tx().Cursor(kv.TblCommitmentVals)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	executor.domains().GetCommitmentContext().SetTtx(i, ttx, c)
+	//}
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -454,6 +462,18 @@ func ExecV3(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 	var errExhausted *ErrLoopExhausted
 
+	if state2.ExperimentalConcurrentCommitment {
+		for i := 0; i < 16; i++ {
+			//rotx := cfg.db.BeginRw(context.Background())
+			rotx, err := cfg.db.BeginRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer rotx.Rollback()
+
+			executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i))
+		}
+	}
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
@@ -461,6 +481,7 @@ Loop:
 		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
+
 			// First compute and commit the progress done so far
 			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
 				return err
@@ -680,17 +701,17 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
-		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
+		if true || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
+			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
 
-			//if !bytes.Equal(rh, header.Root.Bytes()) {
-			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-			//	return errors.New("wrong trie root")
-			//}
+			if !bytes.Equal(rh, header.Root.Bytes()) {
+				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+				return errors.New("wrong trie root")
+			}
 
 			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
@@ -793,6 +814,20 @@ Loop:
 						"step", fmt.Sprintf("%.1f", float64(inputTxNum)/float64(agg.StepSize())),
 						"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
 				}
+
+				if state2.ExperimentalConcurrentCommitment {
+					executor.domains().GetCommitmentContext().CloseSubTxns()
+					fmt.Printf("SD reopens txns after commit; stack %v\n", dbg.Stack())
+					for i := 0; i < 16; i++ {
+						rotx, err := cfg.db.BeginRo(ctx)
+						if err != nil {
+							return err
+						}
+						defer rotx.Rollback()
+
+						executor.domains().SetTxn(rotx.(kv.TemporalTx), uint(i)) // before commitment
+					}
+				}
 			default:
 			}
 		}
@@ -831,6 +866,9 @@ Loop:
 		if err = executor.tx().Commit(); err != nil {
 			return err
 		}
+	}
+	if state2.ExperimentalConcurrentCommitment {
+		executor.domains().GetCommitmentContext().CloseSubTxns()
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -963,7 +1001,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {

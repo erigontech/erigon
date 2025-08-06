@@ -131,6 +131,7 @@ func init() {
 	withUnwindEvery(stateStages)
 	withBlock(stateStages)
 	withIntegrityChecks(stateStages)
+	withExperimentalCommitment(stateStages)
 	withMining(stateStages)
 	withChain(stateStages)
 	withHeimdall(stateStages)

@@ -467,6 +467,7 @@ func init() {
 	withWorkers(cmdStageExec)
 	withChaosMonkey(cmdStageExec)
 	withChainTipMode(cmdStageExec)
+	withExperimentalCommitment(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -483,6 +484,7 @@ func init() {
 	withWorkers(cmdStageCustomTrace)
 	withChaosMonkey(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
+	withExperimentalCommitment(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -495,6 +497,7 @@ func init() {
 	withChain(cmdStagePatriciaTrie)
 	withHeimdall(cmdStagePatriciaTrie)
 	withChaosMonkey(cmdStagePatriciaTrie)
+	withExperimentalCommitment(cmdStagePatriciaTrie)
 	rootCmd.AddCommand(cmdStagePatriciaTrie)
 
 	withConfig(cmdStageTxLookup)
