@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -16,17 +17,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/metrics"
 )
-
-type HeimdallVersion int64
-
-const (
-	HeimdallV1 HeimdallVersion = iota
-	HeimdallV2
-)
-
-type apiVersioner interface {
-	Version() HeimdallVersion
-}
 
 var (
 	// ErrShutdownDetected is returned if a shutdown was detected
@@ -47,6 +37,10 @@ var (
 		ErrNoHost,
 		context.DeadlineExceeded,
 	}
+)
+
+const (
+	fetchChainManagerStatus = "/chainmanager/params"
 )
 
 const (
@@ -93,9 +87,9 @@ func WithHttpMaxRetries(maxRetries int) ClientOption {
 	}
 }
 
-func WithApiVersioner(apiVersioner apiVersioner) ClientOption {
+func WithApiVersioner(ctx context.Context) ClientOption {
 	return func(client *Client) {
-		client.apiVersioner = apiVersioner
+		client.apiVersioner = NewVersionMonitor(ctx, client, client.Logger, time.Minute)
 	}
 }
 
@@ -128,6 +122,33 @@ func (c *Client) Version() HeimdallVersion {
 func (c *Client) Close() {
 	close(c.closeCh)
 	c.handler.CloseIdleConnections()
+}
+
+func (c *Client) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
+	url, err := chainManagerStatusURL(c.UrlString)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = WithRequestType(ctx, StatusRequest)
+
+	return FetchWithRetry[ChainManagerStatus](ctx, c, url, c.Logger)
+}
+
+func chainManagerStatusURL(urlString string) (*url.URL, error) {
+	return MakeURL(urlString, fetchChainManagerStatus, "")
+}
+
+func MakeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
+	u, err := url.Parse(urlString)
+	if err != nil {
+		return nil, err
+	}
+
+	u.Path = path.Join(u.Path, rawPath)
+	u.RawQuery = rawQuery
+
+	return u, err
 }
 
 // FetchWithRetry returns data from heimdall with retry

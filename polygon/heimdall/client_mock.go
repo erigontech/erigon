@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	poshttp "github.com/erigontech/erigon/polygon/bor/poshttp"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -77,10 +78,10 @@ func (c *MockClientCloseCall) DoAndReturn(f func()) *MockClientCloseCall {
 }
 
 // FetchChainManagerStatus mocks base method.
-func (m *MockClient) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
+func (m *MockClient) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchChainManagerStatus", ctx)
-	ret0, _ := ret[0].(*ChainManagerStatus)
+	ret0, _ := ret[0].(*poshttp.ChainManagerStatus)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -98,19 +99,19 @@ type MockClientFetchChainManagerStatusCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockClientFetchChainManagerStatusCall) Return(arg0 *ChainManagerStatus, arg1 error) *MockClientFetchChainManagerStatusCall {
+func (c *MockClientFetchChainManagerStatusCall) Return(arg0 *poshttp.ChainManagerStatus, arg1 error) *MockClientFetchChainManagerStatusCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockClientFetchChainManagerStatusCall) Do(f func(context.Context) (*ChainManagerStatus, error)) *MockClientFetchChainManagerStatusCall {
+func (c *MockClientFetchChainManagerStatusCall) Do(f func(context.Context) (*poshttp.ChainManagerStatus, error)) *MockClientFetchChainManagerStatusCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockClientFetchChainManagerStatusCall) DoAndReturn(f func(context.Context) (*ChainManagerStatus, error)) *MockClientFetchChainManagerStatusCall {
+func (c *MockClientFetchChainManagerStatusCall) DoAndReturn(f func(context.Context) (*poshttp.ChainManagerStatus, error)) *MockClientFetchChainManagerStatusCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

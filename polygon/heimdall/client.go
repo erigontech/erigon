@@ -18,6 +18,8 @@ package heimdall
 
 import (
 	"context"
+
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 )
 
 //go:generate mockgen -typed=true -destination=./client_mock.go -package=heimdall . Client
@@ -26,7 +28,7 @@ type Client interface {
 	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
 	FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error)
 
-	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
+	FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error)
 	FetchStatus(ctx context.Context) (*Status, error)
 
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)

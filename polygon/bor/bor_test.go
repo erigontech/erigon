@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -78,7 +79,7 @@ func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*br
 	return nil, nil
 }
 
-func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
+func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
 	return nil, nil
 }
 

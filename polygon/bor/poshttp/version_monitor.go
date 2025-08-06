@@ -1,4 +1,4 @@
-package heimdall
+package poshttp
 
 import (
 	"context"
@@ -14,6 +14,18 @@ const (
 	HeimdallV1 HeimdallVersion = iota
 	HeimdallV2
 )
+
+type apiVersioner interface {
+	Version() HeimdallVersion
+}
+
+type ChainManagerStatus struct {
+	Params struct {
+		ChainParams struct {
+			PolTokenAddress *string `json:"pol_token_address,omitempty"`
+		} `json:"chain_params"`
+	} `json:"params"`
+}
 
 type heimdallClient interface {
 	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)

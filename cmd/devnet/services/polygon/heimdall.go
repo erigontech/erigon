@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -221,7 +222,7 @@ func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	//MainChain: 8664000
 }
 
-func (h *Heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
+func (h *Heimdall) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
 	return nil, errors.New("TODO")
 }
 

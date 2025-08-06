@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 
@@ -52,11 +51,7 @@ func NewHttpClient(urlString string, logger log.Logger, opts ...poshttp.ClientOp
 }
 
 const (
-	fetchStateSyncEvent = "clerk/event-record/%s"
-
-	fetchStatus             = "/status"
-	fetchChainManagerStatus = "/chainmanager/params"
-
+	fetchStatus                      = "/status"
 	fetchCheckpoint                  = "/checkpoints/%s"
 	fetchCheckpointCount             = "/checkpoints/count"
 	fetchCheckpointList              = "/checkpoints/list"
@@ -87,7 +82,7 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	ctx = poshttp.WithRequestType(ctx, poshttp.SpanRequest)
 
 	if c.Version() == poshttp.HeimdallV2 {
-		url, err := makeURL(c.UrlString, fetchSpanLatestV2, "")
+		url, err := poshttp.MakeURL(c.UrlString, fetchSpanLatestV2, "")
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +94,7 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 		return response.ToSpan()
 	}
 
-	url, err := makeURL(c.UrlString, fetchSpanLatestV1, "")
+	url, err := poshttp.MakeURL(c.UrlString, fetchSpanLatestV1, "")
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +108,7 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 }
 
 func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
-	url, err := makeURL(c.UrlString, fmt.Sprintf("bor/span/%d", spanID), "")
+	url, err := poshttp.MakeURL(c.UrlString, fmt.Sprintf("bor/span/%d", spanID), "")
 	if err != nil {
 		return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 	}
@@ -121,7 +116,7 @@ func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 	ctx = poshttp.WithRequestType(ctx, poshttp.SpanRequest)
 
 	if c.Version() == poshttp.HeimdallV2 {
-		url, err = makeURL(c.UrlString, fmt.Sprintf("bor/spans/%d", spanID), "")
+		url, err = poshttp.MakeURL(c.UrlString, fmt.Sprintf("bor/spans/%d", spanID), "")
 		if err != nil {
 			return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 		}
@@ -149,7 +144,7 @@ func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 	if c.Version() == poshttp.HeimdallV2 {
 		offset := (page - 1) * limit // page start from 1
 
-		url, err := makeURL(c.UrlString, fetchSpanListPathV2, fmt.Sprintf(fetchSpanListFormatV2, offset, limit))
+		url, err := poshttp.MakeURL(c.UrlString, fetchSpanListPathV2, fmt.Sprintf(fetchSpanListFormatV2, offset, limit))
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +157,7 @@ func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 		return response.ToList()
 	}
 
-	url, err := makeURL(c.UrlString, fetchSpanListPathV1, fmt.Sprintf(fetchSpanListFormatV1, page, limit))
+	url, err := poshttp.MakeURL(c.UrlString, fetchSpanListPathV1, fmt.Sprintf(fetchSpanListFormatV1, page, limit))
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +202,7 @@ func (c *HttpClient) FetchCheckpoints(ctx context.Context, page uint64, limit ui
 	if c.Version() == poshttp.HeimdallV2 {
 		offset := (page - 1) * limit // page start from 1
 
-		url, err := makeURL(c.UrlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV2, offset, limit))
+		url, err := poshttp.MakeURL(c.UrlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV2, offset, limit))
 		if err != nil {
 			return nil, err
 		}
@@ -220,7 +215,7 @@ func (c *HttpClient) FetchCheckpoints(ctx context.Context, page uint64, limit ui
 		return response.ToList()
 	}
 
-	url, err := makeURL(c.UrlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV1, page, limit))
+	url, err := poshttp.MakeURL(c.UrlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV1, page, limit))
 	if err != nil {
 		return nil, err
 	}
@@ -301,17 +296,6 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 	return &response.Result, nil
 }
 
-func (c *HttpClient) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
-	url, err := chainManagerStatusURL(c.UrlString)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx = poshttp.WithRequestType(ctx, poshttp.StatusRequest)
-
-	return poshttp.FetchWithRetry[ChainManagerStatus](ctx, c.Client, url, c.Logger)
-}
-
 func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
 	url, err := statusURL(c.UrlString)
 	if err != nil {
@@ -365,7 +349,7 @@ func (c *HttpClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
 
 // FetchMilestoneCount fetches the milestone count from heimdall
 func (c *HttpClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	url, err := makeURL(c.UrlString, fetchMilestoneCountV1, "")
+	url, err := poshttp.MakeURL(c.UrlString, fetchMilestoneCountV1, "")
 	if err != nil {
 		return 0, err
 	}
@@ -373,7 +357,7 @@ func (c *HttpClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	ctx = poshttp.WithRequestType(ctx, poshttp.MilestoneCountRequest)
 
 	if c.Version() == poshttp.HeimdallV2 {
-		url, err := makeURL(c.UrlString, fetchMilestoneCountV2, "")
+		url, err := poshttp.MakeURL(c.UrlString, fetchMilestoneCountV2, "")
 		if err != nil {
 			return 0, err
 		}
@@ -488,55 +472,39 @@ func checkpointURL(urlString string, number int64) (*url.URL, error) {
 		url = fmt.Sprintf(fetchCheckpoint, strconv.FormatInt(number, 10))
 	}
 
-	return makeURL(urlString, url, "")
+	return poshttp.MakeURL(urlString, url, "")
 }
 
 func checkpointCountURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchCheckpointCount, "")
-}
-
-func chainManagerStatusURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchChainManagerStatus, "")
+	return poshttp.MakeURL(urlString, fetchCheckpointCount, "")
 }
 
 func statusURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchStatus, "")
+	return poshttp.MakeURL(urlString, fetchStatus, "")
 }
 
 func milestoneURLv1(urlString string, number int64) (*url.URL, error) {
 	if number == -1 {
-		return makeURL(urlString, fetchMilestoneLatestV1, "")
+		return poshttp.MakeURL(urlString, fetchMilestoneLatestV1, "")
 	}
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV1, number), "")
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchMilestoneAtV1, number), "")
 }
 
 func milestoneURLv2(urlString string, number int64) (*url.URL, error) {
 	if number == -1 {
-		return makeURL(urlString, fetchMilestoneLatestV2, "")
+		return poshttp.MakeURL(urlString, fetchMilestoneLatestV2, "")
 	}
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV2, number), "")
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchMilestoneAtV2, number), "")
 }
 
 func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchLastNoAckMilestone, "")
+	return poshttp.MakeURL(urlString, fetchLastNoAckMilestone, "")
 }
 
 func noAckMilestoneURL(urlString string, id string) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchNoAckMilestone, id), "")
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchNoAckMilestone, id), "")
 }
 
 func milestoneIDURL(urlString string, id string) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneID, id), "")
-}
-
-func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
-	u, err := url.Parse(urlString)
-	if err != nil {
-		return nil, err
-	}
-
-	u.Path = path.Join(u.Path, rawPath)
-	u.RawQuery = rawQuery
-
-	return u, err
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchMilestoneID, id), "")
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
@@ -80,8 +81,8 @@ func (c *IdleClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 	return nil, nil
 }
 
-func (c *IdleClient) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
-	return &ChainManagerStatus{}, nil
+func (c *IdleClient) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
+	return &poshttp.ChainManagerStatus{}, nil
 }
 
 func (c *IdleClient) FetchStatus(ctx context.Context) (*Status, error) {
