@@ -135,6 +135,23 @@ type StateSyncEventsResponseV1 struct {
 	Result []*EventRecordWithTime `json:"result"`
 }
 
+type StateSyncEventsResponse struct {
+	Height string                 `json:"height"`
+	Result []*EventRecordWithTime `json:"result"`
+}
+
+type StateSyncEventsResponseV2 struct {
+	EventRecords []struct {
+		ID       string         `json:"id" yaml:"id"`
+		Contract common.Address `json:"contract" yaml:"contract"`
+		Data     string         `json:"data" yaml:"data"`
+		TxHash   common.Hash    `json:"tx_hash" yaml:"tx_hash"`
+		LogIndex string         `json:"log_index" yaml:"log_index"`
+		ChainID  string         `json:"bor_chain_id" yaml:"bor_chain_id"`
+		Time     time.Time      `json:"record_time" yaml:"record_time"`
+	} `json:"event_records"`
+}
+
 func (v *StateSyncEventsResponseV2) GetEventRecords() ([]*EventRecordWithTime, error) {
 	records := make([]*EventRecordWithTime, 0, len(v.EventRecords))
 
@@ -171,23 +188,6 @@ func (v *StateSyncEventsResponseV2) GetEventRecords() ([]*EventRecordWithTime, e
 	}
 
 	return records, nil
-}
-
-type StateSyncEventsResponse struct {
-	Height string                 `json:"height"`
-	Result []*EventRecordWithTime `json:"result"`
-}
-
-type StateSyncEventsResponseV2 struct {
-	EventRecords []struct {
-		ID       string         `json:"id" yaml:"id"`
-		Contract common.Address `json:"contract" yaml:"contract"`
-		Data     string         `json:"data" yaml:"data"`
-		TxHash   common.Hash    `json:"tx_hash" yaml:"tx_hash"`
-		LogIndex string         `json:"log_index" yaml:"log_index"`
-		ChainID  string         `json:"bor_chain_id" yaml:"bor_chain_id"`
-		Time     time.Time      `json:"record_time" yaml:"record_time"`
-	} `json:"event_records"`
 }
 
 type StateSyncEventResponse struct {
