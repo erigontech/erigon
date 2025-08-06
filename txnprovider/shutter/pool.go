@@ -262,6 +262,11 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
+	//
+	// TODO handle provideOpts.TxnIdsFilter and add test case in pool_test.go
+	//      need to be careful to handle decryptedTxnsGas correctly
+	//
+
 	decryptedTxnsGas := decryptedTxns.TotalGasLimit
 	totalGasTarget := provideOpts.GasTarget
 	if decryptedTxnsGas > totalGasTarget {
