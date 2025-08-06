@@ -544,7 +544,7 @@ func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
 	return RootNum(repo.cfg.RootNumPerStep * step)
 }
 
-func setupEntity(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) (name string, repo *SnapshotRepo) {
+func setupEntity(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) (string, *SnapshotRepo) {
 	t.Helper()
 	stepSize := uint64(10)
 	name, schema := genRepo(stepSize, dirs)
@@ -557,12 +557,12 @@ func setupEntity(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, 
 	}
 	d, err := kv.String2Domain(name)
 	require.NoError(t, err)
-	repo = NewSnapshotRepo(name, FromDomain(d), &SnapshotConfig{
+	repo := NewSnapshotRepo(FromDomain(d), &SnapshotConfig{
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
 
-	return name, repo
+	return name, &repo
 }
 
 type dhiiFiles struct {
