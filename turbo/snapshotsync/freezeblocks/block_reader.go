@@ -324,10 +324,6 @@ func (r *RemoteBlockReader) Ready(ctx context.Context) <-chan error {
 	return ch
 }
 
-func (r *RemoteBlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
-	panic("not implemented")
-}
-
 func (r *RemoteBlockReader) Span(_ context.Context, _ kv.Tx, _ uint64) (*heimdall.Span, bool, error) {
 	panic("not implemented")
 }
