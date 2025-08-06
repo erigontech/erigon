@@ -33,8 +33,6 @@ import (
 
 const (
 	StateEventsFetchLimit = 50
-	SpansFetchLimit       = 150
-	CheckpointsFetchLimit = 10_000
 )
 
 var _ Client = &HttpClient{}
