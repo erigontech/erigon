@@ -1404,10 +1404,13 @@ func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
 	return v
 }
 
-func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+func TestRebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
+
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
@@ -1441,7 +1444,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 			require.True(t, found)
 			require.Equal(t, keyCommitmentState, k)
 		}
-		require.Equal(t, keyCommitmentState, k)
+		require.Equal(t, string(keyCommitmentState), string(k))
 		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
 
