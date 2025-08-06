@@ -1031,6 +1031,10 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+	if signedBlindedBlock.Version().AfterOrEqual(clparams.FuluVersion) {
+		log.Info("Successfully submitted blinded block", "block_num", signedBlindedBlock.Block.Body.ExecutionPayload.BlockNumber, "api_version", apiVersion)
+		return newBeaconResponse(nil), nil
+	}
 	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
