@@ -101,14 +101,25 @@ func (b DirectBackend) SendTransaction(ctx context.Context, txn types.Transactio
 }
 
 func (b DirectBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	logs, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
+	rpcLogs, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
 	if err != nil {
 		return nil, err
 	}
 
-	res := make([]types.Log, len(logs))
-	for i, log := range logs {
-		res[i] = *log
+	res := make([]types.Log, len(rpcLogs))
+
+	for i, log := range rpcLogs {
+		res[i] = types.Log{
+			Address:     log.Address,
+			Topics:      log.Topics,
+			Data:        log.Data,
+			BlockNumber: log.BlockNumber,
+			TxHash:      log.TxHash,
+			TxIndex:     log.TxIndex,
+			BlockHash:   log.BlockHash,
+			Index:       log.Index,
+			Removed:     log.Removed,
+		}
 	}
 
 	return res, nil
