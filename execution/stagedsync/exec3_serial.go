@@ -96,7 +96,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 	}
 
 	var gasPool *core.GasPool
-	for taskIndex, task := range tasks {
+	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
