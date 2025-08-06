@@ -243,7 +243,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				var lastReceipt *types.Receipt
 				// get last receipt and store the last log index + 1
-				fmt.Println("LAST REC", len(blockReceipts), txTask.TxIndex-startTxIndex, txTask.TxIndex-startTxIndex-1)
+				fmt.Println(txTask.BlockNumber(), txTask.TxIndex, "LAST REC", len(blockReceipts), txTask.TxIndex-startTxIndex, txTask.TxIndex-startTxIndex-1)
 				if len(blockReceipts) >= txTask.TxIndex-startTxIndex {
 					lastReceipt = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				}
