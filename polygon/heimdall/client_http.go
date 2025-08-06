@@ -30,9 +30,8 @@ import (
 )
 
 var (
-	ErrNotInRejectedList   = errors.New("milestoneId doesn't exist in rejected list")
-	ErrNotInMilestoneList  = errors.New("milestoneId doesn't exist in Heimdall")
-	ErrNotInCheckpointList = errors.New("checkpontId doesn't exist in Heimdall")
+	ErrNotInRejectedList  = errors.New("milestoneId doesn't exist in rejected list")
+	ErrNotInMilestoneList = errors.New("milestoneId doesn't exist in Heimdall")
 )
 
 const (
