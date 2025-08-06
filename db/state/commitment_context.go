@@ -160,7 +160,7 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, txNum uint64, state []byte, err error) {
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
-		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
+		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	state, _, err = sdc.mainTtx.Branch(keyCommitmentState)
 	if err != nil {
@@ -253,7 +253,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 // encodes current trie state and saves it in SharedDomains
 func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNum, txNum uint64, rootHash []byte) error {
 	if sdc.mainTtx == nil {
-		return fmt.Errorf("store commitment state: AggregatorContext is not initialized")
+		return errors.New("store commitment state: AggregatorContext is not initialized")
 	}
 	encodedState, err := sdc.encodeCommitmentState(blockNum, txNum)
 	if err != nil {

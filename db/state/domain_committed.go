@@ -364,7 +364,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		if r := recover(); r != nil {
 			dt.d.logger.Crit("lookupByShortenedKey panics",
 				"err", r,
-				"offset", offset, "short", fmt.Sprintf("%x", shortKey),
+				"offset", offset, "short", hex.EncodeToString(shortKey),
 				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
 				"file", getter.FileName())
 		}
@@ -374,7 +374,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 	getter.Reset(offset)
 	n := getter.HasNext()
 	if !n || uint64(getter.Size()) <= offset {
-		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", fmt.Sprintf("%x", shortKey), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
+		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", hex.EncodeToString(shortKey), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
 		return nil, false
 	}
 
@@ -470,7 +470,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
-							"shortened", fmt.Sprintf("%x", key),
+							"shortened", hex.EncodeToString(key),
 							"merging", rng.String("", dt.d.aggregationStep),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 						)
@@ -500,7 +500,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",
-						"shortened", fmt.Sprintf("%x", key),
+						"shortened", hex.EncodeToString(key),
 						"merging", rng.String("", dt.d.aggregationStep),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 					)
