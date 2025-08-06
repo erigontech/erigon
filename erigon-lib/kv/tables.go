@@ -787,6 +787,10 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 		return RCacheHistoryIdx, nil
 	case "logaddrs":
 		return LogAddrIdx, nil
+	case "logaddr":
+		return LogAddrIdx, nil
+	case "logtopic":
+		return LogTopicIdx, nil
 	case "logtopics":
 		return LogTopicIdx, nil
 	case "tracesfrom":
@@ -796,6 +800,18 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 	default:
 		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
 	}
+}
+
+func String2Enum(in string) (uint16, error) {
+	ii, err := String2InvertedIdx(in)
+	if err != nil {
+		d, errD := String2Domain(in)
+		if errD != nil {
+			return 0, errD
+		}
+		return uint16(d), nil
+	}
+	return uint16(ii), nil
 }
 
 const (

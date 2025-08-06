@@ -3,9 +3,15 @@ package cmd
 import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/spf13/cobra"
+	"io/fs"
+	"os"
+	"path/filepath"
 )
 
 var (
@@ -37,9 +43,10 @@ var renameCmd = &cobra.Command{
 		fmt.Printf("Renaming in %s, selected domains: %v, extensions: %v\n", datadir, domains, exts)
 
 		// collect rename operations
-		var changedFiles []string
-		// TODO: implement file walking and renaming, appending to changedFiles
-
+		changedFiles, err := renameFiles(domains, exts, datadir2.New(datadir))
+		if err != nil {
+			return err
+		}
 		if len(changedFiles) > 0 {
 			fmt.Println("Renamed files:")
 			for _, f := range changedFiles {
@@ -60,23 +67,105 @@ func init() {
 	renameCmd.Flags().StringSliceVar(&excludeExts, "exclude-exts", []string{}, "Extensions to exclude")
 }
 
-func renameFiles(domains []string, exts []string) error {
-	renameVerMap := make(map[string]string)
+type fileSmallMapping struct {
+	name uint16
+	ext  string
+}
+
+func renameFiles(domains []string, exts []string, dirs datadir2.Dirs) ([]string, error) {
+	renameVerMap := make(map[fileSmallMapping]snaptype.Version)
 	for _, dString := range domains {
 		d, err := kv.String2Domain(dString)
 		if err == nil {
-			state.Schema.GetDomainCfg(d).GetVersions().Domain.DataKV.Current
-			state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorBT.Current
-			state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVI.Current
-			state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVEI.Current
-			state.Schema.GetDomainCfg(d).GetVersions().Hist.DataV.Current
-			state.Schema.GetDomainCfg(d).GetVersions().Hist.AccessorVI.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".kv",
+			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.DataKV.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".bt",
+			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorBT.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".kvi",
+			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVI.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".kvei",
+			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVEI.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".v",
+			}] = state.Schema.GetDomainCfg(d).GetVersions().Hist.DataV.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(d),
+				ext:  ".vi",
+			}] = state.Schema.GetDomainCfg(d).GetVersions().Hist.AccessorVI.Current
 		} else {
 			ii, _ := kv.String2InvertedIdx(dString)
-			state.Schema.GetIICfg(ii).GetVersions().II.DataEF.Current
-			state.Schema.GetIICfg(ii).GetVersions().II.AccessorEFI.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(ii),
+				ext:  ".ef",
+			}] = state.Schema.GetIICfg(ii).GetVersions().II.DataEF.Current
+			renameVerMap[fileSmallMapping{
+				name: uint16(ii),
+				ext:  ".efi",
+			}] = state.Schema.GetIICfg(ii).GetVersions().II.AccessorEFI.Current
 		}
 	}
+	changedFiles := make([]string, 0)
+	extForRenameMap := make(map[string]struct{})
+	for _, e := range exts {
+		extForRenameMap[e] = struct{}{}
+	}
+	domainsForRenameMap := make(map[uint16]struct{})
+	for _, d := range domains {
+		dEnum, err := kv.String2Enum(d)
+		if err != nil {
+			return nil, err
+		}
+		domainsForRenameMap[dEnum] = struct{}{}
+	}
+	if err := filepath.WalkDir(dirs.Snap, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if _, ok := extForRenameMap[filepath.Ext(path)]; !ok {
+			return nil
+		}
 
-	state.Schema.GetDomainCfg()
+		// Call the internal rename function on each file
+		dir, fName := filepath.Split(path)
+		f, _, ok := snaptype.ParseFileName(dir, fName)
+		if !ok {
+			return nil
+		}
+		dEnum, err := kv.String2Enum(f.TypeString)
+		if err != nil {
+			return err
+		}
+		if _, okEnum := domainsForRenameMap[dEnum]; !okEnum {
+			return nil
+		}
+		newVer := renameVerMap[fileSmallMapping{
+			name: dEnum,
+			ext:  f.Ext,
+		}]
+		if !f.Version.Eq(newVer) {
+			newFileName := version.ReplaceVersion(path, f.Version, newVer)
+			if err := os.Rename(path, newFileName); err != nil {
+				return fmt.Errorf("failed to rename %s: %w", path, err)
+			}
+			changedFiles = append(changedFiles, newFileName)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("error walking directory %s: %w", dirs.Snap, err)
+	}
+
+	return changedFiles, nil
 }
