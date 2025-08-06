@@ -18,6 +18,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -275,7 +276,7 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	applyTx := tx.Tx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
-		return fmt.Errorf("can't apply: transaction closed")
+		return errors.New("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
 }
@@ -322,7 +323,7 @@ func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
-		return fmt.Errorf("can't apply: transaction closed")
+		return errors.New("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
 }
@@ -332,7 +333,7 @@ func (tx *RwTx) ApplyRW(ctx context.Context, f func(tx kv.RwTx) error) error {
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
-		return fmt.Errorf("can't apply: transaction closed")
+		return errors.New("can't apply: transaction closed")
 	}
 	return applyTx.ApplyRw(ctx, f)
 }

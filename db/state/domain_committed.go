@@ -20,15 +20,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -203,7 +203,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
 				s0, s1 := fStartTxNum/sd.stepSize, fEndTxNum/sd.stepSize
-				logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
+				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
@@ -220,7 +220,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
 			s0, s1 := fStartTxNum/sd.stepSize, fEndTxNum/sd.stepSize
-			logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
+			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
