@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 )
 
 type EntityFetcher[TEntity Entity] struct {
@@ -102,7 +103,7 @@ func (f *EntityFetcher[TEntity]) FetchEntitiesRangeSequentially(ctx context.Cont
 		select {
 		case <-progressLogTicker.C:
 			f.logger.Info(
-				heimdallLogPrefix(f.name+" fetch entities sequentially periodic progress"),
+				poshttp.HeimdallLogPrefix(f.name+" fetch entities sequentially periodic progress"),
 				"current", id,
 				"start", idRange.Start,
 				"end", idRange.End,
@@ -150,7 +151,7 @@ func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntit
 		select {
 		case <-progressLogTicker.C:
 			f.logger.Info(
-				heimdallLogPrefix(f.name+" fetch all entities periodic progress"),
+				poshttp.HeimdallLogPrefix(f.name+" fetch all entities periodic progress"),
 				"page", page,
 				"len", len(entities),
 			)
@@ -170,7 +171,7 @@ func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntit
 	}
 
 	f.logger.Debug(
-		heimdallLogPrefix(f.name+" fetch all entities done"),
+		poshttp.HeimdallLogPrefix(f.name+" fetch all entities done"),
 		"len", len(entities),
 		"duration", time.Since(fetchStartTime),
 	)

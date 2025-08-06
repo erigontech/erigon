@@ -170,17 +170,17 @@ func (s *Service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 }
 
 func (s *Service) SynchronizeCheckpoints(ctx context.Context) (*Checkpoint, bool, error) {
-	s.logger.Info(heimdallLogPrefix("synchronizing checkpoints..."))
+	s.logger.Info(poshttp.HeimdallLogPrefix("synchronizing checkpoints..."))
 	return s.checkpointScraper.Synchronize(ctx)
 }
 
 func (s *Service) SynchronizeMilestones(ctx context.Context) (*Milestone, bool, error) {
-	s.logger.Info(heimdallLogPrefix("synchronizing milestones..."))
+	s.logger.Info(poshttp.HeimdallLogPrefix("synchronizing milestones..."))
 	return s.milestoneScraper.Synchronize(ctx)
 }
 
 func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
-	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
+	s.logger.Debug(poshttp.HeimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
 
 	lastSpan, ok, err := s.store.Spans().LastEntity(ctx)
 	if err != nil {
@@ -311,7 +311,7 @@ func (s *Service) Ready(ctx context.Context) <-chan error {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	s.logger.Info(heimdallLogPrefix("running heimdall service component"))
+	s.logger.Info(poshttp.HeimdallLogPrefix("running heimdall service component"))
 
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {

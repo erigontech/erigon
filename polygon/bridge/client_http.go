@@ -21,10 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -48,30 +45,81 @@ func NewHttpClient(urlString string, logger log.Logger, opts ...poshttp.ClientOp
 }
 
 const (
-	fetchStateSyncEventsFormat = "from-id=%d&to-time=%d&limit=%d"
-	fetchStateSyncEventsPath   = "clerk/event-record/list"
-	fetchStateSyncEvent        = "clerk/event-record/%s"
+	fetchStateSyncEventsFormatV1 = "from-id=%d&to-time=%d&limit=%d"
+	fetchStateSyncEventsFormatV2 = "from_id=%d&to_time=%s&pagination.limit=%d"
+	fetchStateSyncEventsPathV1   = "clerk/event-record/list"
+	fetchStateSyncEventsPathV2   = "clerk/time"
 )
 
 func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
 	eventRecords := make([]*EventRecordWithTime, 0)
 
+	if c.Version() == poshttp.HeimdallV2 {
+		for {
+			url, err := stateSyncListURLv2(c.UrlString, fromID, to.Unix())
+			if err != nil {
+				return nil, err
+			}
+
+			c.Logger.Trace(poshttp.HeimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+
+			reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
+
+			response, err := poshttp.FetchWithRetry[StateSyncEventsResponseV2](reqCtx, c.Client, url, c.Logger)
+			if err != nil {
+				if errors.Is(err, poshttp.ErrNoResponse) {
+					// for more info check https://github.com/maticnetwork/heimdall/pull/993
+					c.Logger.Warn(
+						poshttp.HeimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+						"path", url.Path,
+						"queryParams", url.RawQuery,
+					)
+				}
+				return nil, err
+			}
+
+			if response == nil || response.EventRecords == nil {
+				// status 204
+				break
+			}
+
+			records, err := response.GetEventRecords()
+			if err != nil {
+				return nil, err
+			}
+
+			eventRecords = append(eventRecords, records...)
+
+			if len(response.EventRecords) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
+				break
+			}
+
+			fromID += uint64(StateEventsFetchLimit)
+		}
+
+		sort.SliceStable(eventRecords, func(i, j int) bool {
+			return eventRecords[i].ID < eventRecords[j].ID
+		})
+
+		return eventRecords, nil
+	}
+
 	for {
-		url, err := stateSyncListURL(c.UrlString, fromID, to.Unix())
+		url, err := stateSyncListURLv1(c.UrlString, fromID, to.Unix())
 		if err != nil {
 			return nil, err
 		}
 
-		c.Logger.Trace(bridgeLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+		c.Logger.Trace(poshttp.HeimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
 
 		reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
 
-		response, err := poshttp.FetchWithRetry[StateSyncEventsResponseV2](reqCtx, c.Client, url, c.Logger)
+		response, err := poshttp.FetchWithRetry[StateSyncEventsResponseV1](reqCtx, c.Client, url, c.Logger)
 		if err != nil {
 			if errors.Is(err, poshttp.ErrNoResponse) {
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993
 				c.Logger.Warn(
-					bridgeLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+					poshttp.HeimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
 					"path", url.Path,
 					"queryParams", url.RawQuery,
 				)
@@ -79,17 +127,14 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 			return nil, err
 		}
 
-		if response == nil || response.EventRecords == nil {
+		if response == nil || response.Result == nil {
 			// status 204
 			break
 		}
-		records, err := response.GetEventRecords()
-		if err != nil {
-			return nil, err
-		}
-		eventRecords = append(eventRecords, records...)
 
-		if len(records) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
+		eventRecords = append(eventRecords, response.Result...)
+
+		if len(response.Result) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
 			break
 		}
 
@@ -103,49 +148,15 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 	return eventRecords, nil
 }
 
-func (c *HttpClient) FetchStateSyncEvent(ctx context.Context, id uint64) (*EventRecordWithTime, error) {
-	url, err := stateSyncURL(c.UrlString, id)
-
-	if err != nil {
-		return nil, err
-	}
-
-	ctx = poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
-
-	isRecoverableError := func(err error) bool {
-		return !strings.Contains(err.Error(), "could not get state record; No record found")
-	}
-
-	response, err := poshttp.FetchWithRetryEx[StateSyncEventResponse](ctx, c.Client, url, isRecoverableError, c.Logger)
-
-	if err != nil {
-		if strings.Contains(err.Error(), "could not get state record; No record found") {
-			return nil, ErrEventRecordNotFound
-		}
-
-		return nil, err
-	}
-
-	return &response.Result, nil
+func stateSyncListURLv1(urlString string, fromID uint64, to int64) (*url.URL, error) {
+	queryParams := fmt.Sprintf(fetchStateSyncEventsFormatV1, fromID, to, StateEventsFetchLimit)
+	return poshttp.MakeURL(urlString, fetchStateSyncEventsPathV1, queryParams)
 }
 
-func stateSyncListURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
-	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, to, StateEventsFetchLimit)
-	return makeURL(urlString, fetchStateSyncEventsPath, queryParams)
-}
+func stateSyncListURLv2(urlString string, fromID uint64, to int64) (*url.URL, error) {
+	t := time.Unix(to, 0).UTC()
+	formattedTime := t.Format(time.RFC3339Nano)
 
-func stateSyncURL(urlString string, id uint64) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchStateSyncEvent, strconv.FormatUint(id, 10)), "")
-}
-
-func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
-	u, err := url.Parse(urlString)
-	if err != nil {
-		return nil, err
-	}
-
-	u.Path = path.Join(u.Path, rawPath)
-	u.RawQuery = rawQuery
-
-	return u, err
+	queryParams := fmt.Sprintf(fetchStateSyncEventsFormatV2, fromID, formattedTime, StateEventsFetchLimit)
+	return poshttp.MakeURL(urlString, fetchStateSyncEventsPathV2, queryParams)
 }

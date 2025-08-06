@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
@@ -61,7 +62,7 @@ type spanBlockProducersTracker struct {
 }
 
 func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
-	t.logger.Info(heimdallLogPrefix("running span block producers tracker component"))
+	t.logger.Info(poshttp.HeimdallLogPrefix("running span block producers tracker component"))
 
 	defer close(t.idleSignal)
 	for {
@@ -107,7 +108,7 @@ func (t *spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
 }
 
 func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
-	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
+	t.logger.Debug(poshttp.HeimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
 
 	lastProducerSelection, ok, err := t.store.LastEntity(ctx)
 	if err != nil {
@@ -188,7 +189,7 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 	}
 
 	t.logger.Debug(
-		heimdallLogPrefix("producers api timing"),
+		poshttp.HeimdallLogPrefix("producers api timing"),
 		"blockNum", blockNum,
 		"time", time.Since(startTime),
 		"increments", increments,

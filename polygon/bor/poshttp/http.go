@@ -303,3 +303,7 @@ func internalFetchWithTimeout(ctx context.Context, handler httpRequestHandler, u
 	// request data once
 	return internalFetch(ctx, handler, url, logger, logPrefix)
 }
+
+func HeimdallLogPrefix(message string) string {
+	return "[bor.heimdall] " + message
+}
