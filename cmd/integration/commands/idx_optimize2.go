@@ -51,7 +51,7 @@ var idxOptimize2 = &cobra.Command{
 		}
 		defer idxInput.Close()
 
-		idxOutput, err := seg.NewCompressor(ctx, "optimizoor", fullpath+".new", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
+		idxOutput, err := seg.NewCompressor(ctx, "optimizoor", fullpath+".new", dirs.Tmp, seg.DefaultWordLvlCfg, log.LvlInfo, logger)
 		if err != nil {
 			logger.Error("Failed to open compressor", "error", err)
 			return
@@ -125,7 +125,7 @@ var idxOptimize2 = &cobra.Command{
 			return
 		}
 		logger.Info("building recsplit")
-		if err := state.BuildHashMapAccessor(ctx, seg.NewReader(data.MakeGetter(), seg.CompressNone), idxPath, false, cfg, ps, logger); err != nil {
+		if err := state.BuildHashMapAccessor(ctx, seg.NewReader(data.MakeGetter(), seg.CompressNone), idxPath, cfg, ps, logger); err != nil {
 			logger.Error("Failed to build accessor", "error", err)
 			return
 		}
