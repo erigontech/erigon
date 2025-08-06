@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -43,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/bridge"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
@@ -69,14 +67,6 @@ func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
 
 func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
-}
-
-func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*bridge.EventRecordWithTime, error) {
-	return nil, nil
-}
-
-func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*bridge.EventRecordWithTime, error) {
-	return nil, nil
 }
 
 func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
