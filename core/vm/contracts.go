@@ -62,10 +62,10 @@ func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract
 		return PrecompiledContractsOsaka
 	case chainRules.IsBhilai:
 		return PrecompiledContractsBhilai
-	case evm.chainRules.IsStylus:
-		precompiles = PrecompiledContractsArbOS30
-	case evm.chainRules.IsArbitrum:
-		precompiles = PrecompiledContractsArbitrum
+	case chainRules.IsStylus:
+		return PrecompiledContractsArbOS30
+	case chainRules.IsArbitrum:
+		return PrecompiledContractsArbitrum
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
 	case chainRules.IsNapoli:

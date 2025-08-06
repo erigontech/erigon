@@ -464,10 +464,10 @@ func (c *Config) SecondsPerSlot() uint64 {
 
 func (c *Config) SystemContracts(time uint64) map[string]common.Address {
 	contracts := map[string]common.Address{}
-	if c.IsCancun(time) {
+	if c.IsCancun(time, 0 /* currentArbosVersion */) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
-	if c.IsPrague(time) {
+	if c.IsPrague(time, 0 /* currentArbosVersion */) {
 		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
 		contracts["DEPOSIT_CONTRACT_ADDRESS"] = c.DepositContract
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
