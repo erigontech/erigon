@@ -148,10 +148,6 @@ func (r *Reader) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uin
 	return r.store.EventTxnToBlockNum(ctx, borTxHash)
 }
 
-func (r *Reader) EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
-	return r.store.EventsByBlock(ctx, hash, blockNum)
-}
-
 func (r *Reader) Close() {
 	r.store.Close()
 }
