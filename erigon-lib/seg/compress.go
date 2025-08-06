@@ -258,7 +258,7 @@ func (c *Compressor) Compress() error {
 			return err
 		}
 	}
-	defer os.Remove(c.tmpOutFilePath)
+	defer dir2.RemoveFile(c.tmpOutFilePath)
 
 	cf, err := os.Create(c.tmpOutFilePath)
 	if err != nil {
@@ -855,7 +855,7 @@ func (f *RawWordsFile) Close() {
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	os.Remove(f.filePath)
+	dir2.RemoveFile(f.filePath)
 }
 func (f *RawWordsFile) Append(v []byte) error {
 	f.count++

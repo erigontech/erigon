@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -130,7 +131,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 		return err
 	}
 
-	defer os.RemoveAll(tempDir)
+	defer dir.RemoveAll(tempDir)
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
@@ -231,7 +232,7 @@ func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.R
 	}
 
 	_ = os.WriteFile(filepath.Join(tmpDir, manifestFile), manifestEntries.Bytes(), 0644)
-	defer os.Remove(filepath.Join(tmpDir, manifestFile))
+	defer dir.RemoveFile(filepath.Join(tmpDir, manifestFile))
 
 	return srcSession.Upload(ctx, manifestFile)
 }

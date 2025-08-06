@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path"
 	"path/filepath"
@@ -525,7 +526,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 func removeMany(filePaths ...string) error {
 	for _, filePath := range filePaths {
-		if err := os.Remove(filePath); err != nil {
+		if err := dir.RemoveFile(filePath); err != nil {
 			_, fileName := filepath.Split(filePath)
 			return fmt.Errorf("failed to remove the file: %s, %w", fileName, err)
 		}
@@ -535,6 +536,6 @@ func removeMany(filePaths ...string) error {
 
 func removeManyIgnoreError(filePaths ...string) {
 	for _, filePath := range filePaths {
-		os.Remove(filePath)
+		dir.RemoveFile(filePath)
 	}
 }

@@ -664,7 +664,9 @@ Loop:
 
 				aggregatorRo := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 
-				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
+				isBatchFull := executor.readState().SizeEstimate() >= commitThreshold
+
+				needCalcRoot := isBatchFull ||
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
@@ -707,13 +709,15 @@ Loop:
 				}
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
-				if !initialCycle {
-					break Loop
+				if !initialCycle && isBatchFull {
+					maxBlockNum = min(maxBlockNum, blockNum+changesetSafeRange) // allow for some changesets to be generated.
 				}
-				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
-					"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
-					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
+				if initialCycle {
+					logger.Info("Committed", "time", time.Since(commitStart),
+						"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
+						"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
+						"flush+commitment", t1, "tx.commit", t2, "prune", t3)
+				}
 			default:
 			}
 		}

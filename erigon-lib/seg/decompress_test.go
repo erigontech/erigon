@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -519,7 +520,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 			"file is some garbage or smaller compressedMinSize(%d) bytes, got error %v", compressedMinSize, err)
 		require.Nil(t, d)
 
-		err = os.Remove(fpath)
+		err = dir.RemoveFile(fpath)
 		require.NoError(t, err)
 
 		aux = make([]byte, compressedMinSize)

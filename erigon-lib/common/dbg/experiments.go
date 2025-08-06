@@ -31,6 +31,7 @@ import (
 )
 
 var (
+	TraceDeletion       = EnvBool("TRACE_DELETION", false)
 	noMemstat           = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
