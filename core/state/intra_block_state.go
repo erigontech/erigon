@@ -471,7 +471,11 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
 		if stateObject != nil && !stateObject.deleted {
 			code, err := stateObject.Code()
 			if sdb.trace || dbg.TraceAccount(addr) {
-				fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
+				if err != nil {
+					fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, err)
+				} else {
+					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
+				}
 			}
 			return code, err
 		}
@@ -493,7 +497,11 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) ([]byte, error) {
 		})
 
 	if sdb.trace || dbg.TraceAccount(addr) {
-		fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
+		if err != nil {
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, err)
+		} else {
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
+		}
 	}
 
 	return code, err

@@ -159,7 +159,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 					se.cfg.notifications.RecentLogs.Add(blockReceipts)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
-				fmt.Println("check block", txTask.BlockNumber(), txTask.TxIndex, startTxIndex)
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {

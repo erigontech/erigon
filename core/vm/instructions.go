@@ -980,6 +980,18 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	return nil, nil
 }
 
+func stCreate(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	var (
+		value  = stack.data[len(stack.data)-1]
+		offset = stack.data[len(stack.data)-2]
+		size   = stack.data[len(stack.data)-3]
+		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	)
+
+	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.Contract.Gas)
+}
+
 func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
@@ -1015,6 +1027,18 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 	interpreter.returnData = nil // clear dirty return data buffer
 	return nil, nil
+}
+
+func stCreate2(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	var (
+		endowment    = stack.data[len(stack.data)-1]
+		offset, size = stack.data[len(stack.data)-2], stack.data[len(stack.data)-3]
+		salt         = stack.data[len(stack.data)-4]
+		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	)
+
+	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.Contract.Gas)
 }
 
 func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
