@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/types/testdata"
+	"github.com/erigontech/erigon/execution/types/testdata"
 )
 
 func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {

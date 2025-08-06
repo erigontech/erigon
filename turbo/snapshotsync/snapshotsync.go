@@ -28,8 +28,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -41,6 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 

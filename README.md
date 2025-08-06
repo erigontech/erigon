@@ -157,7 +157,7 @@ datadir
 # There is 4 domains: account, storage, code, commitment 
 ```
 
-See the [lib](erigon-db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
+See the [lib](db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
 
 ### History on cheap disk
 
