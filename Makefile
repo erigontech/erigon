@@ -180,29 +180,20 @@ test-erigon-lib-all:
 test-erigon-lib-all-race:
 	@cd erigon-lib && $(MAKE) test-all-race
 
-test-erigon-db-short:
-	@cd erigon-db && $(MAKE) test-short
-
-test-erigon-db-all:
-	@cd erigon-db && $(MAKE) test-all
-
-test-erigon-db-all-race:
-	@cd erigon-db && $(MAKE) test-all-race
-
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short test-erigon-db-short
+test-short: test-erigon-lib-short
 	@{ \
-		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
+		$(GOTEST) -short > run.log 2>&1; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \
 	}
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all test-erigon-db-all
+test-all: test-erigon-lib-all
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -211,7 +202,7 @@ test-all: test-erigon-lib-all test-erigon-db-all
 	}
 
 ## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race test-erigon-db-all-race
+test-all-race: test-erigon-lib-all-race
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
 		STATUS=$$?; \
@@ -336,12 +327,10 @@ lint:
 	@cd erigon-lib && $(MAKE) lint
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
-	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## tidy:                              `go mod tidy`
 tidy:
 	cd erigon-lib && go mod tidy
-	cd erigon-db && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir

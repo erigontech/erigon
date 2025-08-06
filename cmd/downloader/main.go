@@ -43,9 +43,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -59,6 +56,9 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
@@ -67,7 +67,7 @@ import (
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/db/snaptype"      //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
@@ -243,8 +243,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"datadir", dirs.DataDir,
 		"ipv6-enabled", !disableIPV6,
 		"ipv4-enabled", !disableIPV4,
-		"download.rate", downloadRate.String(),
-		"upload.rate", uploadRate.String(),
+		"download.rate", downloadRateStr,
+		"upload.rate", uploadRateStr,
 		"webseed", webseeds,
 	)
 

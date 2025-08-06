@@ -92,7 +92,7 @@ jobs:
         env:
           SKIP_FLAKY_TESTS: 'true'
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all-race
+        run: GOGC=80 make test-all
 
       - name: SonarCloud scan in case OS Linux and changed_files is not true
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'

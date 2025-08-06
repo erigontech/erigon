@@ -24,10 +24,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 )
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {

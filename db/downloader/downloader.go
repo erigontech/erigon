@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,6 +42,7 @@ import (
 	"github.com/anacrolix/torrent/webseed"
 	"github.com/c2h5oh/datasize"
 	"github.com/puzpuzpuz/xsync/v4"
+	"golang.org/x/net/http2"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
@@ -55,7 +57,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -65,6 +66,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 )
 
 var debugWebseed = false
@@ -140,10 +142,10 @@ type AggStats struct {
 	BytesCompleted, BytesTotal uint64
 	CompletionRate             uint64
 
-	BytesDownload, BytesUpload uint64
-	UploadRate, DownloadRate   uint64
-	LocalFileHashes            int
-	LocalFileHashTime          time.Duration
+	BytesDownload, BytesUpload                                 uint64
+	ClientWebseedBytesDownload, ClientWebseedBytesDownloadRate uint64
+	PeerConnBytesDownload, PeerConnBytesDownloadRate           uint64
+	UploadRate, DownloadRate                                   uint64
 
 	BytesHashed, BytesFlushed uint64
 	HashRate, FlushRate       uint64
@@ -161,7 +163,7 @@ func (me *AggStats) AllTorrentsComplete() bool {
 }
 
 type requestHandler struct {
-	http.Transport
+	http.RoundTripper
 	downloader *Downloader
 }
 
@@ -170,9 +172,16 @@ var cloudflareHeaders = http.Header{
 }
 
 func insertCloudflareHeaders(req *http.Request) {
+	// Note this is clobbering the headers.
 	for key, value := range cloudflareHeaders {
 		req.Header[key] = value
 	}
+}
+
+type roundTripperFunc func(req *http.Request) (*http.Response, error)
+
+func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return me(req)
 }
 
 // TODO(anacrolix): Upstream any logic that works reliably.
@@ -199,7 +208,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	insertCloudflareHeaders(req)
 
 	webseedTripCount.Add(1)
-	resp, err = r.Transport.RoundTrip(req)
+	resp, err = r.RoundTripper.RoundTrip(req)
 	if err != nil {
 		return
 	}
@@ -247,23 +256,56 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	// buckets. If we could limit HTTP requests to 1 per connection we'd do that, but the HTTP2
 	// config field doesn't do anything yet in Go 1.24 (and 1.25rc1). Disabling HTTP2 is another way
 	// to achieve this.
-	requestHandler := requestHandler{
-		Transport: http.Transport{
-			ReadBufferSize: 256 << 10,
-			// Note this does nothing in go1.24.
-			//HTTP2: &http.HTTP2Config{
-			//	MaxConcurrentStreams: 1,
-			//},
-			// Big hammer to achieve one request per connection.
-			//DisableKeepAlives: true,
-		},
+	requestTransport := &http.Transport{
+		ReadBufferSize: 2 << 20,
+		// Note this does nothing in go1.24.
+		//HTTP2: &http.HTTP2Config{
+		//	MaxConcurrentStreams: 1,
+		//},
+		// Big hammer to achieve one request per connection.
+		DisableKeepAlives: os.Getenv("DOWNLOADER_DISABLE_KEEP_ALIVES") != "",
+		// I see requests get stuck waiting for headers to come back. I suspect Go 1.24 HTTP2
+		// bug.
+		ResponseHeaderTimeout: time.Minute,
 	}
 
+	if s := os.Getenv("DOWNLOADER_MAX_CONNS_PER_HOST"); s != "" {
+		var err error
+		i64, err := strconv.ParseInt(s, 10, 0)
+		panicif.Err(err)
+		requestTransport.MaxConnsPerHost = int(i64)
+	}
+
+	requestHandler := requestHandler{
+		RoundTripper: requestTransport,
+	}
 	// Disable HTTP2. See above.
-	//g.MakeMap(&requestHandler.Transport.TLSNextProto)
+	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") == "" {
+		// Don't set the http2.Transport as the RoundTripper. It's hooked into the http.Transport by
+		// this call.
+		h2t, err := http2.ConfigureTransports(requestTransport)
+		panicif.Err(err)
+		h2t.ReadIdleTimeout = 15 * time.Second
+		h2t.MaxReadFrameSize = 2 << 20 // Same as ReadBufferSize?
+	} else {
+		// Disable h2 being added automatically.
+		g.MakeMap(&requestTransport.TLSNextProto)
+	}
 
 	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
 	cfg.ClientConfig.WebTransport = &requestHandler
+	metainfoSourcesTransport := http.Transport{
+		MaxConnsPerHost:       10,
+		ResponseHeaderTimeout: time.Minute,
+	}
+	// Separate transport so webseed requests and metainfo fetching don't block each other.
+	// Additionally, we can tune for their specific workloads.
+	cfg.ClientConfig.MetainfoSourcesClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			insertCloudflareHeaders(req)
+			return metainfoSourcesTransport.RoundTrip(req)
+		}),
+	}
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
 	if err != nil {
@@ -272,7 +314,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 	defer db.Close()
 
-	var addWebSeedOpts []torrent.AddWebSeedsOpt
+	var addWebSeedOpts []torrent.AddWebSeedsOpt //nolint:prealloc
 
 	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter() {
 		addWebSeedOpts = append(
@@ -423,8 +465,11 @@ func (d *Downloader) messyLogWrapper() {
 		d.logProgress()
 	}
 
+	// TODO: The rest of this function either needs be merged into a single Downloader state logger,
+	// or put in its own routine on its own timer.
+
 	// Or files==0?
-	if d.logSeeding {
+	if !d.logSeeding {
 		return
 	}
 
@@ -561,13 +606,13 @@ func (d *Downloader) ReCalcStats() {
 		log.Debug("[snapshots] downloading",
 			"len", stats.NumTorrents,
 			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"hash-rate", common.ByteCount(stats.HashRate)+"/s", //nolint
 			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"completion-rate", common.ByteCount(stats.CompletionRate)+"/s", //nolint
 			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"flush-rate", common.ByteCount(stats.FlushRate)+"/s", //nolint
 			"downloaded", common.ByteCount(stats.BytesDownload),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)),
+			"download-rate", common.ByteCount(stats.DownloadRate)+"/s", //nolint
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -591,6 +636,8 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
+	stats.ClientWebseedBytesDownload = uint64(connStats.WebSeeds.BytesReadData.Int64())
+	stats.PeerConnBytesDownload = uint64(connStats.PeerConns.BytesReadData.Int64())
 
 	stats.BytesCompleted = 0
 	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
@@ -665,11 +712,16 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 
 	stats.When = time.Now()
 	interval := stats.When.Sub(prevStats.When)
-	stats.DownloadRate = calculateRate(stats.BytesDownload, prevStats.BytesDownload, prevStats.DownloadRate, interval)
-	stats.HashRate = calculateRate(stats.BytesHashed, prevStats.BytesHashed, prevStats.HashRate, interval)
-	stats.FlushRate = calculateRate(stats.BytesFlushed, prevStats.BytesFlushed, prevStats.FlushRate, interval)
-	stats.UploadRate = calculateRate(stats.BytesUpload, prevStats.BytesUpload, prevStats.UploadRate, interval)
-	stats.CompletionRate = calculateRate(stats.BytesCompleted, prevStats.BytesCompleted, prevStats.CompletionRate, interval)
+	calculateRate := func(counter func(*AggStats) uint64, rate func(*AggStats) *uint64) {
+		*rate(&stats) = calculateRate(counter(&stats), counter(&prevStats), *rate(&prevStats), interval)
+	}
+	calculateRate(func(s *AggStats) uint64 { return s.BytesDownload }, func(s *AggStats) *uint64 { return &s.DownloadRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesHashed }, func(s *AggStats) *uint64 { return &s.HashRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesFlushed }, func(s *AggStats) *uint64 { return &s.FlushRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesUpload }, func(s *AggStats) *uint64 { return &s.UploadRate })
+	calculateRate(func(s *AggStats) uint64 { return s.BytesCompleted }, func(s *AggStats) *uint64 { return &s.CompletionRate })
+	calculateRate(func(s *AggStats) uint64 { return s.ClientWebseedBytesDownload }, func(s *AggStats) *uint64 { return &s.ClientWebseedBytesDownloadRate })
+	calculateRate(func(s *AggStats) uint64 { return s.PeerConnBytesDownload }, func(s *AggStats) *uint64 { return &s.PeerConnBytesDownloadRate })
 
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = len(torrents)
@@ -717,7 +769,7 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 				webseedRates = append(
 					webseedRates,
 					strings.TrimSuffix(shortUrl, "/"),
-					fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))),
+					common.ByteCount(uint64(stats.DownloadRate))+"/s",
 				)
 			}
 		}
@@ -746,7 +798,7 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 		}
 		setCommonPeerSegmentFields(&peer.Peer, &stats, &segPeer)
 		peers = append(peers, segPeer)
-		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))))
+		rates = append(rates, url, common.ByteCount(uint64(stats.DownloadRate))+"/s")
 	}
 
 	return rates, peers
@@ -898,16 +950,17 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHash metainfo.Hash,
+	infoHash metainfo.Hash, // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) error {
+	panicif.Zero(infoHash)
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	t, err := d.addPreverifiedTorrent(g.Some(infoHash), name)
 	if err != nil {
 		return err
 	}
+	panicif.Nil(t)
 	g.MakeMapIfNil(&d.requiredTorrents)
 	g.MapInsert(d.requiredTorrents, t, struct{}{})
 	return nil
@@ -916,8 +969,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHashHint g.Option[metainfo.Hash],
+	infoHashHint g.Option[metainfo.Hash], // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) (t *torrent.Torrent, err error) {
 	diskSpecOpt := d.loadSpecFromDisk(name)
@@ -941,12 +993,16 @@ func (d *Downloader) addPreverifiedTorrent(
 		}
 		return infoHashHint.Unwrap()
 	}()
+	panicif.Zero(finalInfoHash)
 
 	ok, err := d.shouldAddTorrent(finalInfoHash, name)
 	if err != nil {
 		return
 	}
 	if !ok {
+		// Return the existing torrent to the caller. If the torrent doesn't exist we should have
+		// returned with an error already.
+		t, _ = d.torrentClient.Torrent(finalInfoHash)
 		return
 	}
 
@@ -1009,7 +1065,7 @@ func (d *Downloader) shouldAddTorrent(
 			}
 		}
 	} else if d.alreadyHaveThisName(name) {
-		return false, fmt.Errorf("name exists with different torrent hash")
+		return false, errors.New("name exists with different torrent hash")
 	}
 	return !ok, nil
 }
@@ -1277,6 +1333,8 @@ func (d *Downloader) logProgress() {
 
 	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
 
+	// TODO: This condition is not ideal as it means we log even if we're not blocked on initial
+	// sync. This decision belongs in the sync stage.
 	if !d.stats.AllTorrentsComplete() {
 		// We have work to do so start timing.
 		d.setStartTime()
@@ -1303,8 +1361,11 @@ func (d *Downloader) logProgress() {
 			}(),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
-			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
+			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.ClientWebseedBytesDownloadRate)), //nolint
+			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)), //nolint
+			"combined-download-todo-remove", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)), //nolint
+			"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)), //nolint
+			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)), //nolint
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys),
 		)
