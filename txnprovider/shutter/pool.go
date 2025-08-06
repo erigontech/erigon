@@ -59,13 +59,18 @@ func NewPool(
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
 	currentBlockNumReader currentBlockNumReader,
+	opts ...Option,
 ) *Pool {
 	logger = logger.New("component", "shutter")
 	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
+	flatOpts := options{slotCalculator: slotCalculator}
+	for _, opt := range opts {
+		opt(&flatOpts)
+	}
 	blockListener := NewBlockListener(logger, stateChangesClient)
 	blockTracker := NewBlockTracker(logger, blockListener, currentBlockNumReader)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
-	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
+	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, flatOpts.slotCalculator, eonTracker)
 	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
 	decryptedTxnsPool := NewDecryptedTxnsPool()
@@ -75,7 +80,7 @@ func NewPool(
 		encryptedTxnsPool,
 		decryptedTxnsPool,
 		blockListener,
-		slotCalculator,
+		flatOpts.slotCalculator,
 	)
 	return &Pool{
 		logger:                  logger,
@@ -88,7 +93,7 @@ func NewPool(
 		decryptionKeysProcessor: decryptionKeysProcessor,
 		encryptedTxnsPool:       encryptedTxnsPool,
 		decryptedTxnsPool:       decryptedTxnsPool,
-		slotCalculator:          slotCalculator,
+		slotCalculator:          flatOpts.slotCalculator,
 	}
 }
 
@@ -288,4 +293,24 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 
 	p.logger.Debug("providing additional public txns", "count", len(additionalTxns))
 	return append(decryptedTxns.Transactions, additionalTxns...), nil
+}
+
+func (p *Pool) AllEncryptedTxns() []EncryptedTxnSubmission {
+	return p.encryptedTxnsPool.AllSubmissions()
+}
+
+func (p *Pool) AllDecryptedTxns() []types.Transaction {
+	return p.decryptedTxnsPool.AllDecryptedTxns()
+}
+
+type Option func(opts *options)
+
+func WithSlotCalculator(slotCalculator SlotCalculator) Option {
+	return func(opts *options) {
+		opts.slotCalculator = slotCalculator
+	}
+}
+
+type options struct {
+	slotCalculator SlotCalculator
 }

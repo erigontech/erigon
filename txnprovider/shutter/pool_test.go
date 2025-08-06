@@ -17,15 +17,20 @@
 package shutter_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -48,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
+	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
@@ -60,20 +66,48 @@ func TestPoolCleanup(t *testing.T) {
 	t.Parallel()
 	pt := NewPoolTest(t)
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
-		// simulate expected contract calls for reading the first eon after the first block event
-		eon, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		// simulate expected contract calls for reading the first ekg after the first block event
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
 		require.NoError(t, err)
-		handle.SimulateInitialEonRead(t, eon)
+		handle.SimulateInitialEonRead(t, ekg)
 		// simulate loadSubmissions after the first block
 		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
 		// simulate the first block
-		err = handle.SimulateNewBlockChange(ctx, 1, 100_000)
+		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-
-		//
-		// TODO - verify that the sub pools get cleaned up
-		//
-		time.Sleep(time.Second)
+		// simulate some encrypted txn submissions and simulate a new block
+		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		encTxn2 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		require.Len(t, pool.AllEncryptedTxns(), 0)
+		err = handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn1),
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 2, encTxn2),
+		})
+		require.NoError(t, err)
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+		// simulate decryption keys
+		handle.SimulateCurrentSlot()
+		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
+		require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+		// simulate one block passing by - decrypted txns pool should get cleaned up after 1 slot
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		require.Eventually(t, WaitDecryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for decrypted txns cleaned")
+		// simulate more blocks passing by - encrypted txns pool should get cleaned up after config.ReorgDepthAwareness
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		require.Eventually(t, WaitEncryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for encrypted txns cleaned")
 	})
 }
 
@@ -124,20 +158,31 @@ func NewPoolTest(t *testing.T) PoolTest {
 	config := shuttercfg.ConfigByChainName(networkname.Chiado)
 	config.PrivateKey = nodeKey
 	config.BootstrapNodes = []string{keySenderPeerAddr}
-	config.BeaconChainGenesisTimestamp = 0
+	config.ReorgDepthAwareness = 3
 	baseTxnProvider := EmptyTxnProvider{}
 	ctrl := gomock.NewController(t)
 	contractBackend := NewMockContractBackend(ctrl)
 	contractBackend.PrepareMocks()
 	stateChangesClient := NewMockStateChangesClient(ctrl)
 	currentBlockNumReader := func(context.Context) (*uint64, error) { return nil, nil }
-	pool := shutter.NewPool(logger, config, baseTxnProvider, contractBackend, stateChangesClient, currentBlockNumReader)
+	slotCalculator := NewMockSlotCalculator(ctrl, config)
+	slotCalculator.PrepareMocks(t)
+	pool := shutter.NewPool(
+		logger,
+		config,
+		baseTxnProvider,
+		contractBackend,
+		stateChangesClient,
+		currentBlockNumReader,
+		shutter.WithSlotCalculator(slotCalculator),
+	)
 	return PoolTest{
 		ctx:                ctx,
 		t:                  t,
 		config:             config,
 		stateChangesClient: stateChangesClient,
 		contractBackend:    contractBackend,
+		slotCalculator:     slotCalculator,
 		keySender:          keySender,
 		poolPeerId:         poolPeerId,
 		pool:               pool,
@@ -150,6 +195,7 @@ type PoolTest struct {
 	config             shuttercfg.Config
 	stateChangesClient *MockStateChangesClient
 	contractBackend    *MockContractBackend
+	slotCalculator     *MockSlotCalculator
 	keySender          testhelpers.DecryptionKeysSender
 	poolPeerId         peer.ID
 	pool               *shutter.Pool
@@ -165,8 +211,12 @@ func (pt PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *sh
 	handle := PoolTestHandle{
 		config:             pt.config,
 		stateChangesClient: pt.stateChangesClient,
+		slotCalculator:     pt.slotCalculator,
 		contractBackend:    pt.contractBackend,
+		keySender:          pt.keySender,
 		pool:               pt.pool,
+		nextBlockNum:       1,
+		nextBlockTime:      pt.config.BeaconChainGenesisTimestamp + pt.config.SecondsPerSlot,
 	}
 	testCase(pt.ctx, pt.t, pt.pool, handle)
 	cancel()
@@ -178,70 +228,112 @@ type PoolTestHandle struct {
 	config             shuttercfg.Config
 	stateChangesClient *MockStateChangesClient
 	contractBackend    *MockContractBackend
+	slotCalculator     *MockSlotCalculator
+	keySender          testhelpers.DecryptionKeysSender
 	pool               *shutter.Pool
+	nextBlockNum       uint64
+	nextBlockTime      uint64
 }
 
-func (h PoolTestHandle) SimulateNewBlockChange(ctx context.Context, blockNum, blockTime uint64) error {
+func (h *PoolTestHandle) SimulateNewBlockChange(ctx context.Context) error {
+	defer func() {
+		h.nextBlockNum++
+		h.nextBlockTime += h.config.SecondsPerSlot
+	}()
 	return h.SimulateStateChange(ctx, MockStateChange{
 		batch: &remoteproto.StateChangeBatch{
 			ChangeBatch: []*remoteproto.StateChange{
-				{BlockHeight: blockNum, BlockTime: blockTime, Direction: remoteproto.Direction_FORWARD},
+				{BlockHeight: h.nextBlockNum, BlockTime: h.nextBlockTime, Direction: remoteproto.Direction_FORWARD},
 			},
 		},
 	})
 }
 
-func (h PoolTestHandle) SimulateStateChange(ctx context.Context, sc MockStateChange) error {
+func (h *PoolTestHandle) SimulateStateChange(ctx context.Context, sc MockStateChange) error {
 	return h.stateChangesClient.SimulateStateChange(ctx, sc)
 }
 
-func (h PoolTestHandle) SimulateCallResult(addr common.Address, result []byte) {
+func (h *PoolTestHandle) SimulateCallResult(addr common.Address, result []byte) {
 	h.contractBackend.SimulateCallResult(addr, result)
 }
 
-func (h PoolTestHandle) SimulateFilterLogs(addr common.Address, logs []types.Log) {
+func (h *PoolTestHandle) SimulateFilterLogs(addr common.Address, logs []types.Log) {
 	h.contractBackend.SimulateFilterLogs(addr, logs)
 }
 
-func (h PoolTestHandle) SimulateInitialEonRead(t *testing.T, eon testhelpers.EonKeyGeneration) {
+func (h *PoolTestHandle) SimulateLogEvents(ctx context.Context, logs []types.Log) error {
+	return h.contractBackend.SimulateLogEvents(ctx, logs)
+}
+
+func (h *PoolTestHandle) SimulateInitialEonRead(t *testing.T, ekg testhelpers.EonKeyGeneration) {
 	ksmAddr := common.HexToAddress(h.config.KeyperSetManagerContractAddress)
 	ksmAbi, err := abi.JSON(strings.NewReader(shuttercontracts.KeyperSetManagerABI))
 	require.NoError(t, err)
 	numKeyperSetsRes, err := ksmAbi.Methods["getNumKeyperSets"].Outputs.PackValues([]any{uint64(1)})
 	require.NoError(t, err)
 	h.SimulateCallResult(ksmAddr, numKeyperSetsRes)
-	activationBlockRes, err := ksmAbi.Methods["getKeyperSetActivationBlock"].Outputs.PackValues([]any{eon.ActivationBlock})
+	activationBlockRes, err := ksmAbi.Methods["getKeyperSetActivationBlock"].Outputs.PackValues([]any{ekg.ActivationBlock})
 	require.NoError(t, err)
 	h.SimulateCallResult(ksmAddr, activationBlockRes)
-	eonIndexRes, err := ksmAbi.Methods["getKeyperSetIndexByBlock"].Outputs.PackValues([]any{uint64(eon.EonIndex)})
+	h.SimulateNewEonRead(t, ekg)
+}
+
+func (h *PoolTestHandle) SimulateCachedEonRead(t *testing.T, ekg testhelpers.EonKeyGeneration) {
+	ksmAddr := common.HexToAddress(h.config.KeyperSetManagerContractAddress)
+	ksmAbi, err := abi.JSON(strings.NewReader(shuttercontracts.KeyperSetManagerABI))
+	require.NoError(t, err)
+	eonIndexRes, err := ksmAbi.Methods["getKeyperSetIndexByBlock"].Outputs.PackValues([]any{uint64(ekg.EonIndex)})
 	require.NoError(t, err)
 	h.SimulateCallResult(ksmAddr, eonIndexRes)
-	keyperSetAddr := common.HexToAddress("0x000000000000000000000000000000005555")
+}
+
+func (h *PoolTestHandle) SimulateNewEonRead(t *testing.T, ekg testhelpers.EonKeyGeneration) {
+	ksmAddr := common.HexToAddress(h.config.KeyperSetManagerContractAddress)
+	ksmAbi, err := abi.JSON(strings.NewReader(shuttercontracts.KeyperSetManagerABI))
+	require.NoError(t, err)
+	eonIndexRes, err := ksmAbi.Methods["getKeyperSetIndexByBlock"].Outputs.PackValues([]any{uint64(ekg.EonIndex)})
+	require.NoError(t, err)
+	h.SimulateCallResult(ksmAddr, eonIndexRes)
+	keyperSetAddr := common.HexToAddress("0x0000000000000000000000000000000000005555")
 	keyperSetAddrRes, err := ksmAbi.Methods["getKeyperSetAddress"].Outputs.PackValues([]any{keyperSetAddr})
 	require.NoError(t, err)
 	h.SimulateCallResult(ksmAddr, keyperSetAddrRes)
 	keyperSetAbi, err := abi.JSON(strings.NewReader(shuttercontracts.KeyperSetABI))
 	require.NoError(t, err)
-	thresholdRes, err := keyperSetAbi.Methods["getThreshold"].Outputs.PackValues([]any{eon.Threshold})
+	thresholdRes, err := keyperSetAbi.Methods["getThreshold"].Outputs.PackValues([]any{ekg.Threshold})
 	require.NoError(t, err)
 	h.SimulateCallResult(keyperSetAddr, thresholdRes)
-	membersRes, err := keyperSetAbi.Methods["getMembers"].Outputs.PackValues([]any{eon.Members()})
+	membersRes, err := keyperSetAbi.Methods["getMembers"].Outputs.PackValues([]any{ekg.Members()})
 	require.NoError(t, err)
 	h.SimulateCallResult(keyperSetAddr, membersRes)
-	var eonKeyBytes []byte
-	err = eon.EonPublicKey.Unmarshal(eonKeyBytes)
-	require.NoError(t, err)
 	keyBroadcastAbi, err := abi.JSON(strings.NewReader(shuttercontracts.KeyBroadcastContractABI))
 	require.NoError(t, err)
+	eonKeyBytes := ekg.EonPublicKey.Marshal()
 	eonKeyRes, err := keyBroadcastAbi.Methods["getEonKey"].Outputs.PackValues([]any{eonKeyBytes})
 	require.NoError(t, err)
 	h.SimulateCallResult(common.HexToAddress(h.config.KeyBroadcastContractAddress), eonKeyRes)
-	activationBlockRes, err = ksmAbi.Methods["getKeyperSetActivationBlock"].Outputs.PackValues([]any{eon.ActivationBlock})
+	activationBlockRes, err := ksmAbi.Methods["getKeyperSetActivationBlock"].Outputs.PackValues([]any{ekg.ActivationBlock})
 	require.NoError(t, err)
 	h.SimulateCallResult(ksmAddr, activationBlockRes)
 	finalizedRes, err := keyperSetAbi.Methods["isFinalized"].Outputs.PackValues([]any{true})
 	require.NoError(t, err)
 	h.SimulateCallResult(keyperSetAddr, finalizedRes)
+}
+
+func (h *PoolTestHandle) SimulateCurrentSlot() {
+	h.slotCalculator.currentSlotTimestamp.Store(h.nextBlockTime)
+}
+
+func (h *PoolTestHandle) SimulateDecryptionKeys(
+	ctx context.Context,
+	t *testing.T,
+	ekg testhelpers.EonKeyGeneration,
+	baseTxnIndex uint64,
+	ips ...*shutter.IdentityPreimage,
+) {
+	slot := h.slotCalculator.CalcCurrentSlot()
+	err := h.keySender.PublishDecryptionKeys(ctx, ekg, slot, baseTxnIndex, ips, h.config.InstanceId)
+	require.NoError(t, err)
 }
 
 type EmptyTxnProvider struct{}
@@ -264,14 +356,17 @@ type MockContractBackend struct {
 	mockedCallResults map[common.Address][][]byte
 	mockedFilterLogs  map[common.Address][][]types.Log
 	subs              map[common.Address][]chan<- types.Log
+	mu                sync.Mutex
 }
 
 func (cb *MockContractBackend) PrepareMocks() {
 	cb.EXPECT().
 		SubscribeFilterLogs(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, query ethereum.FilterQuery, logs chan<- types.Log) (ethereum.Subscription, error) {
-			for _, addr := range query.Addresses {
-				cb.subs[addr] = append(cb.subs[addr], logs)
+		DoAndReturn(func(_ context.Context, q ethereum.FilterQuery, s chan<- types.Log) (ethereum.Subscription, error) {
+			cb.mu.Lock()
+			defer cb.mu.Unlock()
+			for _, addr := range q.Addresses {
+				cb.subs[addr] = append(cb.subs[addr], s)
 			}
 			return MockSubscription{errChan: make(chan error)}, nil
 		}).
@@ -280,6 +375,8 @@ func (cb *MockContractBackend) PrepareMocks() {
 	cb.EXPECT().
 		CallContract(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, msg ethereum.CallMsg, b *big.Int) ([]byte, error) {
+			cb.mu.Lock()
+			defer cb.mu.Unlock()
 			results := cb.mockedCallResults[*msg.To]
 			if len(results) == 0 {
 				return nil, fmt.Errorf("no mocked call result remaining for addr=%s", msg.To)
@@ -293,6 +390,8 @@ func (cb *MockContractBackend) PrepareMocks() {
 	cb.EXPECT().
 		FilterLogs(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+			cb.mu.Lock()
+			defer cb.mu.Unlock()
 			var res []types.Log
 			for _, addr := range query.Addresses {
 				logs := cb.mockedFilterLogs[addr]
@@ -308,29 +407,57 @@ func (cb *MockContractBackend) PrepareMocks() {
 }
 
 func (cb *MockContractBackend) SimulateCallResult(addr common.Address, result []byte) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
 	cb.mockedCallResults[addr] = append(cb.mockedCallResults[addr], result)
 }
 
 func (cb *MockContractBackend) SimulateFilterLogs(addr common.Address, logs []types.Log) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
 	cb.mockedFilterLogs[addr] = append(cb.mockedFilterLogs[addr], logs)
 }
 
+func (cb *MockContractBackend) SimulateLogEvents(ctx context.Context, logs []types.Log) error {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	for _, l := range logs {
+		for _, sub := range cb.subs[l.Address] {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case sub <- l: // no-op
+			}
+		}
+	}
+	return nil
+}
+
 func NewMockStateChangesClient(ctrl *gomock.Controller) *MockStateChangesClient {
-	return &MockStateChangesClient{ctrl: ctrl, ch: make(chan MockStateChange)}
+	return &MockStateChangesClient{ctrl: ctrl}
 }
 
 type MockStateChangesClient struct {
 	ctrl *gomock.Controller
-	ch   chan MockStateChange
+	subs []chan MockStateChange
+	mu   sync.Mutex
 }
 
-func (c MockStateChangesClient) StateChanges(ctx context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+func (c *MockStateChangesClient) StateChanges(
+	ctx context.Context,
+	_ *remoteproto.StateChangeRequest,
+	_ ...grpc.CallOption,
+) (remoteproto.KV_StateChangesClient, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sub := make(chan MockStateChange)
+	c.subs = append(c.subs, sub)
 	mockStream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChange](c.ctrl)
 	mockStream.EXPECT().
 		Recv().
 		DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
 			select {
-			case change := <-c.ch:
+			case change := <-sub:
 				return change.batch, change.err
 			case <-ctx.Done():
 				return nil, io.EOF
@@ -340,13 +467,21 @@ func (c MockStateChangesClient) StateChanges(ctx context.Context, _ *remoteproto
 	return mockStream, nil
 }
 
-func (c MockStateChangesClient) SimulateStateChange(ctx context.Context, sc MockStateChange) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case c.ch <- sc:
-		return nil
+func (c *MockStateChangesClient) SimulateStateChange(ctx context.Context, sc MockStateChange) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var eg errgroup.Group
+	for _, sub := range c.subs {
+		eg.Go(func() error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case sub <- sc:
+				return nil
+			}
+		})
 	}
+	return eg.Wait()
 }
 
 type MockStateChange struct {
@@ -364,4 +499,138 @@ func (m MockSubscription) Unsubscribe() {
 
 func (m MockSubscription) Err() <-chan error {
 	return m.errChan
+}
+
+func NewMockSlotCalculator(ctrl *gomock.Controller, config shuttercfg.Config) *MockSlotCalculator {
+	return &MockSlotCalculator{
+		MockSlotCalculator: testhelpers.NewMockSlotCalculator(ctrl),
+		real:               shutter.NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot),
+	}
+}
+
+type MockSlotCalculator struct {
+	*testhelpers.MockSlotCalculator
+	currentSlotTimestamp atomic.Uint64
+	real                 shutter.BeaconChainSlotCalculator
+}
+
+func (c *MockSlotCalculator) PrepareMocks(t *testing.T) {
+	c.MockSlotCalculator.EXPECT().
+		CalcCurrentSlot().
+		DoAndReturn(func() uint64 {
+			slot, err := c.real.CalcSlot(c.currentSlotTimestamp.Load())
+			require.NoError(t, err)
+			return slot
+		}).
+		AnyTimes()
+	c.MockSlotCalculator.EXPECT().
+		CalcSlot(gomock.Any()).
+		DoAndReturn(func(u uint64) (uint64, error) { return c.real.CalcSlot(u) }).
+		AnyTimes()
+	c.MockSlotCalculator.EXPECT().
+		CalcSlotAge(gomock.Any()).
+		DoAndReturn(func(u uint64) time.Duration { return c.real.CalcSlotAge(u) }).
+		AnyTimes()
+	c.MockSlotCalculator.EXPECT().
+		SecondsPerSlot().
+		DoAndReturn(func() uint64 { return c.real.SecondsPerSlot() }).
+		AnyTimes()
+	c.MockSlotCalculator.EXPECT().
+		CalcSlotStartTimestamp(gomock.Any()).
+		DoAndReturn(func(u uint64) uint64 { return c.real.CalcSlotStartTimestamp(u) }).
+		AnyTimes()
+}
+
+func MockTxnSubmittedEventLog(
+	t *testing.T,
+	config shuttercfg.Config,
+	eon shutter.Eon,
+	txnIndex uint64,
+	submission testhelpers.EncryptedSubmission,
+) types.Log {
+	sequencerAddr := common.HexToAddress(config.SequencerContractAddress)
+	sequencerAbi, err := abi.JSON(strings.NewReader(shuttercontracts.SequencerABI))
+	require.NoError(t, err)
+	submissionTopic, err := abi.MakeTopics([]any{sequencerAbi.Events["TransactionSubmitted"].ID})
+	require.NoError(t, err)
+	return types.Log{
+		Address: sequencerAddr,
+		Topics:  submissionTopic[0],
+		Data:    MockTxnSubmittedEventData(t, eon, txnIndex, submission),
+	}
+}
+
+func MockTxnSubmittedEventData(
+	t *testing.T,
+	eon shutter.Eon,
+	txnIndex uint64,
+	submission testhelpers.EncryptedSubmission,
+) []byte {
+	sequencer, err := abi.JSON(strings.NewReader(shuttercontracts.SequencerABI))
+	require.NoError(t, err)
+	abiArgs := sequencer.Events["TransactionSubmitted"].Inputs
+	var ipPrefix [32]byte
+	copy(ipPrefix[:], submission.IdentityPreimage[:32])
+	sender := common.BytesToAddress(submission.IdentityPreimage[32:52])
+	data, err := abiArgs.Pack(
+		uint64(eon.Index),
+		txnIndex,
+		ipPrefix,
+		sender,
+		submission.EncryptedTxn.Marshal(),
+		submission.GasLimit,
+	)
+	require.NoError(t, err)
+	return data
+}
+
+func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testhelpers.EncryptedSubmission {
+	senderPrivKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderPrivKey.PublicKey)
+	gasLimit := uint64(21_000)
+	txn := &types.LegacyTx{
+		CommonTx: types.CommonTx{
+			Nonce:    uint64(99),
+			GasLimit: gasLimit,
+			To:       &senderAddr, // send to self
+			Value:    uint256.NewInt(123),
+		},
+		GasPrice: uint256.NewInt(555),
+	}
+	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)
+	require.NoError(t, err)
+	var signedTxnBuf bytes.Buffer
+	err = signedTxn.MarshalBinary(&signedTxnBuf)
+	require.NoError(t, err)
+	eonPublicKey, err := eon.PublicKey()
+	require.NoError(t, err)
+	sigma, err := shuttercrypto.RandomSigma(rand.Reader)
+	require.NoError(t, err)
+	identityPrefix, err := shuttercrypto.RandomSigma(rand.Reader)
+	require.NoError(t, err)
+	ip := shutter.IdentityPreimageFromSenderPrefix(identityPrefix, senderAddr)
+	epochId := shuttercrypto.ComputeEpochID(ip[:])
+	encryptedTxn := shuttercrypto.Encrypt(signedTxnBuf.Bytes(), eonPublicKey, epochId, sigma)
+	return testhelpers.EncryptedSubmission{
+		OriginalTxn:      signedTxn,
+		SubmissionTxn:    nil,
+		EncryptedTxn:     encryptedTxn,
+		EonIndex:         eon.Index,
+		IdentityPreimage: ip,
+		GasLimit:         new(big.Int).SetUint64(gasLimit),
+	}
+}
+
+func WaitEncryptedTxns(pool *shutter.Pool, n int) func() bool {
+	return func() bool {
+		return len(pool.AllEncryptedTxns()) == n
+	}
+}
+
+func WaitDecryptedTxns(pool *shutter.Pool, n int) func() bool {
+	return func() bool {
+		return len(pool.AllDecryptedTxns()) == n
+	}
 }
