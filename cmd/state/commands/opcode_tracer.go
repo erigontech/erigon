@@ -39,14 +39,14 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -435,7 +435,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
 	defer rawChainDb.Close()
 
-	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
+	agg, err := dbstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
 	if err != nil {
 		return err
 	}

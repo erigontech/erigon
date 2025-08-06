@@ -20,15 +20,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -203,7 +203,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
 				s0, s1 := fStartTxNum/sd.stepSize, fEndTxNum/sd.stepSize
-				logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
+				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
@@ -220,7 +220,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
 			s0, s1 := fStartTxNum/sd.stepSize, fEndTxNum/sd.stepSize
-			logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
+			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
@@ -276,14 +276,14 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		itemGetter.Reset(offset)
 		if !itemGetter.HasNext() {
 			dt.d.logger.Warn("commitment branch key replacement seek failed",
-				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
+				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 			return nil, false
 		}
 
 		k, _ := itemGetter.Next(nil)
 		if !bytes.Equal(fullKey, k) {
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
-				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
+				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 
 			return nil, false
 		}
@@ -296,7 +296,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		_, _, offsetInFile, ok, err := item.bindex.Get(fullKey, itemGetter)
 		if err != nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement seek failed",
-				"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
+				"key", hex.EncodeToString(fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
 		}
 		if !ok {
 			return nil, false
@@ -364,7 +364,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		if r := recover(); r != nil {
 			dt.d.logger.Crit("lookupByShortenedKey panics",
 				"err", r,
-				"offset", offset, "short", fmt.Sprintf("%x", shortKey),
+				"offset", offset, "short", hex.EncodeToString(shortKey),
 				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
 				"file", getter.FileName())
 		}
@@ -374,7 +374,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 	getter.Reset(offset)
 	n := getter.HasNext()
 	if !n || uint64(getter.Size()) <= offset {
-		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", fmt.Sprintf("%x", shortKey), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
+		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", hex.EncodeToString(shortKey), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
 		return nil, false
 	}
 
@@ -470,7 +470,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
-							"shortened", fmt.Sprintf("%x", key),
+							"shortened", hex.EncodeToString(key),
 							"merging", rng.String("", dt.d.aggregationStep),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 						)
@@ -486,7 +486,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					// if shortened key lost, we can't continue
 					dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
 						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep),
-						"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", auxBuf))
+						"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
 
 					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 				}
@@ -500,7 +500,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",
-						"shortened", fmt.Sprintf("%x", key),
+						"shortened", hex.EncodeToString(key),
 						"merging", rng.String("", dt.d.aggregationStep),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 					)
@@ -515,7 +515,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				}
 				dt.d.logger.Crit("valTransform: replacement for full account key was not found",
 					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep),
-					"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", auxBuf))
+					"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
 				return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
 			}
 			return shortened, nil
