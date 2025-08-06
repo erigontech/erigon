@@ -36,17 +36,17 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -166,7 +166,7 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
-	var domains *libstate.SharedDomains
+	var domains *state.SharedDomains
 	var tx kv.TemporalRwTx
 	if txc.Doms == nil {
 		temporalTx, ok := txc.Tx.(kv.TemporalRwTx)
@@ -174,7 +174,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			return errors.New("tx is not a temporal tx")
 		}
 		tx = temporalTx
-		domains, err = libstate.NewSharedDomains(temporalTx, logger)
+		domains, err = state.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			changeset = &currentKeys
 		} else {
 			for i := range currentKeys {
-				changeset[i] = libstate.MergeDiffSets(changeset[i], currentKeys[i])
+				changeset[i] = state.MergeDiffSets(changeset[i], currentKeys[i])
 			}
 		}
 	}
@@ -229,7 +229,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
-func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *libstate.SharedDomains,
+func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedDomains,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {

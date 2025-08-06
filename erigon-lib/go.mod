@@ -27,10 +27,8 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.2.0
-	github.com/elastic/go-freelru v0.16.0
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
-	github.com/go-test/deep v1.1.1
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/btree v1.1.3
@@ -47,14 +45,12 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.1
-	github.com/protolambda/ztyp v0.2.2
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.12
-	github.com/valyala/fastjson v1.6.4
 	go.uber.org/mock v0.5.0
 	golang.org/x/crypto v0.39.0
 	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476

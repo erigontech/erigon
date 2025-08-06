@@ -37,13 +37,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 

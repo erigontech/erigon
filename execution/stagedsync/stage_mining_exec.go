@@ -31,19 +31,19 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/txnprovider"
@@ -121,7 +121,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
 	defer mb.Close()
-	sd, err := state2.NewSharedDomains(mb, logger)
+	sd, err := dbstate.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
 	}
