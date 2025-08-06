@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"math"
 	"os"
 	"path"
@@ -178,6 +179,9 @@ func filesFromDir(dir string) ([]string, error) {
 			continue
 		}
 		if strings.HasPrefix(f.Name(), ".") { // hidden files
+			continue
+		}
+		if snaptype.IsTorrentPartial(filepath.Ext(f.Name())) {
 			continue
 		}
 		filtered = append(filtered, f.Name())
