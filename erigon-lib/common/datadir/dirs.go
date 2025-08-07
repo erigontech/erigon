@@ -331,6 +331,7 @@ func (d Dirs) RenameNewVersions() error {
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
 		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
 	}
+	var renamed, removed int
 
 	for _, dirPath := range directories {
 		// renaming v1.0- => v1-
@@ -346,6 +347,7 @@ func (d Dirs) RenameNewVersions() error {
 					if err := dir.RemoveFile(path); err != nil {
 						return fmt.Errorf("failed to remove file %s: %w", path, err)
 					}
+					removed++
 					return nil
 				}
 				newName := strings.Replace(dirEntry.Name(), "v1.0-", "v1-", 1)
@@ -355,6 +357,7 @@ func (d Dirs) RenameNewVersions() error {
 				if err := os.Rename(oldPath, newPath); err != nil {
 					return err
 				}
+				renamed++
 			}
 			return nil
 		})
@@ -374,6 +377,7 @@ func (d Dirs) RenameNewVersions() error {
 				if err != nil {
 					return fmt.Errorf("failed to remove file %s: %w", path, err)
 				}
+				removed++
 			}
 
 			return nil
@@ -382,6 +386,8 @@ func (d Dirs) RenameNewVersions() error {
 			return err
 		}
 	}
+
+	log.Info(fmt.Sprintf("Renamed %d directories to old format and removed %d unsupported files", renamed, removed))
 
 	return nil
 }
