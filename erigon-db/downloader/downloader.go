@@ -798,7 +798,6 @@ func (d *Downloader) VerifyData(
 		{
 			logEvery := time.NewTicker(10 * time.Second)
 			defer logEvery.Stop()
-			log.Warn("[dbg] m?")
 			go func() {
 				for {
 					select {
