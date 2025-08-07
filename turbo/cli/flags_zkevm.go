@@ -337,6 +337,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SkipSmt:                                ctx.Bool(utils.SkipSmt.Name),
 		OnlySmtV2:                              ctx.Bool(utils.OnlySmtV2.Name),
 		SequencerBlockGasLimit:                 ctx.Uint64(utils.SequencerBlockGasLimit.Name),
+		PessimisticForkNumber:                  ctx.Uint64(utils.PessimisticForkNumber.Name),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

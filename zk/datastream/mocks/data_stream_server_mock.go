@@ -326,10 +326,6 @@ func (m *MockDataStreamServer) ReadBatches(start, end uint64) ([][]*types0.FullL
 	return ret0, ret1
 }
 
-func (m *MockDataStreamServer) ReadBatchesWithConcurrency(arg0, arg1 uint64) ([][]*types0.FullL2Block, error) {
-	return m.ReadBatches(arg0, arg1)
-}
-
 // ReadBatches indicates an expected call of ReadBatches.
 func (mr *MockDataStreamServerMockRecorder) ReadBatches(start, end any) *MockDataStreamServerReadBatchesCall {
 	mr.mock.ctrl.T.Helper()
@@ -356,6 +352,45 @@ func (c *MockDataStreamServerReadBatchesCall) Do(f func(uint64, uint64) ([][]*ty
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockDataStreamServerReadBatchesCall) DoAndReturn(f func(uint64, uint64) ([][]*types0.FullL2Block, error)) *MockDataStreamServerReadBatchesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ReadBatchesWithConcurrency mocks base method.
+func (m *MockDataStreamServer) ReadBatchesWithConcurrency(start, end uint64) ([][]*types0.FullL2Block, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadBatchesWithConcurrency", start, end)
+	ret0, _ := ret[0].([][]*types0.FullL2Block)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReadBatchesWithConcurrency indicates an expected call of ReadBatchesWithConcurrency.
+func (mr *MockDataStreamServerMockRecorder) ReadBatchesWithConcurrency(start, end any) *MockDataStreamServerReadBatchesWithConcurrencyCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadBatchesWithConcurrency", reflect.TypeOf((*MockDataStreamServer)(nil).ReadBatchesWithConcurrency), start, end)
+	return &MockDataStreamServerReadBatchesWithConcurrencyCall{Call: call}
+}
+
+// MockDataStreamServerReadBatchesWithConcurrencyCall wrap *gomock.Call
+type MockDataStreamServerReadBatchesWithConcurrencyCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataStreamServerReadBatchesWithConcurrencyCall) Return(arg0 [][]*types0.FullL2Block, arg1 error) *MockDataStreamServerReadBatchesWithConcurrencyCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataStreamServerReadBatchesWithConcurrencyCall) Do(f func(uint64, uint64) ([][]*types0.FullL2Block, error)) *MockDataStreamServerReadBatchesWithConcurrencyCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataStreamServerReadBatchesWithConcurrencyCall) DoAndReturn(f func(uint64, uint64) ([][]*types0.FullL2Block, error)) *MockDataStreamServerReadBatchesWithConcurrencyCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
