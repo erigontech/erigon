@@ -31,7 +31,9 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -246,7 +248,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash common
 		}
 
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		txnHash := types.ComputeBorTxHash(blockNum, blockHash)
+		txnHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 		blockEventId, exists := reader.Lookup(txnHash[:])
 		var offset uint64
 

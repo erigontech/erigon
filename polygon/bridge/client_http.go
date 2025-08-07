@@ -58,22 +58,72 @@ const (
 func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
 	eventRecords := make([]*EventRecordWithTime, 0)
 
+	if c.ApiVersioner != nil && c.ApiVersioner.Version() == HeimdallV2 {
+		for {
+			url, err := stateSyncListURLv2(c.UrlString, fromID, to.Unix())
+			if err != nil {
+				return nil, err
+			}
+
+			c.Logger.Trace(heimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+
+			reqCtx := withRequestType(ctx, stateSyncRequest)
+
+			response, err := FetchWithRetry[StateSyncEventsResponseV2](reqCtx, c, url, c.logger)
+			if err != nil {
+				if errors.Is(err, ErrNoResponse) {
+					// for more info check https://github.com/maticnetwork/heimdall/pull/993
+					c.logger.Warn(
+						heimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+						"path", url.Path,
+						"queryParams", url.RawQuery,
+					)
+				}
+				return nil, err
+			}
+
+			if response == nil || response.EventRecords == nil {
+				// status 204
+				break
+			}
+
+			records, err := response.GetEventRecords()
+			if err != nil {
+				return nil, err
+			}
+
+			eventRecords = append(eventRecords, records...)
+
+			if len(response.EventRecords) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
+				break
+			}
+
+			fromID += uint64(StateEventsFetchLimit)
+		}
+
+		sort.SliceStable(eventRecords, func(i, j int) bool {
+			return eventRecords[i].ID < eventRecords[j].ID
+		})
+
+		return eventRecords, nil
+	}
+
 	for {
-		url, err := stateSyncListURL(c.UrlString, fromID, to.Unix())
+		url, err := stateSyncListURLv1(c.urlString, fromID, to.Unix())
 		if err != nil {
 			return nil, err
 		}
 
-		c.Logger.Trace(bridgeLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+		c.logger.Trace(heimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
 
-		reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
+		reqCtx := withRequestType(ctx, stateSyncRequest)
 
-		response, err := poshttp.FetchWithRetry[StateSyncEventsResponse](reqCtx, c.Client, url, c.Logger)
+		response, err := FetchWithRetry[StateSyncEventsResponseV1](reqCtx, c, url, c.logger)
 		if err != nil {
-			if errors.Is(err, poshttp.ErrNoResponse) {
+			if errors.Is(err, ErrNoResponse) {
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993
-				c.Logger.Warn(
-					bridgeLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+				c.logger.Warn(
+					heimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
 					"path", url.Path,
 					"queryParams", url.RawQuery,
 				)

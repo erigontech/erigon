@@ -62,7 +62,7 @@ type Client struct {
 	maxRetries   int
 	closeCh      chan struct{}
 	Logger       log.Logger
-	apiVersioner apiVersioner
+	ApiVersioner apiVersioner
 	logPrefix    func(message string) string
 	sendMetrics  func(ctx context.Context, start time.Time, isSuccessful bool)
 }
@@ -95,7 +95,7 @@ func WithHttpMaxRetries(maxRetries int) ClientOption {
 
 func WithApiVersioner(apiVersioner apiVersioner) ClientOption {
 	return func(client *Client) {
-		client.apiVersioner = apiVersioner
+		client.ApiVersioner = apiVersioner
 	}
 }
 
@@ -118,10 +118,10 @@ func NewClient(urlString string, logger log.Logger, logPrefix func(message strin
 }
 
 func (c *Client) Version() HeimdallVersion {
-	if c.apiVersioner == nil {
+	if c.ApiVersioner == nil {
 		return HeimdallV1
 	}
-	return c.apiVersioner.Version()
+	return c.ApiVersioner.Version()
 }
 
 // Close sends a signal to stop the running process
