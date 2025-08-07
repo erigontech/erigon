@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"maps"
@@ -628,7 +629,13 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
+	v, _, _ := executor.domains().GetLatest(kv.CommitmentDomain, tx, []byte("state"))
+	txNum, blockNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+	fmt.Println("IN STATE PRECLEAR", blockNum, txNum)
 	te.doms.ClearRam(false)
+	v, _, _ = executor.domains().GetLatest(kv.CommitmentDomain, tx, []byte("state"))
+	txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+	fmt.Println("IN STATE POST", blockNum, txNum)
 
 	return tx, t2, nil
 }
