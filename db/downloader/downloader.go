@@ -460,7 +460,7 @@ restart:
 			d.logStats()
 			switch s := d.state(); s {
 			case Idle, Seeding:
-				step = max(step*2, time.Minute)
+				step = min(max(step*2, time.Minute), time.Hour)
 			case Syncing:
 				step = min(max(step, time.Second)*2, 30*time.Second)
 			default:
