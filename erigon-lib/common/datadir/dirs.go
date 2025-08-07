@@ -36,25 +36,24 @@ import (
 // registered services, instead those can use utility methods to create/access
 // databases or flat files
 type Dirs struct {
-	DataDir                   string
-	RelativeDataDir           string // like dataDir, but without filepath.Abs() resolution
-	Chaindata                 string
-	Tmp                       string
-	Snap                      string
-	SnapIdx                   string
-	SnapHistory               string
-	SnapDomain                string
-	SnapAccessors             string
-	SnapCaplin                string
-	Downloader                string
-	TxPool                    string
-	Nodes                     string
-	CaplinBlobs               string
-	CaplinBlobRecoveryRequest string
-	CaplinColumnData          string
-	CaplinIndexing            string
-	CaplinLatest              string
-	CaplinGenesis             string
+	DataDir          string
+	RelativeDataDir  string // like dataDir, but without filepath.Abs() resolution
+	Chaindata        string
+	Tmp              string
+	Snap             string
+	SnapIdx          string
+	SnapHistory      string
+	SnapDomain       string
+	SnapAccessors    string
+	SnapCaplin       string
+	Downloader       string
+	TxPool           string
+	Nodes            string
+	CaplinBlobs      string
+	CaplinColumnData string
+	CaplinIndexing   string
+	CaplinLatest     string
+	CaplinGenesis    string
 }
 
 func New(datadir string) Dirs {
@@ -76,7 +75,6 @@ func New(datadir string) Dirs {
 		dirs.CaplinLatest,
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
-		dirs.CaplinBlobRecoveryRequest,
 	)
 
 	return dirs
@@ -95,25 +93,24 @@ func Open(datadir string) Dirs {
 	}
 
 	dirs := Dirs{
-		RelativeDataDir:           relativeDataDir,
-		DataDir:                   datadir,
-		Chaindata:                 filepath.Join(datadir, "chaindata"),
-		Tmp:                       filepath.Join(datadir, "temp"),
-		Snap:                      filepath.Join(datadir, "snapshots"),
-		SnapIdx:                   filepath.Join(datadir, "snapshots", "idx"),
-		SnapHistory:               filepath.Join(datadir, "snapshots", "history"),
-		SnapDomain:                filepath.Join(datadir, "snapshots", "domain"),
-		SnapAccessors:             filepath.Join(datadir, "snapshots", "accessor"),
-		SnapCaplin:                filepath.Join(datadir, "snapshots", "caplin"),
-		Downloader:                filepath.Join(datadir, "downloader"),
-		TxPool:                    filepath.Join(datadir, "txpool"),
-		Nodes:                     filepath.Join(datadir, "nodes"),
-		CaplinBlobs:               filepath.Join(datadir, "caplin", "blobs"),
-		CaplinColumnData:          filepath.Join(datadir, "caplin", "column"),
-		CaplinBlobRecoveryRequest: filepath.Join(datadir, "caplin", "blob-recovery-request"),
-		CaplinIndexing:            filepath.Join(datadir, "caplin", "indexing"),
-		CaplinLatest:              filepath.Join(datadir, "caplin", "latest"),
-		CaplinGenesis:             filepath.Join(datadir, "caplin", "genesis-state"),
+		RelativeDataDir:  relativeDataDir,
+		DataDir:          datadir,
+		Chaindata:        filepath.Join(datadir, "chaindata"),
+		Tmp:              filepath.Join(datadir, "temp"),
+		Snap:             filepath.Join(datadir, "snapshots"),
+		SnapIdx:          filepath.Join(datadir, "snapshots", "idx"),
+		SnapHistory:      filepath.Join(datadir, "snapshots", "history"),
+		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
+		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
+		SnapCaplin:       filepath.Join(datadir, "snapshots", "caplin"),
+		Downloader:       filepath.Join(datadir, "downloader"),
+		TxPool:           filepath.Join(datadir, "txpool"),
+		Nodes:            filepath.Join(datadir, "nodes"),
+		CaplinBlobs:      filepath.Join(datadir, "caplin", "blobs"),
+		CaplinColumnData: filepath.Join(datadir, "caplin", "column"),
+		CaplinIndexing:   filepath.Join(datadir, "caplin", "indexing"),
+		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
+		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 	}
 	return dirs
 }
@@ -247,12 +244,12 @@ func CopyFile(from, to string) error {
 	defer w.Close()
 	if _, err = w.ReadFrom(r); err != nil {
 		w.Close()
-		os.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	if err = w.Sync(); err != nil {
 		w.Close()
-		os.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	return nil
@@ -262,7 +259,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData, d.CaplinBlobRecoveryRequest,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
 	}
 	renamed := 0
 	torrentsRemoved := 0
@@ -277,7 +274,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1-") {
 					if strings.HasSuffix(name, ".torrent") {
-						if err := os.Remove(path); err != nil {
+						if err := dir.RemoveFile(path); err != nil {
 							return err
 						}
 						torrentsRemoved++
@@ -287,7 +284,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 					if strings.Contains(entry.Name(), "commitment") &&
 						(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 						// remove the file instead of renaming
-						if err := os.Remove(path); err != nil {
+						if err := dir.RemoveFile(path); err != nil {
 							return fmt.Errorf("failed to remove file %s: %w", path, err)
 						}
 						removed++
@@ -314,7 +311,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 		log.Debug(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
 	}
 	if d.Downloader != "" && (renamed > 0 || removed > 0) {
-		if err := os.RemoveAll(d.Downloader); err != nil {
+		if err := dir.RemoveAll(d.Downloader); err != nil {
 			return err
 		}
 		log.Info(fmt.Sprintf("Removed Downloader directory: %s", d.Downloader))
@@ -327,7 +324,7 @@ func (d Dirs) RenameNewVersions() error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData, d.CaplinBlobRecoveryRequest,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
 	}
 
 	for _, dirPath := range directories {
@@ -340,7 +337,7 @@ func (d Dirs) RenameNewVersions() error {
 				if strings.Contains(dirEntry.Name(), "commitment") &&
 					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 					// remove the file instead of renaming
-					if err := os.Remove(path); err != nil {
+					if err := dir.RemoveFile(path); err != nil {
 						return fmt.Errorf("failed to remove file %s: %w", path, err)
 					}
 					return nil

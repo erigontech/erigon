@@ -46,9 +46,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/state/stats"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/core"
@@ -58,6 +55,9 @@ import (
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -544,7 +544,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
-	domains, err := libstate.NewSharedDomains(tx, logger)
+	domains, err := dbstate.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
@@ -869,7 +869,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			if execProgress == 0 {
-				doms, err := libstate.NewSharedDomains(tx, log.New())
+				doms, err := dbstate.NewSharedDomains(tx, log.New())
 				if err != nil {
 					panic(err)
 				}
@@ -955,7 +955,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	agg := db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	defer br.(*freezeblocks.BlockRetire).MadvNormal().DisableReadAhead()
 	//defer agg.MadvNormal().DisableReadAhead()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
@@ -982,7 +982,7 @@ func stagePatriciaTrie(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
 
-	agg := db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
@@ -1077,11 +1077,11 @@ var openSnapshotOnce sync.Once
 var _allSnapshotsSingleton *freezeblocks.RoSnapshots
 var _allBorSnapshotsSingleton *heimdall.RoSnapshots
 var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
-var _aggSingleton *libstate.Aggregator
+var _aggSingleton *dbstate.Aggregator
 var _bridgeStoreSingleton bridge.Store
 var _heimdallStoreSingleton heimdall.Store
 
-func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *heimdall.RoSnapshots, *libstate.Aggregator, *freezeblocks.CaplinSnapshots, bridge.Store, heimdall.Store, error) {
+func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *heimdall.RoSnapshots, *dbstate.Aggregator, *freezeblocks.CaplinSnapshots, bridge.Store, heimdall.Store, error) {
 	var err error
 
 	openSnapshotOnce.Do(func() {
@@ -1101,7 +1101,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
 		txNums := blockReader.TxnumReader(ctx)
 
-		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
+		_aggSingleton, err = dbstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
 		if err != nil {
 			err = fmt.Errorf("aggregator init: %w", err)
 			return

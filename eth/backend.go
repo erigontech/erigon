@@ -68,16 +68,12 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/snaptype"
-	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -88,8 +84,12 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -221,12 +221,11 @@ type Ethereum struct {
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
 	silkwormSentryService    *silkworm.SentryService
 
-	polygonSyncService  *polygonsync.Service
-	polygonDownloadSync *stagedsync.Sync
-	polygonBridge       *bridge.Service
-	heimdallService     *heimdall.Service
-	stopNode            func() error
-	bgComponentsEg      errgroup.Group
+	polygonSyncService *polygonsync.Service
+	polygonBridge      *bridge.Service
+	heimdallService    *heimdall.Service
+	stopNode           func() error
+	bgComponentsEg     errgroup.Group
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -315,7 +314,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
-			libstate.EnableHistoricalRCache()
+			state.EnableHistoricalRCache()
 		}
 
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
@@ -1074,19 +1073,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend,
 		)
 
-		// we need to initiate download before the heimdall services start rather than
-		// waiting for the stage loop to start
-		// TODO although this works we probably want to call engine.Start instead
-
-		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
-			panic("expect to have non-nil downloaderClient")
-		}
-		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
-			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
-				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
-			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
-
 		// these range extractors set the db to the local db instead of the chain db
 		// TODO this needs be refactored away by having a retire/merge component per
 		// snapshot instead of global processing in the stage loop
@@ -1538,11 +1524,11 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
-	salt, err := libstate.GetStateIndicesSalt(dirs, createNewSaltFileIfNeeded, logger)
+	salt, err := state.GetStateIndicesSalt(dirs, createNewSaltFileIfNeeded, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	agg, err := libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, salt, db, logger)
+	agg, err := state.NewAggregator2(ctx, dirs, config3.DefaultStepSize, salt, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1639,24 +1625,9 @@ func (s *Ethereum) Start() error {
 	} else if s.chainConfig.Bor != nil {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
+		go s.eth1ExecutionServer.Start(s.sentryCtx)
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] goroutine terminated")
-			// when we're running in stand alone mode we need to run the downloader before we start the
-			// polygon services because they will wait for it to complete before opening their stores
-			// which make use of snapshots and expect them to be initialize
-			// TODO: get the snapshots to call the downloader directly - which will avoid this
-			go func() {
-				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.NewTxContainer(nil, nil), s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
-
-				if err != nil && !errors.Is(err, context.Canceled) {
-					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
-					err = s.stopNode()
-					if err != nil {
-						s.logger.Error("could not stop node", "err", err)
-					}
-				}
-			}()
-
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
 			if err == nil || errors.Is(err, context.Canceled) {
@@ -1816,7 +1787,7 @@ func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
 	return s.eth1ExecutionServer
 }
 
-// RemoveContents is like os.RemoveAll, but preserve dir itself
+// RemoveContents is like dir.RemoveAll, but preserve dir itself
 func RemoveContents(dirname string) error {
 	d, err := os.Open(dirname)
 	if err != nil {
@@ -1833,7 +1804,7 @@ func RemoveContents(dirname string) error {
 		return err
 	}
 	for _, file := range files {
-		err = os.RemoveAll(filepath.Join(dirname, file.Name()))
+		err = dir.RemoveAll(filepath.Join(dirname, file.Name()))
 		if err != nil {
 			return err
 		}

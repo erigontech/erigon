@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -17,8 +17,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -80,9 +80,9 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 
 		state.Cleanup()
 		db.Close()
-		os.RemoveAll(dirs.Snap)
-		os.RemoveAll(dirs.Chaindata)
-		os.RemoveAll(dirs.SnapIdx)
+		dir.RemoveAll(dirs.Snap)
+		dir.RemoveAll(dirs.Chaindata)
+		dir.RemoveAll(dirs.SnapIdx)
 	})
 }
 

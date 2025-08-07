@@ -48,14 +48,14 @@ import (
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -822,7 +822,7 @@ func (u *snapshotUploader) uploadManifest(ctx context.Context, remoteRefresh boo
 	}
 
 	_ = os.WriteFile(filepath.Join(u.cfg.dirs.Snap, manifestFile), manifestEntries.Bytes(), 0644)
-	defer os.Remove(filepath.Join(u.cfg.dirs.Snap, manifestFile))
+	defer dir.RemoveFile(filepath.Join(u.cfg.dirs.Snap, manifestFile))
 
 	return u.uploadSession.Upload(ctx, manifestFile)
 }
@@ -1146,14 +1146,14 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 		}
 
 		for _, f := range toRemove {
-			_ = os.Remove(f)
-			_ = os.Remove(f + ".torrent")
+			_ = dir.RemoveFile(f)
+			_ = dir.RemoveFile(f + ".torrent")
 			ext := filepath.Ext(f)
 			withoutExt := f[:len(f)-len(ext)]
-			_ = os.Remove(withoutExt + ".idx")
+			_ = dir.RemoveFile(withoutExt + ".idx")
 
 			if strings.HasSuffix(withoutExt, "transactions") {
-				_ = os.Remove(withoutExt + "-to-block.idx")
+				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			}
 		}
 	}

@@ -19,7 +19,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,10 +32,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -175,7 +174,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	aggOld.Close()
 
 	log.Info("[sqeeze] removing", "dir", dirsOld.SnapDomain)
-	_ = os.RemoveAll(dirsOld.SnapDomain)
+	_ = dir.RemoveAll(dirsOld.SnapDomain)
 	log.Info("[sqeeze] success", "please_remove", dirs.SnapDomain+"_backup")
 	return nil
 }
@@ -221,9 +220,9 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 		if err := freezeblocks.Sqeeze(ctx, dirs, f, f, logger); err != nil {
 			return err
 		}
-		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
-		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx"))
-		_ = os.Remove(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".seg.torrent"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".idx"))
+		_ = dir.RemoveFile(strings.ReplaceAll(f, ".seg", ".idx.torrent"))
 	}
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
