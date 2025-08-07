@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"math/big"
 	"os"
 	"time"
@@ -107,6 +108,7 @@ func InitMiner(
 		// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
 		MdbxGrowthStep:  4 * datasize.MB,
 		MdbxDBSizeLimit: 64 * datasize.MB,
+		HTTPTimeouts:    rpccfg.DefaultHTTPTimeouts,
 	}
 
 	stack, err := node.New(ctx, nodeCfg, logger)
