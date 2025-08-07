@@ -136,9 +136,9 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 	dataColmnSidecars := []*cltypes.DataColumnSidecar{}
 	columnIndices := []uint64{}
 	if len(indices) == 0 {
-		// all indices custodying
+		// take all custodies
 		var err error
-		columnIndices, err = a.columnStorage.GetSavedColumnIndex(ctx, blockRoot)
+		columnIndices, err = a.columnStorage.GetSavedColumnIndex(ctx, *slot, blockRoot)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
@@ -151,7 +151,7 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 			columnIndices = append(columnIndices, i)
 		}
 	}
-	// read the sidecars
+	// read the columns
 	for _, index := range columnIndices {
 		sidecar, err := a.columnStorage.ReadColumnSidecarByColumnIndex(ctx, *slot, blockRoot, int64(index))
 		if err != nil {
