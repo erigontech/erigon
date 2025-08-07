@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package poshttp
 
 import (
 	"context"
@@ -34,20 +34,20 @@ type (
 )
 
 const (
-	statusRequest             requestType = "status"
-	stateSyncRequest          requestType = "state-sync"
-	spanRequest               requestType = "span"
-	checkpointRequest         requestType = "checkpoint"
-	checkpointCountRequest    requestType = "checkpoint-count"
-	checkpointListRequest     requestType = "checkpoint-list"
-	milestoneRequest          requestType = "milestone"
-	milestoneCountRequest     requestType = "milestone-count"
-	milestoneNoAckRequest     requestType = "milestone-no-ack"
-	milestoneLastNoAckRequest requestType = "milestone-last-no-ack"
-	milestoneIDRequest        requestType = "milestone-id"
+	StatusRequest             requestType = "status"
+	StateSyncRequest          requestType = "state-sync"
+	SpanRequest               requestType = "span"
+	CheckpointRequest         requestType = "checkpoint"
+	CheckpointCountRequest    requestType = "checkpoint-count"
+	CheckpointListRequest     requestType = "checkpoint-list"
+	MilestoneRequest          requestType = "milestone"
+	MilestoneCountRequest     requestType = "milestone-count"
+	MilestoneNoAckRequest     requestType = "milestone-no-ack"
+	MilestoneLastNoAckRequest requestType = "milestone-last-no-ack"
+	MilestoneIDRequest        requestType = "milestone-id"
 )
 
-func withRequestType(ctx context.Context, reqType requestType) context.Context {
+func WithRequestType(ctx context.Context, reqType requestType) context.Context {
 	return context.WithValue(ctx, requestTypeKey{}, reqType)
 }
 
@@ -58,28 +58,28 @@ func getRequestType(ctx context.Context) (requestType, bool) {
 
 var (
 	requestMeters = map[requestType]meter{
-		stateSyncRequest: {
+		StateSyncRequest: {
 			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_statesync_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_statesync_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_statesync_duration"),
 		},
-		spanRequest: {
+		SpanRequest: {
 			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_span_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_span_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_span_duration"),
 		},
-		checkpointRequest: {
+		CheckpointRequest: {
 			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_checkpoint_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_checkpoint_invalid"),
 			},
 			timer: metrics.GetOrCreateSummary("client_requests_checkpoint_duration"),
 		},
-		checkpointCountRequest: {
+		CheckpointCountRequest: {
 			request: map[bool]metrics.Gauge{
 				true:  metrics.GetOrCreateGauge("client_requests_checkpointcount_valid"),
 				false: metrics.GetOrCreateGauge("client_requests_checkpointcount_invalid"),
