@@ -14,6 +14,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -281,7 +282,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNu
 		return nil
 	}
 
-	fmt.Println("[commitment] store state", "tx.txNum", sdc.mainTtx.txNum, "block", blockNum, "txNum", txNum, "rootHash", fmt.Sprintf("%x", rootHash))
+	fmt.Println("[commitment] store state", "tx.txNum", sdc.mainTtx.txNum, "block", blockNum, "txNum", txNum, "rootHash", fmt.Sprintf("%x", rootHash), dbg.Stack())
 	log.Debug("[commitment] store state", "block", blockNum, "txNum", txNum, "rootHash", fmt.Sprintf("%x", rootHash))
 	v, _, _ := sdc.mainTtx.getter.GetLatest(kv.CommitmentDomain, []byte("state"))
 	txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
