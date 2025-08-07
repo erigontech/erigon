@@ -118,7 +118,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
 			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
 			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
-			eng = bor.New(chainConfig, blockReader, spanner,  heimdallClient, bridgeClient, stateReceiver, logger, polygonBridge, heimdallService)
+			eng = bor.New(chainConfig, blockReader, spanner, stateReceiver, logger, polygonBridge, heimdallService)
 		}
 	}
 

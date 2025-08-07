@@ -15,6 +15,7 @@ import (
 	time "time"
 
 	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	types "github.com/erigontech/erigon/execution/types"
 	gomock "go.uber.org/mock/gomock"
 )
