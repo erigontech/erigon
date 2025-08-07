@@ -177,12 +177,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 			)
 			require.NoError(t, err)
 		})
-
-		t.Run("build shutter block without blob txns", func(t *testing.T) {
-			//
-			//  TODO
-			//
-		})
 	})
 
 	t.Run("eon 1", func(t *testing.T) {
@@ -352,13 +346,13 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis.Config = &chainConfig
 	genesis.Alloc[chainparams.ConsolidationRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}
 	genesis.Alloc[chainparams.WithdrawalRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}

@@ -111,10 +111,59 @@ func TestPoolCleanup(t *testing.T) {
 	})
 }
 
+func TestPoolSkipsBlobTxns(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+	pt := NewPoolTest(t)
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		// simulate expected contract calls for reading the first ekg after the first block event
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		// simulate loadSubmissions after the first block
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		// simulate the first block
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		// simulate some encrypted txn submissions and simulate a new block
+		encBlobTxn1 := MockEncryptedBlobTxn(t, handle.config.ChainId, ekg.Eon())
+		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		require.Len(t, pool.AllEncryptedTxns(), 0)
+		err = handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encBlobTxn1),
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 2, encTxn1),
+		})
+		require.NoError(t, err)
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+		// simulate decryption keys
+		handle.SimulateCurrentSlot()
+		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encBlobTxn1.IdentityPreimage, encTxn1.IdentityPreimage)
+		// verify that only 1 txn gets decrypted and the blob txn gets skipped
+		require.Eventually(t, WaitDecryptedTxns(pool, 1), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+		txns, err := pool.ProvideTxns(
+			ctx,
+			txnprovider.WithBlockTime(handle.nextBlockTime),
+			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+		)
+		require.NoError(t, err)
+		require.Len(t, txns, 1)
+		require.Equal(t, encTxn1.OriginalTxn.Hash(), txns[0].Hash())
+		require.True(t, handle.logHandler.Contains("blob txns not allowed in shutter"))
+	})
+}
+
 func NewPoolTest(t *testing.T) PoolTest {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	t.Cleanup(cancel)
 	logger := testlog.Logger(t, log.LvlTrace)
+	logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
+	logger.SetHandler(logHandler)
 	dataDir := t.TempDir()
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(dataDir))
@@ -180,6 +229,7 @@ func NewPoolTest(t *testing.T) PoolTest {
 		ctx:                ctx,
 		t:                  t,
 		config:             config,
+		logHandler:         logHandler,
 		stateChangesClient: stateChangesClient,
 		contractBackend:    contractBackend,
 		slotCalculator:     slotCalculator,
@@ -193,6 +243,7 @@ type PoolTest struct {
 	ctx                context.Context
 	t                  *testing.T
 	config             shuttercfg.Config
+	logHandler         *testhelpers.CollectingLogHandler
 	stateChangesClient *MockStateChangesClient
 	contractBackend    *MockContractBackend
 	slotCalculator     *MockSlotCalculator
@@ -210,6 +261,7 @@ func (pt PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *sh
 	require.NoError(pt.t, err)
 	handle := PoolTestHandle{
 		config:             pt.config,
+		logHandler:         pt.logHandler,
 		stateChangesClient: pt.stateChangesClient,
 		slotCalculator:     pt.slotCalculator,
 		contractBackend:    pt.contractBackend,
@@ -226,6 +278,7 @@ func (pt PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *sh
 
 type PoolTestHandle struct {
 	config             shuttercfg.Config
+	logHandler         *testhelpers.CollectingLogHandler
 	stateChangesClient *MockStateChangesClient
 	contractBackend    *MockContractBackend
 	slotCalculator     *MockSlotCalculator
@@ -588,11 +641,10 @@ func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testh
 	senderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(senderPrivKey.PublicKey)
-	gasLimit := uint64(21_000)
 	txn := &types.LegacyTx{
 		CommonTx: types.CommonTx{
 			Nonce:    uint64(99),
-			GasLimit: gasLimit,
+			GasLimit: 21_000,
 			To:       &senderAddr, // send to self
 			Value:    uint256.NewInt(123),
 		},
@@ -619,7 +671,37 @@ func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testh
 		EncryptedTxn:     encryptedTxn,
 		EonIndex:         eon.Index,
 		IdentityPreimage: ip,
-		GasLimit:         new(big.Int).SetUint64(gasLimit),
+		GasLimit:         new(big.Int).SetUint64(txn.GetGasLimit()),
+	}
+}
+
+func MockEncryptedBlobTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testhelpers.EncryptedSubmission {
+	senderPrivKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderPrivKey.PublicKey)
+	signer := types.LatestSignerForChainID(chainId.ToBig())
+	txn := types.MakeV1WrappedBlobTxn(chainId)
+	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)
+	require.NoError(t, err)
+	var signedTxnBuf bytes.Buffer
+	err = signedTxn.(*types.BlobTxWrapper).MarshalBinaryWrapped(&signedTxnBuf)
+	require.NoError(t, err)
+	eonPublicKey, err := eon.PublicKey()
+	require.NoError(t, err)
+	sigma, err := shuttercrypto.RandomSigma(rand.Reader)
+	require.NoError(t, err)
+	identityPrefix, err := shuttercrypto.RandomSigma(rand.Reader)
+	require.NoError(t, err)
+	ip := shutter.IdentityPreimageFromSenderPrefix(identityPrefix, senderAddr)
+	epochId := shuttercrypto.ComputeEpochID(ip[:])
+	encryptedTxn := shuttercrypto.Encrypt(signedTxnBuf.Bytes(), eonPublicKey, epochId, sigma)
+	return testhelpers.EncryptedSubmission{
+		OriginalTxn:      signedTxn,
+		SubmissionTxn:    nil,
+		EncryptedTxn:     encryptedTxn,
+		EonIndex:         eon.Index,
+		IdentityPreimage: ip,
+		GasLimit:         new(big.Int).SetUint64(txn.GetGasLimit()),
 	}
 }
 
