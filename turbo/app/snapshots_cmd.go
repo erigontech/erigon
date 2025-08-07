@@ -448,9 +448,17 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				const trieStateKey = "state"
 
 				skipped := false
-				kvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
-				_, ek := os.Stat(kvi)
-				if ek == nil {
+				derivedKvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
+
+				fmask, err := version.ReplaceVersionWithMask(derivedKvi)
+				if err != nil {
+					return err
+				}
+				kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fmask)
+				if err != nil {
+					return err
+				}
+				if ok {
 					idx, err := recsplit.OpenIndex(kvi)
 					if err != nil {
 						return err
