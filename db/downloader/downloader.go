@@ -1367,7 +1367,6 @@ func (d *Downloader) logStats() {
 			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)),
 			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
 		)
-		panicif.NotEq(d.stats.ClientWebseedBytesDownloadRate+d.stats.PeerConnBytesDownloadRate, d.stats.DownloadRate)
 	}
 
 	var m runtime.MemStats
