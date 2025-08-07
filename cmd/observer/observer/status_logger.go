@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/cmd/observer/database"
 )
 
-func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, period time.Duration, logger log.Logger) {
+func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint64, period time.Duration, logger log.Logger) {
 	var maxPingTries uint = 1000000 // unlimited (include dead nodes)
 	var prevTotalCount uint
 	var prevDistinctIPCount uint
@@ -37,7 +37,7 @@ func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, perio
 			break
 		}
 
-		totalCount, err := db.CountNodes(ctx, maxPingTries, networkID)
+		totalCount, err := db.CountNodes(ctx, maxPingTries, uint(networkID))
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error("Failed to count nodes", "err", err)
@@ -45,7 +45,7 @@ func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, perio
 			continue
 		}
 
-		distinctIPCount, err := db.CountIPs(ctx, maxPingTries, networkID)
+		distinctIPCount, err := db.CountIPs(ctx, maxPingTries, uint(networkID))
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error("Failed to count IPs", "err", err)

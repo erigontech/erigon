@@ -48,7 +48,12 @@ func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.
 		return err
 	}
 
-	networkID := uint(chainspec.NetworkIDByChainName(flags.Chain))
+	spec, err := chainspec.ChainSpecByName(flags.Chain)
+	if err != nil {
+		return err
+	}
+	networkID := spec.Config.ChainID.Uint64()
+
 	go observer.StatusLoggerLoop(ctx, db, networkID, flags.StatusLogPeriod, log.Root())
 
 	crawlerConfig := observer.CrawlerConfig{
@@ -85,7 +90,11 @@ func reportWithFlags(ctx context.Context, flags reports.CommandFlags) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	networkID := uint(chainspec.NetworkIDByChainName(flags.Chain))
+	spec, err := chainspec.ChainSpecByName(flags.Chain)
+	if err != nil {
+		return err
+	}
+	networkID := spec.Config.ChainID.Uint64()
 
 	if flags.Estimate {
 		report, err := reports.CreateClientsEstimateReport(ctx, db, flags.ClientsLimit, flags.MaxPingTries, networkID)

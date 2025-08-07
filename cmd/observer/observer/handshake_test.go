@@ -34,7 +34,7 @@ func TestHandshake(t *testing.T) {
 
 	// grep 'self=enode' the log, and paste it here
 	// url := "enode://..."
-	url := chainspec.MainnetBootnodes[0]
+	url := chainspec.Mainnet.Bootnodes[0]
 	node := enode.MustParseV4(url)
 	myPrivateKey, _ := crypto.GenerateKey()
 

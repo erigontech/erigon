@@ -395,7 +395,11 @@ type comparitor struct {
 }
 
 func (c comparitor) chainConfig() *chain.Config {
-	return chainspec.ChainConfigByChainName(c.chain)
+	spec, err := chainspec.ChainSpecByName(c.chain)
+	if err != nil {
+		return &chain.Config{}
+	}
+	return spec.Config
 }
 
 func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {
