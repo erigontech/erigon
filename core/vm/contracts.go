@@ -559,7 +559,11 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	return gas.Uint64()
 }
 
-var errModExpLengthTooLarge = errors.New("one or more of base/exponent/modulus length exceeded 1024 bytes")
+var (
+	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
+	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
+	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
+)
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	header := getData(input, 0, 3*32)
@@ -573,13 +577,13 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		// We also need to check that the high bytes truncated by the Uint64 conversion above are zero
 		// (32 - 8 bytes were truncated)
 		if !allZero(header[0:32-8]) || baseLen > 1024 {
-			return nil, errModExpLengthTooLarge
+			return nil, errModExpBaseLengthTooLarge
 		}
 		if !allZero(header[32:64-8]) || expLen > 1024 {
-			return nil, errModExpLengthTooLarge
+			return nil, errModExpExponentLengthTooLarge
 		}
 		if !allZero(header[64:96-8]) || modLen > 1024 {
-			return nil, errModExpLengthTooLarge
+			return nil, errModExpModulusLengthTooLarge
 		}
 	}
 
