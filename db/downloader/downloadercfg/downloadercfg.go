@@ -282,9 +282,6 @@ func New(
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
 func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
-	if chainName == "" {
-		panic("chainName must not be empty")
-	}
 	if _, known := snapcfg.KnownCfg(chainName); !known {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return snapcfg.NewNonSeededCfg(chainName), nil
