@@ -748,5 +748,6 @@ func (f *ForkChoiceStore) GetPendingPartialWithdrawals(blockRoot common.Hash) (*
 }
 
 func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
-	return f.proposerLookahead.Get(slot)
+	epoch := slot / f.beaconCfg.SlotsPerEpoch
+	return f.proposerLookahead.Get(epoch)
 }
