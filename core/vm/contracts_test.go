@@ -294,7 +294,7 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	osakaModExp := allPrecompiles[common.BytesToAddress([]byte{0xb5})]
 	gas = osakaModExp.RequiredGas(in)
 	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
-	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+	assert.ErrorIs(t, err, errModExpLengthTooLarge)
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
