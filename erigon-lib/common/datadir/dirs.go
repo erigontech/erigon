@@ -19,6 +19,7 @@ package datadir
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -389,6 +390,23 @@ func (d Dirs) RenameNewVersions() error {
 
 	log.Info(fmt.Sprintf("Renamed %d directories to old format and removed %d unsupported files", renamed, removed))
 
+	//eliminate polygon-bridge && heimdall && chaindata just in case
+	if d.DataDir != "" {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.PolygonBridgeDB)); err != nil {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, kv.PolygonBridgeDB)))
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.HeimdallDB)); err != nil {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, kv.HeimdallDB)))
+		if d.Chaindata != "" {
+			if err := dir.RemoveAll(d.Chaindata); err != nil {
+				return err
+			}
+			log.Info(fmt.Sprintf("Removed chaindata directory: %s", d.Chaindata))
+		}
+	}
 	return nil
 }
 
