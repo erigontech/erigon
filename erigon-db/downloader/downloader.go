@@ -810,6 +810,7 @@ func (d *Downloader) VerifyData(
 			defer logEvery.Stop()
 			go func() {
 				for {
+					log.Warn("[dbg] m?")
 					select {
 					case <-ctx.Done():
 						return
