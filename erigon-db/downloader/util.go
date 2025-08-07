@@ -411,7 +411,7 @@ func verifyTorrentComplete(
 	})
 }
 
-func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
+func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completeBytes *atomic.Uint64) error {
 	info := t.Info()
 	file := info.UpvertedFiles()[0]
 	fPath := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
@@ -440,7 +440,7 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 			return err
 		}
 
-		completePieces.Add(1)
+		completeBytes.Add(uint64(p.V1Length()))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

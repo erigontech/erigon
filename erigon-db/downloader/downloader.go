@@ -786,7 +786,13 @@ func (d *Downloader) VerifyData(
 	d.logger.Info("[snapshots] Verify start")
 	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
+	var (
+		verifiedBytes  atomic.Int64
+		completedFiles atomic.Uint64
+	)
+
 	if failFast {
+		var completedBytes atomic.Uint64
 		g, context := errgroup.WithContext(ctx)
 		// torrent lib internally limiting amount of hashers per file
 		// set limit here just to make load predictable, not to control Disk/CPU consumption
@@ -794,8 +800,30 @@ func (d *Downloader) VerifyData(
 		for _, t := range toVerify {
 			t := t
 			g.Go(func() error {
-				return VerifyFileFailFast(context, t, d.SnapDir(), completedPieces)
+				defer completedFiles.Add(1)
+				return VerifyFileFailFast(context, t, d.SnapDir(), &completedBytes)
 			})
+		}
+
+		{
+			logEvery := time.NewTicker(20 * time.Second)
+			defer logEvery.Stop()
+			d.wg.Add(1)
+			go func() {
+				defer d.wg.Done()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-logEvery.C:
+						d.logger.Info("[snapshots] Verify",
+							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
+							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
+							"sz_gb", downloadercfg.DefaultPieceSize*completedBytes.Load()/1024/1024/1024,
+						)
+					}
+				}
+			}()
 		}
 
 		if err := g.Wait(); err != nil {
@@ -803,11 +831,6 @@ func (d *Downloader) VerifyData(
 		}
 		return nil
 	}
-
-	var (
-		verifiedBytes  atomic.Int64
-		completedFiles atomic.Uint64
-	)
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)
