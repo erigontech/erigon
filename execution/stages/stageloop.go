@@ -262,7 +262,6 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		return false, err
 	}
 	logCtx := sync.PrintTimings()
-	withTimings := len(logCtx) > 0
 
 	//var tableSizes []interface{}
 	var commitTime time.Duration
@@ -307,8 +306,9 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			logCtx = append(logCtx, "mgas/s", mgasPerSec)
 		}
 	}
-	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	if withTimings || gasUsed > 0 {
+	withTimings := len(logCtx) > 0
+	if withTimings {
+		logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		logger.Info("Timings", logCtx...)
 	}
 	//if len(tableSizes) > 0 {
