@@ -23,4 +23,5 @@ const (
 	Micro                    = 0             // Patch version component of the current release
 	Modifier                 = "dev"         // Modifier component of the current release
 	DefaultSnapshotGitBranch = "release/3.1" // Branch of erigontech/erigon-snapshot to use in OtterSync
+	SnapshotMainGitBranch    = "main"        // Branch of erigontech/erigon-snapshot to use in OtterSync for arb-sepolia snapshots
 )
