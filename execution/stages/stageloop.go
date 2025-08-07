@@ -308,7 +308,7 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		}
 	}
 	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	logger.Info("Timings", logCtx...)
+	logger.Info("Timings (slower than 50ms)", logCtx...)
 	//if len(tableSizes) > 0 {
 	//	logger.Info("Tables", tableSizes...)
 	//}
