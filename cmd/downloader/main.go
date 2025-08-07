@@ -315,7 +315,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles); err != nil {
+		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
 	}

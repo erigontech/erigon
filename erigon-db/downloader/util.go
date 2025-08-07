@@ -17,7 +17,12 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
+	"io"
+	"os"
+
 	//nolint:gosec
 	"errors"
 	"fmt"
@@ -404,4 +409,43 @@ func verifyTorrentComplete(
 		}
 		return
 	})
+}
+
+func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
+	info := t.Info()
+	file := info.UpvertedFiles()[0]
+	fPath := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
+	f, err := os.Open(fPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			f.Close()
+		}
+	}()
+
+	hasher := sha1.New()
+	for i := 0; i < info.NumPieces(); i++ {
+		p := info.Piece(i)
+		hasher.Reset()
+		_, err := io.Copy(hasher, io.NewSectionReader(f, p.Offset(), p.Length()))
+		if err != nil {
+			return err
+		}
+		good := bytes.Equal(hasher.Sum(nil), p.V1Hash().Value.Bytes())
+		if !good {
+			err := fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
+			log.Warn("[verify.failfast] ", "err", err)
+			return err
+		}
+
+		completePieces.Add(1)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	return nil
 }

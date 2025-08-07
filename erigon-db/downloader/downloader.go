@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"iter"
 	"math"
@@ -36,6 +35,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/anacrolix/chansync"
 	"github.com/anacrolix/torrent/types/infohash"
@@ -759,7 +760,9 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 func (d *Downloader) VerifyData(
 	ctx context.Context,
 	whiteList []string,
+	failFast bool,
 ) error {
+
 	var totalBytes int64
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
@@ -782,6 +785,24 @@ func (d *Downloader) VerifyData(
 
 	d.logger.Info("[snapshots] Verify start")
 	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
+
+	if failFast {
+		g, context := errgroup.WithContext(ctx)
+		// torrent lib internally limiting amount of hashers per file
+		// set limit here just to make load predictable, not to control Disk/CPU consumption
+		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+		for _, t := range toVerify {
+			t := t
+			g.Go(func() error {
+				return VerifyFileFailFast(context, t, d.SnapDir(), completedPieces)
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	var (
 		verifiedBytes  atomic.Int64
