@@ -103,10 +103,7 @@ var (
 	Headers = snaptype.RegisterType(
 		Enums.Headers,
 		"headers",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		[]snaptype.Index{Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
@@ -147,10 +144,7 @@ var (
 	Bodies = snaptype.RegisterType(
 		Enums.Bodies,
 		"bodies",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		[]snaptype.Index{Indexes.BodyHash},
 		snaptype.IndexBuilderFunc(
@@ -184,10 +178,7 @@ var (
 	Transactions = snaptype.RegisterType(
 		Enums.Transactions,
 		"transactions",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		[]snaptype.Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
 		snaptype.IndexBuilderFunc(
@@ -368,10 +359,7 @@ var (
 	Domains = snaptype.RegisterType(
 		Enums.Domains,
 		"domain",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		nil,
 		nil,
@@ -379,10 +367,7 @@ var (
 	Histories = snaptype.RegisterType(
 		Enums.Histories,
 		"history",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		nil,
 		nil,
@@ -390,10 +375,7 @@ var (
 	InvertedIndicies = snaptype.RegisterType(
 		Enums.InvertedIndicies,
 		"idx",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		nil,
 		nil,
@@ -402,10 +384,7 @@ var (
 	Accessors = snaptype.RegisterType(
 		Enums.Accessor,
 		"accessor",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		nil,
 		nil,
@@ -414,10 +393,7 @@ var (
 	Txt = snaptype.RegisterType(
 		Enums.Txt,
 		"txt",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		nil,
 		nil,
 		nil,

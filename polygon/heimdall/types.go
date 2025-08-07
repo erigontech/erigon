@@ -162,10 +162,7 @@ var (
 	Events = snaptype.RegisterType(
 		Enums.Events,
 		"borevents",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
 		snaptype.IndexBuilderFunc(
@@ -260,10 +257,7 @@ var (
 	Spans = snaptype.RegisterType(
 		Enums.Spans,
 		"borspans",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var spanFrom, spanTo uint64
@@ -324,10 +318,7 @@ var (
 	Checkpoints = snaptype.RegisterType(
 		Enums.Checkpoints,
 		"borcheckpoints",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
@@ -392,10 +383,7 @@ var (
 	Milestones = snaptype.RegisterType(
 		Enums.Milestones,
 		"bormilestones",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
