@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
@@ -64,6 +65,12 @@ type EVM struct {
 	// IntraBlockState gives access to the underlying state
 	intraBlockState *state.IntraBlockState
 
+	// table holds the opcode specific handlers
+	jt *JumpTable
+
+	// depth is the current call stack
+	depth int
+
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
 	// chain rules contains the chain rules for the current epoch
@@ -82,6 +89,12 @@ type EVM struct {
 	callGasTemp uint64
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
+
+	hasher    keccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+
+	readOnly   bool   // Whether to throw on stateful modifications
+	returnData []byte // Last CALL's return data for subsequent reuse
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -100,7 +113,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		chainConfig:     chainConfig,
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
-	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
+	evm.jt = jumpTable(evm.chainRules, vmConfig)
 
 	return evm
 }
@@ -127,7 +140,9 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 
-	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
+	evm.depth = 0
+	evm.returnData = nil
+	evm.jt = jumpTable(chainRules, vmConfig)
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
