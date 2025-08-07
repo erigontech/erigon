@@ -813,6 +813,12 @@ var (
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
+		Value: false,
+	}
+	
+	ArbitrumSyncFlag = cli.BoolFlag{
+		Name:  "abitrum.sync",
+		Usage: "Enabling syncing using the arbitrum sync component",
 		Value: true,
 	}
 
@@ -1742,6 +1748,10 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
 }
 
+func setArbitrumConfig(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.ArbitrumSync = ctx.Bool(ArbitrumSyncFlag.Name)
+}
+
 func setMiner(ctx *cli.Context, cfg *params2.MiningConfig) {
 	cfg.Enabled = ctx.Bool(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
@@ -1994,6 +2004,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
+	setArbitrumConfig(ctx, cfg)
 	setSilkworm(ctx, cfg)
 	if err := setBeaconAPI(ctx, cfg); err != nil {
 		log.Error("Failed to set beacon API", "err", err)
