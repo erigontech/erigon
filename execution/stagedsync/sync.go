@@ -589,6 +589,15 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap
 // Run the pruning function for the given stage
 func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	start := time.Now()
+
+	doms, _ := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	fmt.Println("PRUNE", s.LogPrefix(), "block in domains", doms.BlockNum())
+
+	defer func() {
+		doms, _ := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+		fmt.Println("DONE PRUNE", s.LogPrefix(), "block in domains", doms.BlockNum())
+	}()
+
 	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
 	if err != nil {
 		return err
@@ -609,9 +618,9 @@ func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwT
 
 	took := time.Since(start)
 	if took > 30*time.Second {
-		s.logger.Info(fmt.Sprintf("[%s] Prune done", s.LogPrefix()), "in", took)
+		s.logger.Info(fmt.Sprintf("[%s] prune done", s.LogPrefix()), "in", took)
 	} else {
-		s.logger.Debug(fmt.Sprintf("[%s] Prune done", s.LogPrefix()), "in", took)
+		s.logger.Debug(fmt.Sprintf("[%s] prune done", s.LogPrefix()), "in", took)
 	}
 	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: took})
 	s.metricsCache.stagePruneDurationSummary(stage.ID).Observe(took.Seconds())
