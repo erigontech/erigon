@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -63,7 +64,7 @@ type BeaconRpcP2P struct {
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
 // It takes a context, a sentinel.Sent
-func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) *BeaconRpcP2P {
+func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, beaconState *state.CachingBeaconState) *BeaconRpcP2P {
 	rpc := &BeaconRpcP2P{
 		ctx:          ctx,
 		sentinel:     sentinel,
@@ -74,6 +75,7 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		sentinel,
 		beaconConfig,
 		ethClock,
+		beaconState,
 	)
 	return rpc
 }
@@ -117,33 +119,33 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
-) ([]*cltypes.DataColumnSidecar, string, uint64, error) {
-	filteredReq, pid, cgc, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+) ([]*cltypes.DataColumnSidecar, string, error) {
+	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
 	if err != nil {
-		return nil, pid, 0, err
+		return nil, pid, err
 	}
 
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
-		return nil, "", 0, err
+		return nil, "", err
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
 	if err != nil {
-		return nil, pid, 0, err
+		return nil, pid, err
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, 0, err
+			return nil, pid, err
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
-	return ColumnSidecars, pid, cgc, nil
+	return ColumnSidecars, pid, nil
 }
 
 func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
@@ -333,8 +335,14 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinel.ResponseData) ([]resp
 			version: version,
 			raw:     raw,
 		})
-		// TODO(issues/5884): figure out why there is this extra byte.
-		r.ReadByte()
+
+		// read next result byte
+		if _, err := r.ReadByte(); err == io.EOF {
+			break
+		} else if err != nil {
+			log.Debug("failed to read byte", "err", err)
+			return nil, message.Peer.Pid, err
+		}
 	}
 	return responsePacket, message.Peer.Pid, nil
 }
