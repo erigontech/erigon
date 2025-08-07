@@ -87,16 +87,17 @@ func NewCrawler(
 	saveQueue := utils.NewTaskQueue("Crawler.saveQueue", config.ConcurrencyLimit*2, saveQueueLogFuncProvider)
 
 	chain := config.Chain
-	spec, err := chainspec.ChainSpecByName(chain)
-	if err != nil {
-		return nil, err
+	chainConfig := chainspec.ChainConfigByChainName(chain)
+	genesisHash := chainspec.GenesisHashByChainName(chain)
+	if (chainConfig == nil) || (genesisHash == nil) {
+		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
 	// TODO(yperbasis) This might be a problem for chains that have a time-based fork (Shanghai, Cancun, etc)
 	// in genesis already, e.g. Holesky.
 	genesisTime := uint64(0)
 
-	forkFilter := forkid.NewStaticFilter(spec.Config, spec.GenesisHash, genesisTime)
+	forkFilter := forkid.NewStaticFilter(chainConfig, *genesisHash, genesisTime)
 
 	diplomacy := NewDiplomacy(
 		database.NewDBRetrier(db, logger),

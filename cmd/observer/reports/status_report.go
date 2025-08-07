@@ -29,13 +29,13 @@ type StatusReport struct {
 	DistinctIPCount uint
 }
 
-func CreateStatusReport(ctx context.Context, db database.DB, maxPingTries uint, networkID uint64) (*StatusReport, error) {
-	totalCount, err := db.CountNodes(ctx, maxPingTries, uint(networkID))
+func CreateStatusReport(ctx context.Context, db database.DB, maxPingTries uint, networkID uint) (*StatusReport, error) {
+	totalCount, err := db.CountNodes(ctx, maxPingTries, networkID)
 	if err != nil {
 		return nil, err
 	}
 
-	distinctIPCount, err := db.CountIPs(ctx, maxPingTries, uint(networkID))
+	distinctIPCount, err := db.CountIPs(ctx, maxPingTries, networkID)
 	if err != nil {
 		return nil, err
 	}

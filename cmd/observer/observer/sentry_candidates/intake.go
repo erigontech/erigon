@@ -122,11 +122,7 @@ func (intake *Intake) Run(ctx context.Context) error {
 			return err
 		}
 
-		spec, err := chainspec.ChainSpecByName(intake.chain)
-		if err != nil {
-			return err
-		}
-		networkID := spec.Config.ChainID.Uint64()
+		networkID := chainspec.NetworkIDByChainName(intake.chain)
 		isCompatFork := true
 
 		handshakeRetryTime := time.Now().Add(intake.handshakeRefreshTimeout)

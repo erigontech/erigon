@@ -21,9 +21,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/execution/chainspec"
-	"math/big"
 	"runtime"
 	"testing"
 	"time"
@@ -90,24 +87,6 @@ func TestMiningBenchmark(t *testing.T) {
 	fdlimit.Raise(2048)
 
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)
-
-	cspec := chainspec.Spec{
-		Name:        "mining_benchmark",
-		GenesisHash: common.HexToHash("0x94ed840c030d808315d18814a43ad8f6923bae9d3e5f529166085197c9b78b9d"),
-		Genesis:     &genesis,
-		Config: &chain.Config{
-			ChainName: "mining_benchmark",
-			ChainID:   big.NewInt(1338),
-			Bor:       nil,
-			BorJSON:   nil,
-			AllowAA:   false,
-		},
-		Bootnodes:  nil,
-		DNSNetwork: "",
-	}
-
-	chainspec.RegisterChainSpec(cspec.Name, cspec)
-
 	var stacks []*node.Node
 	var ethbackends []*eth.Ethereum
 	var enodes []string

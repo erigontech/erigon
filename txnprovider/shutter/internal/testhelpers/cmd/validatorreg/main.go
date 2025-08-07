@@ -60,7 +60,7 @@ func main() {
 	}
 
 	logger.Info("num updates", "num", n.Uint64())
-	chainId := chainspec.Chiado.Config.ChainID
+	chainId := chainspec.ChiadoChainConfig.ChainID
 	for i := uint64(0); i < n.Uint64(); i++ {
 		u, err := valReg.GetUpdate(&callOpts, big.NewInt(int64(i)))
 		if err != nil {
