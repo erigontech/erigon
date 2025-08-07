@@ -19,12 +19,10 @@
 package debug
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"runtime/pprof"
-	"syscall"
 
 	"golang.org/x/sys/unix"
 
@@ -33,46 +31,16 @@ import (
 )
 
 func ListenSignals(stack io.Closer, logger log.Logger) {
-	{
-		sigc := make(chan os.Signal, 1)
-		signal.Notify(sigc,
-			syscall.SIGHUP,
-			syscall.SIGINT,
-			syscall.SIGTERM,
-			syscall.SIGKILL,
-			syscall.SIGBUS,
-			syscall.SIGABRT,
-			syscall.SIGCHLD,
-			syscall.SIGPIPE,
-			syscall.SIGUSR1,
-			syscall.SIGUSR2,
-			syscall.SIGSEGV,
-			syscall.SIGXCPU,
-			syscall.SIGXFSZ,
-			syscall.SIGQUIT)
-		go func() {
-			c := <-sigc
-			fmt.Printf("[dbg] whaat? %+v\n", c)
-			// ... do something ...
-		}()
-	}
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, unix.SIGINT, unix.SIGTERM)
 	_debug.GetSigC(&sigc)
 	defer signal.Stop(sigc)
 
-	fmt.Println("[dbg] ListenSignals")
-	defer fmt.Println("[dbg] ListenSignals exit")
-
 	usr1 := make(chan os.Signal, 1)
 	signal.Notify(usr1, unix.SIGUSR1)
-
-	bus := make(chan os.Signal, 1)
-	signal.Notify(usr1, unix.SIGBUS)
 	for {
 		select {
 		case <-sigc:
-			fmt.Println("[dbg] sigc")
 			logger.Info("Got interrupt, shutting down...")
 			if stack != nil {
 				go stack.Close()
@@ -86,11 +54,7 @@ func ListenSignals(stack io.Closer, logger log.Logger) {
 			Exit() // ensure trace and CPU profile data is flushed.
 			LoudPanic("boom")
 		case <-usr1:
-			fmt.Println("[dbg] usr1")
-
 			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		case <-bus:
-			fmt.Println("[dbg] bus")
 		}
 	}
 }

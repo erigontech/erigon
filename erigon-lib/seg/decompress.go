@@ -455,7 +455,6 @@ func (d *Decompressor) IsOpen() bool {
 }
 
 func (d *Decompressor) checkFileLenChange() {
-	panic("alex")
 	if d.f == nil {
 		return
 	}
