@@ -291,7 +291,7 @@ func TestNetHandler(t *testing.T) {
 	t.Skip()
 	t.Parallel()
 
-	l, err := net.Listen("tcp", "localhost:0")
+	l, err := net.Listen("tcp", "localhost:0") //nolint
 	if err != nil {
 		t.Fatalf("Failed to listen: %v", l)
 	}

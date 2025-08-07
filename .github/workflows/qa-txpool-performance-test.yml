@@ -361,7 +361,7 @@ jobs:
               else
                 duplicated_p2p_event_count_percentage="N/A"
               fi
-              
+          
               echo "| $tx_count | $min_us | $max_ms | $coor_omission_event_count_percentage | $missed_p2p_event_count_percentage | $duplicated_p2p_event_count_percentage |" >> $GITHUB_STEP_SUMMARY
             done
           else
