@@ -83,7 +83,7 @@ func TestMiningBenchmark(t *testing.T) {
 	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
 	defer clean()
 
-	logger := testlog.Logger(t, log.LvlInfo)
+	logger := testlog.Logger(t, log.LvlDebug)
 	fdlimit.Raise(2048)
 
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)
@@ -94,7 +94,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(ctx, logger, t.TempDir(), &genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(ctx, logger, t.TempDir(), &genesis, pkeys[i], true)
 		if err != nil {
 			panic(err)
 		}
