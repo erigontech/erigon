@@ -51,7 +51,8 @@ func ListenSignals(stack io.Closer, logger log.Logger) {
 			syscall.SIGXFSZ,
 			syscall.SIGQUIT)
 		go func() {
-			fmt.Println("[dbg] whaat?")
+			c := <-sigc
+			fmt.Printf("[dbg] whaat? %+v\n", c)
 			// ... do something ...
 		}()
 	}
