@@ -56,6 +56,9 @@ func (r *BeaconResponse) WithHeaders(headers map[string]string) (out *BeaconResp
 }
 
 func (r *BeaconResponse) WithHeader(key string, value string) (out *BeaconResponse) {
+	if r.headers == nil {
+		r.headers = make(map[string]string)
+	}
 	r.headers[key] = value
 	return r
 }
