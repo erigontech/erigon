@@ -801,7 +801,6 @@ func (d *Downloader) VerifyData(
 			log.Warn("[dbg] m?")
 			go func() {
 				for {
-					log.Warn("[dbg] m?")
 					select {
 					case <-ctx.Done():
 						return
