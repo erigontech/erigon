@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1590,16 +1591,16 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 
 func removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
-		_ = os.Remove(f)
-		_ = os.Remove(f + ".torrent")
+		_ = dir.RemoveFile(f)
+		_ = dir.RemoveFile(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		_ = os.Remove(withoutExt + ".idx.torrent")
+		_ = dir.RemoveFile(withoutExt + ".idx")
+		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
 		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
-			_ = os.Remove(withoutExt + "-to-block.idx")
-			_ = os.Remove(withoutExt + "-to-block.idx.torrent")
+			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
+			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
 		}
 	}
 	tmpFiles, err := snaptype.TmpFiles(snapDir)
@@ -1607,7 +1608,7 @@ func removeOldFiles(toDel []string, snapDir string) {
 		return
 	}
 	for _, f := range tmpFiles {
-		_ = os.Remove(f)
+		_ = dir.RemoveFile(f)
 	}
 }
 

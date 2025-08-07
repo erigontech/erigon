@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math"
 	"os"
 	"path"
@@ -95,8 +96,8 @@ func OpenCaplinDatabase(ctx context.Context,
 	blobDbPath := path.Join(blobDir, "chaindata")
 
 	if wipeout {
-		os.RemoveAll(dataDirIndexer)
-		os.RemoveAll(blobDbPath)
+		dir.RemoveAll(dataDirIndexer)
+		dir.RemoveAll(blobDbPath)
 	}
 
 	os.MkdirAll(dbPath, 0700)
@@ -255,7 +256,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
-	os.RemoveAll(caplinFcuPath)
+	dir.RemoveAll(caplinFcuPath)
 	err = os.MkdirAll(caplinFcuPath, 0o755)
 	if err != nil {
 		return err

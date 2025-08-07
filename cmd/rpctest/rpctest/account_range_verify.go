@@ -21,9 +21,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"net"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
@@ -37,14 +37,14 @@ import (
 )
 
 func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
-	err := os.RemoveAll(tmpDataDir)
+	err := dir.RemoveAll(tmpDataDir)
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
 
 	if !notRegenerateGethData {
-		err = os.RemoveAll(gethDataDir)
+		err = dir.RemoveAll(gethDataDir)
 		if err != nil {
 			log.Error(err.Error())
 			return

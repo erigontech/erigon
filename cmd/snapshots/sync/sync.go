@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -223,7 +224,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 	}
 
 	if config.CleanDir {
-		if err := os.RemoveAll(torrentDir); err != nil {
+		if err := dir.RemoveAll(torrentDir); err != nil {
 			return nil, fmt.Errorf("can't clean torrent dir: %w", err)
 		}
 	}

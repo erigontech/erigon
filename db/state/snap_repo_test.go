@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"strings"
@@ -534,7 +535,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 		if info.IsDir() {
 			return nil
 		}
-		os.Remove(path)
+		dir.RemoveFile(path)
 		return nil
 	})
 }

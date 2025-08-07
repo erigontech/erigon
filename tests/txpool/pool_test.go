@@ -18,8 +18,8 @@ package txpool
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
-	"os"
 	"testing"
 	"time"
 
@@ -121,7 +121,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 	fmt.Printf("\nTx/s: (total %d txs processed): %.2f / s \n", txToSendCount, float64(txToSendCount)*float64(time.Second)/float64(time.Since(start)))
 	fmt.Println("Processed time:", time.Since(start))
 
-	os.RemoveAll("./dev") //remove tmp dir
+	dir.RemoveAll("./dev") //remove tmp dir
 }
 
 // Topology of the network:
@@ -185,7 +185,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 	averageLatency = averageLatency / time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
-	os.RemoveAll("./dev") //remove tmp dir
+	dir.RemoveAll("./dev") //remove tmp dir
 }
 
 // Topology of the network:
@@ -273,7 +273,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 	fmt.Printf("\nTx/s: (total %d txs processed): %.2f / s \n", txToSendCount, float64(txToSendCount)*float64(time.Second)/float64(time.Since(start)))
 	fmt.Println("Processed time:", time.Since(start))
 
-	os.RemoveAll("./dev") //remove tmp dir
+	dir.RemoveAll("./dev") //remove tmp dir
 }
 
 // Topology of the network:
@@ -337,5 +337,5 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 	averageLatency = averageLatency / time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
-	os.RemoveAll("./dev") //remove tmp dir
+	dir.RemoveAll("./dev") //remove tmp dir
 }

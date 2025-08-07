@@ -61,7 +61,7 @@ func ClearDevDB(dataDir string, logger log.Logger) error {
 			return err
 		}
 
-		if err := os.RemoveAll(nodeDataDir); err != nil {
+		if err := dir.RemoveAll(nodeDataDir); err != nil {
 			return err
 		}
 

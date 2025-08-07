@@ -18,6 +18,7 @@ package mdbx
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"unsafe"
 
@@ -99,7 +100,7 @@ func (t *TemporaryMdbx) PageSize() datasize.ByteSize {
 
 func (t *TemporaryMdbx) Close() {
 	t.db.Close()
-	os.RemoveAll(t.path)
+	dir.RemoveAll(t.path)
 }
 
 func (t *TemporaryMdbx) CHandle() unsafe.Pointer {
