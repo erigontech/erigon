@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"testing"

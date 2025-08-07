@@ -19,16 +19,16 @@ package freezeblocks
 import (
 	"context"
 	"fmt"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"reflect"
 
 	"github.com/erigontech/erigon-lib/common"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/db/snapshotsync"
-	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
@@ -72,7 +72,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 			if snap.Enum() == heimdall.Events.Enum() {
 				firstKeyGetter = func(ctx context.Context) uint64 {
-					return br.bridgeStore.LastFrozenEventId() + 1
+					return blockReader.LastFrozenEventId() + 1
 				}
 			}
 
@@ -107,7 +107,7 @@ func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewS
 	snapshots := br.borSnapshots()
 	chainConfig := fromdb.ChainConfig(br.db)
 	merger := snapshotsync.NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(true), snapshots.BlocksAvailable())
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) > 0 {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", snapshotsync.Ranges(rangesToMerge))
 	}
@@ -134,7 +134,7 @@ func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewS
 	}
 
 	{
-		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), heimdall.SnapshotTypes(), false)
+		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), br.borSnapshots().SegmentsMin(), heimdall.SnapshotTypes(), false)
 		if err != nil {
 			return true, err
 		}

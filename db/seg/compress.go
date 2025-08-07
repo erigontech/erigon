@@ -36,10 +36,9 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/etl"
 )
 
 type Cfg struct {
@@ -106,6 +105,7 @@ type Compressor struct {
 
 	outputFileName   string
 	outputFile       string // File where to output the dictionary and compressed data
+	tmpOutFilePath   string // File where to output the dictionary and compressed data
 	suffixCollectors []*etl.Collector
 	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
@@ -124,7 +124,11 @@ type Compressor struct {
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	workers := cfg.Workers
 	dir2.MustExist(tmpDir)
-	_, fileName := filepath.Split(outputFile)
+	dir, fileName := filepath.Split(outputFile)
+
+	// tmpOutFilePath is a ".seg.tmp" file which will be renamed to ".seg" if everything succeeds.
+	// It allows to atomically create a ".seg" file (the downloader will not see partial ".seg" files).
+	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
 
 	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
 	uncompressedFile, err := NewRawWordsFile(uncompressedPath)
@@ -149,6 +153,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	return &Compressor{
 		Cfg:              cfg,
 		uncompressedFile: uncompressedFile,
+		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
 		outputFileName:   outputFileName,
 		tmpDir:           tmpDir,
@@ -257,16 +262,15 @@ func (c *Compressor) Compress() error {
 			return err
 		}
 	}
+	defer dir2.RemoveFile(c.tmpOutFilePath)
 
-	cf, err := dir.CreateTemp(c.outputFile)
+	cf, err := os.Create(c.tmpOutFilePath)
 	if err != nil {
 		return err
 	}
-	tmpFileName := cf.Name()
-	defer dir.RemoveFile(tmpFileName)
 	defer cf.Close()
 	t := time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 		return err
 	}
 	if err = c.fsync(cf); err != nil {
@@ -275,7 +279,7 @@ func (c *Compressor) Compress() error {
 	if err = cf.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpFileName, c.outputFile); err != nil {
+	if err := os.Rename(c.tmpOutFilePath, c.outputFile); err != nil {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
@@ -301,7 +305,7 @@ func (c *Compressor) fsync(f *os.File) error {
 		return nil
 	}
 	if err := f.Sync(); err != nil {
-		c.logger.Warn("couldn't fsync", "err", err, "file", f.Name())
+		c.logger.Warn("couldn't fsync", "err", err, "file", c.tmpOutFilePath)
 		return err
 	}
 	return nil

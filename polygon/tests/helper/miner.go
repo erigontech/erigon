@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"math/big"
 	"os"
 	"time"

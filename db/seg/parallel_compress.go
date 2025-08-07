@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"os"
 	"slices"
@@ -33,11 +34,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/seg/patricia"
-	"github.com/erigontech/erigon/db/seg/sais"
+	"github.com/erigontech/erigon-lib/seg/patricia"
+	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
 func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
@@ -294,13 +294,12 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	t := time.Now()
 
 	var err error
-
+	intermediatePath := segmentFilePath + ".tmp"
+	defer dir.RemoveFile(intermediatePath)
 	var intermediateFile *os.File
-	if intermediateFile, err = dir.CreateTemp(segmentFilePath); err != nil {
+	if intermediateFile, err = os.Create(intermediatePath); err != nil {
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
-	intermediatePath := intermediateFile.Name()
-	defer dir.RemoveFile(intermediatePath)
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
 

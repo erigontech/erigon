@@ -5,6 +5,7 @@ package gdbme
 import (
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"os/exec"
 	"strings"

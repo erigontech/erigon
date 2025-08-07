@@ -21,6 +21,7 @@ package nodecfg_test
 
 import (
 	"context"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
