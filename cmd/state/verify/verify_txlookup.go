@@ -43,7 +43,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }

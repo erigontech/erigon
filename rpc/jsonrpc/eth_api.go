@@ -412,8 +412,6 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
-	logger.Info("starting rpc with polygon bridge")
-
 	return &APIImpl{
 		BaseAPI:                     base,
 		db:                          db,
