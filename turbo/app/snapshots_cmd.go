@@ -451,8 +451,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 				skipped := false
 
-				//TODO: replace by `agg` use?
-				fPathMask := filepath.Join(filepath.Dir(res.Path), fmt.Sprintf("*-%s.%d-%d.kvi", kv.CommitmentDomain.String(), res.From, res.To))
+				derivedKvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
+				fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+				if err != nil {
+					return err
+				}
 				kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					return err
@@ -484,7 +487,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				}
 
 				if !skipped { // try to lookup in bt index
-					fPathMask := filepath.Join(filepath.Dir(res.Path), fmt.Sprintf("*-%s.%d-%d.bt", kv.CommitmentDomain.String(), res.From, res.To))
+					derivedBt := strings.Replace(res.Path, ".kv", ".bt", 1)
+					fPathMask, err := version.ReplaceVersionWithMask(derivedBt)
+					if err != nil {
+						return err
+					}
 					bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 					if err != nil {
 						return err
