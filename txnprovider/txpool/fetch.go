@@ -225,7 +225,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 		}
 
-		 const maxHashesPerMsg = 1024  // ETH/66 soft limit
+		const maxHashesPerMsg = 1024 // ETH/66 soft limit
 		if hashCount > maxHashesPerMsg {
 			f.logger.Warn("Oversized hash announcement",
 				"peer", req.PeerId, "count", hashCount)
