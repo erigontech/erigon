@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
