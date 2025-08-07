@@ -131,14 +131,12 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Upgrading from 3.0 to 3.1
 
-* Erigon3.1 has 2 upgrade options (backup recommended in both):
-    * Just upgrade Erigon binary - it will work on old files
-    * Upgrade binary and data:
-        * upgrade Erigon version
-      * run `./build/bin/erigon snapshot reset --datadir /your-datadir` . After this command: at next start of Erigon -
-        will download latest files (but re-use unchanged files)
-      * start Erigon - it will download changed files
-      * it will take many hours (can increase speed by `--torrent.download.rate=1g`)
+1. Backup your datadir.
+2. Upgrade your Erigon binary.
+3. OPTIONAL: Upgrade snapshot files.
+   1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
+   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See #snapshots-reset for more details.
+4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset your datadir, Erigon will sync to the latest remote snapshots.
 
 ### Datadir structure
 
@@ -260,6 +258,14 @@ debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
 Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk
 output `--log.dir.json`.
+
+#### Torrent client logging
+
+The torrent client in the Downloader logs to `logs/torrent.log` at the level specified by `torrent.verbosity` or WARN, whichever is lower. Logs at `torrent.verbosity` or higher are also passed through to the top level Erigon dir and console loggers (which must have their own levels set low enough to log the messages in their respective handlers).
+
+### Resetting snapshots
+
+Erigon 3.1 adds the command `erigon snapshots reset`. This modifies your datadir so that Erigon will sync to the latest remote snapshots on next run. You must pass `--datadir`. If the chain cannot be inferred from the chaindata, you must pass `--chain`. `--local=false` will prevent locally generated snapshots from also being removed. Pass `--dry-run` and/or `--verbosity=5` for more information.
 
 ### Modularity
 
