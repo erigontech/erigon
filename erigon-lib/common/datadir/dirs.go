@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -332,6 +333,7 @@ func (d Dirs) RenameNewVersions() error {
 	}
 
 	for _, dirPath := range directories {
+		// renaming v1.0- => v1-
 		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -360,6 +362,25 @@ func (d Dirs) RenameNewVersions() error {
 		if err != nil {
 			return err
 		}
+
+		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
+		err = filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !dirEntry.IsDir() && IsVersionedName(dirEntry.Name()) {
+				err = dir.RemoveFile(path)
+				if err != nil {
+					return fmt.Errorf("failed to remove file %s: %w", path, err)
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -370,3 +391,9 @@ func (d Dirs) PreverifiedPath() string {
 }
 
 const PreverifiedFileName = "preverified.toml"
+
+var versionPattern = regexp.MustCompile(`^v\d+\.\d+-`)
+
+func IsVersionedName(name string) bool {
+	return versionPattern.MatchString(name)
+}
