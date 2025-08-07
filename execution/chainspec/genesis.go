@@ -53,21 +53,10 @@ func ReadPrealloc(fileSys fs.FS, filename string) types.GenesisAlloc {
 	return ga
 }
 
-var (
-	// to preserve same pointer in genesis.Config and Spec.Config, init once and reuse configs
-
-	mainnetChainConfig = ReadChainConfig(chainspecs, "chainspecs/mainnet.json")
-	holeskyChainConfig = ReadChainConfig(chainspecs, "chainspecs/holesky.json")
-	sepoliaChainConfig = ReadChainConfig(chainspecs, "chainspecs/sepolia.json")
-	hoodiChainConfig   = ReadChainConfig(chainspecs, "chainspecs/hoodi.json")
-	gnosisChainConfig  = ReadChainConfig(chainspecs, "chainspecs/gnosis.json")
-	chiadoChainConfig  = ReadChainConfig(chainspecs, "chainspecs/chiado.json")
-)
-
 // MainnetGenesisBlock returns the Ethereum main net genesis block.
 func MainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     mainnetChainConfig,
+		Config:     MainnetChainConfig,
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
 		GasLimit:   5000,
@@ -79,7 +68,7 @@ func MainnetGenesisBlock() *types.Genesis {
 // HoleskyGenesisBlock returns the Holesky main net genesis block.
 func HoleskyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     holeskyChainConfig,
+		Config:     HoleskyChainConfig,
 		Nonce:      4660,
 		GasLimit:   25000000,
 		Difficulty: big.NewInt(1),
@@ -91,7 +80,7 @@ func HoleskyGenesisBlock() *types.Genesis {
 // SepoliaGenesisBlock returns the Sepolia network genesis block.
 func SepoliaGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     sepoliaChainConfig,
+		Config:     SepoliaChainConfig,
 		Nonce:      0,
 		ExtraData:  []byte("Sepolia, Athens, Attica, Greece!"),
 		GasLimit:   30000000,
@@ -104,7 +93,7 @@ func SepoliaGenesisBlock() *types.Genesis {
 // HoodiGenesisBlock returns the Hoodi network genesis block.
 func HoodiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     hoodiChainConfig,
+		Config:     HoodiChainConfig,
 		Nonce:      0x1234,
 		ExtraData:  []byte(""),
 		GasLimit:   0x2255100, // 36M
@@ -116,7 +105,7 @@ func HoodiGenesisBlock() *types.Genesis {
 
 func GnosisGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     gnosisChainConfig,
+		Config:     GnosisChainConfig,
 		Timestamp:  0,
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
@@ -127,7 +116,7 @@ func GnosisGenesisBlock() *types.Genesis {
 
 func ChiadoGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     chiadoChainConfig,
+		Config:     ChiadoChainConfig,
 		Timestamp:  0,
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
@@ -155,4 +144,10 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 		Difficulty: big.NewInt(1),
 		Alloc:      ReadPrealloc(allocs, "allocs/dev.json"),
 	}
+}
+
+var genesisBlockByChainName = make(map[string]*types.Genesis)
+
+func GenesisBlockByChainName(chain string) *types.Genesis {
+	return genesisBlockByChainName[chain]
 }

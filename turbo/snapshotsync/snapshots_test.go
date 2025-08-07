@@ -83,7 +83,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 }
 
 func BenchmarkFindMergeRange(t *testing.B) {
-	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.MainnetChainConfig, nil)
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.B) {
 		for j := 0; j < t.N; j++ {
@@ -148,7 +148,7 @@ func BenchmarkFindMergeRange(t *testing.B) {
 }
 
 func TestFindMergeRange(t *testing.T) {
-	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.MainnetChainConfig, nil)
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
 		var RangesOld []Range
@@ -229,7 +229,7 @@ func TestMergeSnapshots(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.MainnetChainConfig, logger)
 		merger.DisableFsync()
 		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true)
 		Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
@@ -246,7 +246,7 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(50, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.MainnetChainConfig, logger)
 		merger.DisableFsync()
 		s.OpenFolder()
 		Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())

@@ -229,7 +229,7 @@ func NewBorDevnetWithLocalHeimdall(
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	var config chain.Config
-	copier.Copy(&config, polychain.BorDevnet.Config)
+	copier.Copy(&config, polychain.BorDevnetChainConfig)
 	borConfig := config.Bor.(*borcfg.BorConfig)
 	if sprintSize > 0 {
 		borConfig.Sprint = map[string]uint64{"0": sprintSize}

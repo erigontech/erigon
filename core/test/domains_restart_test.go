@@ -32,7 +32,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -416,10 +415,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
 		require.NoError(t, err)
-
-		s, err := chainspec.ChainSpecByName(networkname.Test)
-		require.NoError(t, err)
-		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
+		require.Equal(t, chainspec.TestGenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 

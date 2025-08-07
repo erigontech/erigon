@@ -88,7 +88,7 @@ var (
 	chiadoConfig = Config{
 		Enabled:                          true,
 		InstanceId:                       102_000,
-		ChainId:                          uint256.MustFromBig(chainspec.Chiado.Config.ChainID),
+		ChainId:                          uint256.MustFromBig(chainspec.ChiadoChainConfig.ChainID),
 		BeaconChainGenesisTimestamp:      1665396300,
 		SecondsPerSlot:                   clparams.BeaconConfigs[chainspec.ChiadoChainID].SecondsPerSlot,
 		SequencerContractAddress:         "0x2aD8E2feB0ED5b2EC8e700edB725f120576994ed",
@@ -113,7 +113,7 @@ var (
 	gnosisConfig = Config{
 		Enabled:                          true,
 		InstanceId:                       1_000,
-		ChainId:                          uint256.MustFromBig(chainspec.Gnosis.Config.ChainID),
+		ChainId:                          uint256.MustFromBig(chainspec.GnosisChainConfig.ChainID),
 		BeaconChainGenesisTimestamp:      1638993340,
 		SecondsPerSlot:                   clparams.BeaconConfigs[chainspec.GnosisChainID].SecondsPerSlot,
 		SequencerContractAddress:         "0xc5C4b277277A1A8401E0F039dfC49151bA64DC2E",
