@@ -40,7 +40,7 @@ import (
 	ver "github.com/erigontech/erigon-lib/version"
 )
 
-var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)
+var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.SnapshotMainGitBranch)
 
 var (
 	Mainnet    = fromEmbeddedToml(snapshothashes.Mainnet)
