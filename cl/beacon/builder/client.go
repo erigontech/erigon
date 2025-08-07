@@ -130,7 +130,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	}
 	headers := map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
-	}
+	} // Add the Eth-Consensus-Version header to indicate the version of the block being submitted
 
 	var resp *BlindedBlockResponse
 
