@@ -83,18 +83,18 @@ func (c *MockDataColumnStorageColumnSidecarExistsCall) DoAndReturn(f func(contex
 }
 
 // GetSavedColumnIndex mocks base method.
-func (m *MockDataColumnStorage) GetSavedColumnIndex(ctx context.Context, blockRoot common.Hash) ([]uint64, error) {
+func (m *MockDataColumnStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSavedColumnIndex", ctx, blockRoot)
+	ret := m.ctrl.Call(m, "GetSavedColumnIndex", ctx, slot, blockRoot)
 	ret0, _ := ret[0].([]uint64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetSavedColumnIndex indicates an expected call of GetSavedColumnIndex.
-func (mr *MockDataColumnStorageMockRecorder) GetSavedColumnIndex(ctx, blockRoot any) *MockDataColumnStorageGetSavedColumnIndexCall {
+func (mr *MockDataColumnStorageMockRecorder) GetSavedColumnIndex(ctx, slot, blockRoot any) *MockDataColumnStorageGetSavedColumnIndexCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSavedColumnIndex", reflect.TypeOf((*MockDataColumnStorage)(nil).GetSavedColumnIndex), ctx, blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSavedColumnIndex", reflect.TypeOf((*MockDataColumnStorage)(nil).GetSavedColumnIndex), ctx, slot, blockRoot)
 	return &MockDataColumnStorageGetSavedColumnIndexCall{Call: call}
 }
 
@@ -110,13 +110,13 @@ func (c *MockDataColumnStorageGetSavedColumnIndexCall) Return(arg0 []uint64, arg
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockDataColumnStorageGetSavedColumnIndexCall) Do(f func(context.Context, common.Hash) ([]uint64, error)) *MockDataColumnStorageGetSavedColumnIndexCall {
+func (c *MockDataColumnStorageGetSavedColumnIndexCall) Do(f func(context.Context, uint64, common.Hash) ([]uint64, error)) *MockDataColumnStorageGetSavedColumnIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDataColumnStorageGetSavedColumnIndexCall) DoAndReturn(f func(context.Context, common.Hash) ([]uint64, error)) *MockDataColumnStorageGetSavedColumnIndexCall {
+func (c *MockDataColumnStorageGetSavedColumnIndexCall) DoAndReturn(f func(context.Context, uint64, common.Hash) ([]uint64, error)) *MockDataColumnStorageGetSavedColumnIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
