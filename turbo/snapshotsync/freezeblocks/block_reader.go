@@ -39,7 +39,6 @@ import (
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -381,11 +380,10 @@ func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReade
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
-	sn             *RoSnapshots
-	borSn          *heimdall.RoSnapshots
-	borBridgeStore bridge.Store
-	heimdallStore  heimdall.Store
-	txBlockIndex   *txBlockIndexWithBlockReader
+	sn            *RoSnapshots
+	borSn         *heimdall.RoSnapshots
+	heimdallStore heimdall.Store
+	txBlockIndex  *txBlockIndexWithBlockReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
 	headerByNumCache *lru.Cache[uint64, *types.Header]
@@ -393,10 +391,10 @@ type BlockReader struct {
 
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
-func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
+func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
-	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
+	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
 	br.txBlockIndex = txnumReader
