@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/snapcfg"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -50,8 +50,8 @@ func init() {
 }
 
 func initTypes() {
-	borTypes := append(coresnaptype.BlockSnapshotTypes, SnapshotTypes()...)
-	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
+	borTypes := append(snaptype2.BlockSnapshotTypes, SnapshotTypes()...)
+	borTypes = append(borTypes, snaptype2.E3StateTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Amoy, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.BorMainnet, borTypes)

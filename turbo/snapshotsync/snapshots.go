@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/db/snapcfg"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
@@ -1493,7 +1493,7 @@ func (s *RoSnapshots) View() *View {
 	for _, t := range s.enums {
 		sgs[t] = s.visible[t].BeginRo()
 	}
-	return &View{s: s, segments: sgs, baseSegType: coresnaptype.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
+	return &View{s: s, segments: sgs, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 }
 
 func (v *View) Close() {
@@ -1597,7 +1597,7 @@ func removeOldFiles(toDel []string, snapDir string) {
 		withoutExt := f[:len(f)-len(ext)]
 		_ = dir.RemoveFile(withoutExt + ".idx")
 		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
+		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
 		if isTxnType {
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")

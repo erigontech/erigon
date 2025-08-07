@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/db/rawdb"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -559,7 +559,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 		return nil, nil
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "not found file for such blockHeight")
@@ -614,7 +614,7 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 		return h, nil
 	}
 
-	segmentRotx := r.sn.ViewType(coresnaptype.Headers)
+	segmentRotx := r.sn.ViewType(snaptype2.Headers)
 	defer segmentRotx.Close()
 
 	buf := make([]byte, 128)
@@ -642,7 +642,7 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 		return h, true, nil
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
 	if !ok {
 		return h, false, nil
 	}
@@ -676,7 +676,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 		}
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
 	if !ok {
 		return
 	}
@@ -716,7 +716,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		}
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
@@ -741,7 +741,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		return nil, nil
 	}
 
-	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
+	txnSeg, ok, release := r.sn.ViewSingleFile(snaptype2.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.IndicesMax(), "r.sn.segmetntsMax", r.sn.SegmentsMax())
@@ -792,7 +792,7 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 		return body, txCount, nil
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Bodies, blockHeight)
 	if !ok {
 		return
 	}
@@ -817,7 +817,7 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
 }
 func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
-	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockNum)
+	bodySeg, ok, release := r.sn.ViewSingleFile(snaptype2.Bodies, blockNum)
 	if !ok {
 		hash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
@@ -879,7 +879,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no header files for this block num")
@@ -906,7 +906,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	var b *types.Body
 	var baseTxnId uint64
 	var txCount uint32
-	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
+	bodySeg, ok, release := r.sn.ViewSingleFile(snaptype2.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
@@ -930,7 +930,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 
 	var txs []types.Transaction
 	if txCount != 0 {
-		txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
+		txnSeg, ok, release := r.sn.ViewSingleFile(snaptype2.Transactions, blockHeight)
 		if !ok {
 			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
 			return nil, nil, err
@@ -1121,7 +1121,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	idxTxnHash := txsSeg.Src().Index(coresnaptype.Indexes.TxnHash)
+	idxTxnHash := txsSeg.Src().Index(snaptype2.Indexes.TxnHash)
 
 	if idxTxnHash == nil {
 		return nil, nil, nil
@@ -1162,7 +1162,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 }
 
 func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (txn types.Transaction, err error) {
-	idxTxnHash := sn.Src().Index(coresnaptype.Indexes.TxnHash)
+	idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.Src().MakeGetter()
@@ -1185,8 +1185,8 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
-		idxTxnHash := sn.Src().Index(coresnaptype.Indexes.TxnHash)
-		idxTxnHash2BlockNum := sn.Src().Index(coresnaptype.Indexes.TxnHash2BlockNum)
+		idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
+		idxTxnHash2BlockNum := sn.Src().Index(snaptype2.Indexes.TxnHash2BlockNum)
 
 		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
 			continue
@@ -1244,7 +1244,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockNum)
+	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Bodies, blockNum)
 	if !ok {
 		return
 	}
@@ -1265,7 +1265,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return nil, nil
 	}
 
-	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockNum)
+	txnSeg, ok, release := r.sn.ViewSingleFile(snaptype2.Transactions, blockNum)
 	if !ok {
 		return
 	}
@@ -1286,7 +1286,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 		return *blockNumPointer, *txNumPointer, true, nil
 	}
 
-	txns := r.sn.ViewType(coresnaptype.Transactions)
+	txns := r.sn.ViewType(snaptype2.Transactions)
 	defer txns.Close()
 	_, blockNum, txNum, ok, err = r.txnByHash(txnHash, txns.Segments, nil)
 	if err != nil {
@@ -1296,13 +1296,13 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
-	sn, ok, close := r.sn.ViewSingleFile(coresnaptype.Transactions, r.sn.BlocksAvailable())
+	sn, ok, close := r.sn.ViewSingleFile(snaptype2.Transactions, r.sn.BlocksAvailable())
 	if !ok {
 		return 0
 	}
 	defer close()
 
-	lastTxnID := sn.Src().Index(coresnaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Src().Count())
+	lastTxnID := sn.Src().Index(snaptype2.Indexes.TxnHash).BaseDataID() + uint64(sn.Src().Count())
 	return lastTxnID
 }
 
