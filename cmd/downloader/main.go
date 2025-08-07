@@ -318,6 +318,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
+		if verifyFailfast {
+			return nil
+		}
 	}
 
 	// This only works if Cfg.ManualDataVerification is held by reference by the Downloader. The
