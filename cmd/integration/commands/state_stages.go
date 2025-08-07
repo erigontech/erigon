@@ -28,31 +28,28 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
+	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/debugprint"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/execution/builder/buildercfg"
-	chain2 "github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/shards"
 
-	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
@@ -74,15 +71,11 @@ Examples:
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		spec, err := chainspec.ChainSpecByName(chain)
-		if err != nil {
-			utils.Fatalf("unknown chain %s", chain)
-		}
-		ethConfig.Genesis = spec.Genesis
+		ethConfig.Genesis = chainspec.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
-		miningConfig := buildercfg.MiningConfig{}
+		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -112,7 +105,7 @@ var loopExecCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common.RootContext()
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -142,9 +135,7 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-	//withChaosMonkey(stateStages)
-	withL2RPCaddress(stateStages)
-	withL2RPCReceiptAddress(stateStages)
+	withChaosMonkey(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -155,12 +146,10 @@ func init() {
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
 	withChaosMonkey(loopExecCmd)
-	withL2RPCaddress(loopExecCmd)
-	withL2RPCReceiptAddress(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, ctx context.Context, logger1 log.Logger) error {
+func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx context.Context, logger1 log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -190,13 +179,10 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	notifications := shards.NewNotifications(nil)
 
-	spec, err := chainspec.ChainSpecByName(chain)
-	if err != nil {
-		return err
-	}
+	genesis := chainspec.GenesisBlockByChainName(chain)
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
@@ -416,15 +402,12 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	spec, err := chainspec.ChainSpecByName(chain)
-	if err != nil {
-		return fmt.Errorf("unknown chain %s", chain)
-	}
+	genesis := chainspec.GenesisBlockByChainName(chain)
 
 	initialCycle := false
 	br, _ := blocksIO(db, logger)
 	notifications := shards.NewNotifications(nil)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {

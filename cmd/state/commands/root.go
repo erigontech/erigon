@@ -24,16 +24,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/utils"
-	chain2 "github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/networkname"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
-	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
@@ -85,12 +83,12 @@ func genesisFromFile(genesisPath string) *types.Genesis {
 }
 
 func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Config) {
-	name := chain
-	if name == "" {
-		name = networkname.Mainnet
+	if chain == "" {
+		genesis, chainConfig = chainspec.MainnetGenesisBlock(), chainspec.MainnetChainConfig
+	} else {
+		genesis, chainConfig = chainspec.GenesisBlockByChainName(chain), chainspec.ChainConfigByChainName(chain)
 	}
-	spec, _ := chainspec.ChainSpecByName(name)
-	return spec.Genesis, spec.Config
+	return genesis, chainConfig
 }
 
 func Execute() {

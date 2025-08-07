@@ -19,8 +19,10 @@ package shutter_test
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
+	"path"
 	"runtime"
 	"testing"
 	"time"
@@ -28,24 +30,39 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	executiontests "github.com/erigontech/erigon/execution/tests"
-	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 func TestShutterBlockBuilding(t *testing.T) {
@@ -104,8 +121,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 			err = uni.txnInclusionVerifier.VerifyTxnsOrderedInclusion(
 				ctx,
 				block,
-				executiontests.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission.OriginalTxn.Hash()},
-				executiontests.OrderedInclusion{TxnIndex: 1, TxnHash: simpleTxn.Hash()},
+				testhelpers.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission.OriginalTxn.Hash()},
+				testhelpers.OrderedInclusion{TxnIndex: 1, TxnHash: simpleTxn.Hash()},
 			)
 			require.NoError(t, err)
 		})
@@ -154,12 +171,18 @@ func TestShutterBlockBuilding(t *testing.T) {
 			err = uni.txnInclusionVerifier.VerifyTxnsOrderedInclusion(
 				ctx,
 				block,
-				executiontests.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission1.OriginalTxn.Hash()},
-				executiontests.OrderedInclusion{TxnIndex: 1, TxnHash: encryptedSubmission2.OriginalTxn.Hash()},
-				executiontests.OrderedInclusion{TxnIndex: 2, TxnHash: encryptedSubmission3.OriginalTxn.Hash()},
-				executiontests.OrderedInclusion{TxnIndex: 3, TxnHash: simpleTxn.Hash()},
+				testhelpers.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission1.OriginalTxn.Hash()},
+				testhelpers.OrderedInclusion{TxnIndex: 1, TxnHash: encryptedSubmission2.OriginalTxn.Hash()},
+				testhelpers.OrderedInclusion{TxnIndex: 2, TxnHash: encryptedSubmission3.OriginalTxn.Hash()},
+				testhelpers.OrderedInclusion{TxnIndex: 3, TxnHash: simpleTxn.Hash()},
 			)
 			require.NoError(t, err)
+		})
+
+		t.Run("build shutter block without blob txns", func(t *testing.T) {
+			//
+			//  TODO
+			//
 		})
 	})
 
@@ -187,7 +210,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 			err = uni.txnInclusionVerifier.VerifyTxnsOrderedInclusion(
 				ctx,
 				block,
-				executiontests.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission.OriginalTxn.Hash()},
+				testhelpers.OrderedInclusion{TxnIndex: 0, TxnHash: encryptedSubmission.OriginalTxn.Hash()},
 			)
 			require.NoError(t, err)
 		})
@@ -209,7 +232,7 @@ type blockBuildingUniverse struct {
 	acc5PrivKey          *ecdsa.PrivateKey
 	acc5                 common.Address
 	transactor           testhelpers.EncryptedTransactor
-	txnInclusionVerifier executiontests.TxnInclusionVerifier
+	txnInclusionVerifier testhelpers.TxnInclusionVerifier
 	shutterConfig        shuttercfg.Config
 	shutterCoordinator   testhelpers.ShutterBlockBuildingCoordinator
 }
@@ -217,29 +240,55 @@ type blockBuildingUniverse struct {
 func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
-	genesis, coinbasePrivKey := executiontests.DefaultEngineApiTesterGenesis(t)
-	chainConfig := genesis.Config
-	chainConfig.ChainName = "shutter-devnet"
-	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
-	chainConfig.ShanghaiTime = big.NewInt(0)
-	chainConfig.CancunTime = big.NewInt(0)
-	chainConfig.PragueTime = big.NewInt(0)
-	genesis.Timestamp = uint64(time.Now().Unix() - 1)
-	// 1_000 ETH in wei in the bank
-	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
-	bank.RegisterGenesisAlloc(genesis)
-	// first we need to deploy the shutter smart contracts, so we start an engine api tester without shutter
-	eat := executiontests.InitialiseEngineApiTester(t, executiontests.EngineApiTesterInitArgs{
-		Logger:      logger,
-		DataDir:     dataDir,
-		Genesis:     genesis,
-		CoinbaseKey: coinbasePrivKey,
-	})
-	// prepare shutter config for the next engine api tester
-	shutterPort, err := testutil.NextFreePort()
+	dirs := datadir.New(dataDir)
+	sentryPort, err := testhelpers.NextFreePort()
 	require.NoError(t, err)
-	decryptionKeySenderPort, err := testutil.NextFreePort()
+	engineApiPort, err := testhelpers.NextFreePort()
 	require.NoError(t, err)
+	jsonRpcPort, err := testhelpers.NextFreePort()
+	require.NoError(t, err)
+	shutterPort, err := testhelpers.NextFreePort()
+	require.NoError(t, err)
+	decryptionKeySenderPort, err := testhelpers.NextFreePort()
+	require.NoError(t, err)
+
+	const localhost = "127.0.0.1"
+	httpConfig := httpcfg.HttpCfg{
+		Enabled:                  true,
+		HttpServerEnabled:        true,
+		HttpListenAddress:        localhost,
+		HttpPort:                 jsonRpcPort,
+		API:                      []string{"eth"},
+		AuthRpcHTTPListenAddress: localhost,
+		AuthRpcPort:              engineApiPort,
+		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
+		ReturnDataLimit:          100_000,
+		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
+	}
+
+	nodeKeyConfig := p2p.NodeKeyConfig{}
+	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(dataDir))
+	require.NoError(t, err)
+	nodeConfig := nodecfg.Config{
+		Dirs: dirs,
+		Http: httpConfig,
+		P2P: p2p.Config{
+			ListenAddr:      fmt.Sprintf("127.0.0.1:%d", sentryPort),
+			MaxPeers:        1,
+			MaxPendingPeers: 1,
+			NoDiscovery:     true,
+			NoDial:          true,
+			ProtocolVersion: []uint{direct.ETH68},
+			AllowedPorts:    []uint{uint(sentryPort)},
+			PrivateKey:      nodeKey,
+		},
+	}
+
+	txPoolConfig := txpoolcfg.DefaultConfig
+	txPoolConfig.DBDir = dirs.TxPool
+
+	chainId := big.NewInt(987656789)
+	chainIdU256, _ := uint256.FromBig(chainId)
 	decryptionKeySenderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	decryptionKeySenderPrivKeyBytes := make([]byte, 32)
@@ -252,25 +301,107 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployerPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
-	chainIdU256, _ := uint256.FromBig(genesis.Config.ChainID)
-	shutterConfig := shuttercfg.ConfigByChainName(chainspec.Chiado.Config.ChainName)
+	shutterConfig := shuttercfg.ConfigByChainName(chainspec.ChiadoChainConfig.ChainName)
+	shutterConfig.Enabled = false // first we need to deploy the shutter smart contracts
 	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
-	shutterConfig.PrivateKey = eat.NodeKey
+	shutterConfig.PrivateKey = nodeKey
 	shutterConfig.ListenPort = uint64(shutterPort)
 	shutterConfig.InstanceId = 1234567890
 	shutterConfig.ChainId = chainIdU256
 	shutterConfig.SecondsPerSlot = 1
 	shutterConfig.EncryptedGasLimit = 3 * 21_000 // max 3 simple encrypted transfers per block
-	shutterConfig.SequencerContractAddress = types.CreateAddress(contractDeployer, 0).String()
-	shutterConfig.KeyperSetManagerContractAddress = types.CreateAddress(contractDeployer, 1).String()
-	shutterConfig.KeyBroadcastContractAddress = types.CreateAddress(contractDeployer, 2).String()
-	// top up a few accounts with some ETH and deploy the shutter contracts
+	shutterConfig.SequencerContractAddress = crypto.CreateAddress(contractDeployer, 0).String()
+	shutterConfig.KeyperSetManagerContractAddress = crypto.CreateAddress(contractDeployer, 1).String()
+	shutterConfig.KeyBroadcastContractAddress = crypto.CreateAddress(contractDeployer, 2).String()
+
+	ethConfig := ethconfig.Config{
+		Dirs: dirs,
+		Snapshot: ethconfig.BlocksFreezing{
+			NoDownloader: true,
+		},
+		TxPool: txPoolConfig,
+		Miner: params.MiningConfig{
+			EnabledPOS: true,
+		},
+		Shutter: shutterConfig,
+	}
+
+	ethNode, err := node.New(ctx, &nodeConfig, logger)
+	require.NoError(t, err)
+	cleanNode := func(ethNode *node.Node) func() {
+		return func() {
+			err := ethNode.Close()
+			if errors.Is(err, node.ErrNodeStopped) {
+				return
+			}
+			require.NoError(t, err)
+		}
+	}
+	t.Cleanup(cleanNode(ethNode))
+
+	var chainConfig chain.Config
+	copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	chainConfig.ChainName = "shutter-devnet"
+	chainConfig.ChainID = chainId
+	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
+	chainConfig.ShanghaiTime = big.NewInt(0)
+	chainConfig.CancunTime = big.NewInt(0)
+	chainConfig.PragueTime = big.NewInt(0)
+	genesis := chainspec.ChiadoGenesisBlock()
+	genesis.Timestamp = uint64(time.Now().Unix() - 1)
+	genesis.Config = &chainConfig
+	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	// 1_000 ETH in wei in the bank
+	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
+	bank.RegisterGenesisAlloc(genesis)
+	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
+	require.NoError(t, err)
+	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
+	require.NoError(t, err)
+	chainDB.Close()
+
+	// note we need to create jwt secret before calling ethBackend.Init to avoid race conditions
+	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
+	require.NoError(t, err)
+	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
+	require.NoError(t, err)
+	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
+	require.NoError(t, err)
+	err = ethNode.Start()
+	require.NoError(t, err)
+
+	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
+	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
+	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
+	//goland:noinspection HttpUrlsUsage
+	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
+	engineApiClient, err := engineapi.DialJsonRpcClient(
+		engineApiUrl,
+		jwtSecret,
+		logger,
+		// requests should not take more than 5 secs in a test env, yet we can spam frequently
+		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
+		engineapi.WithJsonRpcClientMaxRetries(100),
+	)
+	require.NoError(t, err)
 	slotCalculator := shutter.NewBeaconChainSlotCalculator(shutterConfig.BeaconChainGenesisTimestamp, shutterConfig.SecondsPerSlot)
-	cl := testhelpers.NewMockCl(logger, eat.MockCl, slotCalculator)
+	cl := testhelpers.NewMockCl(slotCalculator, engineApiClient, bank.Address(), gensisBlock)
+	_, err = cl.BuildBlock(ctx)
 	require.NoError(t, err)
-	err = cl.Initialise(ctx)
-	require.NoError(t, err)
-	transactor := executiontests.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
+
+	txnInclusionVerifier := testhelpers.NewTxnInclusionVerifier(rpcApiClient)
+	transactor := testhelpers.NewTransactor(rpcApiClient, chainConfig.ChainID)
 	acc1PrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	acc1 := crypto.PubkeyToAddress(acc1PrivKey.PublicKey)
@@ -306,7 +437,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	block, err := cl.BuildBlock(ctx)
 	require.NoError(t, err)
-	err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(
+	err = txnInclusionVerifier.VerifyTxnsInclusion(
 		ctx,
 		block,
 		topUp1.Hash(),
@@ -318,7 +449,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		topUp7.Hash(),
 	)
 	require.NoError(t, err)
-	deployer := testhelpers.NewContractsDeployer(contractDeployerPrivKey, eat.ContractBackend, cl, chainConfig.ChainID, eat.TxnInclusionVerifier)
+	deployer := testhelpers.NewContractsDeployer(contractDeployerPrivKey, contractBackend, cl, chainConfig.ChainID, txnInclusionVerifier)
 	contractsDeployment, err := deployer.DeployCore(ctx)
 	require.NoError(t, err)
 	// these addresses are determined by the order of deployment (deployerAddr+nonce)
@@ -339,23 +470,23 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		err := decryptionKeySender.Close()
 		require.NoError(t, err)
 	})
+
 	// now that we've deployed all shutter contracts - we can restart erigon with shutter enabled
-	eat.Close(t)
-	eat = executiontests.InitialiseEngineApiTester(t, executiontests.EngineApiTesterInitArgs{
-		Logger:           logger,
-		DataDir:          dataDir,
-		Genesis:          genesis,
-		CoinbaseKey:      coinbasePrivKey,
-		EthConfigTweaker: func(ethConfig *ethconfig.Config) { ethConfig.Shutter = shutterConfig },
-		MockClState:      eat.MockCl.State(),
-	})
-	// need to recreate these since we have a new engine api tester with new ports
-	cl = testhelpers.NewMockCl(logger, eat.MockCl, slotCalculator)
-	err = cl.Initialise(ctx)
+	err = ethNode.Close()
 	require.NoError(t, err)
-	transactor = executiontests.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
-	deployer = testhelpers.NewContractsDeployer(contractDeployerPrivKey, eat.ContractBackend, cl, chainConfig.ChainID, eat.TxnInclusionVerifier)
-	// wait for the shutter validator to connect to our test decryptionKeySender bootstrap node
+	shutterConfig.Enabled = true
+	ethConfig.Shutter = shutterConfig
+	ethNode, err = node.New(ctx, &nodeConfig, logger)
+	require.NoError(t, err)
+	ethBackend, err = eth.New(ctx, ethNode, &ethConfig, logger, nil)
+	require.NoError(t, err)
+	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
+	require.NoError(t, err)
+	err = ethNode.Start()
+	require.NoError(t, err)
+	t.Cleanup(cleanNode(ethNode))
+
+	// wait for shutter validator to connect to our test decryptionKeySender bootstrap node
 	shutterValidatorP2pPrivKeyBytes := make([]byte, 32)
 	shutterConfig.PrivateKey.D.FillBytes(shutterValidatorP2pPrivKeyBytes)
 	shutterValidatorP2pPrivKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(shutterValidatorP2pPrivKeyBytes)
@@ -364,10 +495,11 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	err = decryptionKeySender.WaitExternalPeerConnection(ctx, shutterValidatorPeerId)
 	require.NoError(t, err)
-	encryptedTransactor := testhelpers.NewEncryptedTransactor(transactor, encryptorAccPrivKey, shutterConfig.SequencerContractAddress, eat.ContractBackend)
+
+	encryptedTransactor := testhelpers.NewEncryptedTransactor(transactor, encryptorAccPrivKey, shutterConfig.SequencerContractAddress, contractBackend)
 	coordinator := testhelpers.NewShutterBlockBuildingCoordinator(cl, decryptionKeySender, slotCalculator, shutterConfig.InstanceId)
 	return blockBuildingUniverse{
-		rpcApiClient:         eat.RpcApiClient,
+		rpcApiClient:         rpcApiClient,
 		contractsDeployer:    deployer,
 		contractsDeployment:  contractsDeployment,
 		acc1PrivKey:          acc1PrivKey,
@@ -381,7 +513,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		acc5PrivKey:          acc5PrivKey,
 		acc5:                 acc5,
 		transactor:           encryptedTransactor,
-		txnInclusionVerifier: eat.TxnInclusionVerifier,
+		txnInclusionVerifier: txnInclusionVerifier,
 		shutterConfig:        shutterConfig,
 		shutterCoordinator:   coordinator,
 	}

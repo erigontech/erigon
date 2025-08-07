@@ -24,32 +24,32 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/node/direct"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 func TestCheckPeerStatusCompatibility(t *testing.T) {
 	var version uint = direct.ETH67
-	networkID := chainspec.Mainnet.Config.ChainID.Uint64()
-	heightForks, timeForks := forkid.GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
+	networkID := chainspec.MainnetChainConfig.ChainID.Uint64()
+	heightForks, timeForks := forkid.GatherForks(chainspec.MainnetChainConfig, 0 /* genesisTime */)
 	goodReply := eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       networkID,
 		TD:              big.NewInt(0),
 		Head:            common.Hash{},
-		Genesis:         chainspec.Mainnet.GenesisHash,
-		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.Mainnet.GenesisHash, 0, 0),
+		Genesis:         chainspec.MainnetGenesisHash,
+		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.MainnetGenesisHash, 0, 0),
 	}
-	status := sentryproto.StatusData{
+	status := proto_sentry.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(new(uint256.Int)),
 		BestHash:        nil,
-		ForkData: &sentryproto.Forks{
-			Genesis:     gointerfaces.ConvertHashToH256(chainspec.Mainnet.GenesisHash),
+		ForkData: &proto_sentry.Forks{
+			Genesis:     gointerfaces.ConvertHashToH256(chainspec.MainnetGenesisHash),
 			HeightForks: heightForks,
 			TimeForks:   timeForks,
 		},
@@ -57,41 +57,41 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 	}
 
 	t.Run("ok", func(t *testing.T) {
-		err := compatStatusPacket(goodReply, &status, version, version)
+		err := checkPeerStatusCompatibility(&goodReply, &status, version, version)
 		assert.NoError(t, err)
 	})
 	t.Run("network mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.NetworkID = 0
-		err := compatStatusPacket(reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "network")
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 - 1
-		err := compatStatusPacket(reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 + 1
-		err := compatStatusPacket(reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is more")
 	})
 	t.Run("genesis mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.Genesis = common.Hash{}
-		err := compatStatusPacket(reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "genesis")
 	})
 	t.Run("fork mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.ForkID = forkid.ID{}
-		err := compatStatusPacket(reply, &status, version, version)
+		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, forkid.ErrLocalIncompatibleOrStale)
 	})

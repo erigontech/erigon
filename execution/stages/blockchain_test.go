@@ -2189,7 +2189,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
-			Config: chainspec.Sepolia.Config,
+			Config: chainspec.SepoliaChainConfig,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},
