@@ -23,6 +23,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -55,8 +56,8 @@ type borStateSyncTxnTracer struct {
 	stateReceiverContractAddress libcommon.Address
 }
 
-func (bsstt *borStateSyncTxnTracer) CaptureTxStart(_ uint64) {
-	bsstt.EVMLogger.CaptureTxStart(0)
+func (bsstt *borStateSyncTxnTracer) CaptureTxStart(gasLimit uint64, authorizations []types.Authorization) {
+	bsstt.EVMLogger.CaptureTxStart(0, authorizations)
 }
 
 func (bsstt *borStateSyncTxnTracer) CaptureTxEnd(_ uint64) {
