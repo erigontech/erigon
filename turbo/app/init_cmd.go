@@ -17,9 +17,13 @@
 package app
 
 import (
-	"encoding/json"
+	"bufio"
 	"os"
+	"unsafe"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -31,7 +35,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/turbo/debug"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var jsoniterAPI = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var initCommand = cli.Command{
 	Action:    MigrateFlags(initGenesis),
@@ -54,6 +62,7 @@ It expects the genesis file as argument.`,
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
 func initGenesis(cliCtx *cli.Context) error {
+
 	var logger log.Logger
 	var tracer *tracers.Tracer
 	var err error
@@ -72,9 +81,69 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 	defer file.Close()
 
+	reader := bufio.NewReader(file)
+	iter := jsoniter.Parse(jsoniterAPI, reader, 4096)
+	defer jsoniterAPI.ReturnIterator(iter)
+
 	genesis := new(types.Genesis)
-	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+
+	for field := iter.ReadObject(); field != ""; field = iter.ReadObject() {
+		switch field {
+		case "config":
+			genesis.Config = new(chain.Config)
+			iter.ReadVal(genesis.Config)
+		case "nonce":
+			genesis.Nonce = math.MustParseUint64(iter.ReadString())
+		case "timestamp":
+			genesis.Timestamp = math.MustParseUint64(iter.ReadString())
+		case "extraData":
+			genesis.ExtraData = common.FromHex(iter.ReadString())
+		case "gasLimit":
+			genesis.GasLimit = math.MustParseUint64(iter.ReadString())
+		case "difficulty":
+			genesis.Difficulty = math.MustParseBig256(iter.ReadString())
+		case "mixhash":
+			genesis.Mixhash = common.HexToHash(iter.ReadString())
+		case "coinbase":
+			genesis.Coinbase = common.HexToAddress(iter.ReadString())
+		case "alloc":
+			genesis.Alloc = make(types.GenesisAlloc)
+			var storageKey string
+			var storageValue []byte
+
+			for addr := iter.ReadObject(); addr != ""; addr = iter.ReadObject() {
+				address := common.HexToAddress(addr)
+				account := types.GenesisAccount{}
+
+				for accountField := iter.ReadObject(); accountField != ""; accountField = iter.ReadObject() {
+					switch accountField {
+					case "balance":
+						account.Balance = math.MustParseBig256(iter.ReadString())
+					case "nonce":
+						account.Nonce = math.MustParseUint64(iter.ReadString())
+					case "code":
+						account.Code = common.FromHex(iter.ReadString())
+					case "storage":
+						account.Storage = make(map[common.Hash]common.Hash)
+						for storageKey = iter.ReadObject(); storageKey != ""; storageKey = iter.ReadObject() {
+							storageValue = iter.ReadStringAsSlice()
+							// unsafe []byte to string to avoid extra memory allocation
+							ss := unsafe.String((*byte)(unsafe.Pointer(&storageValue[0])), len(storageValue))
+							account.Storage[common.HexToHash(storageKey)] = common.HexToHash(ss)
+						}
+					default:
+						iter.Skip()
+					}
+				}
+				genesis.Alloc[address] = account
+			}
+		default:
+			iter.Skip()
+		}
+	}
+
+	if iter.Error != nil {
+		utils.Fatalf("invalid genesis file: %v", iter.Error)
 	}
 
 	// Open and initialise both full and light databases
