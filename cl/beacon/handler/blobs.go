@@ -133,7 +133,6 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	dataColumnSidecars := []*cltypes.DataColumnSidecar{}
 	columnIndices := []uint64{}
 	if len(indices) == 0 {
 		// take all custodies
@@ -152,18 +151,19 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 		}
 	}
 	// read the columns
+	dataColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, index := range columnIndices {
 		sidecar, err := a.columnStorage.ReadColumnSidecarByColumnIndex(ctx, *slot, blockRoot, int64(index))
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
 		if sidecar != nil {
-			dataColmnSidecars = append(dataColmnSidecars, sidecar)
+			dataColumnSidecars = append(dataColumnSidecars, sidecar)
 		}
 	}
 
 	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
-	return beaconhttp.NewBeaconResponse(dataColmnSidecars).
+	return beaconhttp.NewBeaconResponse(dataColumnSidecars).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
