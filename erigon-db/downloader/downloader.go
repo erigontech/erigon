@@ -793,7 +793,7 @@ func (d *Downloader) VerifyData(
 
 	if failFast {
 		var completedBytes atomic.Uint64
-		g, context := errgroup.WithContext(ctx)
+		g, ctx := errgroup.WithContext(ctx)
 		// torrent lib internally limiting amount of hashers per file
 		// set limit here just to make load predictable, not to control Disk/CPU consumption
 		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
@@ -801,16 +801,14 @@ func (d *Downloader) VerifyData(
 			t := t
 			g.Go(func() error {
 				defer completedFiles.Add(1)
-				return VerifyFileFailFast(context, t, d.SnapDir(), &completedBytes)
+				return VerifyFileFailFast(ctx, t, d.SnapDir(), &completedBytes)
 			})
 		}
 
 		{
-			logEvery := time.NewTicker(20 * time.Second)
+			logEvery := time.NewTicker(10 * time.Second)
 			defer logEvery.Stop()
-			d.wg.Add(1)
 			go func() {
-				defer d.wg.Done()
 				for {
 					select {
 					case <-ctx.Done():
@@ -943,7 +941,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
 ) error {
@@ -961,7 +959,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHashHint g.Option[metainfo.Hash],
 	name string,
 ) (t *torrent.Torrent, err error) {
