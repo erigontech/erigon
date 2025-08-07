@@ -730,13 +730,12 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		spc, err := chainspec.ChainSpecByName(chainName)
-		if err != nil {
+		chainConfig := chainspec.ChainConfigByChainName(chainName)
+		if chainConfig == nil {
 			return fmt.Errorf("unknown chain: %s", chainName)
 		}
-		if spc.Config.ChainID.Uint64() != cc.ChainID.Uint64() {
-			advice := fmt.Sprintf("\nTo change to '%s', remove %s %s\nAnd then start over with --chain=%s", chainName, dirs.Chaindata, filepath.Join(dirs.Snap, "preverified.toml"), chainName)
-			return fmt.Errorf("datadir already was configured with --chain=%s"+advice, cc.ChainName)
+		if chainConfig.ChainID.Uint64() != cc.ChainID.Uint64() {
+			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
 		}
 	}
 	return nil

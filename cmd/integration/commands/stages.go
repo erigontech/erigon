@@ -1373,10 +1373,10 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 }
 
 func readGenesis(chain string) *types.Genesis {
-	spec, err := chainspec.ChainSpecByName(chain)
-	if err != nil || spec.Genesis == nil {
-		panic(fmt.Errorf("genesis is nil. probably you passed wrong --chain: %w", err))
+	genesis := chainspec.GenesisBlockByChainName(chain)
+	if genesis == nil {
+		panic("genesis is nil. probably you passed wrong --chain")
 	}
-	_ = spec.Genesis.Alloc // nil check
-	return spec.Genesis
+	_ = genesis.Alloc // nil check
+	return genesis
 }
