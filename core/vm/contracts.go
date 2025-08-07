@@ -566,20 +566,23 @@ var (
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
+	header := getData(input, 0, 3*32)
 	var (
-		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+		baseLen = new(big.Int).SetBytes(header[0:32]).Uint64()
+		expLen  = new(big.Int).SetBytes(header[32:64]).Uint64()
+		modLen  = new(big.Int).SetBytes(header[64:96]).Uint64()
 	)
 	if c.osaka {
-		// EIP-7823: Set upper bounds for MODEXP
-		if baseLen > 1024 {
+		// See EIP-7823: Set upper bounds for MODEXP
+		// We also need to check that the high bytes truncated by the Uint64 conversion above are zero
+		// (32 - 8 bytes were truncated)
+		if !allZero(header[0:32-8]) || baseLen > 1024 {
 			return nil, errModExpBaseLengthTooLarge
 		}
-		if expLen > 1024 {
+		if !allZero(header[32:64-8]) || expLen > 1024 {
 			return nil, errModExpExponentLengthTooLarge
 		}
-		if modLen > 1024 {
+		if !allZero(header[64:96-8]) || modLen > 1024 {
 			return nil, errModExpModulusLengthTooLarge
 		}
 	}
