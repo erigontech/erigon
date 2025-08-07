@@ -695,6 +695,9 @@ func ExecV3(ctx context.Context,
 
 		doms, _ := libstate.NewSharedDomains(applyTx.(kv.TemporalTx), log.New())
 		fmt.Println("EXEC COMPLETE", "block in domains", doms.BlockNum(), executor.domains().BlockNum())
+		if doms.BlockNum() != executor.domains().BlockNum() {
+			panic(fmt.Errorf("doms mismatch %d != %d", doms.BlockNum(), executor.domains().BlockNum()))
+		}
 	}()
 
 	computeCommitmentDuration := time.Duration(0)
