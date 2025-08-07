@@ -224,6 +224,15 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 		}
+
+		 const maxHashesPerMsg = 1024  // ETH/66 soft limit
+		if hashCount > maxHashesPerMsg {
+			f.logger.Warn("Oversized hash announcement",
+				"peer", req.PeerId, "count", hashCount)
+			sentryClient.PenalizePeer(ctx, &sentry.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentry.PenaltyKind_Kick}) // Disconnect peer
+			return nil
+		}
+
 		hashes := make([]byte, 32*hashCount)
 		for i := 0; i < len(hashes); i += 32 {
 			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
