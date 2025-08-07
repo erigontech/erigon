@@ -635,7 +635,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 	te.doms.ClearRam(false)
 	v, _, _ = te.doms.GetLatest(kv.CommitmentDomain, tx, []byte("state"))
 	txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-	fmt.Println("RAM POST", blockNum, txNum)
+	fmt.Println("RAM POSTCLEAR", blockNum, txNum)
 
 	return tx, t2, nil
 }

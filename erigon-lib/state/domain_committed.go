@@ -111,17 +111,17 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint
 
 func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, step uint64, fromRam bool, err error) {
 	aggTx := AggTx(tx)
-	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
+	//if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
-		return v, prevStep, true, nil
-	}
+	//	return v, prevStep, true, nil
+	//}
 	v, step, found, err := tx.(kv.TemporalTx).Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 	if found {
 		// db store values as is (without transformation) so safe to return
-		return v, step, true, nil
+		return v, step, false, nil
 	}
 
 	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
