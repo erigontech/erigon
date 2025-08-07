@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/bridge"
 )
 
 // Maximum allowed event record data size
@@ -35,7 +35,7 @@ const LegacyMaxStateSyncSize = 100000
 const MaxStateSyncSize = 30000
 
 type EventRecordWithBlock struct {
-	heimdall.EventRecordWithTime
+	bridge.EventRecordWithTime
 	BlockNumber uint64
 }
 
@@ -58,7 +58,7 @@ func (h *Heimdall) startStateSyncSubscription() {
 	}
 }
 
-func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*heimdall.EventRecordWithTime, error) {
+func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*bridge.EventRecordWithTime, error) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -95,7 +95,7 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64)
 		return events[i].ID < events[j].ID
 	})
 
-	eventsWithTime := make([]*heimdall.EventRecordWithTime, len(events))
+	eventsWithTime := make([]*bridge.EventRecordWithTime, len(events))
 	for i, event := range events {
 		eventsWithTime[i] = &event.EventRecordWithTime
 	}
@@ -155,8 +155,8 @@ func (h *Heimdall) handleStateSynced(event *contracts.TestStateSenderStateSynced
 	}
 
 	h.pendingSyncRecords[syncRecordKey{event.Raw.TxHash, uint64(event.Raw.Index)}] = &EventRecordWithBlock{
-		EventRecordWithTime: heimdall.EventRecordWithTime{
-			EventRecord: heimdall.EventRecord{
+		EventRecordWithTime: bridge.EventRecordWithTime{
+			EventRecord: bridge.EventRecord{
 				ID:       event.Id.Uint64(),
 				Contract: event.ContractAddress,
 				Data:     event.Data,

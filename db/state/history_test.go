@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math"
 	"os"
 	"sort"
@@ -1542,7 +1543,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 	fn := ff.src.decompressor.FilePath()
 	h.Close()
 
-	err := os.Remove(fn)
+	err := dir.RemoveFile(fn)
 	require.NoError(t, err)
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)

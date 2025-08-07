@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"os"
 	"path/filepath"
@@ -137,7 +138,7 @@ func (p *fileDataProvider) Dispose() {
 		go func() {
 			filePath := file.Name()
 			file.Close()
-			_ = os.Remove(filePath)
+			_ = dir.RemoveFile(filePath)
 		}()
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -91,7 +92,7 @@ func cmp(cliCtx *cli.Context) error {
 			return err
 		}
 		tempDir = dataDir
-		defer os.RemoveAll(dataDir)
+		defer dir.RemoveAll(dataDir)
 	} else {
 		tempDir = filepath.Join(dataDir, "temp")
 
@@ -499,8 +500,8 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
 
 					g, gctx = errgroup.WithContext(ctx)
 					g.SetLimit(2)
@@ -561,7 +562,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				f2snaps.Close()
 
 				for _, file := range files {
-					os.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err
@@ -778,8 +779,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
 
 					return func() error {
 						for i := ent1.From; i < ent1.To; i++ {
@@ -816,7 +817,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				f2snaps.Close()
 
 				for _, file := range files {
-					os.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err

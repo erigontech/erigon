@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package bridge
 
 import (
 	"bytes"
@@ -135,6 +135,11 @@ type StateSyncEventsResponseV1 struct {
 	Result []*EventRecordWithTime `json:"result"`
 }
 
+type StateSyncEventsResponse struct {
+	Height string                 `json:"height"`
+	Result []*EventRecordWithTime `json:"result"`
+}
+
 type StateSyncEventsResponseV2 struct {
 	EventRecords []struct {
 		ID       string         `json:"id" yaml:"id"`
@@ -183,6 +188,11 @@ func (v *StateSyncEventsResponseV2) GetEventRecords() ([]*EventRecordWithTime, e
 	}
 
 	return records, nil
+}
+
+type StateSyncEventResponse struct {
+	Height string              `json:"height"`
+	Result EventRecordWithTime `json:"result"`
 }
 
 var methodId []byte = borabi.StateReceiverContractABI().Methods["commitState"].ID
