@@ -692,6 +692,9 @@ func ExecV3(ctx context.Context,
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx)
 	defer func() {
 		executor.LogComplete(stepsInDb)
+
+		doms, _ := libstate.NewSharedDomains(applyTx.(kv.TemporalTx), log.New())
+		fmt.Println("EXEC COMPLETE", "block in domains", doms.BlockNum(), executor.domains().BlockNum())
 	}()
 
 	computeCommitmentDuration := time.Duration(0)

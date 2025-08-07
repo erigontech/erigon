@@ -287,8 +287,6 @@ func (rw *Worker) Run() (err error) {
 }
 
 func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
-	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
-	//defer fmt.Println("RTX DONE", txTask.Version().BlockNum, txTask.Version().TxIndex)
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
