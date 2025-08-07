@@ -1816,7 +1816,7 @@ func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
 	return s.eth1ExecutionServer
 }
 
-// RemoveContents is like os.RemoveAll, but preserve dir itself
+// RemoveContents is like dir.RemoveAll, but preserve dir itself
 func RemoveContents(dirname string) error {
 	d, err := os.Open(dirname)
 	if err != nil {
@@ -1833,7 +1833,7 @@ func RemoveContents(dirname string) error {
 		return err
 	}
 	for _, file := range files {
-		err = os.RemoveAll(filepath.Join(dirname, file.Name()))
+		err = dir.RemoveAll(filepath.Join(dirname, file.Name()))
 		if err != nil {
 			return err
 		}
