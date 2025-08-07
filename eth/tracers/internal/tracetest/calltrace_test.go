@@ -297,7 +297,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
-	signer := types.LatestSigner(chainspec.Mainnet.Config)
+	signer := types.LatestSigner(chainspec.MainnetChainConfig)
 	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
 		GasPrice: uint256.NewInt(0),
 		CommonTx: types.CommonTx{
@@ -337,7 +337,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := chainspec.Mainnet.Config.Rules(context.BlockNumber, context.Time)
+	rules := chainspec.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
 	m := mock.Mock(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
@@ -350,7 +350,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
 	statedb.SetHooks(tracer.Hooks)
-	evm := vm.NewEVM(context, txContext, statedb, chainspec.Mainnet.Config, vm.Config{Tracer: tracer.Hooks})
+	evm := vm.NewEVM(context, txContext, statedb, chainspec.MainnetChainConfig, vm.Config{Tracer: tracer.Hooks})
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)

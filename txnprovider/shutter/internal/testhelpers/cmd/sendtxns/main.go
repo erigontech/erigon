@@ -78,12 +78,7 @@ func main() {
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
-	spec, err := chainspec.ChainSpecByName(chain)
-	if err != nil {
-		return fmt.Errorf("failed to get chain spec for %s: %w", chain, err)
-	}
-	chainId := spec.Config.ChainID
-
+	chainId := chainspec.ChainConfigByChainName(chain).ChainID
 	rpcClient := requests.NewRequestGenerator(url, logger)
 	transactor := testhelpers.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)

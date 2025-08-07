@@ -125,11 +125,11 @@ func (node *NodeArgs) GetName() string {
 }
 
 func (node *NodeArgs) ChainID() *big.Int {
-	spec, err := chainspec.ChainSpecByName(node.Chain)
-	if err != nil {
+	config := chainspec.ChainConfigByChainName(node.Chain)
+	if config == nil {
 		return nil
 	}
-	return spec.Config.ChainID
+	return config.ChainID
 }
 
 func (node *NodeArgs) GetHttpPort() int {
