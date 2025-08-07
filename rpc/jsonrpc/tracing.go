@@ -242,7 +242,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 		// otherwise this may be a bor state sync transaction - check
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
-
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -251,7 +250,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 			stream.WriteNil()
 			return nil
 		}
-		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
+		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}

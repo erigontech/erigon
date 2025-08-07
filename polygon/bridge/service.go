@@ -28,14 +28,15 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
+
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type eventFetcher interface {
-	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
 }
 
 type ServiceConfig struct {
@@ -52,7 +53,7 @@ func NewService(config ServiceConfig) *Service {
 		borConfig:           config.BorConfig,
 		eventFetcher:        config.EventFetcher,
 		reader:              NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress()),
-		transientErrors:     heimdall.TransientErrors,
+		transientErrors:     poshttp.TransientErrors,
 		fetchedEventsSignal: make(chan struct{}),
 	}
 }
@@ -180,7 +181,7 @@ func (s *Service) Run(ctx context.Context) error {
 		// start scraping events
 		from := lastFetchedEventId + 1
 		to := time.Now()
-		events, err := s.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
+		events, err := s.eventFetcher.FetchStateSyncEvents(ctx, from, to, StateEventsFetchLimit)
 		if err != nil {
 			if liberrors.IsOneOf(err, s.transientErrors) {
 				s.logger.Warn(

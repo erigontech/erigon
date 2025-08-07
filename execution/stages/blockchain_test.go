@@ -56,7 +56,6 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-// So we can deterministically seed different blockchains
 var (
 	canonicalSeed = 1
 	forkSeed      = 2

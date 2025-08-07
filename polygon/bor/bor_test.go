@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -67,14 +66,6 @@ func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
 
 func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
-}
-
-func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	return nil, nil
-}
-
-func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
-	return nil, nil
 }
 
 func (h *test_heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {

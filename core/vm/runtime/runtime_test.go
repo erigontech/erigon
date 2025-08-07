@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/asm"
 	"github.com/erigontech/erigon/core/state"
@@ -402,13 +401,7 @@ func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool 
 func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
 func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
 func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
-func (cr *FakeChainHeaderReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	return nil
-}
-func (cr *FakeChainHeaderReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
-	return 0
-}
-func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }
+func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte                   { return nil }
 
 type dummyChain struct {
 	counter int

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -40,7 +39,6 @@ import (
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -318,51 +316,12 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 	return bodyRlp, nil
 }
 
-func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, errors.New("not implemented")
-}
-
-func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Tx, borTxnHash common.Hash) (uint64, bool, error) {
-	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
-	if err != nil {
-		return 0, false, err
-	}
-	if reply == nil {
-		return 0, false, nil
-	}
-	return reply.BlockNumber, reply.Present, nil
-}
-
-func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockNum: blockHeight})
-	if err != nil {
-		return nil, err
-	}
-	result := make([]rlp.RawValue, len(reply.EventRlps))
-	for i, r := range reply.EventRlps {
-		result[i] = r
-	}
-	return result, nil
-}
-
 func (r *RemoteBlockReader) Ready(ctx context.Context) <-chan error {
 	// TODO this should probably check with the remote connection, at
 	// the moment it just returns the ctx err to be non blocking
 	ch := make(chan error, 1)
 	ch <- ctx.Err()
 	return ch
-}
-
-func (r *RemoteBlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
-	panic("not implemented")
-}
-
-func (r *RemoteBlockReader) LastFrozenEventId() uint64 {
-	panic("not implemented")
-}
-
-func (r *RemoteBlockReader) LastFrozenEventBlockNum() uint64 {
-	panic("not implemented")
 }
 
 func (r *RemoteBlockReader) Span(_ context.Context, _ kv.Tx, _ uint64) (*heimdall.Span, bool, error) {
@@ -417,11 +376,10 @@ func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReade
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
-	sn             *RoSnapshots
-	borSn          *heimdall.RoSnapshots
-	borBridgeStore bridge.Store
-	heimdallStore  heimdall.Store
-	txBlockIndex   *txBlockIndexWithBlockReader
+	sn            *RoSnapshots
+	borSn         *heimdall.RoSnapshots
+	heimdallStore heimdall.Store
+	txBlockIndex  *txBlockIndexWithBlockReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
 	headerByNumCache *lru.Cache[uint64, *types.Header]
@@ -429,10 +387,10 @@ type BlockReader struct {
 
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
-func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store, borBridge bridge.Store) *BlockReader {
+func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
-	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore, borBridgeStore: borBridge}
+	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
 	br.txBlockIndex = txnumReader
@@ -1454,69 +1412,6 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 		number--
 	}
 	return hash, number
-}
-
-func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
-
-	if !ok {
-		return 0, false, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
-	}
-
-	return txHandler.WithTx(tx).EventTxnToBlockNum(ctx, txnHash)
-}
-
-func (r *BlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
-
-	if !ok {
-		return 0, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
-	}
-
-	return txHandler.WithTx(tx).BorStartEventId(ctx, hash, blockHeight)
-}
-
-func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
-
-	if !ok {
-		return nil, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
-	}
-
-	return txHandler.WithTx(tx).EventsByBlock(ctx, hash, blockHeight)
-}
-
-// EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
-func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	return r.borBridgeStore.EventsByIdFromSnapshot(from, to, limit)
-}
-
-func (r *BlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
-
-	if !ok {
-		return 0, false, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
-	}
-
-	lastEventId, err := txHandler.WithTx(tx).LastEventId(ctx)
-	ok = err == nil && lastEventId != 0
-	return lastEventId, ok, err
-}
-
-func (r *BlockReader) LastFrozenEventId() uint64 {
-	if r.borBridgeStore == nil {
-		return 0
-	}
-
-	return r.borBridgeStore.LastFrozenEventId()
-}
-
-func (r *BlockReader) LastFrozenEventBlockNum() uint64 {
-	if r.borBridgeStore == nil {
-		return 0
-	}
-
-	return r.borBridgeStore.LastFrozenEventBlockNum()
 }
 
 func (r *BlockReader) LastFrozenSpanId() uint64 {
