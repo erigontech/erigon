@@ -24,12 +24,19 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/nitro-erigon/arbos"
+	"github.com/erigontech/nitro-erigon/arbos/arbosState"
+	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
+	"github.com/erigontech/nitro-erigon/gethhook"
+	"github.com/erigontech/nitro-erigon/statetransfer"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -43,6 +50,13 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
+
+var arbTrace bool
+
+func init() {
+	gethhook.RequireHookedGeth()
+	arbTrace = dbg.EnvBool("ARB_TRACE", false)
+}
 
 var noop = state.NewNoopWriter()
 
@@ -105,8 +119,10 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 
 		isMining: isMining,
 	}
-	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
-	w.vmCfg = vm.Config{Tracer: w.callTracer.Tracer().Hooks}
+	w.vmCfg = vm.Config{Tracer: w.callTracer.Tracer().Hooks, NoBaseFee: true}
+	w.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, w.vmCfg)
+	arbOSVersion := w.evm.Context.ArbOSVersion
+	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0, arbOSVersion))
 	w.ibs = state.New(w.stateReader)
 	return w
 }
@@ -183,6 +199,12 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
+func (rw *Worker) SetArbitrumWasmDB(wasmDB wasmdb.WasmIface) {
+	if rw.chainConfig.IsArbitrum() {
+		rw.ibs.SetWasmDB(wasmDB)
+	}
+}
+
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluation bool) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
@@ -211,14 +233,25 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	rw.rs.Domains().SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
+	if rw.chainConfig.IsArbitrum() && txTask.BlockNum > 0 {
+		if rw.evm.ProcessingHookSet.CompareAndSwap(false, true) {
+			rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, state.NewArbitrum(rw.ibs), txTask.TxAsMessage)
+		} else {
+			rw.evm.ProcessingHook.SetMessage(txTask.TxAsMessage, state.NewArbitrum(rw.ibs))
+		}
+	}
 
 	rw.ibs.Reset()
 	ibs, hooks, cc := rw.ibs, rw.hooks, rw.chainConfig
-	//ibs.SetTrace(true)
+	rw.ibs.SetTrace(arbTrace)
 	ibs.SetHooks(hooks)
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
+	if arbTrace {
+		fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	}
+
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
@@ -230,6 +263,28 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
+
+			if rw.chainConfig.IsArbitrum() { // initialize arbos once
+				ibsa := state.NewArbitrum(rw.ibs)
+				accountsPerSync := uint(100000) // const for sep-rollup
+				initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
+				if err != nil {
+					rw.logger.Error("Failed to get Sepolia Rollup init message", "err", err)
+					return
+				}
+
+				initData := statetransfer.ArbosInitializationInfo{
+					NextBlockNumber: 0,
+				}
+				initReader := statetransfer.NewMemoryInitDataReader(&initData)
+				stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, rw.rs.Domains(), rw.rs.TemporalPutDel(), initReader, rw.chainConfig, initMessage, rw.evm.Context.Time, accountsPerSync)
+				if err != nil {
+					rw.logger.Error("Failed to init ArbOS", "err", err)
+					return
+				}
+				_ = stateRoot
+				rw.logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
+			}
 			break
 		}
 
@@ -246,6 +301,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			break
 		}
 
+		if arbTrace {
+			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		}
 		rw.callTracer.Reset()
 		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 
@@ -278,6 +336,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 	default:
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time, rules.ArbOSVersion)) // ARBITRUM only
+
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
@@ -328,14 +388,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 			}
 		}
-
+	}
+	if arbTrace {
+		fmt.Printf("---- txnIdx %d block %d DONE------\n", txTask.TxIndex, txTask.BlockNum)
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		//for addr, bal := range txTask.BalanceIncreaseSet {
-		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		//}
+		if arbTrace {
+			for addr, bal := range txTask.BalanceIncreaseSet {
+				fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &(bal.Amount))
+			}
+		}
 		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
 		}

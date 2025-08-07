@@ -98,9 +98,11 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnOpcode:  t.OnOpcode,
+			OnTxStart:                 t.OnTxStart,
+			OnTxEnd:                   t.OnTxEnd,
+			OnOpcode:                  t.OnOpcode,
+			CaptureArbitrumStorageGet: t.CaptureArbitrumStorageGet,
+			CaptureArbitrumStorageSet: t.CaptureArbitrumStorageSet,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -308,6 +310,10 @@ func (t *prestateTracer) lookupAccount(addr common.Address) {
 func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 	if t.config.DisableStorage {
 		return
+	}
+
+	if t.pre[addr] == nil {
+		t.lookupAccount(addr)
 	}
 
 	if _, ok := t.pre[addr].Storage[key]; ok {

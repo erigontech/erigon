@@ -22,18 +22,18 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon/core/state"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
@@ -78,14 +78,27 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+
+	//Arbitrum processing hook
+	ProcessingHookSet atomic.Bool
+	ProcessingHook    TxProcessingHook
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
-		if txCtx.GasPrice.IsZero() {
+		if txCtx.GasPrice == nil || txCtx.GasPrice.IsZero() {
+			if chainConfig.IsArbitrum() {
+				blockCtx.BaseFeeInBlock = new(uint256.Int)
+				if blockCtx.BaseFee != nil && !blockCtx.BaseFee.IsZero() {
+					blockCtx.BaseFeeInBlock.Set(blockCtx.BaseFee)
+				}
+			}
 			blockCtx.BaseFee = new(uint256.Int)
+		}
+		if chainConfig.IsArbitrum() && txCtx.BlobFee != nil && txCtx.BlobFee.IsZero() {
+			blockCtx.BlobBaseFee = new(uint256.Int)
 		}
 	}
 	evm := &EVM{
@@ -94,12 +107,13 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		intraBlockState: ibs,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
+		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, blockCtx.ArbOSVersion),
 	}
 	if evm.config.JumpDestCache == nil {
 		evm.config.JumpDestCache = NewJumpDestCache(JumpDestCacheLimit)
 	}
 
+	evm.ProcessingHook = DefaultTxProcessor{evm: evm}
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
 
 	return evm
@@ -158,7 +172,7 @@ func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
-func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, arbInfo *AdvancedPrecompileCall) (ret []byte, leftOverGas uint64, err error) {
 	if evm.abort.Load() {
 		return ret, leftOverGas, nil
 	}
@@ -236,7 +250,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer)
+		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, arbInfo)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -256,8 +270,10 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		var contract *Contract
 		if typ == CALLCODE {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+			contract.delegateOrCallcode = true
 		} else if typ == DELEGATECALL {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache).AsDelegate()
+			contract.delegateOrCallcode = true
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 		}
@@ -282,7 +298,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 		// TODO: consider clearing up unused snapshots:
 		//} else {
-		//	evm.StateDB.DiscardSnapshot(snapshot)
+		//	evm.IntraBlockState().DiscardSnapshot(snapshot)
 	}
 	return ret, gas, err
 }
@@ -292,7 +308,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALL, caller, addr, input, gas, value, bailout)
+	return evm.call(CALL, caller, addr, input, gas, value, bailout, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   addr,
+		Caller:            caller.Address(),
+		Value:             value.ToBig(),
+		ReadOnly:          false,
+		Evm:               evm,
+	})
 }
 
 // CallCode executes the contract associated with the addr with the given input
@@ -303,7 +326,14 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALLCODE, caller, addr, input, gas, value, false)
+	return evm.call(CALLCODE, caller, addr, input, gas, value, false, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   caller.Address(),
+		Caller:            caller.Address(),
+		Value:             value.ToBig(),
+		ReadOnly:          false,
+		Evm:               evm,
+	})
 }
 
 // DelegateCall executes the contract associated with the addr with the given input
@@ -312,7 +342,18 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false)
+	callerContract, ok := caller.(*Contract)
+	if !ok {
+		return nil, gas, fmt.Errorf("caller is not of type *Contract")
+	}
+	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   caller.Address(),
+		Caller:            callerContract.CallerAddress,
+		Value:             callerContract.Value().ToBig(),
+		ReadOnly:          false,
+		Evm:               evm,
+	})
 }
 
 // StaticCall executes the contract associated with the addr with the given input
@@ -320,7 +361,14 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
+	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false, &AdvancedPrecompileCall{
+		PrecompileAddress: addr,
+		ActingAsAddress:   addr,
+		Caller:            caller.Address(),
+		Value:             new(big.Int),
+		ReadOnly:          true,
+		Evm:               evm,
+	})
 }
 
 type codeAndHash struct {
@@ -437,6 +485,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 		err = ErrInvalidCode
+
+		// Arbitrum: retain Stylus programs and instead store them in the DB alongside normal EVM bytecode.
+		if evm.chainRules.IsStylus && state.IsStylusProgram(ret) {
+			err = nil
+		}
 	}
 	// If the contract creation ran successfully and no errors were returned,
 	// calculate the gas required to store the code. If the code could not
@@ -449,7 +502,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		} else {
 			// If we run out of gas, we do not store the code: the returned code must be empty.
 			ret = []byte{}
-			if evm.chainRules.IsHomestead {
+			if evm.chainRules.IsHomestead { // TODO ARBitrum! does not check IsHomestead; but not affects on stylus exec
 				err = ErrCodeStoreOutOfGas
 			}
 		}
@@ -536,6 +589,8 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 		ChainConfig:     evm.ChainConfig(),
 		IntraBlockState: evm.IntraBlockState(),
 		TxHash:          evm.TxHash,
+
+		ArbOSVersion: evm.Context.ArbOSVersion,
 	}
 }
 

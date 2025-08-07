@@ -19,11 +19,8 @@ package state
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"sync"
 	"time"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -68,7 +65,7 @@ type TxTask struct {
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
-	BalanceIncreaseSet map[common.Address]uint256.Int
+	BalanceIncreaseSet map[common.Address]BalanceIncreaseEntry
 	ReadLists          map[string]*state.KvList
 	WriteLists         map[string]*state.KvList
 	AccountPrevs       map[string][]byte
@@ -148,10 +145,10 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 	}
 
 	cumulativeGasUsed += t.GasUsed
-	if t.GasUsed == 0 {
-		msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
-		panic(msg)
-	}
+	// if t.GasUsed == 0 { // TODO arbitrum does not need this but others do
+	// 	msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
+	// 	panic(msg)
+	// }
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
 }

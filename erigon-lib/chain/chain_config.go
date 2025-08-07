@@ -108,6 +108,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
 }
 
 var (
@@ -293,6 +295,9 @@ func (c *Config) IsBerlin(num uint64) bool {
 
 // IsLondon returns whether num is either equal to the London fork block or greater.
 func (c *Config) IsLondon(num uint64) bool {
+	if c.IsArbitrum() {
+		return isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), big.NewInt(int64(num)))
+	}
 	return isForked(c.LondonBlock, num)
 }
 
@@ -307,7 +312,10 @@ func (c *Config) IsGrayGlacier(num uint64) bool {
 }
 
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
-func (c *Config) IsShanghai(time uint64) bool {
+func (c *Config) IsShanghai(time uint64, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= ArbosVersion_11
+	}
 	return isForked(c.ShanghaiTime, time)
 }
 
@@ -330,12 +338,18 @@ func (c *Config) IsBhilai(num uint64) bool {
 }
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
-func (c *Config) IsCancun(time uint64) bool {
+func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= ArbosVersion_20
+	}
 	return isForked(c.CancunTime, time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
-func (c *Config) IsPrague(time uint64) bool {
+func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= ArbosVersion_40
+	}
 	return isForked(c.PragueTime, time)
 }
 
@@ -359,7 +373,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
+func (c *Config) GetBlobConfig(time uint64, currentArbosVer uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
@@ -369,7 +383,9 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
 		if c.PragueTime != nil {
-			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+			if c.IsPrague(time, currentArbosVer) {
+				c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+			}
 		}
 		if c.OsakaTime != nil {
 			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
@@ -413,20 +429,20 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
-func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Max
+func (c *Config) GetMaxBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	return c.GetBlobConfig(time, currentArbosVer).Max
 }
 
-func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(time) * params.GasPerBlob
+func (c *Config) GetMaxBlobGasPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	return c.GetMaxBlobsPerBlock(time, currentArbosVer) * params.GasPerBlob
 }
 
-func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Target
+func (c *Config) GetTargetBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	return c.GetBlobConfig(time, currentArbosVer).Target
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	return c.GetBlobConfig(time).BaseFeeUpdateFraction
+func (c *Config) GetBlobGasPriceUpdateFraction(time uint64, currentArbosVer uint64) uint64 {
+	return c.GetBlobConfig(time, currentArbosVer).BaseFeeUpdateFraction
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
@@ -448,10 +464,10 @@ func (c *Config) SecondsPerSlot() uint64 {
 
 func (c *Config) SystemContracts(time uint64) map[string]common.Address {
 	contracts := map[string]common.Address{}
-	if c.IsCancun(time) {
+	if c.IsCancun(time, 0 /* currentArbosVersion */) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
-	if c.IsPrague(time) {
+	if c.IsPrague(time, 0 /* currentArbosVersion */) {
 		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
 		contracts["DEPOSIT_CONTRACT_ADDRESS"] = c.DepositContract
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
@@ -685,10 +701,12 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
+	IsArbitrum, IsStylus                              bool
+	ArbOSVersion                                      uint64
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
-func (c *Config) Rules(num uint64, time uint64) *Rules {
+func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -705,13 +723,16 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:         c.IsIstanbul(num),
 		IsBerlin:           c.IsBerlin(num),
 		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
-		IsCancun:           c.IsCancun(time),
+		IsShanghai:         c.IsShanghai(time, currentArbosVersion) || c.IsAgra(num),
+		IsCancun:           c.IsCancun(time, currentArbosVersion),
 		IsNapoli:           c.IsNapoli(num),
 		IsBhilai:           c.IsBhilai(num),
-		IsPrague:           c.IsPrague(time) || c.IsBhilai(num),
+		IsPrague:           c.IsPrague(time, currentArbosVersion) || c.IsBhilai(num),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
+		ArbOSVersion:       currentArbosVersion,
+		IsArbitrum:         c.IsArbitrum(),
+		IsStylus:           c.IsArbitrum() && currentArbosVersion >= ArbosVersion_Stylus,
 	}
 }
 
@@ -725,4 +746,359 @@ func isForked(s *big.Int, head uint64) bool {
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
 	return c.MergeHeight != nil && blockNumber < c.MergeHeight.Uint64()
+}
+
+func (c *Config) IsArbitrum() bool {
+	return c.ArbitrumChainParams.EnableArbOS
+}
+
+func (c *Config) IsArbitrumNitro(num *big.Int) bool {
+	return c.IsArbitrum() && isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), num)
+}
+
+// isBlockForked returns whether a fork scheduled at block s is active at the
+// given head block. Whilst this method is the same as isTimestampForked, they
+// are explicitly separate for clearer reading.
+func isBlockForked(s, head *big.Int) bool {
+	if s == nil || head == nil {
+		return false
+	}
+	return s.Cmp(head) <= 0
+}
+
+func (c *Config) MaxCodeSize() uint64 {
+	if c.ArbitrumChainParams.MaxCodeSize == 0 {
+		return 24576
+	}
+	return c.ArbitrumChainParams.MaxCodeSize
+}
+
+func (c *Config) MaxInitCodeSize() uint64 {
+	if c.ArbitrumChainParams.MaxInitCodeSize == 0 {
+		return c.MaxCodeSize() * 2
+	}
+	return c.ArbitrumChainParams.MaxInitCodeSize
+}
+
+func (c *Config) DebugMode() bool {
+	return c.ArbitrumChainParams.AllowDebugPrecompiles
+}
+
+func newBlockCompatError(what string, storedblock, newblock *big.Int) *ConfigCompatError {
+	var rew *big.Int
+	switch {
+	case storedblock == nil:
+		rew = newblock
+	case newblock == nil || storedblock.Cmp(newblock) < 0:
+		rew = storedblock
+	default:
+		rew = newblock
+	}
+	err := &ConfigCompatError{
+		What:         what,
+		StoredConfig: storedblock,
+		NewConfig:    newblock,
+		RewindTo:     0,
+	}
+	if rew != nil && rew.Sign() > 0 {
+		err.RewindTo = rew.Uint64() - 1
+	}
+	return err
+}
+
+func (c *Config) checkArbitrumCompatible(newcfg *Config, head *big.Int) *ConfigCompatError {
+	if c.IsArbitrum() != newcfg.IsArbitrum() {
+		// This difference applies to the entire chain, so report that the genesis block is where the difference appears.
+		return newBlockCompatError("isArbitrum", common.Big0, common.Big0)
+	}
+	if !c.IsArbitrum() {
+		return nil
+	}
+	cArb := &c.ArbitrumChainParams
+	newArb := &newcfg.ArbitrumChainParams
+	if cArb.GenesisBlockNum != newArb.GenesisBlockNum {
+		return newBlockCompatError("genesisblocknum", new(big.Int).SetUint64(cArb.GenesisBlockNum), new(big.Int).SetUint64(newArb.GenesisBlockNum))
+	}
+	return nil
+}
+
+func ArbitrumOneParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		EnableArbOS:               true,
+		AllowDebugPrecompiles:     false,
+		DataAvailabilityCommittee: false,
+		InitialArbOSVersion:       ArbosVersion_6,
+		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
+	}
+}
+
+func ArbitrumNovaParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		EnableArbOS:               true,
+		AllowDebugPrecompiles:     false,
+		DataAvailabilityCommittee: true,
+		InitialArbOSVersion:       ArbosVersion_1,
+		InitialChainOwner:         common.HexToAddress("0x9C040726F2A657226Ed95712245DeE84b650A1b5"),
+	}
+}
+
+func ArbitrumRollupGoerliTestnetParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		EnableArbOS:               true,
+		AllowDebugPrecompiles:     false,
+		DataAvailabilityCommittee: false,
+		InitialArbOSVersion:       ArbosVersion_2,
+		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
+	}
+}
+
+func ArbitrumDevTestParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		EnableArbOS:               true,
+		AllowDebugPrecompiles:     true,
+		DataAvailabilityCommittee: false,
+		InitialArbOSVersion:       ArbosVersion_32,
+		InitialChainOwner:         common.Address{},
+	}
+}
+
+func ArbitrumDevTestDASParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		EnableArbOS:               true,
+		AllowDebugPrecompiles:     true,
+		DataAvailabilityCommittee: true,
+		InitialArbOSVersion:       ArbosVersion_32,
+		InitialChainOwner:         common.Address{},
+	}
+}
+
+func ArbitrumAnytrustGoerliTestnetParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		EnableArbOS:               true,
+		AllowDebugPrecompiles:     false,
+		DataAvailabilityCommittee: true,
+		InitialArbOSVersion:       ArbosVersion_2,
+		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
+	}
+}
+
+func DisableArbitrumParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		EnableArbOS:               false,
+		AllowDebugPrecompiles:     false,
+		DataAvailabilityCommittee: false,
+		InitialArbOSVersion:       ArbosVersion_0,
+		InitialChainOwner:         common.Address{},
+	}
+}
+
+func ArbitrumOneChainConfig() *Config {
+	return &Config{
+		ChainID:             big.NewInt(42161),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumOneParams(),
+		Clique: &CliqueConfig{
+			Period: 0,
+			Epoch:  0,
+		},
+	}
+}
+
+func ArbitrumNovaChainConfig() *Config {
+	return &Config{
+		ChainID:             big.NewInt(42170),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumNovaParams(),
+		Clique: &CliqueConfig{
+			Period: 0,
+			Epoch:  0,
+		},
+	}
+}
+
+func ArbitrumRollupGoerliTestnetChainConfig() *Config {
+	return &Config{
+		ChainID:             big.NewInt(421613),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumRollupGoerliTestnetParams(),
+		Clique: &CliqueConfig{
+			Period: 0,
+			Epoch:  0,
+		},
+	}
+}
+
+func ArbitrumDevTestChainConfig() *Config {
+	return &Config{
+		ChainID:             big.NewInt(412346),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumDevTestParams(),
+		Clique: &CliqueConfig{
+			Period: 0,
+			Epoch:  0,
+		},
+	}
+}
+
+func ArbitrumDevTestDASChainConfig() *Config {
+	return &Config{
+		ChainID:             big.NewInt(412347),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumDevTestDASParams(),
+		Clique: &CliqueConfig{
+			Period: 0,
+			Epoch:  0,
+		},
+	}
+}
+
+func ArbitrumAnytrustGoerliTestnetChainConfig() *Config {
+	return &Config{
+		ChainID:             big.NewInt(421703),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumAnytrustGoerliTestnetParams(),
+		Clique: &CliqueConfig{
+			Period: 0,
+			Epoch:  0,
+		},
+	}
+}
+
+var ArbitrumSupportedChainConfigs = []*Config{
+	ArbitrumOneChainConfig(),
+	ArbitrumNovaChainConfig(),
+	ArbitrumRollupGoerliTestnetChainConfig(),
+	ArbitrumDevTestChainConfig(),
+	ArbitrumDevTestDASChainConfig(),
+	ArbitrumAnytrustGoerliTestnetChainConfig(),
+}
+
+// DefaultCacheConfigWithScheme returns a deep copied default cache config with
+// a provided trie node scheme.
+func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {
+	config := *defaultCacheConfig
+	config.StateScheme = scheme
+	return &config
+}
+
+// defaultCacheConfig are the default caching values if none are specified by the
+// user (also used during testing).
+var defaultCacheConfig = &CacheConfig{
+	// Arbitrum Config Options  TODO remove
+	TriesInMemory:                      128,
+	TrieRetention:                      30 * time.Minute,
+	MaxNumberOfBlocksToSkipStateSaving: 0,
+	MaxAmountOfGasToSkipStateSaving:    0,
+
+	TrieCleanLimit: 256,
+	TrieDirtyLimit: 256,
+	TrieTimeLimit:  5 * time.Minute,
+	SnapshotLimit:  256,
+	SnapshotWait:   true,
+	// StateScheme:    rawdb.HashScheme,
+}
+
+// CacheConfig contains the configuration values for the trie database
+// and state snapshot these are resident in a blockchain.
+type CacheConfig struct {
+	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
+	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
+	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
+	TrieDirtyDisabled   bool          // Whether to disable trie write caching and GC altogether (archive node)
+	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
+	SnapshotLimit       int           // Memory allowance (MB) to use for caching snapshot entries in memory
+	Preimages           bool          // Whether to store preimage of trie key to the disk
+	StateHistory        uint64        // Number of blocks from head whose state histories are reserved.
+	StateScheme         string        // Scheme used to store ethereum states and merkle tree nodes on top
+
+	SnapshotRestoreMaxGas uint64 // Rollback up to this much gas to restore snapshot (otherwise snapshot recalculated from nothing)
+
+	// Arbitrum: configure GC window
+	TriesInMemory uint64        // Height difference before which a trie may not be garbage-collected
+	TrieRetention time.Duration // Time limit before which a trie may not be garbage-collected
+
+	MaxNumberOfBlocksToSkipStateSaving uint32
+	MaxAmountOfGasToSkipStateSaving    uint64
+
+	SnapshotNoBuild bool // Whether the background generation is allowed
+	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+}
+
+type ArbitrumChainParams struct {
+	ParentChainID         int    `json:"parent-chain-id"`
+	ParentChainIsArbitrum bool   `json:"parent-chain-is-arbitrum"`
+	ChainName             string `json:"chain-name"`
+	SequencerURL          string `json:"sequencer-url"`
+	FeedURL               string `json:"feed-url"`
+
+	EnableArbOS               bool           `json:"EnableArbOS"`
+	AllowDebugPrecompiles     bool           `json:"AllowDebugPrecompiles"`
+	DataAvailabilityCommittee bool           `json:"DataAvailabilityCommittee"`
+	InitialArbOSVersion       uint64         `json:"InitialArbOSVersion"`
+	InitialChainOwner         common.Address `json:"InitialChainOwner"`
+	GenesisBlockNum           uint64         `json:"GenesisBlockNum"`
+
+	MaxCodeSize     uint64 `json:"MaxCodeSize,omitempty"`     // Maximum bytecode to permit for a contract. 0 value implies params.DefaultMaxCodeSize
+	MaxInitCodeSize uint64 `json:"MaxInitCodeSize,omitempty"` // Maximum initcode to permit in a creation transaction and create instructions. 0 value implies params.DefaultMaxInitCodeSize
+
+	Rollup ArbRollupConfig `json:"rollup"`
+}
+
+type ArbRollupConfig struct {
+	Bridge                 string `json:"bridge"`
+	Inbox                  string `json:"inbox"`
+	SequencerInbox         string `json:"sequencer-inbox"`
+	Rollup                 string `json:"rollup"`
+	ValidatorUtils         string `json:"validator-utils"`
+	ValidatorWalletCreator string `json:"validator-wallet-creator"`
+	StakeToken             string `json:"stake-token"`
+	DeployedAt             int    `json:"deployed-at"`
 }

@@ -72,12 +72,19 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 	var transferFunc evmtypes.TransferFunc
 	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
-	if engine != nil {
+	if engine != nil && !config.IsArbitrum() {
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = consensus.Transfer
 		postApplyMessageFunc = nil
+	}
+
+	// assert if network is ARB0 to change pervrandao
+	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	if arbOsVersion > chain.ArbosVersion_0 {
+		difficultyHash := common.BigToHash(header.Difficulty)
+		prevRandDao = &difficultyHash
 	}
 	return evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
@@ -92,16 +99,23 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
+		BaseFeeInBlock:   baseFee.Clone(),
+		ArbOSVersion:     arbOsVersion,
 	}
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
-	return evmtypes.TxContext{
+	etx := evmtypes.TxContext{
 		Origin:     msg.From(),
-		GasPrice:   msg.GasPrice(),
+		GasPrice:   msg.GasPrice().Clone(),
 		BlobHashes: msg.BlobHashes(),
 	}
+	//// TODO arbiturm only? seems like not working/needed
+	if mf := msg.MaxFeePerBlobGas(); mf != nil {
+		etx.BlobFee = mf.Clone()
+	}
+	return etx
 }
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number

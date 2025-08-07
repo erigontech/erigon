@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 )
 
-type encodingBuf [32]byte
+type encodingBuf [64]byte
 
 var pooledBuf = sync.Pool{
 	New: func() interface{} { return new(encodingBuf) },
@@ -40,7 +40,7 @@ var pooledBuf = sync.Pool{
 
 func newEncodingBuf() *encodingBuf {
 	b := pooledBuf.Get().(*encodingBuf)
-	*b = encodingBuf([32]byte{}) // reset, do we need to?
+	*b = encodingBuf([64]byte{}) // reset, do we need to?
 	return b
 }
 

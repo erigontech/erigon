@@ -1461,7 +1461,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 
-		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+		var arbosVersion uint64
+		if chainConfig.IsArbitrum() {
+			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		}
+		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, arbosVersion)
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
@@ -1661,7 +1665,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, arbosVersion)
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
@@ -1693,6 +1701,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if !traceTypeTrace {
 		traceResult.Trace = []*ParityTrace{}
 	}
+	// Arbitrum: a tx can schedule another (see retryables)
+	// traceResult, err = runScheduledTxes(ctx, block, state, header, blockCtx, types.MessageGasEstimationMode, result)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	return traceResult, nil
 }
@@ -1702,3 +1715,44 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash,
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_rawTransaction")
 }
+
+// func runScheduledTxes(ctx context.Context, b core.NodeInterfaceBackendAPI, state *state.IntraBlockState, header *types.Header, blockCtx evmtypes.BlockContext, runMode types.MessageRunMode, result *evmtypes.ExecutionResult) (*core.ExecutionResult, error) {
+// 	scheduled := result.ScheduledTxes
+// 	for runMode == types.MessageGasEstimationMode && len(scheduled) > 0 {
+// 		// This will panic if the scheduled tx is signed, but we only schedule unsigned ones
+// 		msg, err := scheduled[0].AsMessage(types.NewArbitrumSigner(nil), header.BaseFee, b.ChainConfig().Rules(header.Number.Uint64(), header.Time))
+// 		// msg, err := core.TransactionToMessage(scheduled[0], types.NewArbitrumSigner(nil), header.BaseFee, runMode)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		// The scheduling transaction will "use" all of the gas available to it,
+// 		// but it's really just passing it on to the scheduled tx, so we subtract it out here.
+// 		if result.UsedGas >= msg.Gas() {
+// 			result.UsedGas -= msg.Gas() // was GasLimit
+// 		} else {
+// 			log.Warn("Scheduling tx used less gas than scheduled tx has available", "usedGas", result.UsedGas, "scheduledGas", msg.GasLimit)
+// 			result.UsedGas = 0
+// 		}
+// 		// make a new EVM for the scheduled Tx (an EVM must never be reused)
+// 		evm := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true}, &blockCtx)
+// 		go func() {
+// 			<-ctx.Done()
+// 			evm.Cancel()
+// 		}()
+
+// 		scheduledTxResult, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(math.MaxUint64))
+// 		if err != nil {
+// 			return nil, err // Bail out
+// 		}
+// 		if err := state.Error(); err != nil {
+// 			return nil, err
+// 		}
+// 		if scheduledTxResult.Failed() {
+// 			return scheduledTxResult, nil
+// 		}
+// 		// Add back in any gas used by the scheduled transaction.
+// 		result.UsedGas += scheduledTxResult.UsedGas
+// 		scheduled = append(scheduled[1:], scheduledTxResult.ScheduledTxes...)
+// 	}
+// 	return result, nil
+// }

@@ -22,6 +22,8 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
+	"github.com/erigontech/nitro-erigon/arbos"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -47,6 +49,10 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) consensus.Engine {
 	var eng consensus.Engine
+
+	if chainConfig.IsArbitrum() {
+		return arbos.Engine{}
+	}
 
 	switch consensusCfg := config.(type) {
 	case *ethashcfg.Config:

@@ -25,7 +25,7 @@ Erigon uses MDBX storage engine. But most information on the Internet about LMDB
 
 We have Go, Rust and C++ implementations of `RoKV` interface.
 
-Rationale and Architecture of DB interface: [./../../ethdb/Readme.md](../../ethdb/Readme.md)
+Rationale and Architecture of DB interface: [./../../Readme.md](../../turbo/Readme.md)
 
 MDBX: [docs](https://libmdbx.dqdkfa.ru/)
 and [mdbx.h](https://github.com/erigontech/libmdbx/blob/master/mdbx.h)

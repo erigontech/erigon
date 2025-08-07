@@ -520,7 +520,11 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
-	rules := chainConfig.Rules(blockNum, blockCtx.Time)
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	rules := chainConfig.Rules(blockNum, blockCtx.Time, arbosVersion)
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {

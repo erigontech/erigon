@@ -39,6 +39,7 @@ type Dirs struct {
 	DataDir          string
 	RelativeDataDir  string // like dataDir, but without filepath.Abs() resolution
 	Chaindata        string
+	ArbitrumWasm     string
 	Tmp              string
 	Snap             string
 	SnapIdx          string
@@ -75,6 +76,7 @@ func New(datadir string) Dirs {
 		dirs.CaplinLatest,
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
+		dirs.ArbitrumWasm,
 	)
 
 	return dirs
@@ -111,6 +113,7 @@ func Open(datadir string) Dirs {
 		CaplinIndexing:   filepath.Join(datadir, "caplin", "indexing"),
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
+		ArbitrumWasm:     filepath.Join(datadir, "arbitrumwasm"),
 	}
 	return dirs
 }

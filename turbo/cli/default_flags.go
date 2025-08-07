@@ -40,6 +40,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
 	&PruneDistanceFlag,
+	&L2RPCAddrFlag,
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,

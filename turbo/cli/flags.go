@@ -75,6 +75,12 @@ var (
 		Value: kv.ReadersLimit - 128,
 	}
 
+	L2RPCAddrFlag = cli.StringFlag{
+		Name:  "l2rpc",
+		Usage: "address of arbitrum L2 rpc server to get blocks and transactions from",
+		Value: "",
+	}
+
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
 		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
@@ -255,6 +261,9 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	_ = chainId
 
+	cfg.L2RPCAddr = ctx.String(L2RPCAddrFlag.Name)
+	log.Info("[Arbitrum] Using L2 RPC server to fetch blocks", "address", cfg.L2RPCAddr)
+
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
 
@@ -363,6 +372,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 
 	cfg.Prune = mode
+
+	l2RPC := f.String(L2RPCAddrFlag.Name, L2RPCAddrFlag.DefaultText, "")
+	cfg.L2RPCAddr = *l2RPC
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))

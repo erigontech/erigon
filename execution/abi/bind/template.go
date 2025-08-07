@@ -19,7 +19,11 @@
 
 package bind
 
-import "github.com/erigontech/erigon/execution/abi"
+import (
+	_ "embed"
+
+	"github.com/erigontech/erigon/execution/abi"
+)
 
 // tmplData is the data structure required to fill the binding template.
 type tmplData struct {
@@ -78,9 +82,13 @@ type tmplStruct struct {
 // tmplSource is language to template mapping containing all the supported
 // programming languages the package can generate to.
 var tmplSource = map[Lang]string{
-	LangGo:   tmplSourceGo,
-	LangJava: tmplSourceJava,
+	LangGo:    tmplSourceGo,
+	LangJava:  tmplSourceJava,
+	LangGoArb: tmplSourceGoArb,
 }
+
+//go:embed source.go.tpl
+var tmplSourceGoArb string
 
 // tmplSourceGo is the Go source template that the generated Go contract binding
 // is based on.

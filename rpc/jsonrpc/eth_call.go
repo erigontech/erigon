@@ -183,7 +183,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	blockNum := *(header.Number)
-
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
@@ -198,6 +197,21 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if args.From == nil {
 		args.From = new(common.Address)
 	}
+	// Run the gas estimation andwrap any revertals into a custom return
+	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
+	// call, err := args.ToMessage(gasCap, header, state, core.MessageGasEstimationMode)
+	// if err != nil {
+	// 	return 0, err
+	// }
+
+	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
+	//{
+	//	gasCap, err = args.L2OnlyGasCap(gasCap, header)
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	// hi = gasCap
+	//}
 
 	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
@@ -341,6 +355,51 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 	}
 	return hexutil.Uint64(hi), nil
+	// ====== arbitrum estimation code
+
+	// // Retrieve the base state and mutate it with any overrides
+	// state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	// if state == nil || err != nil {
+	// 	return 0, err
+	// }
+	// if err = overrides.Apply(state); err != nil {
+	// 	return 0, err
+	// }
+	// header = updateHeaderForPendingBlocks(blockNrOrHash, header)
+
+	// // Construct the gas estimator option from the user input
+	// opts := &gasestimator.Options{
+	// 	Config:           b.ChainConfig(),
+	// 	Chain:            NewChainContext(ctx, b),
+	// 	Header:           header,
+	// 	State:            state,
+	// 	Backend:          b,
+	// 	ErrorRatio:       gasestimator.EstimateGasErrorRatio,
+	// 	RunScheduledTxes: runScheduledTxes,
+	// }
+	// // Run the gas estimation andwrap any revertals into a custom return
+	// // Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
+	// call, err := args.ToMessage(gasCap, header, state, core.MessageGasEstimationMode)
+	// if err != nil {
+	// 	return 0, err
+	// }
+
+	// // Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
+	// {
+	// 	gasCap, err = args.L2OnlyGasCap(gasCap, header, state, core.MessageGasEstimationMode)
+	// 	if err != nil {
+	// 		return 0, err
+	// 	}
+	// }
+
+	// estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
+	// if err != nil {
+	// 	if len(revert) > 0 {
+	// 		return 0, newRevertError(revert)
+	// 	}
+	// 	return 0, err
+	// }
+	// return hexutil.Uint64(estimate), nil
 }
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
@@ -825,8 +884,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &common.Address{}
 	}
 
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
-	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
+	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time, arbosVersion))
 	excl := make(map[common.Address]struct{})
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}

@@ -107,7 +107,7 @@ func NewHistoricalTraceWorker(
 		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
-	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
+	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0, ie.evm.Context.ArbOSVersion))
 	ie.ibs = state.New(ie.stateReader)
 	return ie
 }
@@ -221,7 +221,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time, rw.evm.Context.ArbOSVersion))
 		vmCfg := *rw.vmCfg
 		vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		vmCfg.Tracer = tracer.Tracer().Hooks
@@ -616,6 +616,10 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 		blockReceipts := make(types.Receipts, len(txs))
+		var arbosVersion uint64
+		if chainConfig.IsArbitrum() {
+			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		}
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -623,7 +627,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
-				Rules:           chainConfig.Rules(blockNum, b.Time()),
+				Rules:           chainConfig.Rules(blockNum, b.Time(), arbosVersion),
 				Txs:             txs,
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,

@@ -291,7 +291,7 @@ func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthCo
 	if err != nil {
 		return nil, err
 	}
-	if !chainConfig.IsCancun(timeUnix) {
+	if !chainConfig.IsCancun(timeUnix, 0 /* currentArbosVer */) {
 		return &EthConfigResp{}, fmt.Errorf("not supported: %w: time=%v", ErrForkTimeBeforeCancun, timeUnix)
 	}
 
@@ -322,10 +322,10 @@ var ErrForkTimeBeforeCancun = errors.New("fork time before cancun")
 func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime uint64) *EthHardForkConfig {
 	forkConfig := EthHardForkConfig{}
 	forkConfig.ActivationTime = activationTime
-	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime)
+	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime, 0 /* currentArbosVer */)
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
 	forkConfig.ForkId = forkId[:]
-	precompiles := vm.Precompiles(chainConfig.Rules(math.MaxUint64, activationTime))
+	precompiles := vm.Precompiles(chainConfig.Rules(math.MaxUint64, activationTime, 0 /* currentArbosVer */))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
 		forkConfig.Precompiles[precompile.Name()] = addr

@@ -24,6 +24,8 @@ import (
 	"hash"
 	"slices"
 
+	"github.com/erigontech/erigon/core/state"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -240,6 +242,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
+	in.evm.ProcessingHook.PushContract(contract)
+	defer func() { in.evm.ProcessingHook.PopContract() }()
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, nil
@@ -281,6 +285,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	if restoreReadonly {
 		in.readOnly = true
 	}
+
 	// Increment the call depth which is restricted to 1024
 	in.IncDepth()
 	defer func() {
@@ -301,6 +306,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		in.DecDepth()
 	}()
+
+	// Arbitrum: handle Stylus programs
+	if in.evm.chainRules.IsStylus && state.IsStylusProgram(contract.Code) {
+		ret, err = in.evm.ProcessingHook.ExecuteWASM(callContext, input, in)
+		return
+	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during

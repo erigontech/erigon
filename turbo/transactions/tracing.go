@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/nitro-erigon/arbos"
 )
 
 type BlockGetter interface {
@@ -67,7 +68,12 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
-	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
+	var arbosVersion uint64
+	if cfg.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
+	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time, arbosVersion)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)
@@ -115,6 +121,13 @@ func TraceTx(
 		if tracer != nil && tracer.OnTxStart != nil {
 			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
 		}
+
+		if chainConfig.IsArbitrum() {
+			msg := types.NewMessage(message.From(), message.To(), message.Nonce(), message.Value(), message.Gas(), message.GasPrice(), message.FeeCap(), message.TipCap(), message.Data(), message.AccessList(), true, false, message.MaxFeePerBlobGas())
+			msg.Tx = tx
+			evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(ibs), msg)
+		}
+
 		result, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.OnTxEnd != nil {

@@ -16,8 +16,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/arb/chain"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -41,11 +44,23 @@ var FromBlock = cli.Uint64Flag{
 	Value: 0,
 }
 
+var NoWrite = cli.BoolFlag{
+	Name:  "no-write",
+	Usage: "Avoid writing to the database",
+	Value: false,
+}
+
+var Arbitrum = cli.BoolFlag{
+	Name:  "arbitrum", // this shit wants me to use their shitty tx format.
+	Usage: "Avoid writing to the database",
+	Value: false,
+}
+
 var Command = cli.Command{
 	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
 	Name:        "genfromrpc",
 	Usage:       "genfromrpc utilities",
-	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock},
+	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum},
 	Description: ``,
 }
 
@@ -296,12 +311,292 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 		}},
 	}
 	buildDynamicFeeFields(&tx.DynamicFeeTransaction, rawTx)
+	if rawAuths, ok := rawTx["authorizationList"].([]interface{}); ok {
+		var auths []types.Authorization
+		for _, a := range rawAuths {
+			if auth, ok := a.(map[string]interface{}); ok {
+
+				cid := getUint256FromField(auth, "chainId")
+				yparity := getUint256FromField(auth, "yParity")
+				r := getUint256FromField(auth, "r")
+				s := getUint256FromField(auth, "s")
+				nonce := getUint256FromField(auth, "nonce")
+
+				ja := types.Authorization{
+					Address: common.HexToAddress(auth["address"].(string)),
+				}
+
+				ja.ChainID = *cid
+				ja.YParity = uint8(yparity.Uint64())
+				ja.R.SetFromBig(r.ToBig())
+				ja.S.SetFromBig(s.ToBig())
+				ja.Nonce = nonce.Uint64()
+
+				auths = append(auths, ja)
+			}
+		}
+		tx.Authorizations = auths
+	}
+
 	// TODO: Add any additional EIP-7702–specific processing here.
 	return tx
 }
 
+func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.ArbitrumSubmitRetryableTx{}
+
+	// Chain ID: required field (hex string)
+	if chainIdHex, ok := rawTx["chainId"].(string); ok {
+		tx.ChainId = convertHexToBigInt(chainIdHex)
+	} else {
+		// Optionally handle missing field (e.g. log or return an error)
+	}
+
+	// Request ID: expected as a hex string
+	if requestIdHex, ok := rawTx["requestId"].(string); ok {
+		tx.RequestId = common.HexToHash(requestIdHex)
+	}
+
+	// From: expected as a hex string address.
+	if fromHex, ok := rawTx["from"].(string); ok {
+		tx.From = common.HexToAddress(fromHex)
+	}
+
+	// L1BaseFee: expected as a hex string.
+	if l1BaseFeeHex, ok := rawTx["l1BaseFee"].(string); ok {
+		tx.L1BaseFee = convertHexToBigInt(l1BaseFeeHex)
+	}
+
+	// DepositValue: expected as a hex string.
+	if depositValueHex, ok := rawTx["depositValue"].(string); ok {
+		tx.DepositValue = convertHexToBigInt(depositValueHex)
+	}
+
+	// GasFeeCap: expected as a hex string.
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
+		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
+	}
+
+	// Gas limit: taken from the commonTx already parsed.
+	tx.Gas = commonTx.GasLimit
+
+	// RetryTo: expected as a hex string address. If empty, nil indicates contract creation.
+	if retryToHex, ok := rawTx["retryTo"].(string); ok && retryToHex != "" {
+		addr := common.HexToAddress(retryToHex)
+		tx.RetryTo = &addr
+	}
+
+	// RetryValue: expected as a hex string.
+	if retryValueHex, ok := rawTx["retryValue"].(string); ok {
+		tx.RetryValue = convertHexToBigInt(retryValueHex)
+	}
+
+	// Beneficiary: expected as a hex string address.
+	if beneficiaryHex, ok := rawTx["beneficiary"].(string); ok {
+		tx.Beneficiary = common.HexToAddress(beneficiaryHex)
+	}
+
+	// MaxSubmissionFee: expected as a hex string.
+	if maxSubmissionFeeHex, ok := rawTx["maxSubmissionFee"].(string); ok {
+		tx.MaxSubmissionFee = convertHexToBigInt(maxSubmissionFeeHex)
+	}
+
+	// FeeRefundAddr: expected as a hex string address.
+	if feeRefundAddrHex, ok := rawTx["refundTo"].(string); ok {
+		tx.FeeRefundAddr = common.HexToAddress(feeRefundAddrHex)
+	}
+
+	// RetryData: expected as a hex string (with "0x" prefix) that will be decoded to bytes.
+	if retryDataHex, ok := rawTx["retryData"].(string); ok && len(retryDataHex) >= 2 && retryDataHex[:2] == "0x" {
+		tx.RetryData = common.Hex2Bytes(retryDataHex[2:])
+	}
+
+	return tx
+}
+
+func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.ArbitrumRetryTx{}
+
+	// ChainId (expected as a hex string, e.g., "0x1")
+	if chainIdHex, ok := rawTx["chainId"].(string); ok {
+		tx.ChainId = convertHexToBigInt(chainIdHex)
+	}
+
+	// Nonce is taken from the common transaction fields.
+	tx.Nonce = commonTx.Nonce
+
+	// From (expected as a hex string address)
+	if fromHex, ok := rawTx["from"].(string); ok {
+		tx.From = common.HexToAddress(fromHex)
+	}
+
+	// GasFeeCap (expected as a hex string)
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
+		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
+	}
+
+	// Gas limit is taken from the common transaction fields.
+	tx.Gas = commonTx.GasLimit
+
+	// To is optional. A non-empty hex string is converted to an address pointer;
+	// if missing or empty, nil indicates contract creation.
+	if toStr, ok := rawTx["to"].(string); ok && toStr != "" {
+		addr := common.HexToAddress(toStr)
+		tx.To = &addr
+	}
+
+	// Value (expected as a hex string)
+	if valueStr, ok := rawTx["value"].(string); ok {
+		tx.Value = convertHexToBigInt(valueStr)
+	}
+
+	// Data is taken from the common transaction fields.
+	tx.Data = commonTx.Data
+
+	// TicketId (expected as a hex string)
+	if ticketIdHex, ok := rawTx["ticketId"].(string); ok {
+		tx.TicketId = common.HexToHash(ticketIdHex)
+	}
+
+	// RefundTo (expected as a hex string address)
+	if refundToHex, ok := rawTx["refundTo"].(string); ok {
+		tx.RefundTo = common.HexToAddress(refundToHex)
+	}
+
+	// MaxRefund (expected as a hex string)
+	if maxRefundHex, ok := rawTx["maxRefund"].(string); ok {
+		tx.MaxRefund = convertHexToBigInt(maxRefundHex)
+	}
+
+	// SubmissionFeeRefund (expected as a hex string)
+	if submissionFeeRefundHex, ok := rawTx["submissionFeeRefund"].(string); ok {
+		tx.SubmissionFeeRefund = convertHexToBigInt(submissionFeeRefundHex)
+	}
+
+	return tx
+}
+
+// makeArbitrumContractTx builds an ArbitrumContractTx from the common transaction fields
+// and the raw JSON transaction data.
+func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.ArbitrumContractTx{}
+
+	// ChainId (expected as a hex string, e.g. "0x1")
+	if chainIdHex, ok := rawTx["chainId"].(string); ok {
+		tx.ChainId = convertHexToBigInt(chainIdHex)
+	}
+
+	// RequestId (expected as a hex string)
+	if requestIdHex, ok := rawTx["requestId"].(string); ok {
+		tx.RequestId = common.HexToHash(requestIdHex)
+	}
+
+	// From (expected as a hex string address)
+	if fromHex, ok := rawTx["from"].(string); ok {
+		tx.From = common.HexToAddress(fromHex)
+	}
+
+	// GasFeeCap (expected as a hex string)
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
+		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
+	}
+
+	// Gas limit: obtained from the common transaction fields.
+	tx.Gas = commonTx.GasLimit
+
+	// To: if present and non-empty, convert to an address pointer;
+	// if missing or empty, nil indicates contract creation.
+	if toStr, ok := rawTx["to"].(string); ok && toStr != "" {
+		addr := common.HexToAddress(toStr)
+		tx.To = &addr
+	}
+
+	// Value (expected as a hex string)
+	if valueStr, ok := rawTx["value"].(string); ok {
+		tx.Value = convertHexToBigInt(valueStr)
+	}
+
+	// Data: taken from the common transaction fields.
+	tx.Data = commonTx.Data
+
+	return tx
+}
+
+func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.ArbitrumUnsignedTx{GasFeeCap: big.NewInt(0)}
+
+	// ChainId: expected as a hex string (e.g., "0x1")
+	if chainIdHex, ok := rawTx["chainId"].(string); ok {
+		tx.ChainId = convertHexToBigInt(chainIdHex)
+	}
+
+	// From: expected as a hex string address.
+	if fromHex, ok := rawTx["from"].(string); ok {
+		tx.From = common.HexToAddress(fromHex)
+	}
+
+	// Nonce: already parsed and stored in commonTx.
+	tx.Nonce = commonTx.Nonce
+
+	// GasFeeCap: expected as a hex string.
+	if gasFeeCapHex, ok := rawTx["maxFeePerGas"].(string); ok {
+		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
+	} else if gasFeeCapHex, ok := rawTx["gasPrice"].(string); ok {
+		tx.GasFeeCap = convertHexToBigInt(gasFeeCapHex)
+	}
+
+	// Gas: taken directly from commonTx.
+	tx.Gas = commonTx.GasLimit
+
+	// To: if provided and non-empty, convert to an address pointer.
+	if toStr, ok := rawTx["to"].(string); ok && toStr != "" {
+		addr := common.HexToAddress(toStr)
+		tx.To = &addr
+	}
+
+	// Value: expected as a hex string.
+	if valueStr, ok := rawTx["value"].(string); ok {
+		tx.Value = convertHexToBigInt(valueStr)
+	}
+
+	// Data: taken directly from commonTx.
+	tx.Data = commonTx.Data
+	return tx
+}
+
+func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.ArbitrumDepositTx{}
+
+	// ChainId: expected as a hex string (e.g., "0x1")
+	if chainIdHex, ok := rawTx["chainId"].(string); ok {
+		tx.ChainId = convertHexToBigInt(chainIdHex)
+	}
+
+	// L1RequestId: expected as a hex string.
+	if l1RequestIdHex, ok := rawTx["requestId"].(string); ok {
+		tx.L1RequestId = common.HexToHash(l1RequestIdHex)
+	}
+
+	// From: expected as a hex string address.
+	if fromHex, ok := rawTx["from"].(string); ok {
+		tx.From = common.HexToAddress(fromHex)
+	}
+
+	// To: expected as a hex string address.
+	if toHex, ok := rawTx["to"].(string); ok {
+		tx.To = common.HexToAddress(toHex)
+	}
+
+	// Value: expected as a hex string.
+	if valueStr, ok := rawTx["value"].(string); ok {
+		tx.Value = convertHexToBigInt(valueStr)
+	}
+
+	return tx
+}
+
 // unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
-func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions, error) {
+func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (types.Transactions, error) {
 	var txs types.Transactions
 
 	for _, rawTx := range rawTxs {
@@ -328,29 +623,57 @@ func unMarshalTransactions(rawTxs []map[string]interface{}) (types.Transactions,
 			tx = makeEip4844Tx(commonTx, rawTx)
 		case "0x4": // EIP-7702
 			tx = makeEip7702Tx(commonTx, rawTx)
+		case "0x64": // ArbitrumDepositTxType
+			tx = makeArbitrumDepositTx(commonTx, rawTx)
+		case "0x65": // ArbitrumUnsignedTxType
+			tx = makeArbitrumUnsignedTx(commonTx, rawTx)
+		case "0x66": // ArbitrumContractTxType
+			tx = makeArbitrumContractTx(commonTx, rawTx)
+		case "0x68": // ArbitrumRetryTxType
+			tx = makeArbitrumRetryTx(commonTx, rawTx)
+		case "0x69": // ArbitrumSubmitRetryableTxType
+			tx = makeRetryableTxFunc(commonTx, rawTx)
+		case "0x6a": // ArbitrumInternalTxType
+			var chainID *uint256.Int
+			if chainIDOut := getUint256FromField(rawTx, "chainId"); chainIDOut != nil {
+				chainID = chainIDOut
+			} else {
+				return nil, errors.New("missing chainId in ArbitrumInternalTxType")
+			}
+			tx = &types.ArbitrumInternalTx{
+				Data:    commonTx.Data,
+				ChainId: chainID,
+			}
+		case "0x78": // ArbitrumLegacyTxType
+			// types.NewArbitrumLegacyTx()
+			panic("imlement me")
 		default:
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
 		txs = append(txs, tx)
+
 	}
 	return txs, nil
 }
 
-// getBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
+// GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
+func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(block.Transactions)
+	txs, err := unMarshalTransactions(block.Transactions, verify)
 	if err != nil {
 		return nil, err
 	}
 
 	// Derive the TxHash from the decoded transactions.
-	block.TxHash = types.DeriveSha(txs)
+	txHash := types.DeriveSha(txs)
+	if verify && txHash != block.TxHash {
+		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", block.TxHash, txHash, blockNumber)
+	}
 	blk := types.NewBlockFromNetwork(&types.Header{
 		ParentHash:      block.ParentHash,
 		UncleHash:       block.UncleHash,
@@ -404,6 +727,28 @@ func genFromRPc(cliCtx *cli.Context) error {
 	verification := cliCtx.Bool(Verify.Name)
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
+	start := cliCtx.Uint64(FromBlock.Name)
+	if start == 0 {
+		var curBlock uint64
+		err = db.Update(context.Background(), func(tx kv.RwTx) error {
+			curBlock, err = stages.GetStageProgress(tx, stages.Bodies)
+			return err
+		})
+		if err != nil {
+			log.Warn("can't check current block", "err", err)
+		}
+		if curBlock == 0 {
+			// write arb genesis
+			log.Info("Writing arbitrum sepolia-rollup genesis")
+
+			gen := chain.ArbSepoliaRollupGenesisBlock()
+
+			b := core.MustCommitGenesis(gen, db, dirs, log.New())
+			log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
+		} else {
+			start = curBlock
+		}
+	}
 
 	// Query latest block number.
 	var latestBlockHex string
@@ -411,11 +756,12 @@ func genFromRPc(cliCtx *cli.Context) error {
 		log.Warn("Error fetching latest block number", "err", err)
 		return err
 	}
+
 	latestBlock := new(big.Int)
 	latestBlock.SetString(latestBlockHex[2:], 16)
+	noWrite := cliCtx.Bool(NoWrite.Name)
 
 	var blockNumber big.Int
-	start := cliCtx.Uint64(FromBlock.Name)
 	// Process blocks from the starting block up to the latest.
 	for i := start; i < latestBlock.Uint64(); {
 		prev := i
@@ -424,15 +770,37 @@ func genFromRPc(cliCtx *cli.Context) error {
 		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := getBlockByNumber(client, &blockNumber, verification)
+				blk, err := GetBlockByNumber(client, &blockNumber, verification)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}
-				if err := rawdb.WriteBlock(tx, blk); err != nil {
-					return fmt.Errorf("error writing block %d: %w", blockNum, err)
-				}
-				if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
-					return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+				if !noWrite {
+					if err := rawdb.WriteBlock(tx, blk); err != nil {
+						return fmt.Errorf("error writing block %d: %w", blockNum, err)
+					}
+					if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+						return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
+					}
+					if err = rawdb.AppendCanonicalTxNums(tx, blockNum); err != nil {
+						return fmt.Errorf("failed to append canonical txnum %d: %w", blockNum, err)
+					}
+					rawdb.WriteHeadBlockHash(tx, blk.Hash())
+					if err := rawdb.WriteHeadHeaderHash(tx, blk.Hash()); err != nil {
+						return err
+					}
+					if err := stages.SaveStageProgress(tx, stages.Headers, blockNum); err != nil {
+						return err
+					}
+					if err := stages.SaveStageProgress(tx, stages.BlockHashes, blockNum); err != nil {
+						return err
+					}
+					if err := stages.SaveStageProgress(tx, stages.Bodies, blockNum); err != nil {
+						return err
+					}
+					if err := stages.SaveStageProgress(tx, stages.Senders, blockNum); err != nil {
+						return err
+					}
+
 				}
 
 				// Update the progress counter.

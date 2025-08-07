@@ -254,9 +254,59 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
+
+	case ArbitrumDepositTxType:
+		tx := new(ArbitrumDepositTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumInternalTxType:
+		tx := new(ArbitrumInternalTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumUnsignedTxType:
+		tx := new(ArbitrumUnsignedTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumContractTxType:
+		tx := new(ArbitrumContractTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumRetryTxType:
+		tx := new(ArbitrumRetryTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumSubmitRetryableTxType:
+		tx := new(ArbitrumSubmitRetryableTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumLegacyTxType:
+		tx := new(ArbitrumLegacyTxData)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	//default:
+	//	arbParsing = false
+	//}
+	//}
+	//if !arbParsing {
+	//switch b[0] {
+	//case AccessListTxType:
+	//inner = new(AccessListTx)
+	//case DynamicFeeTxType:
+	//inner = new(DynamicFeeTransaction)
+	//case BlobTxType:
+	//inner = new(BlobTx)
+	//default:
 	default:
-		return nil, fmt.Errorf("unknown transaction type: %v", txType)
+		// return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}
+	return nil, fmt.Errorf("unknown transaction type: %v", txType)
 }
 
 func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
@@ -507,6 +557,52 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (tx *ArbitrumContractTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	return nil
+}
+func (tx *ArbitrumRetryTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	return nil
+}
+func (tx *ArbitrumSubmitRetryableTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *ArbitrumDepositTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *ArbitrumUnsignedTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *ArbitrumInternalTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
 	}
 	return nil
 }

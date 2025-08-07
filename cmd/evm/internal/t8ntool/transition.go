@@ -240,7 +240,8 @@ func Main(ctx *cli.Context) error {
 		prestate.Env.Random = nil
 	}
 
-	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
+	// TODO arbitrum
+	if chainConfig.IsShanghai(prestate.Env.Timestamp, 0) && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
@@ -313,7 +314,8 @@ func Main(ctx *cli.Context) error {
 	blockNum, txNum := uint64(0), uint64(0)
 	sd.SetTxNum(txNum)
 	sd.SetBlockNum(blockNum)
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre, blockNum, txNum)
+	// TODO arbitrum
+	reader, writer := MakePreState(chainConfig.Rules(0, 0, 0), tx, sd, prestate.Pre, blockNum, txNum)
 	blockNum, txNum = uint64(1), uint64(2)
 	sd.SetTxNum(txNum)
 	sd.SetBlockNum(blockNum)

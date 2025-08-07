@@ -62,6 +62,10 @@ func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract
 		return PrecompiledContractsOsaka
 	case chainRules.IsBhilai:
 		return PrecompiledContractsBhilai
+	case chainRules.IsStylus:
+		return PrecompiledContractsArbOS30
+	case chainRules.IsArbitrum:
+		return PrecompiledContractsArbitrum
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
 	case chainRules.IsNapoli:
@@ -261,6 +265,11 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []common.Address {
 	switch {
+	case rules.IsStylus:
+		return PrecompiledAddressesArbOS30
+	case rules.IsArbitrum:
+		return PrecompiledAddressesArbitrum
+
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka
 	case rules.IsBhilai:
@@ -287,8 +296,14 @@ func ActivePrecompiles(rules *chain.Rules) []common.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks, advancedInfoForArbos *AdvancedPrecompileCall,
 ) (ret []byte, remainingGas uint64, err error) {
+	// Arbitrum
+	advanced, isAdvanced := p.(AdvancedPrecompile)
+	if isAdvanced {
+		return advanced.RunAdvanced(input, suppliedGas, advancedInfoForArbos)
+	}
+
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
 		return nil, 0, ErrOutOfGas
