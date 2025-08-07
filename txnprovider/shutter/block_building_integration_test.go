@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/rpc/rpccfg"
+
 	"github.com/holiman/uint256"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"

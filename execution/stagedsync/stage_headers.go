@@ -27,25 +27,22 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/arb/ethdb"
-	snapshots "github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -71,9 +68,6 @@ type HeadersCfg struct {
 	notifications *shards.Notifications
 
 	syncConfig ethconfig.Sync
-
-	L2RPCAddr      string // L2 RPC address for Arbitrum
-	ReceiptRPCAddr string // L2 RPC address for fetching receipts (if different from L2RPCAddr)
 }
 
 func StageHeadersCfg(
@@ -91,8 +85,6 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
-	L2RPCAddr string, // L2 RPC address for Arbitrum
-	ReceiptRPCAddr string,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -109,8 +101,6 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
 		notifications:     notifications,
-		L2RPCAddr:         L2RPCAddr,
-		ReceiptRPCAddr:    ReceiptRPCAddr,
 	}
 }
 
@@ -129,98 +119,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
-	if !cfg.chainConfig.IsArbitrum() {
-		return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
-	}
+	cfg.hd.Progress()
+	return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 
-	jsonRpcAddr := cfg.L2RPCAddr
-	client, err := rpc.Dial(jsonRpcAddr, log.Root())
-	if err != nil {
-		log.Warn("Error connecting to RPC", "err", err)
-		return err
-	}
-
-	var receiptClient *rpc.Client
-	if cfg.ReceiptRPCAddr != "" {
-		receiptClient, err = rpc.Dial(cfg.ReceiptRPCAddr, log.Root())
-		if err != nil {
-			log.Warn("Error connecting to receipt RPC", "err", err, "url", cfg.ReceiptRPCAddr)
-			return err
-		}
-	}
-
-	var curBlock uint64
-	curBlock, err = stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		log.Warn("can't check current block", "err", err)
-	}
-	// Query latest block number.
-	var latestBlockHex string
-	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
-		log.Warn("Error fetching latest block number", "err", err)
-		return err
-	}
-
-	latestBlock := new(big.Int)
-	latestBlock.SetString(latestBlockHex[2:], 16)
-	if curBlock > 0 {
-		curBlock++
-	}
-	firstBlock := curBlock
-
-	if firstBlock >= latestBlock.Uint64() {
-		return nil
-	}
-	latestBlock.SetUint64(min(latestBlock.Uint64(), firstBlock+uint64(cfg.syncConfig.LoopBlockLimit)))
-
-	if firstBlock+1 > latestBlock.Uint64() { // print only if 1+ blocks available
-		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
-	}
-
-	finaliseState := func(tx kv.RwTx, lastCommittedBlockNum uint64) error {
-		err = cfg.hd.ReadProgressFromDb(tx)
-		if err != nil {
-			return fmt.Errorf("error reading header progress from db: %w", err)
-		}
-		//
-		//if err = cfg.blockWriter.FillHeaderNumberIndex(s.LogPrefix(), tx, os.TempDir(), firstBlock, lastCommittedBlockNum+1, ctx, logger); err != nil {
-		//	return err
-		//}
-		//
-		//if err := rawdbv3.TxNums.Truncate(tx, firstBlock); err != nil {
-		//	return err
-		//}
-		//if err := cfg.blockWriter.MakeBodiesCanonical(tx, firstBlock); err != nil {
-		//	return fmt.Errorf("failed to make bodies canonical %d: %w", firstBlock, err)
-		//}
-		// This will update bd.maxProgress
-		if err = cfg.bodyDownload.UpdateFromDb(tx); err != nil {
-			return err
-		}
-		//defer cfg.bodyDownload.ClearBodyCache()
-		cfg.hd.SetSynced()
-		return nil
-	}
-
-	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestBlock.Uint64(), false, true, false, finaliseState)
-	if err != nil {
-		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
-	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("commit failed: %w", err)
-		}
-		tx = nil
-	}
-
-	ethdb.InitialiazeLocalWasmTarget()
-
-	if lastCommittedBlockNum-firstBlock > 1 {
-		log.Info("[Arbitrum] Headers stage completed", "latestProcessedBlock", lastCommittedBlockNum,
-			"from", firstBlock, "to", latestBlock.Uint64(), "wasTxCommitted", !useExternalTx)
-	}
-	return nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
@@ -263,7 +164,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 
 	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress, "hash", hash.Hex())
 
-	diaglib.Send(diaglib.HeadersWaitingUpdate{From: startProgress})
+	diagnostics.Send(diagnostics.HeadersWaitingUpdate{From: startProgress})
 
 	localTd, err := rawdb.ReadTd(tx, hash, startProgress)
 	if err != nil {
@@ -456,7 +357,7 @@ Loop:
 		headers := headerInserter.GetHighest() - startProgress
 		secs := time.Since(startTime).Seconds()
 
-		diaglib.Send(diaglib.HeadersProcessedUpdate{
+		diagnostics.Send(diagnostics.HeadersProcessedUpdate{
 			Highest:   headerInserter.GetHighest(),
 			Age:       time.Unix(int64(headerInserter.GetHighestTimestamp()), 0).Second(),
 			Headers:   headers,
@@ -496,7 +397,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 		select {
 		case <-logEvery.C:
-			diaglib.Send(diaglib.HeaderCanonicalMarkerUpdate{AncestorHeight: ancestorHeight, AncestorHash: ancestorHash.String()})
+			diagnostics.Send(diagnostics.HeaderCanonicalMarkerUpdate{AncestorHeight: ancestorHeight, AncestorHash: ancestorHash.String()})
 			logger.Info(fmt.Sprintf("[%s] write canonical markers", logPrefix), "ancestor", ancestorHeight, "hash", ancestorHash)
 		default:
 		}
@@ -657,7 +558,7 @@ func logProgressHeaders(
 		"rejectedBadHeaders", stats.RejectedBadHeaders,
 	)
 
-	diaglib.Send(diaglib.BlockHeadersUpdate{
+	diagnostics.Send(diagnostics.BlockHeadersUpdate{
 		CurrentBlockNumber:  now,
 		PreviousBlockNumber: prev,
 		Speed:               speed,
@@ -739,4 +640,12 @@ func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block
 func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
+}
+func (cr ChainReaderImpl) BorSpan(spanId uint64) *heimdall.Span {
+	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
+	if err != nil {
+		cr.logger.Error("[staged sync] BorSpan failed", "err", err)
+		return nil
+	}
+	return span
 }
