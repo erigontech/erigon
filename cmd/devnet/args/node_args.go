@@ -69,7 +69,6 @@ type NodeArgs struct {
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
 	HeimdallURL               string `arg:"--bor.heimdall" json:"bor.heimdall,omitempty"`
-	WithHeimdallMilestones    bool   `arg:"--bor.milestone" json:"bor.milestone"`
 	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
 
 	NodeKey    *ecdsa.PrivateKey `arg:"-"`
@@ -118,8 +117,6 @@ func (node *NodeArgs) Configure(base NodeArgs, nodeNumber int) error {
 	node.AuthRpcPort = apiPort + 4
 
 	node.Port = base.Port + nodeNumber
-
-	node.WithHeimdallMilestones = base.WithHeimdallMilestones
 
 	return nil
 }

@@ -35,5 +35,5 @@
   },
   "depositContractAddress": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
   "ethash": {},
-  "defaultBlockGasLimit" : 45000000
+  "defaultBlockGasLimit": 45000000
 }

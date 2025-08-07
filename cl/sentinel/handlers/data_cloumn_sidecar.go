@@ -113,6 +113,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.FuluVersion); err != nil {
 		return err
 	}
+
 	curSlot := c.ethClock.GetCurrentSlot()
 	curEpoch := curSlot / c.beaconConfig.SlotsPerEpoch
 

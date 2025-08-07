@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
@@ -51,12 +50,14 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -67,6 +68,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+
 	//goland:noinspection GoBoolExpressions
 	if race.Enabled && runtime.GOOS == "darwin" {
 		// We run race detector for medium tests which fails on macOS.
@@ -260,6 +262,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		AuthRpcPort:              engineApiPort,
 		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
+		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
 	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}

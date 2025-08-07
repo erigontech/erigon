@@ -24,17 +24,16 @@ import (
 	"math/big"
 	"sync"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.

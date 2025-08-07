@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/arb/ethdb"
 	"math/big"
 	"os"
 	"runtime"
@@ -29,8 +28,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -39,13 +36,16 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/arb/ethdb"
 	snapshots "github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -788,8 +788,10 @@ func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *big.Int {
 	}
 	return td
 }
-func (cr ChainReaderImpl) FrozenBlocks() uint64    { return cr.blockReader.FrozenBlocks() }
-func (cr ChainReaderImpl) FrozenBorBlocks() uint64 { return cr.blockReader.FrozenBorBlocks() }
+func (cr ChainReaderImpl) FrozenBlocks() uint64 { return cr.blockReader.FrozenBlocks() }
+func (cr ChainReaderImpl) FrozenBorBlocks(align bool) uint64 {
+	return cr.blockReader.FrozenBorBlocks(align)
+}
 func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b

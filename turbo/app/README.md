@@ -65,7 +65,7 @@ The following configuration can be used to upload blocks from genesis where:
 
 ```shell
 erigon/build/bin/erigon seg uploader --datadir=~/snapshots/bor-mainnet --chain=bor-mainnet \
-  --bor.heimdall=https://heimdall-api.polygon.technology --bor.milestone=false --sync.loop.prune.limit=500000 \
+  --bor.heimdall=https://heimdall-api.polygon.technology --sync.loop.prune.limit=500000 \
   --upload.location=r2:erigon-v2-snapshots-bor-mainnet --upload.from=earliest --snapshot.version=2 \
   --upload.snapshot.limit=1500000 
 ```
