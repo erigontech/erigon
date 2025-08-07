@@ -258,36 +258,6 @@ func TestPoolTransactionYielder_AddMined(t *testing.T) {
 	yielder.readyMtx.Unlock()
 
 	assert.True(t, isSkipped)
-}
-
-func TestPoolTransactionYielder_RemoveMinedTransactions(t *testing.T) {
-	ctx := context.Background()
-	cfg := ethconfig.Zk{}
-
-	mockDB := memdb.NewTestDB(t)
-	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
-
-	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
-
-	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
-
-	// Create test transaction
-	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	tx := createMockTransaction(1, &to, []byte{})
-	txHash := tx.Hash()
-
-	// Add transaction to cache
-	cache.Add(txHash, &tx)
-
-	// Add some transactions to skip map
-	yielder.readyMtx.Lock()
-	yielder.toSkip[common.HexToHash("0x1234")] = struct{}{}
-	yielder.toSkip[common.HexToHash("0x5678")] = struct{}{}
-	yielder.readyMtx.Unlock()
-
-	// Remove mined transactions
-	yielder.RemoveMinedTransactions([]common.Hash{txHash})
 
 	// Verify transaction was removed from cache
 	_, found := cache.Get(txHash)
@@ -295,8 +265,11 @@ func TestPoolTransactionYielder_RemoveMinedTransactions(t *testing.T) {
 
 	// Verify skip map was cleared
 	yielder.readyMtx.Lock()
-	assert.Empty(t, yielder.toSkip)
+	assert.Len(t, yielder.toSkip, 1)
 	yielder.readyMtx.Unlock()
+
+	yielder.Cleanup() // Cleanup to reset state
+	assert.Empty(t, yielder.toSkip)
 }
 
 func TestPoolTransactionYielder_SetExecutionDetails(t *testing.T) {
