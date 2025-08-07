@@ -24,7 +24,6 @@ import (
 	"strconv"
 )
 
-const uintBits = 32 << (uint64(^uint(0)) >> 63)
 
 // Decode decodes a hex string with 0x prefix.
 func Decode(input string) ([]byte, error) {
