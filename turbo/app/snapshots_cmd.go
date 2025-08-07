@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
@@ -244,7 +244,7 @@ var snapshotCommand = cli.Command{
 					return err
 				}
 				defer l.Unlock()
-				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
+				return dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
@@ -416,7 +416,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
 	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
-		filePaths, err := dir.ListFiles(dirPath)
+		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			return err
 		}
@@ -572,7 +572,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		if removeLatest {
-			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n4) Exit\n (pick number): ", _maxFrom)
+			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom)
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -580,7 +580,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		if minS == maxS {
-			q := "remove ALL snapshot files?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
+			q := "remove ALL snapshot files?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -598,7 +598,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
 				fmt.Printf("this will remove ALL commitment files with state trie\n")
-				q := "Do that anyway?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
+				q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
 				if promptExit(q) {
 					os.Exit(0)
 				}
@@ -617,8 +617,8 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
-		os.Remove(res.Path)
-		os.Remove(res.Path + ".torrent")
+		dir2.RemoveFile(res.Path)
+		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
@@ -990,7 +990,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
 					return err
 				}
@@ -1002,7 +1002,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
 					return err
 				}
@@ -1014,7 +1014,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
 					return err
 				}
@@ -1186,7 +1186,7 @@ func doPublishable(cliCtx *cli.Context) error {
 		return err
 	}
 	// check if salt-state.txt and salt-blocks.txt exist
-	exists, err := dir.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
+	exists, err := dir2.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
 	if err != nil {
 		return err
 	}
@@ -1194,7 +1194,7 @@ func doPublishable(cliCtx *cli.Context) error {
 		return fmt.Errorf("missing file %s", filepath.Join(dat.Snap, "salt-state.txt"))
 	}
 
-	exists, err = dir.FileExist(filepath.Join(dat.Snap, "salt-blocks.txt"))
+	exists, err = dir2.FileExist(filepath.Join(dat.Snap, "salt-blocks.txt"))
 	if err != nil {
 		return err
 	}
@@ -1216,7 +1216,7 @@ func doClearIndexing(cliCtx *cli.Context) error {
 	snapDir := dat.Snap
 
 	// Delete accessorsDir
-	if err := os.RemoveAll(accessorsDir); err != nil {
+	if err := dir2.RemoveAll(accessorsDir); err != nil {
 		return fmt.Errorf("failed to delete accessorsDir: %w", err)
 	}
 
@@ -1231,10 +1231,10 @@ func doClearIndexing(cliCtx *cli.Context) error {
 	}
 
 	// remove salt-state.txt and salt-blocks.txt
-	os.Remove(filepath.Join(snapDir, "salt-state.txt"))
-	os.Remove(filepath.Join(snapDir, "salt-state.txt.torrent"))
-	os.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
-	os.Remove(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-state.txt"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-state.txt.torrent"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-blocks.txt"))
+	dir2.RemoveFile(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
 
 	return nil
 }
@@ -1253,7 +1253,7 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 		// Check file extensions and delete matching files
 		for _, ext := range extensions {
 			if strings.HasSuffix(info.Name(), ext) {
-				if err := os.Remove(path); err != nil {
+				if err := dir2.RemoveFile(path); err != nil {
 					return err
 				}
 			}
@@ -1819,7 +1819,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	sourcefile := cliCtx.String(SnapshotFileFlag.Name)
 	sourcefile = filepath.Join(dirs.Snap, sourcefile)
 
-	exists, err := dir.FileExist(sourcefile)
+	exists, err := dir2.FileExist(sourcefile)
 	if err != nil {
 		return err
 	}
