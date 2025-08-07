@@ -29,13 +29,13 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -152,35 +152,35 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
-) (types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	for _, r := range rewards {
 		switch r.Kind {
 		case consensus.RewardAuthor:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 		case consensus.RewardUncle:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineUncle)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
 		default:
-			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceChangeUnspecified)
+			state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
 		}
 	}
 
 	if withdrawals != nil {
 		if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
 			if err := auraEngine.ExecuteSystemWithdrawals(withdrawals, syscall); err != nil {
-				return nil, nil, nil, err
+				return nil, err
 			}
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
-				state.AddBalance(w.Address, amountInWei, tracing.BalanceIncreaseWithdrawal)
+				state.AddBalance(w.Address, *amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
@@ -191,27 +191,27 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		allLogs := make(types.Logs, 0)
 		for i, rec := range receipts {
 			if rec == nil {
-				return nil, nil, nil, fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
+				return nil, fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
 			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
 		}
 		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
 		if withdrawalReq != nil {
 			rs = append(rs, *withdrawalReq)
 		}
 		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
@@ -219,30 +219,29 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
-				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
+				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
 			}
 		}
 	}
 
-	return txs, receipts, rs, nil
+	return rs, nil
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
+) (*types.Block, types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 	}
 	header.RequestsHash = nil
-	outTxs, outReceipts, outRequests, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, false, logger)
-
+	outRequests, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, false, logger)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	if config.IsPrague(header.Time) {
 		header.RequestsHash = outRequests.Hash()
 	}
-	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, outRequests, nil
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), outRequests, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
@@ -258,6 +257,10 @@ func (s *Merge) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTi
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
 	return ProofOfStakeDifficulty
+}
+
+func (c *Merge) TxDependencies(h *types.Header) [][]int {
+	return nil
 }
 
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
@@ -281,8 +284,8 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	// Verify that the gas limit is within cap
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	if header.GasLimit > params.MaxBlockGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxBlockGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {

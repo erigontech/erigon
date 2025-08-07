@@ -13,22 +13,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  performance-test-suite:
-    strategy:
-      matrix:
-        include:
-          - chain: mainnet
-            backend: RpcSpecific
-          #- chain: bor-mainnet
-          #  backend: Polygon
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
+  mainnet-rpc-perf-tests:
+    runs-on: [ self-hosted, qa, Ethereum, rpc-performance ]
     env:
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      CHAIN: ${{ matrix.chain }}
+      CHAIN: mainnet
 
     steps:
       - name: Checkout Erigon repository
@@ -200,7 +193,7 @@ jobs:
           run_perf mainnet eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20
           run_perf mainnet eth_getLogs stress_test_eth_getLogs_15M 1:1,100:30,1000:20,10000:20,20000:20
           run_perf mainnet eth_getBalance stress_test_eth_getBalance_15M 1:1,100:30,1000:20,10000:20,20000:20
-          run_perf mainnet eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,10000:20
+          run_perf mainnet eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,5000:20
           run_perf mainnet eth_getBlockByNumber stress_test_eth_getBlockByNumber_13M 1:1,100:30,1000:20,5000:20
           run_perf mainnet eth_getTransactionByHash stress_test_eth_getTransactionByHash_13M 1:1,100:30,1000:20,10000:20
           run_perf mainnet eth_getTransactionReceipt stress_test_eth_getTransactionReceipt_14M 1:1,100:30,1000:20,5000:20,10000:20,20000:20

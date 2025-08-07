@@ -36,9 +36,9 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -279,11 +279,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
-	var stream *jsoniter.Stream
+	var stream jsonstream.Stream
 	if !s.disableStreaming {
-		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+		stream = jsonstream.New(w)
 	}
-	s.serveSingleRequest(ctx, codec, stream)
+
+	errorMsg := s.serveSingleRequest(ctx, codec, stream)
+	if errorMsg != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		codec.WriteJSON(ctx, errorMsg)
+	}
 }
 
 // validateRequest returns a non-zero response code and error message if the

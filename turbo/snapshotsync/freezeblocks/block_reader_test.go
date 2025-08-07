@@ -20,21 +20,21 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/version"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -135,7 +135,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx file for last bor span segment to simulate segment with missing idx file
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Spans.Name()))
-	err := os.Remove(idxFileToDelete)
+	err := dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
@@ -164,13 +164,13 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx file for all bor span segments to simulate segments with missing idx files
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1, 500_000, heimdall.Spans.Name()))
-	err := os.Remove(idxFileToDelete)
+	err := dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, heimdall.Spans.Name()))
-	err = os.Remove(idxFileToDelete)
+	err = dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Spans.Name()))
-	err = os.Remove(idxFileToDelete)
+	err = dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
@@ -232,7 +232,7 @@ func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx file for last bor events segment to simulate segment with missing idx file
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Events.Name()))
-	err := os.Remove(idxFileToDelete)
+	err := dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
@@ -257,13 +257,13 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx files for all bor events segment to simulate segment files with missing idx files
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 0, 500_000, heimdall.Events.Name()))
-	err := os.Remove(idxFileToDelete)
+	err := dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, heimdall.Events.Name()))
-	err = os.Remove(idxFileToDelete)
+	err = dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Events.Name()))
-	err = os.Remove(idxFileToDelete)
+	err = dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()

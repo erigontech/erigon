@@ -19,14 +19,13 @@ package freezeblocks
 import (
 	"context"
 	"fmt"
-	"os"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"reflect"
 
 	"github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -82,7 +81,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
 				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
-				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger, br.blockReader); err != nil {
 					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
 				}
 			}
@@ -203,11 +202,11 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	}
 
 	for _, f := range toDel {
-		_ = os.Remove(f)
-		_ = os.Remove(f + ".torrent")
+		_ = dir2.RemoveFile(f)
+		_ = dir2.RemoveFile(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		_ = os.Remove(withoutExt + ".idx.torrent")
+		_ = dir2.RemoveFile(withoutExt + ".idx")
+		_ = dir2.RemoveFile(withoutExt + ".idx.torrent")
 	}
 }

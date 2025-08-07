@@ -18,6 +18,7 @@ package mdbx
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"unsafe"
 
@@ -38,6 +39,23 @@ func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 	}
 
 	db, err := New(kv.ChainDB, log.Root()).InMem(path).Open(ctx)
+	if err != nil {
+		return &TemporaryMdbx{}, err
+	}
+
+	return &TemporaryMdbx{
+		db:   db,
+		path: path,
+	}, nil
+}
+
+func NewUnboundedTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
+	path, err := os.MkdirTemp(tempdir, "mdbx-temp")
+	if err != nil {
+		return &TemporaryMdbx{}, err
+	}
+
+	db, err := New(kv.ChainDB, log.Root()).InMem(path).MapSize(32 * datasize.TB).PageSize(16 * datasize.KB).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
@@ -82,7 +100,7 @@ func (t *TemporaryMdbx) PageSize() datasize.ByteSize {
 
 func (t *TemporaryMdbx) Close() {
 	t.db.Close()
-	os.RemoveAll(t.path)
+	dir.RemoveAll(t.path)
 }
 
 func (t *TemporaryMdbx) CHandle() unsafe.Pointer {

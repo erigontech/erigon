@@ -30,11 +30,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
-	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -81,12 +81,8 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
-	var blockNr uint64 = 0
-
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
-	sd.SetBlockNum(blockNr)
-
+func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *dbstate.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -108,7 +104,6 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.Shared
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	sd.SetBlockNum(blockNr + 1)
 	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {
 		panic(err)
 	}

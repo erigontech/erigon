@@ -33,11 +33,13 @@ import (
 var (
 	MaxReorgDepth = EnvInt("MAX_REORG_DEPTH", 512)
 
-	doMemstat           = EnvBool("NO_MEMSTAT", true)
-	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
-	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
+	noMemstat            = EnvBool("NO_MEMSTAT", false)
+	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
+	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
+	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -55,9 +57,6 @@ var (
 
 	// allows to collect reading metrics for kv by file level
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
-
-	// run prune on flush with given timeout. If timeout is 0, no prune on flush will be performed
-	PruneOnFlushTimeout = EnvDuration("PRUNE_ON_FLUSH_TIMEOUT", time.Duration(0))
 
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
@@ -84,12 +83,14 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	TraceDeletion        = EnvBool("TRACE_DELETION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
-	if doMemstat {
-		runtime.ReadMemStats(m)
+	if noMemstat {
+		return
 	}
+	runtime.ReadMemStats(m)
 }
 
 func MdbxLockInRam() bool { return mdbxLockInRam }
@@ -210,7 +211,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*45 {
+	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
 		return
 	}
 
@@ -249,7 +250,7 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 		return
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(heapProfileFrequency)
 	defer ticker.Stop()
 
 	for {

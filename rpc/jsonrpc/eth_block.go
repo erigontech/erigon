@@ -28,10 +28,10 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -99,7 +99,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, api._txNumReader, stateBlockNumber+1, 0, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
 		}
@@ -359,11 +359,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 
-		var ok bool
-		var err error
-
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err
 		}
@@ -405,10 +401,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 
-		var ok bool
-		var err error
-
-		_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err
 		}

@@ -21,9 +21,9 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/event"
 )
 
 // TestTxPool is a mock transaction pool that blindly accepts all transactions.

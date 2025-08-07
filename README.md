@@ -77,16 +77,15 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.24](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 2TB (May 2025). FullNode: 1.1TB (May 2025)
-- ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
-- ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
+- ArchiveNode Ethereum Mainnet: 3.2T (Aug 2025). FullNode: 1.5TB (May 2025)
+- ArchiveNode Gnosis: 1.2T (Aug 2025). FullNode: 500GB (June 2024)
+- ArchiveNode Polygon Mainnet: 5.7T (Aug 2024). FullNode: 2Tb (April 2024)
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
-Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): Blocks Execution is slow
+Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like gp3): Blocks Execution is slow
 on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
@@ -121,9 +120,6 @@ make erigon
 ./build/bin/erigon
 ```
 
-Increase download speed by `--torrent.download.rate=20mb`. <code>🔬
-See [Downloader docs](./cmd/downloader/readme.md)</code>
-
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
@@ -132,6 +128,17 @@ For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) cli
 Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+
+### Upgrading from 3.0 to 3.1
+
+* Erigon3.1 has 2 upgrade options (backup recommended in both):
+    * Just upgrade Erigon binary - it will work on old files
+    * Upgrade binary and data:
+        * upgrade Erigon version
+      * run `./build/bin/erigon snapshot reset --datadir /your-datadir` . After this command: at next start of Erigon -
+        will download latest files (but re-use unchanged files)
+      * start Erigon - it will download changed files
+      * it will take many hours (can increase speed by `--torrent.download.rate=1g`)
 
 ### Datadir structure
 
@@ -149,6 +156,8 @@ datadir
    
 # There is 4 domains: account, storage, code, commitment 
 ```
+
+See the [lib](db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
 
 ### History on cheap disk
 
@@ -175,31 +184,31 @@ datadir
 ### Erigon3 datadir size
 
 ```sh
-# eth-mainnet - archive - Nov 2024
+# eth-mainnet - archive - Aug 2025
 
 du -hsc /erigon/chaindata
 15G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-120G 	/erigon/snapshots/accessor
-300G	/erigon/snapshots/domain
-280G	/erigon/snapshots/history
-430G	/erigon/snapshots/idx
-2.3T	/erigon/snapshots
+140G 	/erigon/snapshots/accessor
+250G	/erigon/snapshots/domain
+600G	/erigon/snapshots/history
+250G	/erigon/snapshots/idx
+3.1T	/erigon/snapshots
 ```
 
 ```sh
-# bor-mainnet - archive - Nov 2024
+# bor-mainnet - archive - Aug 2025
 
 du -hsc /erigon/chaindata
-20G 	/erigon/chaindata
+30G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-360G	/erigon-data/snapshots/accessor
+400G	/erigon-data/snapshots/accessor
 1.1T	/erigon-data/snapshots/domain
-750G	/erigon-data/snapshots/history
-1.5T	/erigon-data/snapshots/idx
-4.9T	/erigon/snapshots
+1.9G	/erigon-data/snapshots/history
+900T	/erigon-data/snapshots/idx
+5.7T	/erigon/snapshots
 ```
 
 ### Erigon3 changes from Erigon2
@@ -213,11 +222,10 @@ du -hsc /erigon/snapshots/*
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
-    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+  - `chaindata` is less than `30gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
-- **Other changes:**
-    - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
-    - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
+- **Beacon state Archive:* `--caplin.blocks-archive`, `caplin.states-archive`, `--caplin.blobs-archive`
+- **ExecutionStage included many E2 stages:* stage_hash_state, stage_trie, log_index, history_index, trace_index
 
 ### Logging
 
@@ -400,7 +408,7 @@ DB. That reduces write amplification and DB inserts are orders of magnitude quic
 
 **Single accounts/state trie**. Erigon uses a single Merkle trie for both accounts and the storage.
 
-<code> 🔬 [Staged Sync Readme](/eth/stagedsync/README.md)</code>
+<code> 🔬 [Staged Sync Readme](/docs/readthedocs/source/stagedsync.rst)</code>
 
 ### JSON-RPC daemon
 
@@ -769,7 +777,6 @@ What can do:
 - increase RAM
 - if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
-- Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ### Filesystem's background features are expensive
@@ -790,12 +797,12 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 
 ### Erigon crashes due to kernel allocation limits
 
-Erigon will crash with `cannot allocate memory`.
+Error message: `cannot allocate memory`.
 
-to fix this add the following to `/etc/sysctl.conf` or a .conf file in `/etc/sysctl.d/`
+Add to `/etc/sysctl.conf` (or add .conf file in `/etc/sysctl.d/`)
 
 ```
-vm.overcommit_memory = 1 (it is 0 by default)
-vm.max_map_count = 8388608 (it is 1048576 by default)
+vm.overcommit_memory = 1 
+vm.max_map_count = 16777216 
 ```
 ---------

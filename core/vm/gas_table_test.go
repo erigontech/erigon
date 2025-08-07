@@ -22,11 +22,9 @@ package vm_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -37,15 +35,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -104,9 +102,9 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	dirs, logger := datadir.New(t.TempDir()), log.New()
-	salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
 	require.NoError(t, err)
-	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
+	agg, err := dbstate.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -115,12 +113,12 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 	return _db
 }
 
-func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *state3.SharedDomains) {
+func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *dbstate.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -187,28 +185,19 @@ var createGasTests = []struct {
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	for i, tt := range createGasTests {
 		address := common.BytesToAddress([]byte("contract"))
 
-		tx, err := db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-
-		var stateReader state.StateReader
-		var stateWriter state.StateWriter
-		txc := wrap.NewTxContainer(tx, nil)
-
-		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
-		fmt.Printf("init tx %x\n", eface[1])
-
-		domains, err := state3.NewSharedDomains(txc.Ttx, log.New())
+		domains, err := dbstate.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
-		txc.Doms = domains
 
-		//stateReader = rpchelper.NewLatestStateReader(domains)
-		stateReader = rpchelper.NewLatestStateReader(domains.AsGetter(tx))
-		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
+		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
+		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
@@ -236,7 +225,7 @@ func TestCreateGas(t *testing.T) {
 		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
-		tx.Rollback()
 		domains.Close()
 	}
+	tx.Rollback()
 }

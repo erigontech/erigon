@@ -21,11 +21,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	stateLib "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/log/v3"
+	dbstate "github.com/erigontech/erigon/db/state"
 )
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
@@ -72,13 +71,10 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 		}
 	}
 	// Check that no extra elements are in the access list
-	index := s.accessList.addresses[address]
-	if index >= 0 {
-		stateSlots := s.accessList.slots[index]
-		for s := range stateSlots {
-			if _, slotPresent := slotMap[s]; !slotPresent {
-				t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
-			}
+	stateSlots := s.accessList.addresses[address]
+	for s := range stateSlots {
+		if _, slotPresent := slotMap[s]; !slotPresent {
+			t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
 		}
 	}
 }
@@ -91,12 +87,10 @@ func TestAccessList(t *testing.T) {
 
 	_, tx, _ := NewTestTemporalDb(t)
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
@@ -113,9 +107,6 @@ func TestAccessList(t *testing.T) {
 	verifyAddrs(t, state, "aa", "bb")
 	verifySlots(t, state, "bb", "01", "02")
 	if got, exp := len(state.accessList.addresses), 2; got != exp {
-		t.Fatalf("expected empty, got %d", got)
-	}
-	if got, exp := len(state.accessList.slots), 1; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
 
@@ -199,9 +190,6 @@ func TestAccessList(t *testing.T) {
 		t.Fatalf("addr present, expected missing")
 	}
 	if got, exp := len(state.accessList.addresses), 0; got != exp {
-		t.Fatalf("expected empty, got %d", got)
-	}
-	if got, exp := len(state.accessList.slots), 0; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
 }

@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/bits"
 
@@ -28,8 +27,9 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -138,9 +138,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 			delete(b.senderIDTxnCount, senderID)
 		}
 
-		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.Blobs != nil {
+		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
 			accBlobCount := b.senderIDBlobCount[senderID]
-			txnBlobCount := len(mt.TxnSlot.Blobs)
+			txnBlobCount := len(mt.TxnSlot.BlobBundles)
 			if txnBlobCount > 1 {
 				b.senderIDBlobCount[senderID] = accBlobCount - uint64(txnBlobCount)
 			} else {
@@ -165,8 +165,8 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *meta
 	}
 
 	b.senderIDTxnCount[mt.TxnSlot.SenderID]++
-	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.Blobs != nil {
-		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(mt.TxnSlot.Blobs))
+	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
+		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(mt.TxnSlot.BlobBundles))
 	}
 	return nil
 }

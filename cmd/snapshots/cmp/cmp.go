@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,18 +33,18 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -91,7 +92,7 @@ func cmp(cliCtx *cli.Context) error {
 			return err
 		}
 		tempDir = dataDir
-		defer os.RemoveAll(dataDir)
+		defer dir.RemoveAll(dataDir)
 	} else {
 		tempDir = filepath.Join(dataDir, "temp")
 
@@ -394,7 +395,7 @@ type comparitor struct {
 }
 
 func (c comparitor) chainConfig() *chain.Config {
-	return params.ChainConfigByChainName(c.chain)
+	return chainspec.ChainConfigByChainName(c.chain)
 }
 
 func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {
@@ -561,7 +562,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				f2snaps.Close()
 
 				for _, file := range files {
-					os.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err
@@ -816,7 +817,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				f2snaps.Close()
 
 				for _, file := range files {
-					os.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err

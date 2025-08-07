@@ -27,8 +27,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -37,12 +35,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -84,17 +83,21 @@ var Indexes = struct {
 	BorMilestoneId:  snaptype.Index{Name: "bormilestones"},
 }
 
+var ErrHeimdallDataIsNotReady = errors.New("heimdall data is not ready to extract for the specified interval")
+
 type EventRangeExtractor struct {
 	EventsDb func() kv.RoDB
 }
 
-func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, chainDb kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, chainDb kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	from := hexutil.EncodeTs(blockFrom)
 	startEventId := firstEventId(ctx)
 	var lastEventId uint64
+
+	logger.Debug("Extracting events to snapshots", "blockFrom", blockFrom, "blockTo", blockTo)
 
 	chainTx, err := chainDb.BeginRo(ctx)
 	if err != nil {
@@ -113,9 +116,14 @@ func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uin
 	if err := kv.BigChunks(eventsDb, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
 		endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
 		blockNum := binary.BigEndian.Uint64(blockNumBytes)
-		blockHash, e := rawdb.ReadCanonicalHash(chainTx, blockNum)
-		if e != nil {
-			return false, e
+
+		blockHash, ok, err := hashResolver.CanonicalHash(ctx, chainTx, blockNum)
+		if err != nil {
+			return false, err
+		}
+
+		if !ok {
+			return false, fmt.Errorf("failed to read canonical hash for the block number %d", blockNum)
 		}
 
 		if blockNum >= blockTo {
@@ -256,9 +264,12 @@ var (
 			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				spanFrom := uint64(SpanIdAt(blockFrom))
 				spanTo := uint64(SpanIdAt(blockTo))
+
+				logger.Debug("Extracting spans to snapshots", "blockFrom", blockFrom, "blockTo", blockTo, "spanFrom", spanFrom, "spanTo", spanTo)
+
 				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{Indexes.BorSpanId},
@@ -285,15 +296,19 @@ var (
 			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
 
-					checkpoints, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
+					checkpoints, ok, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
 					if err != nil {
 						return err
+					}
+
+					if !ok {
+						return ErrHeimdallDataIsNotReady
 					}
 
 					if len(checkpoints) > 0 {
@@ -307,6 +322,8 @@ var (
 				if err != nil {
 					return 0, err
 				}
+
+				logger.Debug("Extracting checkpoints to snapshots", "blockFrom", blockFrom, "blockTo", blockTo, "checkpointFrom", checkpointFrom, "checkpointTo", checkpointTo)
 
 				return extractValueRange(ctx, kv.BorCheckpoints, uint64(checkpointFrom), uint64(checkpointTo), db, collect, workers, lvl, logger)
 			}),
@@ -347,15 +364,19 @@ var (
 			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
-					milestones, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
+					milestones, ok, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
+					}
+
+					if !ok {
+						return ErrHeimdallDataIsNotReady
 					}
 
 					if len(milestones) > 0 {
@@ -411,25 +432,15 @@ func RecordWayPoints(value bool) {
 
 func SnapshotTypes() []snaptype.Type {
 	if recordWaypoints {
-		return []snaptype.Type{Events, Spans, Checkpoints, Milestones}
+		return []snaptype.Type{Events, Spans, Checkpoints}
 	}
 
 	return []snaptype.Type{Events, Spans}
 }
 
-func CheckpointsEnabled() bool {
+func WaypointsEnabled() bool {
 	for _, snapType := range SnapshotTypes() {
 		if snapType.Enum() == Checkpoints.Enum() {
-			return true
-		}
-	}
-
-	return false
-}
-
-func MilestonesEnabled() bool {
-	for _, snapType := range SnapshotTypes() {
-		if snapType.Enum() == Milestones.Enum() {
 			return true
 		}
 	}

@@ -19,17 +19,18 @@ package verify
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
 )
 
 var (
@@ -210,7 +211,7 @@ func verify(cliCtx *cli.Context) error {
 			return err
 		}
 		tempDir = dataDir
-		defer os.RemoveAll(dataDir)
+		defer dir.RemoveAll(dataDir)
 	} else {
 		tempDir = filepath.Join(dataDir, "temp")
 

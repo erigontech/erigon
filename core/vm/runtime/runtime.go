@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"math"
 	"math/big"
 	"os"
@@ -35,13 +36,13 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -62,7 +63,7 @@ type Config struct {
 	State *state.IntraBlockState
 
 	evm       *vm.EVM
-	GetHashFn func(n uint64) common.Hash
+	GetHashFn func(n uint64) (common.Hash, error)
 }
 
 // sets defaults on the config
@@ -108,8 +109,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) common.Hash {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
+			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 		}
 	}
 }
@@ -131,11 +132,11 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		defer db.Close()
 		dirs := datadir.New(tempdir)
 		logger := log.New()
-		salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+		salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
 		if err != nil {
 			return nil, nil, err
 		}
-		agg, err := state3.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
+		agg, err := dbstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -149,7 +150,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := dbstate.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -196,11 +197,11 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	externalState := cfg.State != nil
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer os.RemoveAll(tmp) //nolint
+		defer dir.RemoveAll(tmp) //nolint
 
 		db := memdb.NewStateDB(tmp)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
+		agg, err := dbstate.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -214,7 +215,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := dbstate.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}

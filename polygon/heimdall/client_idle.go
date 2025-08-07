@@ -33,6 +33,10 @@ func NewIdleClient(cfg params.MiningConfig) Client {
 	return &IdleClient{cfg: cfg}
 }
 
+func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
+	return nil, nil
+}
+
 func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return &Span{
 		ValidatorSet: valset.ValidatorSet{
@@ -78,6 +82,10 @@ func (c *IdleClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 
 func (c *IdleClient) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error) {
 	return nil, nil
+}
+
+func (c *IdleClient) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
+	return &ChainManagerStatus{}, nil
 }
 
 func (c *IdleClient) FetchStatus(ctx context.Context) (*Status, error) {

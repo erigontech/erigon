@@ -54,7 +54,6 @@ linters:
     gocritic:
       enabled-checks:
         - ruleguard
-        - sortSlice
       disabled-checks:
         - unnecessaryDefer
         - appendAssign

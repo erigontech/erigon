@@ -27,8 +27,9 @@ import (
 
 const (
 	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
-	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
-	MaxGasLimit          uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
+	MinBlockGasLimit     uint64 = 5000               // Minimum the block gas limit may ever be.
+	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
+	MaxTxnGasLimit       uint64 = 16_777_216         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
@@ -128,10 +129,11 @@ const (
 	// Introduced in Tangerine Whistle (Eip 150)
 	CreateBySelfdestructGas uint64 = 25000
 
-	BaseFeeChangeDenominator          = 8          // Bounds the amount the base fee can change between blocks.
-	BaseFeeChangeDenominatorPostDelhi = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
-	ElasticityMultiplier              = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
-	InitialBaseFee                    = 1000000000 // Initial base fee for EIP-1559 blocks.
+	BaseFeeChangeDenominator           = 8          // Bounds the amount the base fee can change between blocks.
+	BaseFeeChangeDenominatorPostDelhi  = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
+	BaseFeeChangeDenominatorPostBhilai = 64         // Bounds the amount the base fee can change between blocks post bhilai hard fork for polygon networks.
+	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
+	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
 
 	MaxCodeSize              = 24576           // Maximum bytecode to permit for a contract
 	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
@@ -150,14 +152,14 @@ const (
 	IdentityBaseGas     uint64 = 15   // Base price for a data copy operation
 	IdentityPerWordGas  uint64 = 3    // Per-work price for a data copy operation
 
-	Bn256AddGasByzantium             uint64 = 500    // Byzantium gas needed for an elliptic curve addition
-	Bn256AddGasIstanbul              uint64 = 150    // Gas needed for an elliptic curve addition
-	Bn256ScalarMulGasByzantium       uint64 = 40000  // Byzantium gas needed for an elliptic curve scalar multiplication
-	Bn256ScalarMulGasIstanbul        uint64 = 6000   // Gas needed for an elliptic curve scalar multiplication
-	Bn256PairingBaseGasByzantium     uint64 = 100000 // Byzantium base price for an elliptic curve pairing check
-	Bn256PairingBaseGasIstanbul      uint64 = 45000  // Base price for an elliptic curve pairing check
-	Bn256PairingPerPointGasByzantium uint64 = 80000  // Byzantium per-point price for an elliptic curve pairing check
-	Bn256PairingPerPointGasIstanbul  uint64 = 34000  // Per-point price for an elliptic curve pairing check
+	Bn254AddGasByzantium             uint64 = 500    // Byzantium gas needed for an elliptic curve addition
+	Bn254AddGasIstanbul              uint64 = 150    // Gas needed for an elliptic curve addition
+	Bn254ScalarMulGasByzantium       uint64 = 40000  // Byzantium gas needed for an elliptic curve scalar multiplication
+	Bn254ScalarMulGasIstanbul        uint64 = 6000   // Gas needed for an elliptic curve scalar multiplication
+	Bn254PairingBaseGasByzantium     uint64 = 100000 // Byzantium base price for an elliptic curve pairing check
+	Bn254PairingBaseGasIstanbul      uint64 = 45000  // Base price for an elliptic curve pairing check
+	Bn254PairingPerPointGasByzantium uint64 = 80000  // Byzantium per-point price for an elliptic curve pairing check
+	Bn254PairingPerPointGasIstanbul  uint64 = 34000  // Per-point price for an elliptic curve pairing check
 
 	Bls12381G1AddGas          uint64 = 375   // Price for BLS12-381 elliptic curve G1 point addition
 	Bls12381G1MulGas          uint64 = 12000 // Price for BLS12-381 elliptic curve G1 point scalar multiplication
@@ -177,10 +179,20 @@ const (
 	PointEvaluationGas   uint64 = 50000
 	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
 	BlobSize                    = FieldElementsPerBlob * 32
-	BlobGasPerBlob       uint64 = 0x20000
+	GasPerBlob           uint64 = 1 << 17
+	BlobBaseCost         uint64 = 1 << 13 // EIP-7918: Blob base fee bounded by execution cost
+
+	// EIP-7594: PeerDAS - Peer Data Availability Sampling
+	// See https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/polynomial-commitments-sampling.md
+	FieldElementsPerExtBlob        = 2 * FieldElementsPerBlob                       // Number of field elements in a Reed-Solomon extended blob
+	FieldElementsPerCell    uint64 = 64                                             // Number of Field elements in a cell
+	BytesPerCell                   = FieldElementsPerCell * 32                      // The number of bytes in a cell
+	CellsPerExtBlob                = FieldElementsPerExtBlob / FieldElementsPerCell // The number of cells in an extended blob
+	MaxBlobsPerTxn                 = 6                                              // https://github.com/ethereum/EIPs/pull/9981
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
-	P256VerifyGas uint64 = 3450
+	P256VerifyGas        uint64 = 3450
+	P256VerifyGasEIP7951 uint64 = 6900
 
 	// EIP-2935: Historical block hashes in state
 	BlockHashHistoryServeWindow uint64 = 8191
@@ -190,6 +202,11 @@ const (
 	SetCodeMagicPrefix  = byte(0x05)
 	PerEmptyAccountCost = 25000
 	PerAuthBaseCost     = 12500
+
+	// EIP-7934: RLP Execution Block Size Limit
+	MaxBlockSize             = 10_485_760 // 10 MiB
+	MaxBlockSizeSafetyMargin = 2_097_152  // 2 MiB
+	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
 )
 
 // EIP-7702: Set EOA account code
@@ -219,3 +236,29 @@ var (
 	MinimumDifficulty      = big.NewInt(131072) // The minimum that the difficulty may ever be.
 	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
+
+// See EIP-7840: Add blob schedule to EL config files
+type BlobConfig struct {
+	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+	Max                   uint64 `json:"max"`
+	Target                uint64 `json:"target"`
+}
+
+var DefaultCancunBlobConfig = BlobConfig{
+	Target:                3,
+	Max:                   6,
+	BaseFeeUpdateFraction: 3338477,
+}
+
+var DefaultPragueBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}
+
+// TODO(yperbasis): update when Fusaka's blob config is decided
+var DefaultOsakaBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}

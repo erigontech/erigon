@@ -4,20 +4,20 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"os"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/snaptype"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 )
 
 type Merger struct {
@@ -36,7 +36,7 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
-	cfg := snapcfg.KnownCfg(m.chainConfig.ChainName)
+	cfg, _ := snapcfg.KnownCfg(m.chainConfig.ChainName)
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
@@ -94,16 +94,16 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 		}
 		if err != nil {
 			f := sn.Path
-			_ = os.Remove(f)
-			_ = os.Remove(f + ".torrent")
+			_ = dir.RemoveFile(f)
+			_ = dir.RemoveFile(f + ".torrent")
 			ext := filepath.Ext(f)
 			withoutExt := f[:len(f)-len(ext)]
-			_ = os.Remove(withoutExt + ".idx")
-			_ = os.Remove(withoutExt + ".idx.torrent")
+			_ = dir.RemoveFile(withoutExt + ".idx")
+			_ = dir.RemoveFile(withoutExt + ".idx.torrent")
 			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 			if isTxnType {
-				_ = os.Remove(withoutExt + "-to-block.idx")
-				_ = os.Remove(withoutExt + "-to-block.idx.torrent")
+				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
+				_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
 			}
 		}
 	}()
@@ -206,7 +206,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	defer snapshots.recalcVisibleFiles()
+	defer snapshots.recalcVisibleFiles(snapshots.alignMin)
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()

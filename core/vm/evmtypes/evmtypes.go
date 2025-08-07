@@ -22,8 +22,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -64,14 +64,16 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	GasUsed             uint64 // Total used gas but include the refunded gas
-	Err                 error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	Reverted            bool   // Whether the execution was aborted by `REVERT`
-	ReturnData          []byte // Returned data from evm(function result or data supplied with revert opcode)
-	SenderInitBalance   *uint256.Int
-	CoinbaseInitBalance *uint256.Int
-	FeeTipped           *uint256.Int
-	EvmRefund           uint64 // Gas refunded by EVM without considering refundQuotient
+	GasUsed              uint64 // Total used gas but include the refunded gas
+	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	Reverted             bool   // Whether the execution was aborted by `REVERT`
+	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
+	SenderInitBalance    uint256.Int
+	CoinbaseInitBalance  uint256.Int
+	FeeTipped            uint256.Int
+	FeeBurnt             uint256.Int
+	BurntContractAddress common.Address
+	EvmRefund            uint64 // Gas refunded by EVM without considering refundQuotient
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -110,7 +112,7 @@ type (
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
-	GetHashFunc func(uint64) common.Hash
+	GetHashFunc func(uint64) (common.Hash, error)
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
 	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
@@ -119,9 +121,9 @@ type (
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
-	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
-	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
-	GetBalance(common.Address) (*uint256.Int, error)
+	SubBalance(common.Address, uint256.Int, tracing.BalanceChangeReason) error
+	AddBalance(common.Address, uint256.Int, tracing.BalanceChangeReason) error
+	GetBalance(common.Address) (uint256.Int, error)
 
 	AddLog(*types.Log)
 

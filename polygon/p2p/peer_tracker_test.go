@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 func TestPeerTracker(t *testing.T) {
@@ -49,6 +49,12 @@ func TestPeerTracker(t *testing.T) {
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
 	peerTracker.PeerConnected(PeerIdFromUint64(2))
 	peerIds = peerTracker.ListPeersMayHaveBlockNum(100)
+	require.Len(t, peerIds, 2)
+	sortPeerIdsAssumingUints(peerIds)
+	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
+	require.Equal(t, PeerIdFromUint64(2), peerIds[1])
+
+	peerIds = peerTracker.ListPeers()
 	require.Len(t, peerIds, 2)
 	sortPeerIdsAssumingUints(peerIds)
 	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
@@ -69,6 +75,11 @@ func TestPeerTracker(t *testing.T) {
 	peerTracker.PeerDisconnected(PeerIdFromUint64(2))
 	peerIds = peerTracker.ListPeersMayHaveBlockNum(100)
 	require.Len(t, peerIds, 1)
+	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
+
+	peerIds = peerTracker.ListPeers()
+	require.Len(t, peerIds, 1)
+	sortPeerIdsAssumingUints(peerIds)
 	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 
 	peerTracker.PeerConnected(PeerIdFromUint64(2))
