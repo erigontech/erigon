@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -155,6 +156,69 @@ func TestPoolSkipsBlobTxns(t *testing.T) {
 		require.Len(t, txns, 1)
 		require.Equal(t, encTxn1.OriginalTxn.Hash(), txns[0].Hash())
 		require.True(t, handle.logHandler.Contains("blob txns not allowed in shutter"))
+	})
+}
+
+func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+	pt := NewPoolTest(t)
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		// simulate expected contract calls for reading the first ekg after the first block event
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		// simulate loadSubmissions after the first block
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		// simulate the first block
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		// simulate some encrypted txn submissions and simulate a new block
+		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		encTxn2 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		require.Len(t, pool.AllEncryptedTxns(), 0)
+		err = handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn1),
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 2, encTxn2),
+		})
+		require.NoError(t, err)
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+		// simulate decryption keys
+		handle.SimulateCurrentSlot()
+		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
+		// verify that only 1 txn gets decrypted and the blob txn gets skipped
+		require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+		gasLimit := encTxn1.GasLimit.Uint64()
+		// make sure both have the same gas limit so we can use it as an option for both ProvideTxns requests
+		require.Equal(t, gasLimit, encTxn2.GasLimit.Uint64())
+		txnsIdFilter := mapset.NewSet[[32]byte]()
+		txnsRes1, err := pool.ProvideTxns(
+			ctx,
+			txnprovider.WithBlockTime(handle.nextBlockTime),
+			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+			txnprovider.WithTxnIdsFilter(txnsIdFilter),
+			txnprovider.WithGasTarget(gasLimit),
+		)
+		require.NoError(t, err)
+		require.Len(t, txnsRes1, 1)
+		txnsIdFilter.Add(txnsRes1[0].Hash())
+		txnsRes2, err := pool.ProvideTxns(
+			ctx,
+			txnprovider.WithBlockTime(handle.nextBlockTime),
+			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+			txnprovider.WithTxnIdsFilter(txnsIdFilter),
+			txnprovider.WithGasTarget(gasLimit),
+		)
+		require.NoError(t, err)
+		require.Len(t, txnsRes2, 1)
+		txnsIdFilter.Add(txnsRes2[0].Hash())
+		require.Equal(t, 2, txnsIdFilter.Cardinality())
 	})
 }
 

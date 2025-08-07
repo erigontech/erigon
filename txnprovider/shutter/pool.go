@@ -267,32 +267,28 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
-	//
-	// TODO handle provideOpts.TxnIdsFilter and add test case in pool_test.go
-	//      need to be careful to handle decryptedTxnsGas correctly
-	//
-
-	decryptedTxnsGas := decryptedTxns.TotalGasLimit
-	totalGasTarget := provideOpts.GasTarget
-	if decryptedTxnsGas > totalGasTarget {
-		// note this should never happen because EncryptedGasLimit must always be <= gasLimit for a block
-		return nil, fmt.Errorf("decrypted txns gas gt target: %d > %d", decryptedTxnsGas, totalGasTarget)
+	availableGas := provideOpts.GasTarget
+	txnsIdFilter := provideOpts.TxnIdsFilter
+	txns := make([]types.Transaction, 0, len(decryptedTxns.Transactions))
+	for _, txn := range decryptedTxns.Transactions {
+		if txnsIdFilter.Contains(txn.Hash()) {
+			continue
+		}
+		if txn.GetGasLimit() > availableGas {
+			continue
+		}
+		availableGas -= txn.GetGasLimit()
+		txns = append(txns, txn)
 	}
 
-	p.logger.Debug("providing decrypted txns", "count", len(decryptedTxns.Transactions), "gas", decryptedTxnsGas)
-	if decryptedTxnsGas == totalGasTarget {
-		return decryptedTxns.Transactions, nil
-	}
-
-	remGasTarget := totalGasTarget - decryptedTxnsGas
-	opts = append(opts, txnprovider.WithGasTarget(remGasTarget)) // overrides option
+	opts = append(opts, txnprovider.WithGasTarget(availableGas)) // overrides option
 	additionalTxns, err := p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	p.logger.Debug("providing additional public txns", "count", len(additionalTxns))
-	return append(decryptedTxns.Transactions, additionalTxns...), nil
+	return append(txns, additionalTxns...), nil
 }
 
 func (p *Pool) AllEncryptedTxns() []EncryptedTxnSubmission {
