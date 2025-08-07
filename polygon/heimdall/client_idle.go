@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
@@ -31,10 +32,6 @@ type IdleClient struct {
 
 func NewIdleClient(cfg params.MiningConfig) Client {
 	return &IdleClient{cfg: cfg}
-}
-
-func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
-	return nil, nil
 }
 
 func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
@@ -84,8 +81,8 @@ func (c *IdleClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 	return nil, nil
 }
 
-func (c *IdleClient) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
-	return &ChainManagerStatus{}, nil
+func (c *IdleClient) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
+	return &poshttp.ChainManagerStatus{}, nil
 }
 
 func (c *IdleClient) FetchStatus(ctx context.Context) (*Status, error) {

@@ -6,22 +6,16 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-)
-
-type HeimdallVersion int64
-
-const (
-	HeimdallV1 HeimdallVersion = iota
-	HeimdallV2
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 )
 
 type heimdallClient interface {
-	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
+	FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error)
 }
 
 type versionMonitor struct {
 	ctx            context.Context
-	currentVersion HeimdallVersion
+	currentVersion poshttp.HeimdallVersion
 
 	heimdall heimdallClient
 	logger   log.Logger
@@ -35,7 +29,7 @@ func NewVersionMonitor(ctx context.Context, heimdallClient heimdallClient, logge
 	return &versionMonitor{
 		ctx:            ctx,
 		heimdall:       heimdallClient,
-		currentVersion: HeimdallV1,
+		currentVersion: poshttp.HeimdallV1,
 		frequency:      frequency,
 		logger:         logger,
 	}
@@ -56,7 +50,7 @@ func (vm *versionMonitor) Run() {
 	}
 }
 
-func (vm *versionMonitor) Version() HeimdallVersion {
+func (vm *versionMonitor) Version() poshttp.HeimdallVersion {
 	vm.once.Do(vm.resolveVersion)
 
 	vm.m.Lock()
@@ -77,8 +71,8 @@ func (vm *versionMonitor) resolveVersion() {
 
 	// We should monitor upgrade and downgrade both, because it is a valid scenario
 	if status.Params.ChainParams.PolTokenAddress != nil {
-		vm.currentVersion = HeimdallV2
+		vm.currentVersion = poshttp.HeimdallV2
 	} else {
-		vm.currentVersion = HeimdallV1
+		vm.currentVersion = poshttp.HeimdallV1
 	}
 }

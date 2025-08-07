@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -26,6 +27,14 @@ const (
 
 type apiVersioner interface {
 	Version() HeimdallVersion
+}
+
+type ChainManagerStatus struct {
+	Params struct {
+		ChainParams struct {
+			PolTokenAddress *string `json:"pol_token_address,omitempty"`
+		} `json:"chain_params"`
+	} `json:"params"`
 }
 
 var (
@@ -53,6 +62,8 @@ const (
 	apiHeimdallTimeout = 10 * time.Second
 	retryBackOff       = time.Second
 	maxRetries         = 5
+
+	fetchChainManagerStatus = "/chainmanager/params"
 )
 
 type Client struct {
@@ -122,6 +133,17 @@ func (c *Client) Version() HeimdallVersion {
 		return HeimdallV1
 	}
 	return c.ApiVersioner.Version()
+}
+
+func (c *Client) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
+	url, err := chainManagerStatusURL(c.UrlString)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = WithRequestType(ctx, StatusRequest)
+
+	return FetchWithRetry[ChainManagerStatus](ctx, c, url, c.Logger)
 }
 
 // Close sends a signal to stop the running process
@@ -281,4 +303,20 @@ func internalFetchWithTimeout(ctx context.Context, handler httpRequestHandler, u
 
 	// request data once
 	return internalFetch(ctx, handler, url, logger, logPrefix)
+}
+
+func chainManagerStatusURL(UrlString string) (*url.URL, error) {
+	return MakeURL(UrlString, fetchChainManagerStatus, "")
+}
+
+func MakeURL(UrlString, rawPath, rawQuery string) (*url.URL, error) {
+	u, err := url.Parse(UrlString)
+	if err != nil {
+		return nil, err
+	}
+
+	u.Path = path.Join(u.Path, rawPath)
+	u.RawQuery = rawQuery
+
+	return u, err
 }

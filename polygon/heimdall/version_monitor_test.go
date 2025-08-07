@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -16,7 +17,7 @@ func TestVersioMonitorHeimdallV2(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
 
-	status := &heimdall.ChainManagerStatus{}
+	status := &poshttp.ChainManagerStatus{}
 	status.Params.ChainParams.PolTokenAddress = new(string)
 
 	heimdallClient.
@@ -27,14 +28,14 @@ func TestVersioMonitorHeimdallV2(t *testing.T) {
 	monitor := heimdall.NewVersionMonitor(context.TODO(), heimdallClient, log.New(), time.Minute)
 	resolved := monitor.Version()
 
-	require.Equal(t, resolved, heimdall.HeimdallV2)
+	require.Equal(t, resolved, poshttp.HeimdallV2)
 }
 
 func TestVersioMonitorHeimdallV1(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
 
-	status := &heimdall.ChainManagerStatus{}
+	status := &poshttp.ChainManagerStatus{}
 
 	heimdallClient.
 		EXPECT().
@@ -44,7 +45,7 @@ func TestVersioMonitorHeimdallV1(t *testing.T) {
 	monitor := heimdall.NewVersionMonitor(context.TODO(), heimdallClient, log.New(), time.Minute)
 	resolved := monitor.Version()
 
-	require.Equal(t, resolved, heimdall.HeimdallV1)
+	require.Equal(t, resolved, poshttp.HeimdallV1)
 }
 
 func TestVersioMonitorHeimdallUpgrade(t *testing.T) {
@@ -60,8 +61,8 @@ func TestVersioMonitorHeimdallUpgrade(t *testing.T) {
 	heimdallClient.
 		EXPECT().
 		FetchChainManagerStatus(gomock.Any()).
-		DoAndReturn(func(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
-			status := &heimdall.ChainManagerStatus{}
+		DoAndReturn(func(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
+			status := &poshttp.ChainManagerStatus{}
 
 			if time.Since(timeNow) > time.Second {
 				status.Params.ChainParams.PolTokenAddress = new(string)
@@ -81,11 +82,11 @@ func TestVersioMonitorHeimdallUpgrade(t *testing.T) {
 
 		switch upgradeMonitoredTimes.Load() {
 		case 0:
-			require.Equal(t, resolved, heimdall.HeimdallV1) // Upgrade has not been happened yet
+			require.Equal(t, resolved, poshttp.HeimdallV1) // Upgrade has not been happened yet
 		case 1:
 			// Upgrade happened and monitored but race still possible to happen. Let's skip the check
 		default:
-			require.Equal(t, resolved, heimdall.HeimdallV2) // Upgrade happened and monitored twice or more -> it was updated in the monitor
+			require.Equal(t, resolved, poshttp.HeimdallV2) // Upgrade happened and monitored twice or more -> it was updated in the monitor
 			return
 		}
 	}
@@ -104,8 +105,8 @@ func TestVersioMonitorHeimdallDowngrade(t *testing.T) {
 	heimdallClient.
 		EXPECT().
 		FetchChainManagerStatus(gomock.Any()).
-		DoAndReturn(func(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
-			status := &heimdall.ChainManagerStatus{}
+		DoAndReturn(func(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
+			status := &poshttp.ChainManagerStatus{}
 			status.Params.ChainParams.PolTokenAddress = new(string)
 
 			if time.Since(timeNow) > time.Second {
@@ -126,11 +127,11 @@ func TestVersioMonitorHeimdallDowngrade(t *testing.T) {
 
 		switch downgradeMonitoredTimes.Load() {
 		case 0:
-			require.Equal(t, resolved, heimdall.HeimdallV2) // Downgrade has not been happened yet
+			require.Equal(t, resolved, poshttp.HeimdallV2) // Downgrade has not been happened yet
 		case 1:
 			// Downgrade happened and monitored but race still possible to happen. Let's skip the check
 		default:
-			require.Equal(t, resolved, heimdall.HeimdallV1) // Downgrade happened and monitored twice or more -> it was updated in the monitor
+			require.Equal(t, resolved, poshttp.HeimdallV1) // Downgrade happened and monitored twice or more -> it was updated in the monitor
 			return
 		}
 	}

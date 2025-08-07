@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,31 +49,33 @@ func NewHttpClient(urlString string, logger log.Logger, opts ...poshttp.ClientOp
 }
 
 const (
-	fetchStateSyncEventsFormat = "from-id=%d&to-time=%d&limit=%d"
-	fetchStateSyncEventsPath   = "clerk/event-record/list"
-	fetchStateSyncEvent        = "clerk/event-record/%s"
+	fetchStateSyncEvent          = "clerk/event-record/%s"
+	fetchStateSyncEventsFormatV1 = "from-id=%d&to-time=%d&limit=%d"
+	fetchStateSyncEventsFormatV2 = "from_id=%d&to_time=%s&pagination.limit=%d"
+	fetchStateSyncEventsPathV1   = "clerk/event-record/list"
+	fetchStateSyncEventsPathV2   = "clerk/time"
 )
 
 func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
 	eventRecords := make([]*EventRecordWithTime, 0)
 
-	if c.ApiVersioner != nil && c.ApiVersioner.Version() == HeimdallV2 {
+	if c.ApiVersioner != nil && c.ApiVersioner.Version() == poshttp.HeimdallV2 {
 		for {
 			url, err := stateSyncListURLv2(c.UrlString, fromID, to.Unix())
 			if err != nil {
 				return nil, err
 			}
 
-			c.Logger.Trace(heimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+			c.Logger.Trace(bridgeLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
 
-			reqCtx := withRequestType(ctx, stateSyncRequest)
+			reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
 
-			response, err := FetchWithRetry[StateSyncEventsResponseV2](reqCtx, c, url, c.logger)
+			response, err := poshttp.FetchWithRetry[StateSyncEventsResponseV2](reqCtx, c.Client, url, c.Logger)
 			if err != nil {
-				if errors.Is(err, ErrNoResponse) {
+				if errors.Is(err, poshttp.ErrNoResponse) {
 					// for more info check https://github.com/maticnetwork/heimdall/pull/993
-					c.logger.Warn(
-						heimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+					c.Logger.Warn(
+						bridgeLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
 						"path", url.Path,
 						"queryParams", url.RawQuery,
 					)
@@ -109,21 +110,21 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 	}
 
 	for {
-		url, err := stateSyncListURLv1(c.urlString, fromID, to.Unix())
+		url, err := stateSyncListURLv1(c.UrlString, fromID, to.Unix())
 		if err != nil {
 			return nil, err
 		}
 
-		c.logger.Trace(heimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
+		c.Logger.Trace(bridgeLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
 
-		reqCtx := withRequestType(ctx, stateSyncRequest)
+		reqCtx := poshttp.WithRequestType(ctx, poshttp.StateSyncRequest)
 
-		response, err := FetchWithRetry[StateSyncEventsResponseV1](reqCtx, c, url, c.logger)
+		response, err := poshttp.FetchWithRetry[StateSyncEventsResponseV1](reqCtx, c.Client, url, c.Logger)
 		if err != nil {
-			if errors.Is(err, ErrNoResponse) {
+			if errors.Is(err, poshttp.ErrNoResponse) {
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993
-				c.logger.Warn(
-					heimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
+				c.Logger.Warn(
+					bridgeLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
 					"path", url.Path,
 					"queryParams", url.RawQuery,
 				)
@@ -178,23 +179,19 @@ func (c *HttpClient) FetchStateSyncEvent(ctx context.Context, id uint64) (*Event
 	return &response.Result, nil
 }
 
-func stateSyncListURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
-	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, to, StateEventsFetchLimit)
-	return makeURL(urlString, fetchStateSyncEventsPath, queryParams)
+func stateSyncListURLv1(UrlString string, fromID uint64, to int64) (*url.URL, error) {
+	queryParams := fmt.Sprintf(fetchStateSyncEventsFormatV1, fromID, to, StateEventsFetchLimit)
+	return poshttp.MakeURL(UrlString, fetchStateSyncEventsPathV1, queryParams)
+}
+
+func stateSyncListURLv2(UrlString string, fromID uint64, to int64) (*url.URL, error) {
+	t := time.Unix(to, 0).UTC()
+	formattedTime := t.Format(time.RFC3339Nano)
+
+	queryParams := fmt.Sprintf(fetchStateSyncEventsFormatV2, fromID, formattedTime, StateEventsFetchLimit)
+	return poshttp.MakeURL(UrlString, fetchStateSyncEventsPathV2, queryParams)
 }
 
 func stateSyncURL(urlString string, id uint64) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchStateSyncEvent, strconv.FormatUint(id, 10)), "")
-}
-
-func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
-	u, err := url.Parse(urlString)
-	if err != nil {
-		return nil, err
-	}
-
-	u.Path = path.Join(u.Path, rawPath)
-	u.RawQuery = rawQuery
-
-	return u, err
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchStateSyncEvent, strconv.FormatUint(id, 10)), "")
 }

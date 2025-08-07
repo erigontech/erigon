@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/bor/poshttp"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -226,7 +227,7 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(_ context.Context, fromId uint6
 	return events, err
 }
 
-func (h *HeimdallSimulator) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
+func (h *HeimdallSimulator) FetchChainManagerStatus(ctx context.Context) (*poshttp.ChainManagerStatus, error) {
 	return nil, errors.New("method FetchChainManagerStatus not implemented")
 }
 
