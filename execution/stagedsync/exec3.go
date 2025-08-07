@@ -1423,6 +1423,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
+
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
 		return false, times, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
