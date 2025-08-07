@@ -43,7 +43,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -59,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"

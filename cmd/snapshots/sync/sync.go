@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,10 +35,10 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 )

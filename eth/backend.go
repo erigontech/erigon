@@ -47,7 +47,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -88,6 +87,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/consensuschain"

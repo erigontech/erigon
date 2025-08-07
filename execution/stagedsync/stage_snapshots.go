@@ -39,7 +39,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -53,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/snapcfg"
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"

@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/snapcfg"
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )

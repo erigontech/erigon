@@ -18,7 +18,6 @@ package snapshotsync
 
 import (
 	"context"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -27,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/snapcfg"
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"

@@ -31,7 +31,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )

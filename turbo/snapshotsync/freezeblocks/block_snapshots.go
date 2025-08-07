@@ -33,7 +33,6 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -50,6 +49,7 @@ import (
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snapcfg"
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"

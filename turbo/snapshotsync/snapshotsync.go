@@ -29,7 +29,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/snapcfg"
 	coresnaptype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
