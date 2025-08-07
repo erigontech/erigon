@@ -1186,7 +1186,7 @@ func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *Stage
 		return applyTx, err
 	}
 
-	pe.logger.Info("["+pe.logPrefix+"] flushed", "time", time.Since(flushStart), "flush", flushTime, "commit", time.Since(commitStart), "db", t2, "externaltx", useExternalTx)
+	pe.logger.Info("["+pe.logPrefix+"] flushed", "block", pe.doms.BlockNum(), "time", time.Since(flushStart), "flush", flushTime, "commit", time.Since(commitStart), "db", t2, "externaltx", useExternalTx)
 	return applyTx, nil
 }
 
