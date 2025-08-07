@@ -283,10 +283,13 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNu
 
 	fmt.Println("[commitment] store state", "tx.txNum", sdc.mainTtx.txNum, "block", blockNum, "txNum", txNum, "rootHash", fmt.Sprintf("%x", rootHash))
 	log.Debug("[commitment] store state", "block", blockNum, "txNum", txNum, "rootHash", fmt.Sprintf("%x", rootHash))
-	err = sdc.mainTtx.PutBranch(keyCommitmentState, encodedState, prevState, prevStep)
 	v, _, _ := sdc.mainTtx.getter.GetLatest(kv.CommitmentDomain, []byte("state"))
-	blockNum, TxNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-	fmt.Println("[commitment] stored state", "tx.txNum", sdc.mainTtx.txNum, "block", blockNum, "txNum", TxNum)
+	txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+	fmt.Println("[commitment] pre state", "tx.txNum", sdc.mainTtx.txNum, "block", blockNum, "txNum", txNum)
+	err = sdc.mainTtx.PutBranch(keyCommitmentState, encodedState, prevState, prevStep)
+	v, _, _ = sdc.mainTtx.getter.GetLatest(kv.CommitmentDomain, []byte("state"))
+	txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+	fmt.Println("[commitment] stored state", "tx.txNum", sdc.mainTtx.txNum, "block", blockNum, "txNum", txNum)
 	return err
 }
 

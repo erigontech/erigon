@@ -696,8 +696,11 @@ func ExecV3(ctx context.Context,
 		doms, _ := libstate.NewSharedDomains(applyTx.(kv.TemporalTx), log.New())
 		fmt.Println("EXEC COMPLETE", "block in domains", doms.BlockNum(), executor.domains().BlockNum())
 		v, _, _ := executor.domains().GetLatest(kv.CommitmentDomain, applyTx, []byte("state"))
-		blockNum, TxNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-		fmt.Println("IN STATE", blockNum, TxNum)
+		txNum, blockNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+		fmt.Println("IN STATE PREV", blockNum, txNum)
+		v, _, _ = doms.GetLatest(kv.CommitmentDomain, applyTx, []byte("state"))
+		txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+		fmt.Println("IN STATE NEW", blockNum, txNum)
 		if doms.BlockNum() != executor.domains().BlockNum() {
 			panic(fmt.Errorf("doms mismatch %d != %d", doms.BlockNum(), executor.domains().BlockNum()))
 		}
