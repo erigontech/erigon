@@ -114,11 +114,11 @@ func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeleti
 func (p *DecryptedTxnsPool) AllDecryptedTxns() []types.Transaction {
 	p.decryptionCond.L.Lock()
 	defer p.decryptionCond.L.Unlock()
-	var marks []DecryptionMark
 	var totalTxns int
+	marks := make([]DecryptionMark, 0, len(p.decryptedTxns))
 	for mark, txnBatch := range p.decryptedTxns {
-		marks = append(marks, mark)
 		totalTxns += len(txnBatch.Transactions)
+		marks = append(marks, mark)
 	}
 	slices.SortStableFunc(marks, func(a, b DecryptionMark) int {
 		if a.Slot < b.Slot {
