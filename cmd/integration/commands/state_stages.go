@@ -73,7 +73,11 @@ Examples:
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = chainspec.GenesisBlockByChainName(chain)
+		spec, err := chainspec.ChainSpecByName(chain)
+		if err != nil {
+			utils.Fatalf("unknown chain %s", chain)
+		}
+		ethConfig.Genesis = spec.Genesis
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
@@ -183,10 +187,13 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	notifications := shards.NewNotifications(nil)
 
-	genesis := chainspec.GenesisBlockByChainName(chain)
+	spec, err := chainspec.ChainSpecByName(chain)
+	if err != nil {
+		return err
+	}
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
@@ -406,12 +413,15 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	genesis := chainspec.GenesisBlockByChainName(chain)
+	spec, err := chainspec.ChainSpecByName(chain)
+	if err != nil {
+		return fmt.Errorf("unknown chain %s", chain)
+	}
 
 	initialCycle := false
 	br, _ := blocksIO(db, logger)
 	notifications := shards.NewNotifications(nil)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {

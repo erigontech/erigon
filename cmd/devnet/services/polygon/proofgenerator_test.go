@@ -88,7 +88,7 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 		db:         db,
 		chain:      chain,
 		sentry:     sentry,
-		bor:        bor.NewRo(polychain.BorDevnetChainConfig, reader, log.Root()),
+		bor:        bor.NewRo(polychain.BorDevnet.Config, reader, log.Root()),
 		txBlockMap: map[common.Hash]*types.Block{},
 	}, nil
 }
@@ -142,7 +142,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 	}
 
 	engine := rg.bor
-	chainConfig := polychain.BorDevnetChainConfig
+	chainConfig := polychain.BorDevnet.Config
 
 	reader := blockReader{
 		chain: rg.chain,

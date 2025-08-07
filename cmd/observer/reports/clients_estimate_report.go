@@ -35,13 +35,7 @@ type ClientsEstimateReport struct {
 	Clients []ClientsEstimateReportEntry
 }
 
-func CreateClientsEstimateReport(
-	ctx context.Context,
-	db database.DB,
-	limit uint,
-	maxPingTries uint,
-	networkID uint,
-) (*ClientsEstimateReport, error) {
+func CreateClientsEstimateReport(ctx context.Context, db database.DB, limit uint, maxPingTries uint, networkID uint64) (*ClientsEstimateReport, error) {
 	clientsReport, err := CreateClientsReport(ctx, db, limit, maxPingTries, networkID)
 	if err != nil {
 		return nil, err
@@ -55,7 +49,7 @@ func CreateClientsEstimateReport(
 		}
 		clientName := topClient.Name
 
-		sameNetworkCount, err := db.CountClients(ctx, clientName+"/", maxPingTries, networkID)
+		sameNetworkCount, err := db.CountClients(ctx, clientName+"/", maxPingTries, uint(networkID))
 		if err != nil {
 			return nil, err
 		}
