@@ -295,6 +295,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
@@ -411,6 +412,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	defer l.Unlock()
 
 	removeLatest := cliCtx.Bool("latest")
+	dryRun := cliCtx.Bool("dry-run")
 
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -448,9 +450,21 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				const trieStateKey = "state"
 
 				skipped := false
-				kvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
-				_, ek := os.Stat(kvi)
-				if ek == nil {
+
+				derivedKvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
+				fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+				if err != nil {
+					return err
+				}
+				kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					return err
+				}
+				if ok {
+					_, err := os.Stat(kvi)
+					if err != nil {
+						return err
+					}
 					idx, err := recsplit.OpenIndex(kvi)
 					if err != nil {
 						return err
@@ -461,45 +475,61 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					if found {
 						fmt.Printf("found state key with kvi %s\n", res.Path)
 						commitmentFilesWithState = append(commitmentFilesWithState, res)
+					} else {
+						fmt.Printf("skipping file because it doesn't have state key %s\n", fName)
 					}
 					skipped = true
 					_ = oft
 					rd.Close()
 					idx.Close()
+				} else {
+					log.Warn("[dbg] not found files for", "pattern", fPathMask)
 				}
 
 				if !skipped { // try to lookup in bt index
-					bt := strings.Replace(res.Path, ".kv", ".bt", 1)
-					_, eb := os.Stat(bt)
-					if eb == nil {
-						rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
-						if err != nil {
-							return err
-						}
-
-						getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
-						//for getter.HasNext() {
-						//	k, _ := getter.Next(nil)
-						//	if bytes.Equal(k, []byte(trieStateKey)) {
-						//		fmt.Printf("found state key without bt in %s\n", res.Path)
-						//		commitmentFilesWithState = append(commitmentFilesWithState, res)
-						//		break
-						//	}
-						//	getter.Skip()
-						//}
-						c, err := btindex.Seek(getter, []byte(trieStateKey))
-						if err != nil {
-							return err
-						}
-						if bytes.Equal(c.Key(), []byte(trieStateKey)) {
-							fmt.Printf("found state key using bt %s\n", res.Path)
-							commitmentFilesWithState = append(commitmentFilesWithState, res)
-						}
-						c.Close()
-						btindex.Close()
-						rd.Close()
+					derivedBt := strings.Replace(res.Path, ".kv", ".bt", 1)
+					fPathMask, err := version.ReplaceVersionWithMask(derivedBt)
+					if err != nil {
+						return err
+					}
+					bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return fmt.Errorf("can't find accessor for %s", res.Path)
+					}
+					_, err = os.Stat(bt)
+					if err != nil {
+						return err
 					}
 
+					rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
+					if err != nil {
+						return err
+					}
+
+					getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
+					//for getter.HasNext() {
+					//	k, _ := getter.Next(nil)
+					//	if bytes.Equal(k, []byte(trieStateKey)) {
+					//		fmt.Printf("found state key without bt in %s\n", res.Path)
+					//		commitmentFilesWithState = append(commitmentFilesWithState, res)
+					//		break
+					//	}
+					//	getter.Skip()
+					//}
+					c, err := btindex.Seek(getter, []byte(trieStateKey))
+					if err != nil {
+						return err
+					}
+					if bytes.Equal(c.Key(), []byte(trieStateKey)) {
+						fmt.Printf("found state key using bt %s\n", res.Path)
+						commitmentFilesWithState = append(commitmentFilesWithState, res)
+					}
+					c.Close()
+					btindex.Close()
+					rd.Close()
 				}
 			}
 
@@ -617,6 +647,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
+		if dryRun {
+			fmt.Printf("[dry-run] rm %s\n", res.Path)
+			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
+			continue
+		}
 		dir2.RemoveFile(res.Path)
 		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
