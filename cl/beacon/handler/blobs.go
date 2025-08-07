@@ -133,7 +133,7 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	dataColmnSidecars := []*cltypes.DataColumnSidecar{}
+	dataColumnSidecars := []*cltypes.DataColumnSidecar{}
 	columnIndices := []uint64{}
 	if len(indices) == 0 {
 		// take all custodies
