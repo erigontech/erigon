@@ -227,6 +227,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		logger.SetHandler(logHandler)
 		config := shuttercfg.ConfigByChainName(networkname.Chiado)
 		config.ReorgDepthAwareness = 3
+		config.BeaconChainGenesisTimestamp = uint64(time.Now().Unix())
 		baseTxnProvider := EmptyTxnProvider{}
 		ctrl := gomock.NewController(t)
 		contractBackend := NewMockContractBackend(ctrl, logger)

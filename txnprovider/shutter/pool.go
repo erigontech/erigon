@@ -218,25 +218,21 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		return nil, err
 	}
 
-	// Note: specs say to produce empty block in case decryption keys do not arrive on time.
-	// However, upon discussion with Shutter and Nethermind it was agreed that this is not
-	// practical at this point in time as it can hurt validator rewards across the network,
-	// and also it doesn't in any way prevent any cheating from happening.
-	// To properly address cheating, we need a mechanism for slashing which is a future
-	// work stream item for the Shutter team. For now, we follow what Nethermind does
-	// and fallback to the public devp2p mempool - any changes to this should be
-	// co-ordinated with them.
 	blockNum := parentBlockNum + 1
 	decryptionMark := DecryptionMark{Slot: slot, Eon: eon.Index}
-	slotAge := p.slotCalculator.CalcSlotAge(slot)
-	if slotAge < p.config.MaxDecryptionKeysDelay {
-		decryptionMarkWaitTimeout := p.config.MaxDecryptionKeysDelay - slotAge
+	slotStartTime := p.slotCalculator.CalcSlotStartTimestamp(slot)
+	cutoffTime := time.Unix(int64(slotStartTime), 0).Add(p.config.MaxDecryptionKeysDelay)
+	if time.Now().Before(cutoffTime) {
+		decryptionMarkWaitTimeout := time.Until(cutoffTime)
+		// enforce the max cap for malicious inputs with slot times far ahead in the future
+		decryptionMarkWaitTimeout = min(decryptionMarkWaitTimeout, p.config.MaxDecryptionKeysDelay)
 		p.logger.Debug(
 			"waiting for decryption keys",
 			"slot", slot,
 			"blockNum", blockNum,
 			"eon", eon.Index,
-			"age", slotAge,
+			"slotStart", slotStartTime,
+			"cutoffTime", cutoffTime.Unix(),
 			"timeout", decryptionMarkWaitTimeout,
 		)
 
@@ -254,7 +250,8 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 					"slot", slot,
 					"blockNum", blockNum,
 					"eon", eon.Index,
-					"age", slotAge,
+					"slotStart", slotStartTime,
+					"cutoffTime", cutoffTime.Unix(),
 					"timeout", decryptionMarkWaitTimeout,
 				)
 
@@ -274,7 +271,8 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			"decryption keys missing, falling back to base txn provider",
 			"slot", slot,
 			"eon", eon.Index,
-			"age", slotAge,
+			"slotStart", slotStartTime,
+			"cutoffTime", cutoffTime.Unix(),
 			"blockNum", blockNum,
 		)
 
