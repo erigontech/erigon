@@ -18,11 +18,11 @@ const (
 
 // InfoTreeL2RpcSyncer is a struct that is used to sync the Info Tree from an L2 Sequencer RPC.
 type InfoTreeL2RpcSyncer struct {
-	ctx            context.Context
-	zkCfg          *ethconfig.Zk
-	isSyncStarted  atomic.Bool
-	isSyncFinished atomic.Bool
-	infoTreeChan   chan []zkTypes.L1InfoTreeUpdate
+	ctx           context.Context
+	zkCfg         *ethconfig.Zk
+	isSyncStarted atomic.Bool
+	infoTreeChan  chan []zkTypes.L1InfoTreeUpdate
+	err           error // Error encountered during sync
 }
 
 // NewInfoTreeL2RpcSyncer creates a new InfoTreeL2RpcSyncer.
@@ -32,7 +32,7 @@ func NewInfoTreeL2RpcSyncer(ctx context.Context, zkCfg *ethconfig.Zk) *InfoTreeL
 	return &InfoTreeL2RpcSyncer{
 		ctx:          ctx,
 		zkCfg:        zkCfg,
-		infoTreeChan: make(chan []zkTypes.L1InfoTreeUpdate),
+		infoTreeChan: nil,
 	}
 }
 
@@ -40,65 +40,46 @@ func (s *InfoTreeL2RpcSyncer) IsSyncStarted() bool {
 	return s.isSyncStarted.Load()
 }
 
-func (s *InfoTreeL2RpcSyncer) IsSyncFinished() bool {
-	return s.isSyncFinished.Load()
-}
-
-func (s *InfoTreeL2RpcSyncer) GetInfoTreeChan() chan []zkTypes.L1InfoTreeUpdate {
-	return s.infoTreeChan
-}
-
-// ConsumeInfoTree consumes the Info Tree from the Info Tree chan.
-func (s *InfoTreeL2RpcSyncer) ConsumeInfoTree() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case <-s.infoTreeChan:
-		default:
-			if !s.isSyncStarted.Load() {
-				return
-			}
-			time.Sleep(time.Second)
-		}
-	}
+func (s *InfoTreeL2RpcSyncer) GetError() error {
+	return s.err
 }
 
 // RunSyncInfoTree runs the sync process for the Info Tree from an L2 Sequencer RPC and put the updates in the Info Tree chan.
-func (s *InfoTreeL2RpcSyncer) RunSyncInfoTree() {
+func (s *InfoTreeL2RpcSyncer) RunSyncInfoTree() <-chan []zkTypes.L1InfoTreeUpdate {
 	if s.isSyncStarted.Load() {
-		return
+		return s.infoTreeChan
 	}
 	s.isSyncStarted.Store(true)
-	s.isSyncFinished.Store(false)
+	s.infoTreeChan = make(chan []zkTypes.L1InfoTreeUpdate, 100) // Buffered channel to avoid blocking
 
 	totalSynced := uint64(0)
 	batchSize := s.zkCfg.L2InfoTreeUpdatesBatchSize
 
 	go func() {
+		defer close(s.infoTreeChan)
+
 		retry := 0
 		for {
 			select {
 			case <-s.ctx.Done():
-				s.isSyncFinished.Store(true)
-				break
+				return
 			default:
 				query := exitRootQuery{
 					From: totalSynced + 1,
 					To:   totalSynced + batchSize,
 				}
-				infoTree, err := getExitRootTable(s.zkCfg.L2RpcUrl, query)
+				infoTree, err := getExitRootTable(s.zkCfg.L2InfoTreeUpdatesURL, query)
 				if err != nil {
-					log.Debug("getExitRootTable retry error", "err", err)
+					log.Info("getExitRootTable retry error", "err", err)
 					retry++
 					if retry > 5 {
+						s.err = err
 						return
 					}
 					time.Sleep(time.Duration(retry*2) * time.Second)
 				}
 
 				if len(infoTree) == 0 {
-					s.isSyncFinished.Store(true)
 					return
 				}
 
@@ -107,6 +88,8 @@ func (s *InfoTreeL2RpcSyncer) RunSyncInfoTree() {
 			}
 		}
 	}()
+
+	return s.infoTreeChan
 }
 
 type exitRootQuery struct {

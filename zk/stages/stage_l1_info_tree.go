@@ -58,7 +58,7 @@ func SpawnL1InfoTreeStage(
 		select {
 		default:
 			// If we are a rpc node, and we are starting from the beginning, we need to check for updates from the L2
-			infoTrees, err := cfg.updater.CheckL2RpcForInfoTreeUpdates(logPrefix, tx)
+			infoTrees, err := cfg.updater.CheckL2RpcForInfoTreeUpdates(ctx, logPrefix, tx)
 			if err != nil {
 				log.Warn(fmt.Sprintf("[%s] L2 Info Tree sync failed, getting Info Tree from L1", logPrefix), "err", err)
 				break

@@ -1,6 +1,7 @@
 package l1infotree
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -38,10 +39,8 @@ type L2InfoReaderRpc interface {
 
 type L2Syncer interface {
 	IsSyncStarted() bool
-	IsSyncFinished() bool
-	GetInfoTreeChan() chan []zkTypes.L1InfoTreeUpdate
-	RunSyncInfoTree()
-	ConsumeInfoTree()
+	RunSyncInfoTree() <-chan []zkTypes.L1InfoTreeUpdate
+	GetError() error
 }
 
 type Updater struct {
@@ -342,23 +341,25 @@ func (u *Updater) RollbackL1InfoTree(hermezDb *hermez_db.HermezDb, tx kv.RwTx) e
 	return nil
 }
 
-func (u *Updater) CheckL2RpcForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (infoTrees []zkTypes.L1InfoTreeUpdate, err error) {
-	u.l2Syncer.RunSyncInfoTree()
-	go u.l2Syncer.ConsumeInfoTree()
-
-	infoTreeChan := u.l2Syncer.GetInfoTreeChan()
+func (u *Updater) CheckL2RpcForInfoTreeUpdates(ctx context.Context, logPrefix string, tx kv.RwTx) (infoTrees []zkTypes.L1InfoTreeUpdate, err error) {
+	infoTreeChan := u.l2Syncer.RunSyncInfoTree()
 
 LOOP:
 	for {
 		select {
-		case infoTree := <-infoTreeChan:
-			infoTrees = append(infoTrees, infoTree...)
-		default:
-			if u.l2Syncer.IsSyncFinished() {
-				log.Info(fmt.Sprintf("[%s] Received %v L2 Info Tree updates", logPrefix, len(infoTrees)))
+		case infoTree, ok := <-infoTreeChan:
+			if !ok {
+				infoTreeChan = nil
+				if u.l2Syncer.GetError() != nil {
+					log.Warn(fmt.Sprintf("[%s] L2 Info Tree sync failed", logPrefix), "err", u.l2Syncer.GetError())
+					return nil, u.l2Syncer.GetError()
+				}
 				break LOOP
 			}
-			time.Sleep(10 * time.Millisecond)
+			infoTrees = append(infoTrees, infoTree...)
+		case <-ctx.Done():
+			log.Info(fmt.Sprintf("[%s] L2 Info Tree sync cancelled", logPrefix))
+			return nil, ctx.Err()
 		}
 	}
 
@@ -381,6 +382,9 @@ LOOP:
 		select {
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Processed %d/%d info tree updates from L2 RPC, %d%% complete", logPrefix, processed, len(infoTrees), processed*100/len(infoTrees)))
+		case <-ctx.Done():
+			log.Info(fmt.Sprintf("[%s] L2 Info Tree sync cancelled", logPrefix))
+			return nil, ctx.Err()
 		default:
 		}
 

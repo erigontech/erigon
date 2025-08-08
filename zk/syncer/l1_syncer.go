@@ -244,7 +244,7 @@ func (s *L1Syncer) GetL1BlockTimeStampByTxHash(ctx context.Context, txHash commo
 		return 0, err
 	}
 
-	header, err := em.HeaderByNumber(context.Background(), r.BlockNumber)
+	header, err := em.HeaderByNumber(s.ctx, r.BlockNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -268,13 +268,12 @@ func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Hea
 	headersQueue := make(chan *ethTypes.Header, logsSize)
 
 	process := func(em IEtherman) {
-		ctx := context.Background()
 		for {
 			l, ok := <-logQueue
 			if !ok {
 				break
 			}
-			header, err := em.HeaderByNumber(ctx, new(big.Int).SetUint64(l.BlockNumber))
+			header, err := em.HeaderByNumber(s.ctx, new(big.Int).SetUint64(l.BlockNumber))
 			if err != nil {
 				log.Error("Error getting block", "err", err)
 				// assume a transient error and try again
@@ -319,7 +318,7 @@ func (s *L1Syncer) getLatestL1Block() (uint64, error) {
 		blockNumber = nil
 	}
 
-	latestBlock, err := em.BlockByNumber(context.Background(), blockNumber)
+	latestBlock, err := em.BlockByNumber(s.ctx, blockNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -444,7 +443,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 			retry := 0
 			for {
 				em := s.getNextEtherman()
-				logs, err = em.FilterLogs(context.Background(), query)
+				logs, err = em.FilterLogs(s.ctx, query)
 				if err != nil {
 					log.Debug("getSequencedLogs retry error", "err", err)
 					retry++
@@ -564,6 +563,8 @@ func (s *L1Syncer) CheckL1BlockFinalized(blockNo uint64) (finalized bool, finali
 }
 
 func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
+	log.Info("QueryForRootLog", "to", to, "l1ContractAddresses", s.l1ContractAddresses, "topics", s.topics)
+
 	var logs []ethTypes.Log
 	var err error
 	retry := 0
@@ -575,7 +576,7 @@ func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
 			Addresses: s.l1ContractAddresses,
 			Topics:    s.topics,
 		}
-		logs, err = em.FilterLogs(context.Background(), query)
+		logs, err = em.FilterLogs(s.ctx, query)
 		if err != nil {
 			log.Debug("QueryForRootLog retry error", "err", err)
 			retry++
