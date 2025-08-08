@@ -186,7 +186,7 @@ test-erigon-ext:
 ## test-short:                run short tests with a 10m timeout
 test-short: test-erigon-lib-short
 	@{ \
-		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
+		$(GOTEST) -short > run.log 2>&1; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \
