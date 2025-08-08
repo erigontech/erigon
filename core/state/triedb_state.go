@@ -15,8 +15,8 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
 	"github.com/erigontech/erigon/execution/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
