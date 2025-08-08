@@ -21,12 +21,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {

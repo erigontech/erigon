@@ -22,7 +22,6 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-eth-kzg v1.3.0
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
-	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/erigontech/speedtest v0.0.2
@@ -63,6 +62,7 @@ require (
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/consensys/bavard v0.1.29 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect

@@ -50,9 +50,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/seg"
+	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type rndGen struct {

@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func init() {

@@ -19,10 +19,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types/accounts"
-	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 type SharedDomainsCommitmentContext struct {

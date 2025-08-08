@@ -24,10 +24,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/crypto"
-
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestHashWithModificationsEmpty(t *testing.T) {

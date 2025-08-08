@@ -35,13 +35,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/cmd/pics/contracts"
 	"github.com/erigontech/erigon/cmd/pics/visual"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types"
 )
 

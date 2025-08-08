@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var PrunedError = errors.New("old data not available due to pruning")
