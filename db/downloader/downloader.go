@@ -37,23 +37,24 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/puzpuzpuz/xsync/v4"
+
 	"github.com/anacrolix/chansync"
 	g "github.com/anacrolix/generics"
+	// Make Go expvars available to Prometheus for diagnostics.
+	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/anacrolix/torrent/webseed"
-	"github.com/c2h5oh/datasize"
-	"github.com/puzpuzpuz/xsync/v4"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/net/http2"
-	"golang.org/x/sync/semaphore"
-	"golang.org/x/time/rate"
-
-	// Make Go expvars available to Prometheus for diagnostics.
-	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
-	"github.com/anacrolix/missinggo/v2/panicif"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
