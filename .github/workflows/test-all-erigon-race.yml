@@ -81,14 +81,6 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: GOGC=80 make test-all-race
 
-      - name: SonarCloud scan in case OS Linux and changed_files is not true
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: SonarSource/sonarqube-scan-action@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
-
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
         run: echo "This check does not make sense for changes within out-of-scope directories"
