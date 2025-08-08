@@ -908,18 +908,24 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
 			// check that the file exist
-			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, segName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing file %s", segName)
 			}
 			// check that the index file exist
 			idxName := strings.Replace(segName, ".seg", ".idx", 1)
-			if _, err := os.Stat(filepath.Join(snapDir, idxName)); err != nil {
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, idxName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing index file %s", idxName)
 			}
 			if snapType == "transactions" {
 				// check that the tx index file exist
 				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-				if _, err := os.Stat(filepath.Join(snapDir, txIdxName)); err != nil {
+				if exists, err := dir2.FileExist(filepath.Join(snapDir, txIdxName)); err != nil {
+					return err
+				} else if !exists {
 					return fmt.Errorf("missing tx index file %s", txIdxName)
 				}
 			}
