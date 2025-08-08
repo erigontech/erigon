@@ -496,7 +496,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if w.valsTable == "CommitmentVals" && string(k) == "state" {
 			txNum, blockNum := binary.BigEndian.Uint64(v[8:16]), binary.BigEndian.Uint64(v[16:24])
-			fmt.Println("FLUSH STATE", blockNum, txNum)
+			fmt.Printf("FLUSH STATE %p %d, %d\n", tx, blockNum, txNum)
 		}
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {

@@ -458,10 +458,10 @@ func (sd *SharedDomains) flushWriters(ctx context.Context, tx kv.RwTx) error {
 		if w == nil {
 			continue
 		}
-		if di==int(kv.CommitmentDomain) {
+		if di == int(kv.CommitmentDomain) {
 			fmt.Println("FLUSH COMMITMENT")
 		}
-		
+
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
@@ -506,6 +506,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
+
 	return nil
 }
 

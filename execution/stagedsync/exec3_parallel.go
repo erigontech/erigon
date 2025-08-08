@@ -631,11 +631,11 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 
 	v, _, _ := te.doms.GetLatest(kv.CommitmentDomain, tx, []byte("state"))
 	txNum, blockNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-	fmt.Println("RAM PRECLEAR", blockNum, txNum)
+	fmt.Printf("RAM PRECLEAR %p %d %d\n", tx, blockNum, txNum)
 	te.doms.ClearRam(false)
 	v, _, _ = te.doms.GetLatest(kv.CommitmentDomain, tx, []byte("state"))
 	txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-	fmt.Println("RAM POSTCLEAR", blockNum, txNum)
+	fmt.Printf("RAM POSTCLEAR %p %d %d\n", tx, blockNum, txNum)
 
 	return tx, t2, nil
 }
