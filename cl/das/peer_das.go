@@ -155,7 +155,7 @@ func (d *peerdas) resubscribeGossip() {
 			}); err != nil {
 				log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "subnet", subnet)
 			} else {
-				log.Info("[peerdas] subscribed to column sidecar subnet", "subnet", subnet)
+				log.Debug("[peerdas] subscribed to column sidecar subnet", "subnet", subnet)
 			}
 		}
 		return
@@ -175,7 +175,7 @@ func (d *peerdas) resubscribeGossip() {
 		}); err != nil {
 			log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "column", column, "subnet", subnet)
 		} else {
-			log.Info("[peerdas] subscribed to column sidecar", "column", column, "subnet", subnet)
+			log.Debug("[peerdas] subscribed to column sidecar", "column", column, "subnet", subnet)
 		}
 	}
 }
