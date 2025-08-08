@@ -15,7 +15,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 

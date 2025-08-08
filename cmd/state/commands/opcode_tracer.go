@@ -22,13 +22,14 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"

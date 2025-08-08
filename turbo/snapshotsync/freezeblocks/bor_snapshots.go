@@ -19,14 +19,14 @@ package freezeblocks
 import (
 	"context"
 	"fmt"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"reflect"
 
 	"github.com/erigontech/erigon-lib/common"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )

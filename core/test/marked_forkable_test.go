@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
 	"testing"
 
@@ -14,10 +13,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -56,10 +56,10 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (F
 	require.Equal(t, state.ForkableId(0), headerId)
 
 	// create marked forkable
-	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
+	freezer := snaptype2.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
 	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, log,
-		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
+		state.WithIndexKeyFactory(&snaptype2.HeaderAccessorIndexKeyFactory{}))
 
 	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, state.IdentityRootRelationInstance, log,
 		state.App_WithFreezer(freezer),

@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	downloadertype "github.com/erigontech/erigon-lib/snaptype"
+	downloadertype "github.com/erigontech/erigon/db/snaptype"
 )
 
 //Sqeeze: ForeignKeys-aware compression of file
