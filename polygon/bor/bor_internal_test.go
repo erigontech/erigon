@@ -47,10 +47,6 @@ func (m mockBridgeReader) EventsWithinTime(context.Context, time.Time, time.Time
 	panic("mock")
 }
 
-func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
-	panic("mock")
-}
-
 var _ spanReader = mockSpanReader{}
 
 type mockSpanReader struct{}

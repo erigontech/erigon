@@ -14,16 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package bridge
 
-type Status struct {
-	LatestBlockHash string `json:"latest_block_hash"`
-	LatestAppHash   string `json:"latest_app_hash"`
-	LatestBlockTime string `json:"latest_block_time"`
-	CatchingUp      bool   `json:"catching_up"`
-}
+import (
+	"context"
+	"time"
+)
 
-type StatusResponse struct {
-	Height string `json:"height"`
-	Result Status `json:"result"`
+//go:generate mockgen -typed=true -destination=./client_mock.go -package=bridge . Client
+type Client interface {
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
+	Close()
 }

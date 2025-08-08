@@ -14,12 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package bridge
 
-import "net/http"
+import (
+	"context"
+	"time"
+)
 
-//go:generate mockgen -typed=true -source=./http_request_handler.go -destination=./http_request_handler_mock.go -package=heimdall httpRequestHandler
-type httpRequestHandler interface {
-	Do(req *http.Request) (*http.Response, error)
-	CloseIdleConnections()
+type IdleClient struct {
+}
+
+func NewIdleClient() Client {
+	return &IdleClient{}
+}
+
+func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
+	return nil, nil
+}
+
+func (c *IdleClient) Close() {
 }

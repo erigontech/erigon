@@ -1,4 +1,4 @@
-package heimdall
+package bridge
 
 import (
 	"context"
