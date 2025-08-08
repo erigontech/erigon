@@ -60,7 +60,7 @@ func (m VirtualMemStat) Fields() []interface{} {
 	return s
 }
 
-func Print() {
+func Print(prefix string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	vm, err := ReadVirtualMemStats()
@@ -74,7 +74,7 @@ func Print() {
 	v := VirtualMemStat{vm}
 	l := v.Fields()
 	l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	log.Info("[mem] memory stats", l...)
+	log.Info("[mem] memory stats "+prefix, l...)
 }
 
 func LogMemStats(ctx context.Context, logger log.Logger) {
