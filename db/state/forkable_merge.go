@@ -7,8 +7,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 // type Merger struct {

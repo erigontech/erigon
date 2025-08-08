@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
-	"github.com/erigontech/erigon-lib/recsplit/simpleseq"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/recsplit/simpleseq"
 )
 
 type EncodingType uint8
