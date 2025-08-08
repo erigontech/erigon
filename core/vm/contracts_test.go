@@ -296,7 +296,7 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 
-	// length_of_EXPONENT = 1024; everything else is zero
+	// length_of_EXPONENT = 1025; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004010000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
 	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
