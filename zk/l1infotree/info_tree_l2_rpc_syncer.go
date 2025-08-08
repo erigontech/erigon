@@ -13,7 +13,10 @@ import (
 )
 
 const (
-	ExitRootTable = "zkevm_getExitRootTable"
+	ExitRootTable            = "zkevm_getExitRootTable"
+	infoTreeChanSize         = 100 // Size of the channel to hold info tree updates
+	exitRootTableMaxRetry    = 5   // Max retries for exit root table queries
+	exitRootTableRetryFactor = 2   // Factor to increase retry delay
 )
 
 // InfoTreeL2RpcSyncer is a struct that is used to sync the Info Tree from an L2 Sequencer RPC.
@@ -50,7 +53,7 @@ func (s *InfoTreeL2RpcSyncer) RunSyncInfoTree() <-chan []zkTypes.L1InfoTreeUpdat
 		return s.infoTreeChan
 	}
 	s.isSyncStarted.Store(true)
-	s.infoTreeChan = make(chan []zkTypes.L1InfoTreeUpdate, 100) // Buffered channel to avoid blocking
+	s.infoTreeChan = make(chan []zkTypes.L1InfoTreeUpdate, infoTreeChanSize) // Buffered channel to avoid blocking
 
 	totalSynced := uint64(0)
 	batchSize := s.zkCfg.L2InfoTreeUpdatesBatchSize
@@ -72,11 +75,11 @@ func (s *InfoTreeL2RpcSyncer) RunSyncInfoTree() <-chan []zkTypes.L1InfoTreeUpdat
 				if err != nil {
 					log.Info("getExitRootTable retry error", "err", err)
 					retry++
-					if retry > 5 {
+					if retry > exitRootTableMaxRetry {
 						s.err = err
 						return
 					}
-					time.Sleep(time.Duration(retry*2) * time.Second)
+					time.Sleep(time.Duration(retry*exitRootTableRetryFactor) * time.Second)
 				}
 
 				if len(infoTree) == 0 {
