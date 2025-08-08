@@ -81,16 +81,19 @@ func TestPoolCleanup(t *testing.T) {
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 2)
 		// simulate decryption keys
 		handle.SimulateCurrentSlot()
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
-		require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllDecryptedTxns(), 2)
 		// simulate one block passing by - decrypted txns pool should get cleaned up after 1 slot
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitDecryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for decrypted txns cleaned")
+		synctest.Wait()
+		require.Len(t, pool.AllDecryptedTxns(), 0)
 		// simulate more blocks passing by - encrypted txns pool should get cleaned up after config.ReorgDepthAwareness
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
@@ -101,7 +104,8 @@ func TestPoolCleanup(t *testing.T) {
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitEncryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for encrypted txns cleaned")
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 0)
 	})
 }
 
@@ -130,12 +134,14 @@ func TestPoolSkipsBlobTxns(t *testing.T) {
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 2)
 		// simulate decryption keys
 		handle.SimulateCurrentSlot()
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encBlobTxn1.IdentityPreimage, encTxn1.IdentityPreimage)
 		// verify that only 1 txn gets decrypted and the blob txn gets skipped
-		require.Eventually(t, WaitDecryptedTxns(pool, 1), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllDecryptedTxns(), 1)
 		txns, err := pool.ProvideTxns(
 			ctx,
 			txnprovider.WithBlockTime(handle.nextBlockTime),
@@ -173,11 +179,13 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 2)
 		// simulate decryption keys
 		handle.SimulateCurrentSlot()
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
-		require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllDecryptedTxns(), 2)
 		gasLimit := encTxn1.GasLimit.Uint64()
 		// make sure both have the same gas limit so we can use it as an option for both ProvideTxns requests
 		require.Equal(t, gasLimit, encTxn2.GasLimit.Uint64())
@@ -221,11 +229,11 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		config.ReorgDepthAwareness = 3
 		baseTxnProvider := EmptyTxnProvider{}
 		ctrl := gomock.NewController(t)
-		contractBackend := NewMockContractBackend(ctrl)
-		stateChangesClient := NewMockStateChangesClient(ctrl)
+		contractBackend := NewMockContractBackend(ctrl, logger)
+		stateChangesClient := NewMockStateChangesClient(ctrl, logger)
 		currentBlockNumReader := func(context.Context) (*uint64, error) { return nil, nil }
 		slotCalculator := NewMockSlotCalculator(ctrl, config)
-		keySenderFactory := &MockDecryptionKeysSourceFactory{}
+		keySenderFactory := NewMockDecryptionKeysSourceFactory(logger)
 		pool := shutter.NewPool(
 			logger,
 			config,
@@ -251,6 +259,8 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 			nextBlockNum:       1,
 			nextBlockTime:      config.BeaconChainGenesisTimestamp + config.SecondsPerSlot,
 		}
+		// wait before calling the test case to ensure all pool background loops and subscriptions have been initialised
+		synctest.Wait()
 		testCase(ctx, t.T, pool, handle)
 		cancel()
 		err := eg.Wait()
@@ -376,9 +386,10 @@ func (p EmptyTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.Provid
 	return nil, nil
 }
 
-func NewMockContractBackend(ctrl *gomock.Controller) *MockContractBackend {
+func NewMockContractBackend(ctrl *gomock.Controller, logger log.Logger) *MockContractBackend {
 	return &MockContractBackend{
 		MockBackend:       contracts.NewMockBackend(ctrl),
+		logger:            logger,
 		mockedCallResults: map[common.Address][][]byte{},
 		mockedFilterLogs:  map[common.Address][][]types.Log{},
 		subs:              map[common.Address][]chan<- types.Log{},
@@ -387,6 +398,7 @@ func NewMockContractBackend(ctrl *gomock.Controller) *MockContractBackend {
 
 type MockContractBackend struct {
 	*contracts.MockBackend
+	logger            log.Logger
 	mockedCallResults map[common.Address][][]byte
 	mockedFilterLogs  map[common.Address][][]types.Log
 	subs              map[common.Address][]chan<- types.Log
@@ -399,10 +411,13 @@ func (cb *MockContractBackend) PrepareMocks() {
 		DoAndReturn(func(_ context.Context, q ethereum.FilterQuery, s chan<- types.Log) (ethereum.Subscription, error) {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
+			addrStrs := make([]string, 0, len(q.Addresses))
 			for _, addr := range q.Addresses {
+				addrStrs = append(addrStrs, addr.Hex())
 				cb.subs[addr] = append(cb.subs[addr], s)
 			}
-			return MockSubscription{errChan: make(chan error)}, nil
+			cb.logger.Trace("--- DEBUG --- called SubscribeFilterLogs", "addrs", strings.Join(addrStrs, ","))
+			return MockSubscription{errChan: make(chan error), logger: cb.logger}, nil
 		}).
 		AnyTimes()
 
@@ -413,10 +428,12 @@ func (cb *MockContractBackend) PrepareMocks() {
 			defer cb.mu.Unlock()
 			results := cb.mockedCallResults[*msg.To]
 			if len(results) == 0 {
+				cb.logger.Trace("--- DEBUG --- ISSUE - no mocked CallContract", "addr", msg.To.String())
 				return nil, fmt.Errorf("no mocked call result remaining for addr=%s", msg.To)
 			}
 			res := results[0]
 			cb.mockedCallResults[*msg.To] = results[1:]
+			cb.logger.Trace("--- DEBUG --- called CallContract", "addr", msg.To.String())
 			return res, nil
 		}).
 		AnyTimes()
@@ -427,14 +444,18 @@ func (cb *MockContractBackend) PrepareMocks() {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			var res []types.Log
+			addrStrs := make([]string, 0, len(query.Addresses))
 			for _, addr := range query.Addresses {
 				logs := cb.mockedFilterLogs[addr]
 				if len(logs) == 0 {
+					cb.logger.Trace("--- DEBUG --- ISSUE - no mocked FilterLogs", "addr", addr.String())
 					return nil, fmt.Errorf("no mocked filter logs for addr=%s", addr)
 				}
 				res = append(res, logs[0]...)
 				cb.mockedFilterLogs[addr] = logs[1:]
+				addrStrs = append(addrStrs, addr.Hex())
 			}
+			cb.logger.Trace("--- DEBUG --- called FilterLogs")
 			return res, nil
 		}).
 		AnyTimes()
@@ -456,25 +477,29 @@ func (cb *MockContractBackend) SimulateLogEvents(ctx context.Context, logs []typ
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	for _, l := range logs {
+		cb.logger.Trace("--- DEBUG --- attempting to send log for", "addr", l.Address.String())
 		for _, sub := range cb.subs[l.Address] {
+			cb.logger.Trace("--- DEBUG --- sending log event", "addr", l.Address.String())
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case sub <- l: // no-op
+				cb.logger.Trace("--- DEBUG --- sent log event", "addr", l.Address.String())
 			}
 		}
 	}
 	return nil
 }
 
-func NewMockStateChangesClient(ctrl *gomock.Controller) *MockStateChangesClient {
-	return &MockStateChangesClient{ctrl: ctrl}
+func NewMockStateChangesClient(ctrl *gomock.Controller, logger log.Logger) *MockStateChangesClient {
+	return &MockStateChangesClient{ctrl: ctrl, logger: logger}
 }
 
 type MockStateChangesClient struct {
-	ctrl *gomock.Controller
-	subs []chan MockStateChange
-	mu   sync.Mutex
+	ctrl   *gomock.Controller
+	logger log.Logger
+	subs   []chan MockStateChange
+	mu     sync.Mutex
 }
 
 func (c *MockStateChangesClient) StateChanges(
@@ -492,6 +517,11 @@ func (c *MockStateChangesClient) StateChanges(
 		DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
 			select {
 			case change := <-sub:
+				c.logger.Trace(
+					"--- DEBUG --- simulating state change - batch returned by Recv",
+					"blockNum", change.batch.ChangeBatch[0].BlockHeight,
+					"blockTime", change.batch.ChangeBatch[0].BlockTime,
+				)
 				return change.batch, change.err
 			case <-ctx.Done():
 				return nil, io.EOF
@@ -507,10 +537,20 @@ func (c *MockStateChangesClient) SimulateStateChange(ctx context.Context, sc Moc
 	var eg errgroup.Group
 	for _, sub := range c.subs {
 		eg.Go(func() error {
+			c.logger.Trace(
+				"--- DEBUG --- simulating state change - sending batch",
+				"blockNum", sc.batch.ChangeBatch[0].BlockHeight,
+				"blockTime", sc.batch.ChangeBatch[0].BlockTime,
+			)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case sub <- sc:
+				c.logger.Trace(
+					"--- DEBUG --- simulating state change - batch sent",
+					"blockNum", sc.batch.ChangeBatch[0].BlockHeight,
+					"blockTime", sc.batch.ChangeBatch[0].BlockTime,
+				)
 				return nil
 			}
 		})
@@ -525,13 +565,16 @@ type MockStateChange struct {
 
 type MockSubscription struct {
 	errChan chan error
+	logger  log.Logger
 }
 
 func (m MockSubscription) Unsubscribe() {
+	m.logger.Trace("--- DEBUG --- called MockSubscription.Unsubscribe")
 	close(m.errChan)
 }
 
 func (m MockSubscription) Err() <-chan error {
+	m.logger.Trace("--- DEBUG --- called MockSubscription.Err")
 	return m.errChan
 }
 
@@ -575,12 +618,19 @@ func (c *MockSlotCalculator) PrepareMocks(t *testing.T) {
 		AnyTimes()
 }
 
+func NewMockDecryptionKeysSourceFactory(logger log.Logger) *MockDecryptionKeysSourceFactory {
+	return &MockDecryptionKeysSourceFactory{
+		logger: logger,
+	}
+}
+
 type MockDecryptionKeysSourceFactory struct {
+	logger log.Logger
 	sender *MockKeySender
 }
 
 func (f *MockDecryptionKeysSourceFactory) NewDecryptionKeysSource(validator pubsub.ValidatorEx) shutter.DecryptionKeysSource {
-	f.sender = &MockKeySender{validator: validator}
+	f.sender = &MockKeySender{validator: validator, logger: f.logger}
 	return f.sender
 }
 
@@ -588,6 +638,7 @@ type MockKeySender struct {
 	mu        sync.Mutex
 	subs      []MockDecryptionKeysSubscription
 	validator pubsub.ValidatorEx
+	logger    log.Logger
 }
 
 func (m *MockKeySender) Run(_ context.Context) error {
@@ -595,10 +646,11 @@ func (m *MockKeySender) Run(_ context.Context) error {
 }
 
 func (m *MockKeySender) Subscribe(_ context.Context) (shutter.DecryptionKeysSubscription, error) {
-	sub := make(MockDecryptionKeysSubscription)
+	sub := MockDecryptionKeysSubscription{logger: m.logger, ch: make(chan *pubsub.Message)}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.subs = append(m.subs, sub)
+	m.logger.Trace("--- DEBUG --- subscribed to mock decryption keys source")
 	return sub, nil
 }
 
@@ -626,6 +678,12 @@ func (m *MockKeySender) SimulateDecryptionKeys(
 	var eg errgroup.Group
 	for _, sub := range m.subs {
 		eg.Go(func() error {
+			m.logger.Trace(
+				"--- DEBUG --- attempting to send mock decryption keys msg",
+				"slot", slot,
+				"baseTxnIndex", baseTxnIndex,
+				"ips", len(ips),
+			)
 			return sub.Consume(ctx, msg)
 		})
 	}
@@ -633,13 +691,17 @@ func (m *MockKeySender) SimulateDecryptionKeys(
 	return eg.Wait()
 }
 
-type MockDecryptionKeysSubscription chan *pubsub.Message
+type MockDecryptionKeysSubscription struct {
+	logger log.Logger
+	ch     chan *pubsub.Message
+}
 
 func (s MockDecryptionKeysSubscription) Next(ctx context.Context) (*pubsub.Message, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case msg := <-s:
+	case msg := <-s.ch:
+		defer s.logger.Trace("--- DEBUG --- mock decryption keys msg returned by Next")
 		return msg, nil
 	}
 }
@@ -648,7 +710,8 @@ func (s MockDecryptionKeysSubscription) Consume(ctx context.Context, m *pubsub.M
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case s <- m:
+	case s.ch <- m:
+		defer s.logger.Trace("--- DEBUG --- consumed mock decryption keys msg")
 		return nil
 	}
 }
@@ -761,17 +824,5 @@ func MockEncryptedBlobTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) t
 		EonIndex:         eon.Index,
 		IdentityPreimage: ip,
 		GasLimit:         new(big.Int).SetUint64(txn.GetGasLimit()),
-	}
-}
-
-func WaitEncryptedTxns(pool *shutter.Pool, n int) func() bool {
-	return func() bool {
-		return len(pool.AllEncryptedTxns()) == n
-	}
-}
-
-func WaitDecryptedTxns(pool *shutter.Pool, n int) func() bool {
-	return func() bool {
-		return len(pool.AllDecryptedTxns()) == n
 	}
 }
