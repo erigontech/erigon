@@ -36,16 +36,16 @@ func RedactArgs(args []string) string {
 // RedactString redacts sensitive substrings in the provided string.
 func RedactString(s string) string {
 	// Redact URLs
-	s = reHTTP.ReplaceAllString(s, "http://[redacted]")
-	s = reHTTPS.ReplaceAllString(s, "https://[redacted]")
-	s = reWS.ReplaceAllString(s, "ws://[redacted]")
-	s = reWSS.ReplaceAllString(s, "wss://[redacted]")
+	s = reHTTP.ReplaceAllString(s, "http://<redacted>")
+	s = reHTTPS.ReplaceAllString(s, "https://<redacted>")
+	s = reWS.ReplaceAllString(s, "ws://<redacted>")
+	s = reWSS.ReplaceAllString(s, "wss://<redacted>")
 
 	// Redact datadir paths
-	s = reDatadir.ReplaceAllString(s, "${1}[redacted-dir]")
+	s = reDatadir.ReplaceAllString(s, "${1}<redacted-dir>")
 
 	// redact IPs
-	s = reIPv6.ReplaceAllString(s, "$1[redacted-ipv6]")
-	s = reIPv4.ReplaceAllString(s, "$1[redacted-ip]")
+	s = reIPv6.ReplaceAllString(s, "$1<redacted-ipv6>")
+	s = reIPv4.ReplaceAllString(s, "$1<redacted-ip>")
 	return s
 }
