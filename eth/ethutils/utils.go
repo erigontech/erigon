@@ -22,11 +22,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
@@ -36,35 +35,6 @@ var (
 	ErrMismatchBlobHashes  = errors.New("mismatch blob hashes")
 	ErrInvalidVersiondHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
-
-type RPCTransactionLog struct {
-	Address        common.Address `json:"address"`
-	Topics         []common.Hash  `json:"topics"`
-	Data           hexutil.Bytes  `json:"data"`
-	BlockNumber    hexutil.Uint64 `json:"blockNumber"`
-	TxHash         common.Hash    `json:"transactionHash"`
-	TxIndex        hexutil.Uint64 `json:"transactionIndex"`
-	BlockHash      common.Hash    `json:"blockHash"`
-	LogIndex       hexutil.Uint64 `json:"logIndex"`
-	Removed        bool           `json:"removed"`
-	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp"`
-}
-
-// Converts types.Log into RPCTransactionLog
-func toRPCTransactionLog(log *types.Log, header *types.Header, txHash common.Hash, txIndex uint64) *RPCTransactionLog {
-	return &RPCTransactionLog{
-		Address:        log.Address,
-		Topics:         log.Topics,
-		Data:           log.Data,
-		BlockNumber:    hexutil.Uint64(header.Number.Uint64()),
-		TxHash:         txHash,
-		TxIndex:        hexutil.Uint64(txIndex),
-		BlockHash:      header.Hash(),
-		LogIndex:       hexutil.Uint64(log.Index),
-		Removed:        log.Removed,
-		BlockTimestamp: hexutil.Uint64(header.Time),
-	}
-}
 
 // IsLocalBlock checks whether the specified block is mined
 // by local miner accounts.

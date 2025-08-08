@@ -29,10 +29,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
@@ -40,18 +41,19 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -435,7 +437,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
 	defer rawChainDb.Close()
 
-	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
+	agg, err := dbstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
 	if err != nil {
 		return err
 	}
@@ -452,7 +454,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = genesis.Config.ChainName
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot.Tracer().Hooks}
@@ -713,7 +715,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			}
 			// if the summary file for the just-finished range of blocks is empty, delete it
 			if fi.Size() == 0 {
-				os.Remove(fi.Name())
+				dir.RemoveFile(fi.Name())
 			}
 			fsum.Close()
 			fsum = nil
