@@ -298,9 +298,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 
-	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
-
-	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore)
+	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
