@@ -18,13 +18,14 @@ package polygoncommon
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -109,7 +110,7 @@ func (db *Database) BeginRw(ctx context.Context) (kv.RwTx, error) {
 		return db.BeginRw(ctx)
 	}
 
-	return nil, errors.New("db is read only")
+	return nil, fmt.Errorf("db is read only: %s", dbg.Stack())
 }
 
 func (db *Database) View(ctx context.Context, f func(tx kv.Tx) error) error {
