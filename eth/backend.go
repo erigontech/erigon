@@ -24,9 +24,7 @@ import (
 	"io/fs"
 	"math/big"
 	"net"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -131,7 +129,6 @@ import (
 	"github.com/erigontech/erigon/zk/datastream/client"
 	"github.com/erigontech/erigon/zk/datastream/server"
 	"github.com/erigontech/erigon/zk/hermez_db"
-	"github.com/erigontech/erigon/zk/l1_cache"
 	"github.com/erigontech/erigon/zk/l1infotree"
 	"github.com/erigontech/erigon/zk/legacy_executor_verifier"
 	"github.com/erigontech/erigon/zk/sequencer"
@@ -230,7 +227,6 @@ type Ethereum struct {
 	streamServer    server.StreamServer
 	l1Syncer        *syncer.L1Syncer
 	etherManClients []*etherman.Client
-	l1Cache         *l1_cache.L1Cache
 
 	preStartTasks *PreStartTasks
 
@@ -1030,28 +1026,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.chainConfig.FreeInjectedBatch = cfg.FreeInjectedBatch
 		backend.chainConfig.Type1 = cfg.Zk.Commitment.IsType1()
 		l1Urls := strings.Split(cfg.L1RpcUrl, ",")
-
-		if cfg.Zk.L1CacheEnabled {
-			// extract hosts from l1Urls
-			l1Hosts, err := urlsToHosts(l1Urls)
-			if err != nil {
-				return nil, err
-			}
-
-			l1Cache, err := l1_cache.NewL1Cache(ctx, path.Join(stack.DataDir(), "l1cache"), cfg.Zk.L1CachePort, l1Hosts)
-			if err != nil {
-				return nil, err
-			}
-			backend.l1Cache = l1Cache
-
-			var cacheL1Urls []string
-			for _, l1Url := range l1Urls {
-				encoded := url.QueryEscape(l1Url)
-				cacheL1Url := fmt.Sprintf("http://localhost:%d?endpoint=%s&chainid=%d", cfg.Zk.L1CachePort, encoded, cfg.L2ChainId)
-				cacheL1Urls = append(cacheL1Urls, cacheL1Url)
-			}
-			l1Urls = cacheL1Urls
-		}
 
 		backend.etherManClients = make([]*etherman.Client, len(l1Urls))
 		for i, url := range l1Urls {
@@ -2269,16 +2243,4 @@ func createClientVersionMetric() {
 	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{os="%s"}`, runtime.GOOS))
 	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{arch="%s"}`, runtime.GOARCH))
 	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{go_version="%s"}`, runtime.Version()))
-}
-
-func urlsToHosts(urls []string) ([]string, error) {
-	hosts := make([]string, len(urls))
-	for i, urlStr := range urls {
-		host, err := url.Parse(urlStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse URL: %w", err)
-		}
-		hosts[i] = host.Hostname()
-	}
-	return hosts, nil
 }

@@ -137,6 +137,8 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 
 ### Deprecated
 - `zkevm_getBroadcastURI` - it was removed by zkEvm
+- `zkevm.l1-cache-enabled` - the l1 cache is removed from erigon
+- `zkevm.l1-cache-port` - removed as the cache is no longer supported
 ***
 
 ## Limitations/Warnings/Performance
