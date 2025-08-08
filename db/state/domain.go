@@ -44,8 +44,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 var (

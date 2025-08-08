@@ -48,8 +48,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
