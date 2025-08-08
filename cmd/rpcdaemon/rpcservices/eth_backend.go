@@ -333,14 +333,6 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return back.blockReader.LastSpanId(ctx, tx)
-}
-
-func (back *RemoteBackend) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
-	return back.blockReader.Span(ctx, tx, spanId)
-}
-
 func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return 0, false, errors.New("not implemented")
 }

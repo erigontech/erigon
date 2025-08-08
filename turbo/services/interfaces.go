@@ -55,11 +55,6 @@ type HeaderReader interface {
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
 	Integrity(ctx context.Context) error
 }
-type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error)
-	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	LastFrozenSpanId() uint64
-}
 
 type BorMilestoneReader interface {
 	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
@@ -113,7 +108,6 @@ type FullBlockReader interface {
 	BlockReader
 	BodyReader
 	HeaderReader
-	BorSpanReader
 	BorMilestoneReader
 	BorCheckpointReader
 	TxnReader
