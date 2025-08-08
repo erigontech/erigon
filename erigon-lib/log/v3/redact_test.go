@@ -23,6 +23,12 @@ func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 
 	out := RedactArgs(in)
 
+	// Executable path should be redacted to "erigon"
+	if strings.Contains(out, "./build/bin/erigon") {
+		t.Fatalf("expected executable path to be redacted, got: %s", out)
+	}
+	mustContain(t, out, "erigon")
+
 	// Flags must be preserved
 	mustContain(t, out, "--chain=bor")
 	mustContain(t, out, "--datadir=~/erigon-data/bor-archive")
@@ -61,6 +67,11 @@ func TestRedactArgsStandaloneValues(t *testing.T) {
 		"http://foo.com", "ws://foo.bar",
 	}
 	out := RedactArgs(in)
+	// First arg (cmd) should be redacted to "erigon"
+	mustContain(t, out, "erigon")
+	if strings.Contains(out, "cmd") {
+		t.Fatalf("expected executable path to be redacted, got: %s", out)
+	}
 	mustContain(t, out, "localhost")
 	mustContain(t, out, "[redacted-ip]")
 	mustContain(t, out, "[redacted-ipv6]")

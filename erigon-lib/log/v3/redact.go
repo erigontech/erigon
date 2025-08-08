@@ -20,7 +20,15 @@ func RedactArgs(args []string) string {
 	if len(args) == 0 {
 		return ""
 	}
-	s := strings.Join(args, " ")
+
+	// Make a copy to avoid modifying the original slice
+	redacted := make([]string, len(args))
+	copy(redacted, args)
+
+	// Replace args[0] (executable path) with just "erigon" to avoid exposing sensitive paths
+	redacted[0] = "erigon"
+
+	s := strings.Join(redacted, " ")
 	return RedactString(s)
 }
 
