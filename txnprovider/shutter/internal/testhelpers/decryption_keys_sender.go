@@ -159,5 +159,9 @@ func (dks DecryptionKeysSender) PublishDecryptionKeys(
 }
 
 func (dks DecryptionKeysSender) Close() error {
+	println("--- debug --- closing dks")
+	if err := dks.topic.Close(); err != nil {
+		return err
+	}
 	return dks.host.Close()
 }

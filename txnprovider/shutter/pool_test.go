@@ -59,63 +59,65 @@ import (
 )
 
 func TestPoolCleanup(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	synctest.Run(func() {
+		if testing.Short() {
+			t.Skip()
+		}
 
-	t.Parallel()
-	pt := NewPoolTest(t)
-	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
-		// simulate expected contract calls for reading the first ekg after the first block event
-		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
-		require.NoError(t, err)
-		handle.SimulateInitialEonRead(t, ekg)
-		// simulate loadSubmissions after the first block
-		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
-		// simulate the first block
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		// simulate some encrypted txn submissions and simulate a new block
-		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
-		encTxn2 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
-		require.Len(t, pool.AllEncryptedTxns(), 0)
-		err = handle.SimulateLogEvents(ctx, []types.Log{
-			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn1),
-			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 2, encTxn2),
+		t.Parallel()
+		pt := NewPoolTest(t)
+		pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+			// simulate expected contract calls for reading the first ekg after the first block event
+			ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+			require.NoError(t, err)
+			handle.SimulateInitialEonRead(t, ekg)
+			// simulate loadSubmissions after the first block
+			handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+			// simulate the first block
+			err = handle.SimulateNewBlockChange(ctx)
+			require.NoError(t, err)
+			// simulate some encrypted txn submissions and simulate a new block
+			encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+			encTxn2 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+			require.Len(t, pool.AllEncryptedTxns(), 0)
+			err = handle.SimulateLogEvents(ctx, []types.Log{
+				MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn1),
+				MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 2, encTxn2),
+			})
+			require.NoError(t, err)
+			handle.SimulateCachedEonRead(t, ekg)
+			err = handle.SimulateNewBlockChange(ctx)
+			require.NoError(t, err)
+			//synctest.Wait()
+			//require.Len(t, pool.AllEncryptedTxns(), 2)
+			require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+			// simulate decryption keys
+			handle.SimulateCurrentSlot()
+			handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
+			//synctest.Wait()
+			//require.Len(t, pool.AllDecryptedTxns(), 2)
+			require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+			// simulate one block passing by - decrypted txns pool should get cleaned up after 1 slot
+			handle.SimulateCachedEonRead(t, ekg)
+			err = handle.SimulateNewBlockChange(ctx)
+			require.NoError(t, err)
+			//synctest.Wait()
+			//require.Len(t, pool.AllDecryptedTxns(), 0)
+			require.Eventually(t, WaitDecryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for decrypted txns cleaned")
+			// simulate more blocks passing by - encrypted txns pool should get cleaned up after config.ReorgDepthAwareness
+			handle.SimulateCachedEonRead(t, ekg)
+			err = handle.SimulateNewBlockChange(ctx)
+			require.NoError(t, err)
+			handle.SimulateCachedEonRead(t, ekg)
+			err = handle.SimulateNewBlockChange(ctx)
+			require.NoError(t, err)
+			handle.SimulateCachedEonRead(t, ekg)
+			err = handle.SimulateNewBlockChange(ctx)
+			require.NoError(t, err)
+			//synctest.Wait()
+			//require.Len(t, pool.AllEncryptedTxns(), 0)
+			require.Eventually(t, WaitEncryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for encrypted txns cleaned")
 		})
-		require.NoError(t, err)
-		handle.SimulateCachedEonRead(t, ekg)
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		synctest.Wait()
-		require.Len(t, pool.AllEncryptedTxns(), 2)
-		//require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
-		// simulate decryption keys
-		handle.SimulateCurrentSlot()
-		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
-		synctest.Wait()
-		require.Len(t, pool.AllDecryptedTxns(), 2)
-		//require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
-		// simulate one block passing by - decrypted txns pool should get cleaned up after 1 slot
-		handle.SimulateCachedEonRead(t, ekg)
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		synctest.Wait()
-		require.Len(t, pool.AllDecryptedTxns(), 0)
-		//require.Eventually(t, WaitDecryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for decrypted txns cleaned")
-		// simulate more blocks passing by - encrypted txns pool should get cleaned up after config.ReorgDepthAwareness
-		handle.SimulateCachedEonRead(t, ekg)
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		handle.SimulateCachedEonRead(t, ekg)
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		handle.SimulateCachedEonRead(t, ekg)
-		err = handle.SimulateNewBlockChange(ctx)
-		require.NoError(t, err)
-		synctest.Wait()
-		require.Len(t, pool.AllEncryptedTxns(), 0)
-		//require.Eventually(t, WaitEncryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for encrypted txns cleaned")
 	})
 }
 
@@ -230,7 +232,7 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 }
 
 func NewPoolTest(t *testing.T) PoolTest {
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
 	logger := testlog.Logger(t, log.LvlTrace)
 	logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
@@ -300,6 +302,7 @@ func NewPoolTest(t *testing.T) PoolTest {
 	)
 	return PoolTest{
 		ctx:                ctx,
+		cancel:             cancel,
 		t:                  t,
 		config:             config,
 		logHandler:         logHandler,
@@ -314,6 +317,7 @@ func NewPoolTest(t *testing.T) PoolTest {
 
 type PoolTest struct {
 	ctx                context.Context
+	cancel             context.CancelFunc
 	t                  *testing.T
 	config             shuttercfg.Config
 	logHandler         *testhelpers.CollectingLogHandler
@@ -326,30 +330,30 @@ type PoolTest struct {
 }
 
 func (pt PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle)) {
-	synctest.Run(func() {
-		ctx, cancel := context.WithTimeout(pt.t.Context(), time.Minute)
-		pt.t.Cleanup(cancel)
-		eg := errgroup.Group{}
-		eg.Go(func() error { return pt.pool.Run(ctx) })
-		synctest.Wait() // wait for pool to connect to key sender bootnode
-		//err := pt.keySender.WaitExternalPeerConnection(ctx, pt.poolPeerId)
-		//require.NoError(pt.t, err)
-		handle := PoolTestHandle{
-			config:             pt.config,
-			logHandler:         pt.logHandler,
-			stateChangesClient: pt.stateChangesClient,
-			slotCalculator:     pt.slotCalculator,
-			contractBackend:    pt.contractBackend,
-			keySender:          pt.keySender,
-			pool:               pt.pool,
-			nextBlockNum:       1,
-			nextBlockTime:      pt.config.BeaconChainGenesisTimestamp + pt.config.SecondsPerSlot,
-		}
-		testCase(pt.ctx, pt.t, pt.pool, handle)
-		cancel()
-		err := eg.Wait()
-		require.ErrorIs(pt.t, err, context.Canceled)
-	})
+	eg := errgroup.Group{}
+	eg.Go(func() error { return pt.pool.Run(pt.ctx) })
+	//synctest.Wait() // wait for pool to connect to key sender bootnode
+	err := pt.keySender.WaitExternalPeerConnection(pt.ctx, pt.poolPeerId)
+	require.NoError(pt.t, err)
+	handle := PoolTestHandle{
+		config:             pt.config,
+		logHandler:         pt.logHandler,
+		stateChangesClient: pt.stateChangesClient,
+		slotCalculator:     pt.slotCalculator,
+		contractBackend:    pt.contractBackend,
+		keySender:          pt.keySender,
+		pool:               pt.pool,
+		nextBlockNum:       1,
+		nextBlockTime:      pt.config.BeaconChainGenesisTimestamp + pt.config.SecondsPerSlot,
+	}
+	//synctest.Run(func() {
+	testCase(pt.ctx, pt.t, pt.pool, handle)
+	//})
+	err = pt.keySender.Close()
+	pt.cancel()
+	require.NoError(pt.t, err)
+	err = eg.Wait()
+	require.ErrorIs(pt.t, err, context.Canceled)
 }
 
 type PoolTestHandle struct {

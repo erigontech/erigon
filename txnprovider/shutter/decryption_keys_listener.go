@@ -30,7 +30,6 @@ import (
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/transport/memory"
 	inproc "github.com/lthibault/go-libp2p-inproc-transport"
 	"github.com/multiformats/go-multiaddr"
 	"golang.org/x/sync/errgroup"
