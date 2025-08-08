@@ -19,9 +19,11 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/anacrolix/envpprof"
+	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -38,6 +40,7 @@ import (
 
 func main() {
 	defer envpprof.Stop()
+	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
 	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
