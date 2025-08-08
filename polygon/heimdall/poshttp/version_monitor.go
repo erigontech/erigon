@@ -1,4 +1,4 @@
-package heimdall
+package poshttp
 
 import (
 	"context"
@@ -15,6 +15,19 @@ const (
 	HeimdallV2
 )
 
+type apiVersioner interface {
+	Version() HeimdallVersion
+}
+
+type ChainManagerStatus struct {
+	Params struct {
+		ChainParams struct {
+			PolTokenAddress *string `json:"pol_token_address,omitempty"`
+		} `json:"chain_params"`
+	} `json:"params"`
+}
+
+//go:generate mockgen -typed=true -source=./version_monitor.go -destination=./heimdall_client_mock.go -package=poshttp heimdallClient
 type heimdallClient interface {
 	FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error)
 }

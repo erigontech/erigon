@@ -1,4 +1,4 @@
-package snaptype
+package snaptype2
 
 import (
 	"context"

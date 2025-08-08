@@ -20,21 +20,21 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/version"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -105,12 +105,12 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	require.NoError(t, err)
 	err = idx.Build(context.Background())
 	require.NoError(t, err)
-	if name == coresnaptype.Transactions.Enum() {
+	if name == snaptype2.Transactions.Enum() {
 		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, coresnaptype.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -200,11 +200,8 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-
-	blockReader := &BlockReader{
-		borSn:          borRoSnapshots,
-		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
-	require.Equal(t, uint64(132), blockReader.LastFrozenEventId())
+	require.Equal(t, uint64(132),
+		bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil).LastFrozenEventId())
 }
 
 func TestBlockReaderLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T) {
@@ -219,11 +216,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T)
 
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-
-	blockReader := &BlockReader{
-		borSn:          borRoSnapshots,
-		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
-	require.Equal(t, uint64(0), blockReader.LastFrozenEventId())
+	require.Equal(t, uint64(0), bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil).LastFrozenEventId())
 }
 
 func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
@@ -248,11 +241,7 @@ func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-
-	blockReader := &BlockReader{
-		borSn:          borRoSnapshots,
-		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
-	require.Equal(t, uint64(264), blockReader.LastFrozenEventId())
+	require.Equal(t, uint64(264), bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil).LastFrozenEventId())
 }
 
 func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *testing.T) {
@@ -283,11 +272,7 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-
-	blockReader := &BlockReader{
-		borSn:          borRoSnapshots,
-		borBridgeStore: bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil)}
-	require.Equal(t, uint64(0), blockReader.LastFrozenEventId())
+	require.Equal(t, uint64(0), bridge.NewSnapshotStore(bridge.NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil).LastFrozenEventId())
 }
 
 func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir string, logger log.Logger) {

@@ -14,40 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package snaptype
+package bridge
 
-import "github.com/erigontech/erigon-lib/version"
-
-var (
-	BeaconBlocks = snapType{
-		enum: CaplinEnums.BeaconBlocks,
-		name: "beaconblocks",
-		versions: Versions{
-			Current:      version.V1_0,
-			MinSupported: version.V1_0,
-		},
-		indexes: []Index{CaplinIndexes.BeaconBlockSlot},
-	}
-	BlobSidecars = snapType{
-		enum: CaplinEnums.BlobSidecars,
-		name: "blobsidecars",
-		versions: Versions{
-			Current:      version.V1_0,
-			MinSupported: version.V1_0,
-		},
-		indexes: []Index{CaplinIndexes.BlobSidecarSlot},
-	}
-
-	CaplinSnapshotTypes = []Type{BeaconBlocks, BlobSidecars}
+import (
+	"context"
+	"time"
 )
 
-func IsCaplinType(t Enum) bool {
+type IdleClient struct {
+}
 
-	for _, ct := range CaplinSnapshotTypes {
-		if t == ct.Enum() {
-			return true
-		}
-	}
+func NewIdleClient() Client {
+	return &IdleClient{}
+}
 
-	return false
+func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
+	return nil, nil
+}
+
+func (c *IdleClient) Close() {
 }
