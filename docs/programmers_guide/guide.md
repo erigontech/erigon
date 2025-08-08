@@ -8,7 +8,7 @@ On a high level, Ethereum state is a collection of accounts. An account can be e
 
 ### Content of an account
 
-Type `Account` [erigon-lib/types/accounts/account.go](../../erigon-lib/types/accounts/account.go) lists the main components of an
+Type `Account` [execution/types/accounts/account.go](../../execution/types/accounts/account.go) lists the main components of an
 account's content (not identifier):
 
 1. Nonce

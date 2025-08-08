@@ -37,8 +37,8 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var (
