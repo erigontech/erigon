@@ -5,24 +5,24 @@ package state
 import "github.com/erigontech/erigon-lib/version"
 
 func InitSchemasGen() {
-	Schema.AccountsDomain.version.AccessorBT = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.AccountsDomain.version.DataKV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.AccountsDomain.version.AccessorKVEI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.AccountsDomain.hist.version.DataV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.AccountsDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.AccountsDomain.version.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.AccountsDomain.version.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.AccountsDomain.version.AccessorKVEI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.AccountsDomain.hist.version.DataV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.AccountsDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.AccountsDomain.hist.iiCfg.version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.AccountsDomain.hist.iiCfg.version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.CodeDomain.version.AccessorBT = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.CodeDomain.version.DataKV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.CodeDomain.version.AccessorKVEI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.CodeDomain.hist.version.DataV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.CodeDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.CodeDomain.version.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.CodeDomain.version.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.CodeDomain.version.AccessorKVEI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.CodeDomain.hist.version.DataV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.CodeDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.hist.iiCfg.version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.CodeDomain.hist.iiCfg.version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.CommitmentDomain.version.DataKV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.CommitmentDomain.version.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CommitmentDomain.version.AccessorKVI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.CommitmentDomain.hist.version.DataV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.CommitmentDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.CommitmentDomain.hist.version.DataV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.CommitmentDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.LogAddrIdx.version.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
@@ -32,7 +32,7 @@ func InitSchemasGen() {
 	Schema.RCacheDomain.version.DataKV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.RCacheDomain.version.AccessorKVI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.RCacheDomain.hist.version.DataV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.RCacheDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.RCacheDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.RCacheDomain.hist.iiCfg.version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.ReceiptDomain.version.AccessorBT = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
@@ -42,11 +42,11 @@ func InitSchemasGen() {
 	Schema.ReceiptDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.StorageDomain.version.AccessorBT = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.StorageDomain.version.DataKV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.StorageDomain.version.AccessorKVEI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.StorageDomain.hist.version.DataV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
-	Schema.StorageDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.StorageDomain.version.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.StorageDomain.version.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.StorageDomain.version.AccessorKVEI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.StorageDomain.hist.version.DataV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.StorageDomain.hist.version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.StorageDomain.hist.iiCfg.version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.StorageDomain.hist.iiCfg.version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.TracesFromIdx.version.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}

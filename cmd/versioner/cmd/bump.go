@@ -2,28 +2,25 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon/db/state"
 	"github.com/spf13/cobra"
-)
 
-var domain string
-var facet string
-var newVersion string
+	"github.com/erigontech/erigon/cmd/versioner/internal/tui"
+)
 
 var bumpCmd = &cobra.Command{
 	Use:   "bump",
-	Short: "Bump a schema version in code",
+	Short: "Edit versions.yaml in TUI and regenerate code",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		//if domain == "" || facet == "" || newVersion == "" {
-		//	return fmt.Errorf("--domain, --facet and --to flags are required")
-		//}
-		fmt.Printf("Bumping %s.%s to %s\n", domain, facet, newVersion)
-		return state.GenerateSchemaVersions("./db/state/versions.yaml", "./db/state/version_schema_gen.go")
-	},
-}
+		file := "./db/state/versions.yaml"
+		out := "./db/state/version_schema_gen.go"
 
-func init() {
-	//bumpCmd.Flags().StringVar(&domain, "domain", "", "Domain name (e.g. accounts)")
-	//bumpCmd.Flags().StringVar(&facet, "facet", "", "Facet/key to bump (e.g. data-kv)")
-	//bumpCmd.Flags().StringVar(&newVersion, "to", "", "New version (e.g. 2.0.0-standard)")
+		if err := tui.Run(file); err != nil {
+			return fmt.Errorf("tui: %w", err)
+		}
+		log.Info("started generating:")
+		return state.GenerateSchemaVersions(file, out)
+	},
 }
