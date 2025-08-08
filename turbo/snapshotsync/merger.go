@@ -270,7 +270,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 		expectedTotal += d.Count()
 	}
 
-	compresCfg := seg.DefaultCfg
+	compresCfg := seg.DefaultWordLvlCfg
 	compresCfg.Workers = m.compressWorkers
 	f, err := seg.NewCompressor(ctx, "Snapshots merge", targetFile.Path, m.tmpDir, compresCfg, log.LvlTrace, m.logger)
 	if err != nil {

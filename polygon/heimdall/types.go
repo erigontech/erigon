@@ -213,7 +213,7 @@ var (
 					return err
 				}
 				defer rs.Close()
-				rs.LogLvl(log.LvlInfo)
+				rs.LogLvl(log.LvlDebug)
 
 				defer d.MadvSequential().DisableReadAhead()
 
@@ -490,7 +490,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 		return err
 	}
 	defer rs.Close()
-	rs.LogLvl(log.LvlInfo)
+	rs.LogLvl(log.LvlDebug)
 
 	defer d.MadvSequential().DisableReadAhead()
 

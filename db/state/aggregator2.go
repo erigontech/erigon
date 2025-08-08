@@ -169,68 +169,84 @@ var ExperimentalConcurrentCommitment = false // set true to use concurrent commi
 var Schema = SchemaGen{
 	AccountsDomain: domainCfg{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
+		CompressCfg: seg.Cfg{
+			WordLvl:    seg.CompressNone,
+			WordLvlCfg: DomainCompressCfg,
+			//PageLvl:    seg.PageLvlCfg{PageSize: 64, Compress: true},
+		},
 
 		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblAccountHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultWordLvlCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.AccountsHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				CompressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultWordLvlCfg,
 				Accessors:     AccessorHashMap,
 			},
 		},
 	},
 	StorageDomain: domainCfg{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+		CompressCfg: seg.Cfg{
+			WordLvl:    seg.CompressNone,
+			WordLvlCfg: DomainCompressCfg,
+			//PageLvl:    seg.PageLvlCfg{PageSize: 64, Compress: true},
+		},
 
 		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblStorageHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultWordLvlCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.StorageHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				CompressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultWordLvlCfg,
 				Accessors:     AccessorHashMap,
 			},
 		},
 	},
 	CodeDomain: domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg: seg.Cfg{
+			WordLvl:    seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+			WordLvlCfg: DomainCompressCfg,
+			//PageLvl:    seg.PageLvlCfg{PageSize: 64, Compress: true},
+		},
 
 		Accessors:   AccessorBTree | AccessorExistence,
 		largeValues: true,
 
 		hist: histCfg{
 			valuesTable:   kv.TblCodeHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: seg.DefaultWordLvlCfg, Compression: seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
 			historyIdx:         kv.CodeHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				CompressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultWordLvlCfg,
 				Accessors:     AccessorHashMap,
 			},
 		},
 	},
 	CommitmentDomain: domainCfg{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+		CompressCfg: seg.Cfg{
+			WordLvl:    seg.CompressNone, //seg.CompressKeys,
+			WordLvlCfg: DomainCompressCfg,
+			PageLvl:    seg.PageLvlCfg{PageSize: 16, Compress: false},
+		},
 
 		Accessors:           AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
@@ -248,38 +264,40 @@ var Schema = SchemaGen{
 
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				CompressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultWordLvlCfg,
 				Accessors:     AccessorHashMap,
 			},
 		},
 	},
 	ReceiptDomain: domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+		CompressCfg: seg.Cfg{WordLvl: seg.CompressNone},
+
 		largeValues: false,
 
 		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblReceiptHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultWordLvlCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.ReceiptHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				CompressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultWordLvlCfg,
 				Accessors:     AccessorHashMap,
 			},
 		},
 	},
 	RCacheDomain: domainCfg{
 		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
+		CompressCfg: seg.Cfg{WordLvl: seg.CompressNone},
+
 		largeValues: true,
 
-		Accessors:   AccessorHashMap,
-		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		Accessors: AccessorHashMap,
 
 		hist: histCfg{
 			valuesTable: kv.TblRCacheHistoryVals,
@@ -294,7 +312,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				disable:      true, // disable everything by default
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
-				CompressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultWordLvlCfg,
 				Accessors:     AccessorHashMap,
 			},
 		},
@@ -337,7 +355,7 @@ func EnableHistoricalCommitment() {
 	Schema.CommitmentDomain = cfg
 }
 
-var DomainCompressCfg = seg.Cfg{
+var DomainCompressCfg = seg.WordLvlCfg{
 	MinPatternScore:      1000,
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
@@ -347,7 +365,7 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-var HistoryCompressCfg = seg.Cfg{
+var HistoryCompressCfg = seg.WordLvlCfg{
 	MinPatternScore:      4000,
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
