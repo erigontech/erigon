@@ -262,17 +262,15 @@ func extractPipeId(addr ma.Multiaddr) (string, error) {
 	}
 
 	for i, comp := range components {
-		for _, p := range comp.Protocols() {
-			if p.Code == PipeProtocolCode {
-				if i+1 >= len(components) {
-					return "", fmt.Errorf("missing pipe ID")
-				}
-				value, err := components[i+1].ValueForProtocol(components[i+1].Protocol().Code)
-				if err != nil {
-					return "", err
-				}
-				return value, nil
+		if comp.Protocols()[0].Code == PipeProtocolCode {
+			if i+1 >= len(components) {
+				return "", fmt.Errorf("missing pipe ID")
 			}
+			value, err := components[i+1].ValueForProtocol(components[i+1].Protocols()[0].Code)
+			if err != nil {
+				return "", err
+			}
+			return value, nil
 		}
 	}
 
