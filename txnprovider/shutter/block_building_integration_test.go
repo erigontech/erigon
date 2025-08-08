@@ -459,7 +459,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		"keyBroadcast", contractsDeployment.KeyBroadcastAddr,
 	)
 	// start up shutter test decryption key sender p2p node
-	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey)
+	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey, false)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		err := decryptionKeySender.Close()

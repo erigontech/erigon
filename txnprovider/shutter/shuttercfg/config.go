@@ -52,6 +52,7 @@ type P2pConfig struct {
 	PrivateKey     *ecdsa.PrivateKey
 	ListenPort     uint64
 	BootstrapNodes []string
+	InProc         bool
 }
 
 func (c P2pConfig) BootstrapNodesAddrInfo() ([]peer.AddrInfo, error) {

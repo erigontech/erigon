@@ -23,18 +23,17 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -88,16 +87,22 @@ func TestPoolCleanup(t *testing.T) {
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 2)
+		//require.Eventually(t, WaitEncryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for encrypted txns populated")
 		// simulate decryption keys
 		handle.SimulateCurrentSlot()
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
-		require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
+		synctest.Wait()
+		require.Len(t, pool.AllDecryptedTxns(), 2)
+		//require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
 		// simulate one block passing by - decrypted txns pool should get cleaned up after 1 slot
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitDecryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for decrypted txns cleaned")
+		synctest.Wait()
+		require.Len(t, pool.AllDecryptedTxns(), 0)
+		//require.Eventually(t, WaitDecryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for decrypted txns cleaned")
 		// simulate more blocks passing by - encrypted txns pool should get cleaned up after config.ReorgDepthAwareness
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
@@ -108,7 +113,9 @@ func TestPoolCleanup(t *testing.T) {
 		handle.SimulateCachedEonRead(t, ekg)
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
-		require.Eventually(t, WaitEncryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for encrypted txns cleaned")
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 0)
+		//require.Eventually(t, WaitEncryptedTxns(pool, 0), time.Minute, 10*time.Millisecond, "wait for encrypted txns cleaned")
 	})
 }
 
@@ -244,7 +251,8 @@ func NewPoolTest(t *testing.T) PoolTest {
 	keySenderPrivKey.D.FillBytes(keySenderPrivKeyBytes)
 	keySenderP2pPrivKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(keySenderPrivKeyBytes)
 	require.NoError(t, err)
-	keySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, 0, keySenderP2pPrivKey)
+	keySenderInProcPort := 123
+	keySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, keySenderInProcPort, keySenderP2pPrivKey, true)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		err := keySender.Close()
@@ -252,26 +260,27 @@ func NewPoolTest(t *testing.T) PoolTest {
 	})
 	keySenderPeerId, err := peer.IDFromPrivateKey(keySenderP2pPrivKey)
 	require.NoError(t, err)
-	keySenderListenAddresses, err := keySender.InterfaceListenAddresses()
-	require.NoError(t, err)
-	var keySenderPort uint64 // get the port that the OS assigned to the key sender (we used localhost:0)
-	for _, addr := range keySenderListenAddresses {
-		for _, protocol := range addr.Protocols() {
-			if protocol.Code == multiaddr.P_TCP {
-				keySenderPortStr, err := addr.ValueForProtocol(multiaddr.P_TCP)
-				require.NoError(t, err)
-				keySenderPort, err = strconv.ParseUint(keySenderPortStr, 10, 64)
-				require.NoError(t, err)
-			}
-		}
-	}
-	require.Greater(t, keySenderPort, uint64(0))
-	require.NoError(t, err)
-	keySenderPeerAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", keySenderPort, keySenderPeerId)
+	//keySenderListenAddresses, err := keySender.InterfaceListenAddresses()
+	//require.NoError(t, err)
+	//var keySenderPort uint64 // get the port that the OS assigned to the key sender (we used localhost:0)
+	//for _, addr := range keySenderListenAddresses {
+	//	for _, protocol := range addr.Protocols() {
+	//		if protocol.Code == multiaddr.P_TCP {
+	//			keySenderPortStr, err := addr.ValueForProtocol(multiaddr.P_TCP)
+	//			require.NoError(t, err)
+	//			keySenderPort, err = strconv.ParseUint(keySenderPortStr, 10, 64)
+	//			require.NoError(t, err)
+	//		}
+	//	}
+	//}
+	//require.Greater(t, keySenderPort, uint64(0))
+	//require.NoError(t, err)
+	//keySenderPeerAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", keySenderPort, keySenderPeerId)
 	config := shuttercfg.ConfigByChainName(networkname.Chiado)
 	config.PrivateKey = nodeKey
-	config.BootstrapNodes = []string{keySenderPeerAddr}
+	config.BootstrapNodes = []string{fmt.Sprintf("/inproc/%d/p2p/%s", keySenderInProcPort, keySenderPeerId)}
 	config.ReorgDepthAwareness = 3
+	config.InProc = true
 	baseTxnProvider := EmptyTxnProvider{}
 	ctrl := gomock.NewController(t)
 	contractBackend := NewMockContractBackend(ctrl)
@@ -317,27 +326,30 @@ type PoolTest struct {
 }
 
 func (pt PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle)) {
-	ctx, cancel := context.WithTimeout(pt.t.Context(), time.Minute)
-	pt.t.Cleanup(cancel)
-	eg := errgroup.Group{}
-	eg.Go(func() error { return pt.pool.Run(ctx) })
-	err := pt.keySender.WaitExternalPeerConnection(ctx, pt.poolPeerId)
-	require.NoError(pt.t, err)
-	handle := PoolTestHandle{
-		config:             pt.config,
-		logHandler:         pt.logHandler,
-		stateChangesClient: pt.stateChangesClient,
-		slotCalculator:     pt.slotCalculator,
-		contractBackend:    pt.contractBackend,
-		keySender:          pt.keySender,
-		pool:               pt.pool,
-		nextBlockNum:       1,
-		nextBlockTime:      pt.config.BeaconChainGenesisTimestamp + pt.config.SecondsPerSlot,
-	}
-	testCase(pt.ctx, pt.t, pt.pool, handle)
-	cancel()
-	err = eg.Wait()
-	require.ErrorIs(pt.t, err, context.Canceled)
+	synctest.Run(func() {
+		ctx, cancel := context.WithTimeout(pt.t.Context(), time.Minute)
+		pt.t.Cleanup(cancel)
+		eg := errgroup.Group{}
+		eg.Go(func() error { return pt.pool.Run(ctx) })
+		synctest.Wait() // wait for pool to connect to key sender bootnode
+		//err := pt.keySender.WaitExternalPeerConnection(ctx, pt.poolPeerId)
+		//require.NoError(pt.t, err)
+		handle := PoolTestHandle{
+			config:             pt.config,
+			logHandler:         pt.logHandler,
+			stateChangesClient: pt.stateChangesClient,
+			slotCalculator:     pt.slotCalculator,
+			contractBackend:    pt.contractBackend,
+			keySender:          pt.keySender,
+			pool:               pt.pool,
+			nextBlockNum:       1,
+			nextBlockTime:      pt.config.BeaconChainGenesisTimestamp + pt.config.SecondsPerSlot,
+		}
+		testCase(pt.ctx, pt.t, pt.pool, handle)
+		cancel()
+		err := eg.Wait()
+		require.ErrorIs(pt.t, err, context.Canceled)
+	})
 }
 
 type PoolTestHandle struct {

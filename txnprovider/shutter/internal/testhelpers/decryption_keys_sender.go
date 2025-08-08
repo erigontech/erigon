@@ -26,6 +26,7 @@ import (
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	inproc "github.com/lthibault/go-libp2p-inproc-transport"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -39,20 +40,25 @@ type DecryptionKeysSender struct {
 	topic  *pubsub.Topic
 }
 
-func DialDecryptionKeysSender(ctx context.Context, logger log.Logger, port int, key libp2pcrypto.PrivKey) (DecryptionKeysSender, error) {
+func DialDecryptionKeysSender(ctx context.Context, logger log.Logger, port int, key libp2pcrypto.PrivKey, enableInProc bool) (DecryptionKeysSender, error) {
 	logger = logger.New("component", "decryption-key-sender")
-
-	addr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/" + strconv.FormatInt(int64(port), 10))
+	var opts []libp2p.Option
+	var addr multiaddr.Multiaddr
+	var err error
+	if enableInProc {
+		opts = append(opts, libp2p.Transport(inproc.New()))
+		addr, err = multiaddr.NewMultiaddr("/inproc/" + strconv.FormatInt(int64(port), 10))
+	} else {
+		addr, err = multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/" + strconv.FormatInt(int64(port), 10))
+	}
 	if err != nil {
 		return DecryptionKeysSender{}, err
 	}
-
-	p2pHost, err := libp2p.New(
-		libp2p.Identity(key),
-		libp2p.ListenAddrs(addr),
-		libp2p.UserAgent("test/decryption-key-sender"),
-		libp2p.ProtocolVersion(shutter.ProtocolVersion),
-	)
+	opts = append(opts, libp2p.ListenAddrs(addr))
+	opts = append(opts, libp2p.Identity(key))
+	opts = append(opts, libp2p.UserAgent("test/decryption-key-sender"))
+	opts = append(opts, libp2p.ProtocolVersion(shutter.ProtocolVersion))
+	p2pHost, err := libp2p.New(opts...)
 	if err != nil {
 		return DecryptionKeysSender{}, err
 	}

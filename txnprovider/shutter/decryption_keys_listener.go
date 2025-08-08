@@ -30,6 +30,8 @@ import (
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/transport/memory"
+	inproc "github.com/lthibault/go-libp2p-inproc-transport"
 	"github.com/multiformats/go-multiaddr"
 	"golang.org/x/sync/errgroup"
 
@@ -75,6 +77,7 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	}
 
 	defer func() {
+		println("--- debug --- closing dkl")
 		err := p2pHost.Close()
 		if err != nil {
 			dkl.logger.Error("failed to close p2p host", "err", err)
@@ -113,11 +116,6 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 }
 
 func (dkl DecryptionKeysListener) initP2pHost() (host.Host, error) {
-	listenAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/" + strconv.FormatUint(dkl.config.ListenPort, 10))
-	if err != nil {
-		return nil, err
-	}
-
 	privKeyBytes := make([]byte, 32)
 	dkl.config.PrivateKey.D.FillBytes(privKeyBytes)
 	privKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(privKeyBytes)
@@ -125,12 +123,30 @@ func (dkl DecryptionKeysListener) initP2pHost() (host.Host, error) {
 		return nil, err
 	}
 
-	p2pHost, err := libp2p.New(
+	var listenAddr multiaddr.Multiaddr
+	opts := []libp2p.Option{
 		libp2p.Identity(privKey),
-		libp2p.ListenAddrs(listenAddr),
-		libp2p.UserAgent("erigon/shutter/"+params.VersionWithCommit(params.GitCommit)),
+		libp2p.UserAgent("erigon/shutter/" + params.VersionWithCommit(params.GitCommit)),
 		libp2p.ProtocolVersion(ProtocolVersion),
-	)
+	}
+	if dkl.config.InProc {
+		listenAddr, err = multiaddr.NewMultiaddr("/inproc/" + strconv.FormatUint(dkl.config.ListenPort, 10))
+		if err != nil {
+			return nil, err
+		}
+
+		opts = append(opts, libp2p.ListenAddrs(listenAddr))
+		opts = append(opts, libp2p.Transport(inproc.New()))
+	} else {
+		listenAddr, err = multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/" + strconv.FormatUint(dkl.config.ListenPort, 10))
+		if err != nil {
+			return nil, err
+		}
+
+		opts = append(opts, libp2p.ListenAddrs(listenAddr))
+	}
+
+	p2pHost, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}
