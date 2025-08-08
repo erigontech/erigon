@@ -74,7 +74,7 @@ func Print(prefix string) {
 	v := VirtualMemStat{vm}
 	l := v.Fields()
 	l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	log.Info("[mem] memory stats "+prefix, l...)
+	log.Warn("[mem] memory stats "+prefix, l...)
 }
 
 func LogMemStats(ctx context.Context, logger log.Logger) {
