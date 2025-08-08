@@ -60,6 +60,23 @@ func (m VirtualMemStat) Fields() []interface{} {
 	return s
 }
 
+func Print() {
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	vm, err := ReadVirtualMemStats()
+	if err != nil {
+		// suppress error if platform is unsupported, we just print out heap stats
+		if errors.Is(err, ErrorUnsupportedPlatform) {
+			log.Warn("[mem] error reading virtual memory stats", "err", err)
+		}
+	}
+
+	v := VirtualMemStat{vm}
+	l := v.Fields()
+	l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	log.Info("[mem] memory stats", l...)
+}
+
 func LogMemStats(ctx context.Context, logger log.Logger) {
 	logEvery := time.NewTicker(180 * time.Second)
 	defer logEvery.Stop()
