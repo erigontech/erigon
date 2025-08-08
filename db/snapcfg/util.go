@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
 	ver "github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)

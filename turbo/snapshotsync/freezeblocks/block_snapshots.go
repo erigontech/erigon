@@ -33,7 +33,6 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -47,10 +46,11 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -75,7 +75,7 @@ type RoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, coresnaptype.BlockSnapshotTypes, segmentsMin, true, logger)}
+	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, snaptype2.BlockSnapshotTypes, segmentsMin, true, logger)}
 }
 
 // headers
@@ -92,7 +92,7 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 // transaction_hash  -> block_number
 
 func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
-	return snapshotsync.TypedSegments(dir, minBlock, coresnaptype.BlockSnapshotTypes, true)
+	return snapshotsync.TypedSegments(dir, minBlock, snaptype2.BlockSnapshotTypes, true)
 }
 
 func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
@@ -550,8 +550,8 @@ func (br *BlockRetire) DisableReadAhead() {
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, chainConfig) {
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
 		if err != nil {
 			return err
 		}
@@ -570,16 +570,16 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		return lastTxNum, err
 	}
 
-	if _, err = dumpRange(ctx, coresnaptype.Headers.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err = dumpRange(ctx, snaptype2.Headers.FileInfo(snapDir, blockFrom, blockTo),
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return 0, err
 	}
 
-	if lastTxNum, err = dumpRange(ctx, coresnaptype.Bodies.FileInfo(snapDir, blockFrom, blockTo),
+	if lastTxNum, err = dumpRange(ctx, snaptype2.Bodies.FileInfo(snapDir, blockFrom, blockTo),
 		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return lastTxNum, err
 	}
-	if _, err = dumpRange(ctx, coresnaptype.Transactions.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err = dumpRange(ctx, snaptype2.Transactions.FileInfo(snapDir, blockFrom, blockTo),
 		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return lastTxNum, err
 	}
@@ -1047,28 +1047,28 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	return &View{base: s.RoSnapshots.View().WithBaseSegType(coresnaptype.Transactions)}
+	return &View{base: s.RoSnapshots.View().WithBaseSegType(snaptype2.Transactions)}
 }
 
 func (v *View) Close() {
 	v.base.Close()
 }
 
-func (v *View) Headers() []*snapshotsync.VisibleSegment { return v.base.Segments(coresnaptype.Headers) }
-func (v *View) Bodies() []*snapshotsync.VisibleSegment  { return v.base.Segments(coresnaptype.Bodies) }
+func (v *View) Headers() []*snapshotsync.VisibleSegment { return v.base.Segments(snaptype2.Headers) }
+func (v *View) Bodies() []*snapshotsync.VisibleSegment  { return v.base.Segments(snaptype2.Bodies) }
 func (v *View) Txs() []*snapshotsync.VisibleSegment {
-	return v.base.Segments(coresnaptype.Transactions)
+	return v.base.Segments(snaptype2.Transactions)
 }
 
 func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(coresnaptype.Headers, blockNum)
+	return v.base.Segment(snaptype2.Headers, blockNum)
 }
 
 func (v *View) BodiesSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(coresnaptype.Bodies, blockNum)
+	return v.base.Segment(snaptype2.Bodies, blockNum)
 }
 func (v *View) TxsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(coresnaptype.Transactions, blockNum)
+	return v.base.Segment(snaptype2.Transactions, blockNum)
 }
 
 func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
