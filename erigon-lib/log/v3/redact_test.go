@@ -31,7 +31,11 @@ func TestRedactArgsPreservesFlagsAndRedactsValues(t *testing.T) {
 
 	// Flags must be preserved
 	mustContain(t, out, "--chain=bor")
-	mustContain(t, out, "--datadir=~/erigon-data/bor-archive")
+	// datadir should be redacted
+	if strings.Contains(out, "~/erigon-data/bor-archive") {
+		t.Fatalf("expected datadir path to be redacted, got: %s", out)
+	}
+	mustContain(t, out, "--datadir=[redacted-dir]")
 	mustContain(t, out, "--log.dir.verbosity")
 	mustContain(t, out, "--torrent.conns.perfile")
 	mustContain(t, out, "--torrent.maxpeers")
@@ -78,6 +82,38 @@ func TestRedactArgsStandaloneValues(t *testing.T) {
 	mustContain(t, out, "wss://[redacted]")
 	mustContain(t, out, "http://[redacted]")
 	mustContain(t, out, "ws://[redacted]")
+}
+
+func TestRedactArgsDatadir(t *testing.T) {
+	// Test both --datadir= and --datadir formats
+	in1 := []string{"erigon", "--datadir=/home/user/sensitive-path", "--chain=mainnet"}
+	out1 := RedactArgs(in1)
+	mustContain(t, out1, "--datadir=[redacted-dir]")
+	if strings.Contains(out1, "/home/user/sensitive-path") {
+		t.Fatalf("expected datadir path to be redacted, got: %s", out1)
+	}
+
+	in2 := []string{"erigon", "--datadir", "/home/user/another-path", "--chain=mainnet"}
+	out2 := RedactArgs(in2)
+	mustContain(t, out2, "--datadir [redacted-dir]")
+	if strings.Contains(out2, "/home/user/another-path") {
+		t.Fatalf("expected datadir path to be redacted, got: %s", out2)
+	}
+
+	// Test single dash versions
+	in3 := []string{"erigon", "-datadir=/home/user/single-dash-path", "--chain=mainnet"}
+	out3 := RedactArgs(in3)
+	mustContain(t, out3, "-datadir=[redacted-dir]")
+	if strings.Contains(out3, "/home/user/single-dash-path") {
+		t.Fatalf("expected datadir path to be redacted, got: %s", out3)
+	}
+
+	in4 := []string{"erigon", "-datadir", "/home/user/another-single-dash", "--chain=mainnet"}
+	out4 := RedactArgs(in4)
+	mustContain(t, out4, "-datadir [redacted-dir]")
+	if strings.Contains(out4, "/home/user/another-single-dash") {
+		t.Fatalf("expected datadir path to be redacted, got: %s", out4)
+	}
 }
 
 // helpers
