@@ -4,7 +4,7 @@ run:
     - nosqlite
     - noboltdb
     - nosilkworm
-    - synctest
+    - goexperiment.synctest
 linters:
   enable:
     - asasalint
