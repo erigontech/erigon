@@ -18,136 +18,40 @@ package heimdall
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
-	"path"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 var (
-	// ErrShutdownDetected is returned if a shutdown was detected
-	ErrShutdownDetected      = errors.New("shutdown detected")
-	ErrNoResponse            = errors.New("got a nil response")
-	ErrNotSuccessfulResponse = errors.New("error while fetching data from Heimdall")
-	ErrNotInRejectedList     = errors.New("milestoneId doesn't exist in rejected list")
-	ErrNotInMilestoneList    = errors.New("milestoneId doesn't exist in Heimdall")
-	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
-	ErrBadGateway            = errors.New("bad gateway")
-	ErrServiceUnavailable    = errors.New("service unavailable")
-	ErrCloudflareAccessNoApp = errors.New("cloudflare access - no application")
-	ErrOperationTimeout      = errors.New("operation timed out, check internet connection")
-	ErrNoHost                = errors.New("no such host, check internet connection")
-
-	TransientErrors = []error{
-		ErrBadGateway,
-		ErrServiceUnavailable,
-		ErrCloudflareAccessNoApp,
-		ErrOperationTimeout,
-		ErrNoHost,
-		context.DeadlineExceeded,
-	}
+	ErrNotInRejectedList  = errors.New("milestoneId doesn't exist in rejected list")
+	ErrNotInMilestoneList = errors.New("milestoneId doesn't exist in Heimdall")
 )
 
 const (
-	StateEventsFetchLimit = 50
 	SpansFetchLimit       = 150
 	CheckpointsFetchLimit = 10_000
-
-	apiHeimdallTimeout = 10 * time.Second
-	retryBackOff       = time.Second
-	maxRetries         = 5
 )
-
-var (
-	MaxRetriesUnlimited = -1
-)
-
-type apiVersioner interface {
-	Version() HeimdallVersion
-}
 
 var _ Client = &HttpClient{}
 
 type HttpClient struct {
-	urlString    string
-	handler      httpRequestHandler
-	retryBackOff time.Duration
-	maxRetries   int
-	closeCh      chan struct{}
-	logger       log.Logger
-	apiVersioner apiVersioner
+	*poshttp.Client
 }
 
-type HttpRequest struct {
-	handler httpRequestHandler
-	url     *url.URL
-	start   time.Time
-}
-
-type HttpClientOption func(*HttpClient)
-
-func WithHttpRequestHandler(handler httpRequestHandler) HttpClientOption {
-	return func(client *HttpClient) {
-		client.handler = handler
+func NewHttpClient(urlString string, logger log.Logger, opts ...poshttp.ClientOption) *HttpClient {
+	return &HttpClient{
+		poshttp.NewClient(urlString, logger, heimdallLogPrefix, opts...),
 	}
-}
-
-func WithHttpRetryBackOff(retryBackOff time.Duration) HttpClientOption {
-	return func(client *HttpClient) {
-		client.retryBackOff = retryBackOff
-	}
-}
-
-func WithHttpMaxRetries(maxRetries int) HttpClientOption {
-	return func(client *HttpClient) {
-		client.maxRetries = maxRetries
-	}
-}
-
-func WithApiVersioner(ctx context.Context) HttpClientOption {
-	return func(client *HttpClient) {
-		client.apiVersioner = NewVersionMonitor(ctx, client, client.logger, time.Minute)
-	}
-}
-
-func NewHttpClient(urlString string, logger log.Logger, opts ...HttpClientOption) *HttpClient {
-	c := &HttpClient{
-		urlString:    urlString,
-		logger:       logger,
-		handler:      &http.Client{Timeout: apiHeimdallTimeout},
-		retryBackOff: retryBackOff,
-		maxRetries:   maxRetries,
-		closeCh:      make(chan struct{}),
-	}
-
-	for _, opt := range opts {
-		opt(c)
-	}
-
-	return c
 }
 
 const (
-	fetchStateSyncEventsFormatV1 = "from-id=%d&to-time=%d&limit=%d"
-	fetchStateSyncEventsFormatV2 = "from_id=%d&to_time=%s&pagination.limit=%d"
-	fetchStateSyncEventsPathV1   = "clerk/event-record/list"
-	fetchStateSyncEventsPathV2   = "clerk/time"
-
-	fetchStatus             = "/status"
-	fetchChainManagerStatus = "/chainmanager/params"
-
+	fetchStatus                      = "/status"
 	fetchCheckpoint                  = "/checkpoints/%s"
 	fetchCheckpointCount             = "/checkpoints/count"
 	fetchCheckpointList              = "/checkpoints/list"
@@ -174,113 +78,15 @@ const (
 	fetchSpanListPathV2   = "bor/spans/list"
 )
 
-func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
-	eventRecords := make([]*EventRecordWithTime, 0)
-
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		for {
-			url, err := stateSyncListURLv2(c.urlString, fromID, to.Unix())
-			if err != nil {
-				return nil, err
-			}
-
-			c.logger.Trace(heimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
-
-			reqCtx := withRequestType(ctx, stateSyncRequest)
-
-			response, err := FetchWithRetry[StateSyncEventsResponseV2](reqCtx, c, url, c.logger)
-			if err != nil {
-				if errors.Is(err, ErrNoResponse) {
-					// for more info check https://github.com/maticnetwork/heimdall/pull/993
-					c.logger.Warn(
-						heimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
-						"path", url.Path,
-						"queryParams", url.RawQuery,
-					)
-				}
-				return nil, err
-			}
-
-			if response == nil || response.EventRecords == nil {
-				// status 204
-				break
-			}
-
-			records, err := response.GetEventRecords()
-			if err != nil {
-				return nil, err
-			}
-
-			eventRecords = append(eventRecords, records...)
-
-			if len(response.EventRecords) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
-				break
-			}
-
-			fromID += uint64(StateEventsFetchLimit)
-		}
-
-		sort.SliceStable(eventRecords, func(i, j int) bool {
-			return eventRecords[i].ID < eventRecords[j].ID
-		})
-
-		return eventRecords, nil
-	}
-
-	for {
-		url, err := stateSyncListURLv1(c.urlString, fromID, to.Unix())
-		if err != nil {
-			return nil, err
-		}
-
-		c.logger.Trace(heimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
-
-		reqCtx := withRequestType(ctx, stateSyncRequest)
-
-		response, err := FetchWithRetry[StateSyncEventsResponseV1](reqCtx, c, url, c.logger)
-		if err != nil {
-			if errors.Is(err, ErrNoResponse) {
-				// for more info check https://github.com/maticnetwork/heimdall/pull/993
-				c.logger.Warn(
-					heimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
-					"path", url.Path,
-					"queryParams", url.RawQuery,
-				)
-			}
-			return nil, err
-		}
-
-		if response == nil || response.Result == nil {
-			// status 204
-			break
-		}
-
-		eventRecords = append(eventRecords, response.Result...)
-
-		if len(response.Result) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
-			break
-		}
-
-		fromID += uint64(StateEventsFetchLimit)
-	}
-
-	sort.SliceStable(eventRecords, func(i, j int) bool {
-		return eventRecords[i].ID < eventRecords[j].ID
-	})
-
-	return eventRecords, nil
-}
-
 func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
-	ctx = withRequestType(ctx, spanRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.SpanRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		url, err := makeURL(c.urlString, fetchSpanLatestV2, "")
+	if c.Version() == poshttp.HeimdallV2 {
+		url, err := poshttp.MakeURL(c.UrlString, fetchSpanLatestV2, "")
 		if err != nil {
 			return nil, err
 		}
-
-		response, err := FetchWithRetry[SpanResponseV2](ctx, c, url, c.logger)
+		response, err := poshttp.FetchWithRetry[SpanResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return nil, err
 		}
@@ -288,12 +94,12 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 		return response.ToSpan()
 	}
 
-	url, err := makeURL(c.urlString, fetchSpanLatestV1, "")
+	url, err := poshttp.MakeURL(c.UrlString, fetchSpanLatestV1, "")
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := FetchWithRetry[SpanResponseV1](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[SpanResponseV1](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -302,20 +108,20 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 }
 
 func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
-	url, err := makeURL(c.urlString, fmt.Sprintf("bor/span/%d", spanID), "")
+	url, err := poshttp.MakeURL(c.UrlString, fmt.Sprintf("bor/span/%d", spanID), "")
 	if err != nil {
 		return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 	}
 
-	ctx = withRequestType(ctx, spanRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.SpanRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		url, err = makeURL(c.urlString, fmt.Sprintf("bor/spans/%d", spanID), "")
+	if c.Version() == poshttp.HeimdallV2 {
+		url, err = poshttp.MakeURL(c.UrlString, fmt.Sprintf("bor/spans/%d", spanID), "")
 		if err != nil {
 			return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 		}
 
-		response, err := FetchWithRetry[SpanResponseV2](ctx, c, url, c.logger)
+		response, err := poshttp.FetchWithRetry[SpanResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 		}
@@ -324,7 +130,7 @@ func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 
 	}
 
-	response, err := FetchWithRetry[SpanResponseV1](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[SpanResponseV1](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 	}
@@ -333,17 +139,17 @@ func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 }
 
 func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*Span, error) {
-	ctx = withRequestType(ctx, checkpointListRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.CheckpointListRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+	if c.Version() == poshttp.HeimdallV2 {
 		offset := (page - 1) * limit // page start from 1
 
-		url, err := makeURL(c.urlString, fetchSpanListPathV2, fmt.Sprintf(fetchSpanListFormatV2, offset, limit))
+		url, err := poshttp.MakeURL(c.UrlString, fetchSpanListPathV2, fmt.Sprintf(fetchSpanListFormatV2, offset, limit))
 		if err != nil {
 			return nil, err
 		}
 
-		response, err := FetchWithRetry[SpanListResponseV2](ctx, c, url, c.logger)
+		response, err := poshttp.FetchWithRetry[SpanListResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return nil, err
 		}
@@ -351,12 +157,12 @@ func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 		return response.ToList()
 	}
 
-	url, err := makeURL(c.urlString, fetchSpanListPathV1, fmt.Sprintf(fetchSpanListFormatV1, page, limit))
+	url, err := poshttp.MakeURL(c.UrlString, fetchSpanListPathV1, fmt.Sprintf(fetchSpanListFormatV1, page, limit))
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := FetchWithRetry[SpanListResponseV1](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[SpanListResponseV1](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -366,15 +172,15 @@ func (c *HttpClient) FetchSpans(ctx context.Context, page uint64, limit uint64) 
 
 // FetchCheckpoint fetches the checkpoint from heimdall
 func (c *HttpClient) FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error) {
-	url, err := checkpointURL(c.urlString, number)
+	url, err := checkpointURL(c.UrlString, number)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx = withRequestType(ctx, checkpointRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.CheckpointRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		response, err := FetchWithRetry[CheckpointResponseV2](ctx, c, url, c.logger)
+	if c.Version() == poshttp.HeimdallV2 {
+		response, err := poshttp.FetchWithRetry[CheckpointResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return nil, err
 		}
@@ -382,7 +188,7 @@ func (c *HttpClient) FetchCheckpoint(ctx context.Context, number int64) (*Checkp
 		return response.ToCheckpoint(number)
 	}
 
-	response, err := FetchWithRetry[CheckpointResponseV1](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[CheckpointResponseV1](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -391,17 +197,17 @@ func (c *HttpClient) FetchCheckpoint(ctx context.Context, number int64) (*Checkp
 }
 
 func (c *HttpClient) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*Checkpoint, error) {
-	ctx = withRequestType(ctx, checkpointListRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.CheckpointListRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+	if c.Version() == poshttp.HeimdallV2 {
 		offset := (page - 1) * limit // page start from 1
 
-		url, err := makeURL(c.urlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV2, offset, limit))
+		url, err := poshttp.MakeURL(c.UrlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV2, offset, limit))
 		if err != nil {
 			return nil, err
 		}
 
-		response, err := FetchWithRetry[CheckpointListResponseV2](ctx, c, url, c.logger)
+		response, err := poshttp.FetchWithRetry[CheckpointListResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return nil, err
 		}
@@ -409,12 +215,12 @@ func (c *HttpClient) FetchCheckpoints(ctx context.Context, page uint64, limit ui
 		return response.ToList()
 	}
 
-	url, err := makeURL(c.urlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV1, page, limit))
+	url, err := poshttp.MakeURL(c.UrlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormatV1, page, limit))
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := FetchWithRetry[CheckpointListResponseV1](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[CheckpointListResponseV1](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -423,18 +229,18 @@ func (c *HttpClient) FetchCheckpoints(ctx context.Context, page uint64, limit ui
 }
 
 func isInvalidMilestoneIndexError(err error) bool {
-	return errors.Is(err, ErrNotSuccessfulResponse) &&
+	return errors.Is(err, poshttp.ErrNotSuccessfulResponse) &&
 		strings.Contains(err.Error(), "Invalid milestone index")
 }
 
 // FetchMilestone fetches a milestone from heimdall
 func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milestone, error) {
-	url, err := milestoneURLv1(c.urlString, number)
+	url, err := milestoneURLv1(c.UrlString, number)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx = withRequestType(ctx, milestoneRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.MilestoneRequest)
 
 	isRecoverableError := func(err error) bool {
 		if !isInvalidMilestoneIndexError(err) {
@@ -448,7 +254,7 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 
 		firstNum, err := c.FetchFirstMilestoneNum(ctx)
 		if err != nil {
-			c.logger.Warn(
+			c.Logger.Warn(
 				heimdallLogPrefix("issue fetching milestone count when deciding if invalid index err is recoverable"),
 				"err", err,
 			)
@@ -460,13 +266,13 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 		return firstNum <= number && number <= firstNum+milestonePruneNumber-1
 	}
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		url, err := milestoneURLv2(c.urlString, number)
+	if c.Version() == poshttp.HeimdallV2 {
+		url, err := milestoneURLv2(c.UrlString, number)
 		if err != nil {
 			return nil, err
 		}
 
-		response, err := FetchWithRetryEx[MilestoneResponseV2](ctx, c, url, isRecoverableError, c.logger)
+		response, err := poshttp.FetchWithRetryEx[MilestoneResponseV2](ctx, c.Client, url, isRecoverableError, c.Logger)
 		if err != nil {
 			if isInvalidMilestoneIndexError(err) {
 				return nil, fmt.Errorf("%w: number %d", ErrNotInMilestoneList, number)
@@ -477,7 +283,7 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 		return response.ToMilestone(number)
 	}
 
-	response, err := FetchWithRetryEx[MilestoneResponseV1](ctx, c, url, isRecoverableError, c.logger)
+	response, err := poshttp.FetchWithRetryEx[MilestoneResponseV1](ctx, c.Client, url, isRecoverableError, c.Logger)
 	if err != nil {
 		if isInvalidMilestoneIndexError(err) {
 			return nil, fmt.Errorf("%w: number %d", ErrNotInMilestoneList, number)
@@ -490,30 +296,19 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 	return &response.Result, nil
 }
 
-func (c *HttpClient) FetchChainManagerStatus(ctx context.Context) (*ChainManagerStatus, error) {
-	url, err := chainManagerStatusURL(c.urlString)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx = withRequestType(ctx, statusRequest)
-
-	return FetchWithRetry[ChainManagerStatus](ctx, c, url, c.logger)
-}
-
 func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
-	url, err := statusURL(c.urlString)
+	url, err := statusURL(c.UrlString)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx = withRequestType(ctx, statusRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.StatusRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		return FetchWithRetry[Status](ctx, c, url, c.logger)
+	if c.Version() == poshttp.HeimdallV2 {
+		return poshttp.FetchWithRetry[Status](ctx, c.Client, url, c.Logger)
 	}
 
-	response, err := FetchWithRetry[StatusResponse](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[StatusResponse](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -523,15 +318,15 @@ func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
 
 // FetchCheckpointCount fetches the checkpoint count from heimdall
 func (c *HttpClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
-	url, err := checkpointCountURL(c.urlString)
+	url, err := checkpointCountURL(c.UrlString)
 	if err != nil {
 		return 0, err
 	}
 
-	ctx = withRequestType(ctx, checkpointCountRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.CheckpointCountRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		response, err := FetchWithRetry[CheckpointCountResponseV2](ctx, c, url, c.logger)
+	if c.Version() == poshttp.HeimdallV2 {
+		response, err := poshttp.FetchWithRetry[CheckpointCountResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return 0, err
 		}
@@ -544,7 +339,7 @@ func (c *HttpClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
 		return int64(count), nil
 	}
 
-	response, err := FetchWithRetry[CheckpointCountResponseV1](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[CheckpointCountResponseV1](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return 0, err
 	}
@@ -554,20 +349,20 @@ func (c *HttpClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
 
 // FetchMilestoneCount fetches the milestone count from heimdall
 func (c *HttpClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	url, err := makeURL(c.urlString, fetchMilestoneCountV1, "")
+	url, err := poshttp.MakeURL(c.UrlString, fetchMilestoneCountV1, "")
 	if err != nil {
 		return 0, err
 	}
 
-	ctx = withRequestType(ctx, milestoneCountRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.MilestoneCountRequest)
 
-	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
-		url, err := makeURL(c.urlString, fetchMilestoneCountV2, "")
+	if c.Version() == poshttp.HeimdallV2 {
+		url, err := poshttp.MakeURL(c.UrlString, fetchMilestoneCountV2, "")
 		if err != nil {
 			return 0, err
 		}
 
-		response, err := FetchWithRetry[MilestoneCountResponseV2](ctx, c, url, c.logger)
+		response, err := poshttp.FetchWithRetry[MilestoneCountResponseV2](ctx, c.Client, url, c.Logger)
 		if err != nil {
 			return 0, err
 		}
@@ -580,7 +375,7 @@ func (c *HttpClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
 		return int64(count), nil
 	}
 
-	response, err := FetchWithRetry[MilestoneCountResponseV1](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[MilestoneCountResponseV1](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return 0, err
 	}
@@ -610,14 +405,14 @@ func (c *HttpClient) FetchFirstMilestoneNum(ctx context.Context) (int64, error) 
 
 // FetchLastNoAckMilestone fetches the last no-ack-milestone from heimdall
 func (c *HttpClient) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
-	url, err := lastNoAckMilestoneURL(c.urlString)
+	url, err := lastNoAckMilestoneURL(c.UrlString)
 	if err != nil {
 		return "", err
 	}
 
-	ctx = withRequestType(ctx, milestoneLastNoAckRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.MilestoneLastNoAckRequest)
 
-	response, err := FetchWithRetry[MilestoneLastNoAckResponse](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[MilestoneLastNoAckResponse](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return "", err
 	}
@@ -627,14 +422,14 @@ func (c *HttpClient) FetchLastNoAckMilestone(ctx context.Context) (string, error
 
 // FetchNoAckMilestone fetches the last no-ack-milestone from heimdall
 func (c *HttpClient) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
-	url, err := noAckMilestoneURL(c.urlString, milestoneID)
+	url, err := noAckMilestoneURL(c.UrlString, milestoneID)
 	if err != nil {
 		return err
 	}
 
-	ctx = withRequestType(ctx, milestoneNoAckRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.MilestoneNoAckRequest)
 
-	response, err := FetchWithRetry[MilestoneNoAckResponse](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[MilestoneNoAckResponse](ctx, c.Client, url, c.Logger)
 	if err != nil {
 		return err
 	}
@@ -649,14 +444,14 @@ func (c *HttpClient) FetchNoAckMilestone(ctx context.Context, milestoneID string
 // FetchMilestoneID fetches the bool result from Heimdall whether the ID corresponding
 // to the given milestone is in process in Heimdall
 func (c *HttpClient) FetchMilestoneID(ctx context.Context, milestoneID string) error {
-	url, err := milestoneIDURL(c.urlString, milestoneID)
+	url, err := milestoneIDURL(c.UrlString, milestoneID)
 	if err != nil {
 		return err
 	}
 
-	ctx = withRequestType(ctx, milestoneIDRequest)
+	ctx = poshttp.WithRequestType(ctx, poshttp.MilestoneIDRequest)
 
-	response, err := FetchWithRetry[MilestoneIDResponse](ctx, c, url, c.logger)
+	response, err := poshttp.FetchWithRetry[MilestoneIDResponse](ctx, c.Client, url, c.Logger)
 
 	if err != nil {
 		return err
@@ -669,114 +464,6 @@ func (c *HttpClient) FetchMilestoneID(ctx context.Context, milestoneID string) e
 	return nil
 }
 
-// FetchWithRetry returns data from heimdall with retry
-func FetchWithRetry[T any](ctx context.Context, client *HttpClient, url *url.URL, logger log.Logger) (*T, error) {
-	return FetchWithRetryEx[T](ctx, client, url, nil, logger)
-}
-
-// FetchWithRetryEx returns data from heimdall with retry
-func FetchWithRetryEx[T any](
-	ctx context.Context,
-	client *HttpClient,
-	url *url.URL,
-	isRecoverableError func(error) bool,
-	logger log.Logger,
-) (result *T, err error) {
-	attempt := 0
-	// create a new ticker for retrying the request
-	ticker := time.NewTicker(client.retryBackOff)
-	defer ticker.Stop()
-
-	for client.maxRetries == MaxRetriesUnlimited || attempt < client.maxRetries {
-		attempt++
-
-		request := &HttpRequest{handler: client.handler, url: url, start: time.Now()}
-		result, err = Fetch[T](ctx, request, logger)
-		if err == nil {
-			return result, nil
-		}
-
-		if strings.Contains(err.Error(), "operation timed out") {
-			return result, ErrOperationTimeout
-		}
-
-		if strings.Contains(err.Error(), "no such host") {
-			return result, ErrNoHost
-		}
-
-		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
-		// yet in heimdall. E.g. when the hard fork hasn't hit yet but heimdall
-		// is upgraded.
-		if errors.Is(err, ErrServiceUnavailable) {
-			client.logger.Debug(heimdallLogPrefix("service unavailable at the moment"), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
-			return nil, err
-		}
-
-		if (isRecoverableError != nil) && !isRecoverableError(err) {
-			return nil, err
-		}
-
-		client.logger.Debug(heimdallLogPrefix("an error while fetching"), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
-
-		select {
-		case <-ctx.Done():
-			client.logger.Debug(heimdallLogPrefix("request canceled"), "reason", ctx.Err(), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt)
-			return nil, ctx.Err()
-		case <-client.closeCh:
-			client.logger.Debug(heimdallLogPrefix("shutdown detected, terminating request"), "path", url.Path, "queryParams", url.RawQuery)
-			return nil, ErrShutdownDetected
-		case <-ticker.C:
-			// retry
-		}
-	}
-
-	return nil, err
-}
-
-// Fetch fetches response from heimdall
-func Fetch[T any](ctx context.Context, request *HttpRequest, logger log.Logger) (*T, error) {
-	isSuccessful := false
-
-	defer func() {
-		if metrics.EnabledExpensive {
-			sendMetrics(ctx, request.start, isSuccessful)
-		}
-	}()
-
-	result := new(T)
-
-	body, err := internalFetchWithTimeout(ctx, request.handler, request.url, logger)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(body) == 0 {
-		return nil, ErrNoResponse
-	}
-
-	err = json.Unmarshal(body, result)
-	if err != nil {
-		return nil, err
-	}
-
-	isSuccessful = true
-
-	return result, nil
-}
-
-func stateSyncListURLv1(urlString string, fromID uint64, to int64) (*url.URL, error) {
-	queryParams := fmt.Sprintf(fetchStateSyncEventsFormatV1, fromID, to, StateEventsFetchLimit)
-	return makeURL(urlString, fetchStateSyncEventsPathV1, queryParams)
-}
-
-func stateSyncListURLv2(urlString string, fromID uint64, to int64) (*url.URL, error) {
-	t := time.Unix(to, 0).UTC()
-	formattedTime := t.Format(time.RFC3339Nano)
-
-	queryParams := fmt.Sprintf(fetchStateSyncEventsFormatV2, fromID, formattedTime, StateEventsFetchLimit)
-	return makeURL(urlString, fetchStateSyncEventsPathV2, queryParams)
-}
-
 func checkpointURL(urlString string, number int64) (*url.URL, error) {
 	var url string
 	if number == -1 {
@@ -785,119 +472,39 @@ func checkpointURL(urlString string, number int64) (*url.URL, error) {
 		url = fmt.Sprintf(fetchCheckpoint, strconv.FormatInt(number, 10))
 	}
 
-	return makeURL(urlString, url, "")
+	return poshttp.MakeURL(urlString, url, "")
 }
 
 func checkpointCountURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchCheckpointCount, "")
-}
-
-func chainManagerStatusURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchChainManagerStatus, "")
+	return poshttp.MakeURL(urlString, fetchCheckpointCount, "")
 }
 
 func statusURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchStatus, "")
+	return poshttp.MakeURL(urlString, fetchStatus, "")
 }
 
 func milestoneURLv1(urlString string, number int64) (*url.URL, error) {
 	if number == -1 {
-		return makeURL(urlString, fetchMilestoneLatestV1, "")
+		return poshttp.MakeURL(urlString, fetchMilestoneLatestV1, "")
 	}
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV1, number), "")
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchMilestoneAtV1, number), "")
 }
 
 func milestoneURLv2(urlString string, number int64) (*url.URL, error) {
 	if number == -1 {
-		return makeURL(urlString, fetchMilestoneLatestV2, "")
+		return poshttp.MakeURL(urlString, fetchMilestoneLatestV2, "")
 	}
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAtV2, number), "")
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchMilestoneAtV2, number), "")
 }
 
 func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchLastNoAckMilestone, "")
+	return poshttp.MakeURL(urlString, fetchLastNoAckMilestone, "")
 }
 
 func noAckMilestoneURL(urlString string, id string) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchNoAckMilestone, id), "")
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchNoAckMilestone, id), "")
 }
 
 func milestoneIDURL(urlString string, id string) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchMilestoneID, id), "")
-}
-
-func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
-	u, err := url.Parse(urlString)
-	if err != nil {
-		return nil, err
-	}
-
-	u.Path = path.Join(u.Path, rawPath)
-	u.RawQuery = rawQuery
-
-	return u, err
-}
-
-// internal fetch method
-func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, logger log.Logger) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Trace(heimdallLogPrefix("http client get request"), "uri", u.RequestURI())
-
-	res, err := handler.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		_ = res.Body.Close()
-	}()
-
-	if res.StatusCode == http.StatusServiceUnavailable {
-		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrServiceUnavailable, u.String(), res.StatusCode)
-	}
-	if res.StatusCode == http.StatusBadGateway {
-		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrBadGateway, u.String(), res.StatusCode)
-	}
-
-	// unmarshall data from buffer
-	if res.StatusCode == 204 {
-		return nil, nil
-	}
-
-	// get response
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// check status code
-	if res.StatusCode != 200 {
-		cloudflareErr := regexp.MustCompile(`Error.*Cloudflare Access.*Unable to find your Access application`)
-		bodyStr := string(body)
-		if res.StatusCode == 404 && cloudflareErr.MatchString(bodyStr) {
-			return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrCloudflareAccessNoApp, u.String(), res.StatusCode, bodyStr)
-		}
-
-		return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrNotSuccessfulResponse, u.String(), res.StatusCode, bodyStr)
-	}
-
-	return body, nil
-}
-
-func internalFetchWithTimeout(ctx context.Context, handler httpRequestHandler, url *url.URL, logger log.Logger) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, apiHeimdallTimeout)
-	defer cancel()
-
-	// request data once
-	return internalFetch(ctx, handler, url, logger)
-}
-
-// Close sends a signal to stop the running process
-func (c *HttpClient) Close() {
-	close(c.closeCh)
-	c.handler.CloseIdleConnections()
+	return poshttp.MakeURL(urlString, fmt.Sprintf(fetchMilestoneID, id), "")
 }

@@ -11,21 +11,22 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -84,8 +85,7 @@ func InitMiner(
 	genesis *types.Genesis,
 	privKey *ecdsa.PrivateKey,
 	withoutHeimdall bool,
-	minerID int,
-) (*node.Node, *eth.Ethereum, error) {
+) (_ *node.Node, _ *eth.Ethereum, err error) {
 	// Define the basic configurations for the Ethereum node
 
 	nodeCfg := &nodecfg.Config{
@@ -93,11 +93,13 @@ func InitMiner(
 		Version: params.Version,
 		Dirs:    datadir.New(dirName),
 		P2P: p2p.Config{
-			ListenAddr:      ":30303",
-			ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
-			MaxPeers:        100,
-			MaxPendingPeers: 1000,
-			AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307, 30308, 30309, 30310},
+			ListenAddr:      ":0",
+			ProtocolVersion: []uint{direct.ETH68},
+			AllowedPorts:    []uint{0},
+			NoDiscovery:     true,
+			NoDial:          true,
+			MaxPeers:        1,
+			MaxPendingPeers: 1,
 			PrivateKey:      privKey,
 			NAT:             nat.Any(),
 		},
@@ -107,6 +109,7 @@ func InitMiner(
 		// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
 		MdbxGrowthStep:  4 * datasize.MB,
 		MdbxDBSizeLimit: 64 * datasize.MB,
+		HTTPTimeouts:    rpccfg.DefaultHTTPTimeouts,
 	}
 
 	stack, err := node.New(ctx, nodeCfg, logger)
@@ -114,14 +117,14 @@ func InitMiner(
 		return nil, nil, err
 	}
 
-	downloadRate, err := datasize.ParseString("16mb")
+	downloadRate, err := utils.GetStringFlagRateLimit("16mb")
 	if err != nil {
-		return nil, nil, err
+		return
 	}
 
-	uploadRate, err := datasize.ParseString("4mb")
+	uploadRate, err := utils.GetStringFlagRateLimit("4mb")
 	if err != nil {
-		return nil, nil, err
+		return
 	}
 
 	torrentLogLevel, err := downloadercfg.Int2LogLevel(3)
@@ -134,15 +137,15 @@ func InitMiner(
 		datadir.New(dirName),
 		nodeCfg.Version,
 		torrentLogLevel,
-		downloadRate,
-		uploadRate,
-		utils.TorrentPortFlag.Value,
+		0,
 		utils.TorrentConnsPerFileFlag.Value,
-		[]string{},
 		[]string{},
 		"",
 		utils.DbWriteMapFlag.Value,
-		downloadercfg.NewCfgOpts{},
+		downloadercfg.NewCfgOpts{
+			DownloadRateLimit: downloadRate.TorrentRateLimit(),
+			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+		},
 	)
 	if err != nil {
 		return nil, nil, err
@@ -158,7 +161,7 @@ func InitMiner(
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
 			GasLimit:   &genesis.GasLimit,
 			GasPrice:   big.NewInt(1),
-			Recommit:   125 * time.Second,
+			Recommit:   ethconfig.Defaults.Miner.Recommit,
 			SigKey:     privKey,
 			Enabled:    true,
 			EnabledPOS: true,
@@ -171,11 +174,10 @@ func InitMiner(
 		RPCTxFeeCap:     1, // 1 ether
 		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
 		StateStream:     true,
-		PolygonSync:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second
-	ethCfg.Downloader.ClientConfig.ListenPort = utils.TorrentPortFlag.Value + minerID
+	ethCfg.Downloader.ClientConfig.ListenPort = 0
 	ethCfg.TxPool.AccountSlots = 1000000
 	ethCfg.TxPool.PendingSubPoolLimit = 1000000
 

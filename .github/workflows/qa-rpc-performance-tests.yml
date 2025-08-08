@@ -14,21 +14,14 @@ concurrency:
 
 jobs:
   mainnet-rpc-perf-tests:
-    strategy:
-      matrix:
-        include:
-          - chain: mainnet
-            backend: RpcSpecific
-          #- chain: bor-mainnet
-          #  backend: Polygon
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-performance ]
     env:
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      CHAIN: ${{ matrix.chain }}
+      CHAIN: mainnet
 
     steps:
       - name: Checkout Erigon repository

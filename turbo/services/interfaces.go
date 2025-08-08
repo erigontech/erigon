@@ -18,15 +18,16 @@ package services
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -54,16 +55,6 @@ type HeaderReader interface {
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
 	Integrity(ctx context.Context) error
 }
-
-type BorEventReader interface {
-	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error)
-	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
-	LastFrozenEventId() uint64
-	LastFrozenEventBlockNum() uint64
-}
-
 type BorSpanReader interface {
 	Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error)
 	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
@@ -122,7 +113,6 @@ type FullBlockReader interface {
 	BlockReader
 	BodyReader
 	HeaderReader
-	BorEventReader
 	BorSpanReader
 	BorMilestoneReader
 	BorCheckpointReader
@@ -130,7 +120,7 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
-	FrozenBorBlocks() uint64
+	FrozenBorBlocks(align bool) uint64
 	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
@@ -147,8 +137,16 @@ type FullBlockReader interface {
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
-	PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error)
-	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
+	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
+	RetireBlocksInBackground(
+		ctx context.Context,
+		miBlockNum uint64,
+		maxBlockNum uint64,
+		lvl log.Lvl,
+		seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+		onDelete func(l []string) error,
+		onFinishRetire func() error,
+		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int

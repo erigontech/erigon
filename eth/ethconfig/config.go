@@ -31,17 +31,17 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/estimate"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -85,12 +85,13 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            estimate.BlocksExecution.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
+		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
-		ParallelStateFlushing: true,
-		ChaosMonkey:           false,
+		ParallelStateFlushing:    true,
+		ChaosMonkey:              false,
+		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -239,12 +240,6 @@ type Config struct {
 	HeimdallURL string
 	// No heimdall service
 	WithoutHeimdall bool
-	// Heimdall services active
-	WithHeimdallMilestones bool
-	// Heimdall waypoint recording active
-	WithHeimdallWaypointRecording bool
-	// Use polygon checkpoint sync in preference to POW downloader
-	PolygonSync bool
 
 	// Ethstats service
 	Ethstats string
@@ -273,6 +268,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	ElBlockDownloaderV2 bool
 }
 
 type Sync struct {

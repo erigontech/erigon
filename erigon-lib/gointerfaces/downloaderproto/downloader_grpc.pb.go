@@ -20,11 +20,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Downloader_Add_FullMethodName               = "/downloader.Downloader/Add"
-	Downloader_Delete_FullMethodName            = "/downloader.Downloader/Delete"
-	Downloader_SetLogPrefix_FullMethodName      = "/downloader.Downloader/SetLogPrefix"
-	Downloader_Completed_FullMethodName         = "/downloader.Downloader/Completed"
-	Downloader_CommitPreverified_FullMethodName = "/downloader.Downloader/CommitPreverified"
+	Downloader_Add_FullMethodName          = "/downloader.Downloader/Add"
+	Downloader_Delete_FullMethodName       = "/downloader.Downloader/Delete"
+	Downloader_SetLogPrefix_FullMethodName = "/downloader.Downloader/SetLogPrefix"
+	Downloader_Completed_FullMethodName    = "/downloader.Downloader/Completed"
 )
 
 // DownloaderClient is the client API for Downloader service.
@@ -38,7 +37,6 @@ type DownloaderClient interface {
 	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error)
-	CommitPreverified(ctx context.Context, in *CommitPreverifiedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type downloaderClient struct {
@@ -89,16 +87,6 @@ func (c *downloaderClient) Completed(ctx context.Context, in *CompletedRequest, 
 	return out, nil
 }
 
-func (c *downloaderClient) CommitPreverified(ctx context.Context, in *CommitPreverifiedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, Downloader_CommitPreverified_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // DownloaderServer is the server API for Downloader service.
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility.
@@ -110,7 +98,6 @@ type DownloaderServer interface {
 	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(context.Context, *CompletedRequest) (*CompletedReply, error)
-	CommitPreverified(context.Context, *CommitPreverifiedRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -132,9 +119,6 @@ func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefix
 }
 func (UnimplementedDownloaderServer) Completed(context.Context, *CompletedRequest) (*CompletedReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Completed not implemented")
-}
-func (UnimplementedDownloaderServer) CommitPreverified(context.Context, *CommitPreverifiedRequest) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CommitPreverified not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
 func (UnimplementedDownloaderServer) testEmbeddedByValue()                    {}
@@ -229,24 +213,6 @@ func _Downloader_Completed_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Downloader_CommitPreverified_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CommitPreverifiedRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DownloaderServer).CommitPreverified(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Downloader_CommitPreverified_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DownloaderServer).CommitPreverified(ctx, req.(*CommitPreverifiedRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Downloader_ServiceDesc is the grpc.ServiceDesc for Downloader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -269,10 +235,6 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Completed",
 			Handler:    _Downloader_Completed_Handler,
-		},
-		{
-			MethodName: "CommitPreverified",
-			Handler:    _Downloader_CommitPreverified_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

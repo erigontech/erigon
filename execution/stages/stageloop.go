@@ -21,28 +21,27 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"runtime/debug"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -51,11 +50,9 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -204,24 +201,31 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 }
 
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			debug.PrintStack()
-			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
-		}
-	}() // avoid crash because Erigon's core does many things
+	// avoid crash because Erigon's core does many things
+	defer debug.RecoverPanicIntoError(logger, &err)
 
+	hasMore := true
+	for hasMore {
+		hasMore, err = stageLoopIteration(ctx, db, txc, sync, initialCycle, firstCycle, logger, blockReader, hook)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
 	externalTx := txc.Tx != nil
 	finishProgressBefore, borProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, txc.Tx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	if blockReader.BorSnapshots() != nil {
-		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks()
+		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks(false)
 	}
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {
@@ -244,17 +248,17 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	if canRunCycleInOneTransaction && !externalTx {
 		txc.Tx, err = db.BeginRwNosync(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
 		defer txc.Tx.Rollback()
 	}
 
 	if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
-		return err
+		return false, err
 	}
-	_, err = sync.Run(db, txc, initialCycle, firstCycle)
+	hasMore, err = sync.Run(db, txc, initialCycle, firstCycle)
 	if err != nil {
-		return err
+		return false, err
 	}
 	logCtx := sync.PrintTimings()
 	//var tableSizes []interface{}
@@ -265,14 +269,14 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		errTx := txc.Tx.Commit()
 		txc = wrap.NewTxContainer(nil, txc.Doms)
 		if errTx != nil {
-			return errTx
+			return false, errTx
 		}
 		commitTime = time.Since(commitStart)
 	}
 
 	// -- send notifications START
 	if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
-		return err
+		return false, err
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
@@ -316,10 +320,10 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return hasMore, nil
 }
 
 func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, polygonSync, fin uint64, gasUsed uint64, err error) {
@@ -516,8 +520,12 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	defer sd.Close()
 	txc.Doms = sd
 
-	if _, err = mining.Run(nil, txc, false /* firstCycle */, false); err != nil {
+	hasMore, err := mining.Run(nil, txc, false /* firstCycle */, false)
+	if err != nil {
 		return err
+	}
+	if hasMore {
+		return errors.New("unexpected mining step has more work")
 	}
 	return nil
 }
@@ -615,12 +623,20 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		}
 		// Run state sync
 		if !test {
-			if err = stateSync.RunNoInterrupt(nil, txc); err != nil {
+			hasMore, err := stateSync.RunNoInterrupt(nil, txc)
+			if err != nil {
 				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
 					return err
 
 				}
 				return err
+			}
+			if hasMore {
+				// should not ever happen since we exec blocks 1 by 1
+				if err := cleanupProgressIfNeeded(txc.Tx, currentHeader); err != nil {
+					return err
+				}
+				return errors.New("unexpected state step has more work")
 			}
 		}
 
@@ -635,13 +651,23 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 		return err
 	}
 
-	if err = stateSync.RunNoInterrupt(nil, txc); err != nil {
+	hasMore, err := stateSync.RunNoInterrupt(nil, txc)
+	if err != nil {
 		if !test {
 			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
 				return err
 			}
 		}
 		return err
+	}
+	if hasMore {
+		// should not ever happen since we exec blocks 1 by 1
+		if !test {
+			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
+				return err
+			}
+		}
+		return errors.New("unexpected state step has more work")
 	}
 
 	return nil
@@ -656,7 +682,6 @@ func SilkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Confi
 
 func NewDefaultStages(ctx context.Context,
 	db kv.TemporalRwDB,
-	snapDb kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
@@ -666,10 +691,6 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient heimdall.Client,
-	heimdallStore heimdall.Store,
-	bridgeStore bridge.Store,
-	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[common.Hash, common.Address],
 	logger log.Logger,
 	tracer *tracers.Tracer,

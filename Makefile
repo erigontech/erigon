@@ -46,8 +46,7 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-BUILD_TAGS = noboltdb
+BUILD_TAGS =
 
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
@@ -181,29 +180,20 @@ test-erigon-lib-all:
 test-erigon-lib-all-race:
 	@cd erigon-lib && $(MAKE) test-all-race
 
-test-erigon-db-short:
-	@cd erigon-db && $(MAKE) test-short
-
-test-erigon-db-all:
-	@cd erigon-db && $(MAKE) test-all
-
-test-erigon-db-all-race:
-	@cd erigon-db && $(MAKE) test-all-race
-
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short test-erigon-db-short
+test-short: test-erigon-lib-short
 	@{ \
-		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
+		$(GOTEST) -short > run.log 2>&1; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \
 	}
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all test-erigon-db-all
+test-all: test-erigon-lib-all
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -212,7 +202,7 @@ test-all: test-erigon-lib-all test-erigon-db-all
 	}
 
 ## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race test-erigon-db-all-race
+test-all-race: test-erigon-lib-all-race
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
 		STATUS=$$?; \
@@ -238,7 +228,7 @@ define run_suite
     printf "\n\n============================================================"; \
     echo "Running test: $1-$2"; \
     printf "\n"; \
-    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --docker.nocache=true --client erigon $3 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
     fi; \
@@ -292,7 +282,7 @@ eest-hive:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
@@ -337,12 +327,10 @@ lint:
 	@cd erigon-lib && $(MAKE) lint
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
-	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## tidy:                              `go mod tidy`
 tidy:
 	cd erigon-lib && go mod tidy
-	cd erigon-db && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir

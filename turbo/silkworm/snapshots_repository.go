@@ -8,12 +8,12 @@ import (
 
 	silkworm_go "github.com/erigontech/silkworm-go"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -112,8 +112,8 @@ func (r *SnapshotsRepository) updateBlocks(view *freezeblocks.View) error {
 			},
 			Transactions: TransactionsSnapshot{
 				Segment:            memoryMappedFile(segmentTransactions),
-				TxnHashIndex:       memoryMappedFile(segmentTransactions.Index(coresnaptype.Indexes.TxnHash)),
-				TxnHash2BlockIndex: memoryMappedFile(segmentTransactions.Index(coresnaptype.Indexes.TxnHash2BlockNum)),
+				TxnHashIndex:       memoryMappedFile(segmentTransactions.Index(snaptype2.Indexes.TxnHash)),
+				TxnHash2BlockIndex: memoryMappedFile(segmentTransactions.Index(snaptype2.Indexes.TxnHash2BlockNum)),
 			},
 		})
 		if err != nil {

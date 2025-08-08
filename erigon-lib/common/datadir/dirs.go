@@ -25,6 +25,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/gofrs/flock"
@@ -56,6 +57,31 @@ type Dirs struct {
 }
 
 func New(datadir string) Dirs {
+	dirs := Open(datadir)
+
+	dir.MustExist(
+		dirs.Chaindata,
+		dirs.Tmp,
+		dirs.SnapIdx,
+		dirs.SnapHistory,
+		dirs.SnapDomain,
+		dirs.SnapAccessors,
+		dirs.SnapCaplin,
+		dirs.Downloader,
+		dirs.TxPool,
+		dirs.Nodes,
+		dirs.CaplinBlobs,
+		dirs.CaplinIndexing,
+		dirs.CaplinLatest,
+		dirs.CaplinGenesis,
+		dirs.CaplinColumnData,
+	)
+
+	return dirs
+}
+
+// Create new Dirs instance without forcing all the directories to exist.
+func Open(datadir string) Dirs {
 	relativeDataDir := datadir
 	if datadir != "" {
 		var err error
@@ -86,11 +112,6 @@ func New(datadir string) Dirs {
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 	}
-
-	dir.MustExist(dirs.Chaindata, dirs.Tmp,
-		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
-		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis, dirs.CaplinColumnData)
-
 	return dirs
 }
 
@@ -109,14 +130,20 @@ func convertFileLockError(err error) error {
 }
 
 func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
-	// Lock the instance directory to prevent concurrent use by another instance as well as
-	// accidental use of the instance directory as a database.
-	l := flock.New(filepath.Join(dirs.DataDir, "LOCK"))
+	l := dirs.newFlock()
 	locked, err := l.TryLock()
 	if err != nil {
 		return nil, false, convertFileLockError(err)
 	}
 	return l, locked, nil
+}
+
+// Dirs is huge, use pointer receiver to avoid copying it around. Returns a new flock.Flock for the
+// datadir.
+func (dirs *Dirs) newFlock() *flock.Flock {
+	// Lock the instance directory to prevent concurrent use by another instance as well as
+	// accidental use of the instance directory as a database.
+	return flock.New(filepath.Join(dirs.DataDir, "LOCK"))
 }
 
 func (dirs Dirs) MustFlock() (Dirs, *flock.Flock, error) {
@@ -128,6 +155,31 @@ func (dirs Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 		return dirs, l, ErrDataDirLocked
 	}
 	return dirs, l, nil
+}
+
+// Tries a non-blocking lock on the data directory. Converts failure to lock into ErrDataDirLocked.
+// If err is nil, the unlock function must be called to release and close the flock.
+func (dirs *Dirs) TryFlock() (unlock func(), err error) {
+	f := dirs.newFlock()
+	defer func() {
+		if err != nil {
+			f.Close()
+		}
+	}()
+	locked, err := f.TryLock()
+	if err != nil {
+		err = convertFileLockError(err)
+		return
+	}
+	if locked {
+		unlock = func() {
+			// If we fail to unlock the application is in a bad state (we can't recover from this).
+			panicif.Err(f.Unlock())
+		}
+	} else {
+		err = ErrDataDirLocked
+	}
+	return
 }
 
 // ApplyMigrations - if can get flock.
@@ -192,18 +244,18 @@ func CopyFile(from, to string) error {
 	defer w.Close()
 	if _, err = w.ReadFrom(r); err != nil {
 		w.Close()
-		os.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	if err = w.Sync(); err != nil {
 		w.Close()
-		os.Remove(to)
+		dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	return nil
 }
 
-func (d Dirs) RenameOldVersions() error {
+func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -222,7 +274,7 @@ func (d Dirs) RenameOldVersions() error {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1-") {
 					if strings.HasSuffix(name, ".torrent") {
-						if err := os.Remove(path); err != nil {
+						if err := dir.RemoveFile(path); err != nil {
 							return err
 						}
 						torrentsRemoved++
@@ -232,7 +284,7 @@ func (d Dirs) RenameOldVersions() error {
 					if strings.Contains(entry.Name(), "commitment") &&
 						(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 						// remove the file instead of renaming
-						if err := os.Remove(path); err != nil {
+						if err := dir.RemoveFile(path); err != nil {
 							return fmt.Errorf("failed to remove file %s: %w", path, err)
 						}
 						removed++
@@ -253,9 +305,13 @@ func (d Dirs) RenameOldVersions() error {
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
+	if cmdCommand {
+		log.Info(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
+	} else {
+		log.Debug(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
+	}
 	if d.Downloader != "" && (renamed > 0 || removed > 0) {
-		if err := os.RemoveAll(d.Downloader); err != nil {
+		if err := dir.RemoveAll(d.Downloader); err != nil {
 			return err
 		}
 		log.Info(fmt.Sprintf("Removed Downloader directory: %s", d.Downloader))
@@ -281,7 +337,7 @@ func (d Dirs) RenameNewVersions() error {
 				if strings.Contains(dirEntry.Name(), "commitment") &&
 					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 					// remove the file instead of renaming
-					if err := os.Remove(path); err != nil {
+					if err := dir.RemoveFile(path); err != nil {
 						return fmt.Errorf("failed to remove file %s: %w", path, err)
 					}
 					return nil
@@ -304,3 +360,9 @@ func (d Dirs) RenameNewVersions() error {
 
 	return nil
 }
+
+func (d Dirs) PreverifiedPath() string {
+	return filepath.Join(d.Snap, PreverifiedFileName)
+}
+
+const PreverifiedFileName = "preverified.toml"

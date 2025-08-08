@@ -22,8 +22,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -31,6 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/execution/dataflow"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
@@ -230,7 +230,7 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 				err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
 				if err != nil {
 					logger.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
-					if err := u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("Uncle verification failed: %w", err)), tx); err != nil {
+					if err := u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("uncle verification failed: %w", err)), tx); err != nil {
 						return false, err
 					}
 					return true, nil
