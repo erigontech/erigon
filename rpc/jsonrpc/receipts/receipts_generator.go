@@ -314,13 +314,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		JumpDestCache: vm.NewJumpDestCache(16),
 	}
 
-	evm := core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
-	go func() {
-		<-ctx.Done()
-		evm.Cancel()
-	}()
 
 	for i, txn := range block.Transactions() {
 		select {
@@ -329,7 +324,12 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		default:
 		}
 
-		evm = core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vmCfg)
+		evm := core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vmCfg)
+		go func() {
+			<-ctx.Done()
+			evm.Cancel()
+		}()
+
 		genEnv.ibs.SetTxContext(blockNum, i)
 		receipt, _, err := core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
 		if err != nil {
