@@ -123,5 +123,5 @@ cache/
 zk/debug_tools/rpc-cache/cache.db
 zk/debug_tools/rpc-cache/rpc-cache
 
-dynamic*.json
-dynamic*.yaml
+/dynamic*.json
+/dynamic*.yaml
