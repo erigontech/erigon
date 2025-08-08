@@ -18,4 +18,4 @@ then
 	exit 2
 fi
 
-GOEXPERIMENT=synctest golangci-lint run --config ./.golangci.yml
+golangci-lint run --config ./.golangci.yml

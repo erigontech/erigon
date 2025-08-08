@@ -4,6 +4,7 @@ run:
     - nosqlite
     - noboltdb
     - nosilkworm
+    - synctest
 linters:
   enable:
     - asasalint
