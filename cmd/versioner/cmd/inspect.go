@@ -3,7 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/spf13/cobra"
 	"reflect"
 	"strings"

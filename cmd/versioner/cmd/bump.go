@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +18,7 @@ var bumpCmd = &cobra.Command{
 		//	return fmt.Errorf("--domain, --facet and --to flags are required")
 		//}
 		fmt.Printf("Bumping %s.%s to %s\n", domain, facet, newVersion)
-		return state.GenerateSchemaVersions("./erigon-lib/state/versions.yaml", "./erigon-lib/state/version_schema_gen.go")
+		return state.GenerateSchemaVersions("./db/state/versions.yaml", "./db/state/version_schema_gen.go")
 	},
 }
 

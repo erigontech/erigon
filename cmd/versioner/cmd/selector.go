@@ -4,7 +4,7 @@ import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/state"
 	"slices"
 )
 
