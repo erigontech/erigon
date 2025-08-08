@@ -41,9 +41,9 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
+	"github.com/erigontech/erigon/execution/trie"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports

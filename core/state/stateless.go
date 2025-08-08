@@ -24,8 +24,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/execution/trie"
 )
 
 var (
