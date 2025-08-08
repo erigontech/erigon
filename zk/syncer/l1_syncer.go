@@ -68,6 +68,7 @@ type L1Syncer struct {
 	blockRange          uint64
 	queryDelay          uint64
 
+	firstL1Block  uint64
 	latestL1Block uint64
 
 	// atomic
@@ -84,7 +85,7 @@ type L1Syncer struct {
 	highestBlockType string // finalized, latest, safe
 }
 
-func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string) *L1Syncer {
+func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string, firstL1Block uint64) *L1Syncer {
 	return &L1Syncer{
 		ctx:                 ctx,
 		etherMans:           etherMans,
@@ -97,6 +98,7 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		logsChan:            make(chan []ethTypes.Log),
 		logsChanProgress:    make(chan string),
 		highestBlockType:    highestBlockType,
+		firstL1Block:        firstL1Block,
 	}
 }
 
@@ -563,15 +565,13 @@ func (s *L1Syncer) CheckL1BlockFinalized(blockNo uint64) (finalized bool, finali
 }
 
 func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
-	log.Info("QueryForRootLog", "to", to, "l1ContractAddresses", s.l1ContractAddresses, "topics", s.topics)
-
 	var logs []ethTypes.Log
 	var err error
 	retry := 0
 	for {
 		em := s.getNextEtherman()
 		query := ethereum.FilterQuery{
-			FromBlock: new(big.Int).SetUint64(0),
+			FromBlock: new(big.Int).SetUint64(s.firstL1Block),
 			ToBlock:   new(big.Int).SetUint64(to),
 			Addresses: s.l1ContractAddresses,
 			Topics:    s.topics,
