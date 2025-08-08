@@ -137,6 +137,7 @@ type Zk struct {
 	SkipSmt                bool
 	OnlySmtV2              bool
 	SequencerBlockGasLimit uint64
+	PessimisticForkNumber  uint64
 }
 
 type Hardfork string

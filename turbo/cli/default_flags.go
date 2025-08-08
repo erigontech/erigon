@@ -343,4 +343,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.SkipSmt,
 	&utils.OnlySmtV2,
 	&utils.SequencerBlockGasLimit,
+	&utils.PessimisticForkNumber,
 }

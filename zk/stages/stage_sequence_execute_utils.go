@@ -51,6 +51,7 @@ const (
 var (
 	noop                 = state.NewNoopWriter()
 	SpecialZeroIndexHash = common.HexToHash("0x27AE5BA08D7291C96C8CBDDCC148BF48A6D68C7974B94356F53754EF6171D757")
+	EmptyWithdrawalsHash = common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 )
 
 type HasChangeSetWriter interface {
@@ -228,6 +229,7 @@ type ForkDb interface {
 	GetForkId(batch uint64) (uint64, error)
 	WriteForkIdBlockOnce(forkId, block uint64) error
 	WriteForkId(batch, forkId uint64) error
+	WriteNewForkHistory(forkId, lastVerifiedBatch uint64) error
 }
 
 func prepareForkId(lastBatch, executionAt uint64, hermezDb ForkDb, cfg SequenceBlockCfg) (latest uint64, err error) {
@@ -237,17 +239,32 @@ func prepareForkId(lastBatch, executionAt uint64, hermezDb ForkDb, cfg SequenceB
 		return 0, err
 	}
 
-	if cfg.zk.Commitment.IsType1() {
-		if len(allForks) == 1 && allForks[0] == 0 {
-			// we are in normalcy on a network that has never had an FEP rollup type
-			// assigned to it, so there is no fork history to use here.  So we default
-			// to the highest available fork id (13) to ensure we're using the latest
-			// methods for decoding things like the injected batch (read from disk in normalcy).
-			return 13, nil
-		}
-	}
-
 	nextBatch := lastBatch + 1
+
+	if len(allForks) == 1 && allForks[0] == 0 {
+		// we are running on a network that has never had an FEP rollup type
+		// assigned to it, so there is no fork history to use here.  So we fall back
+		// to the fork number specified in the config.  If this config isn't set then
+		// we return an error to notify that the flag must be set.
+		log.Info("No fork history found, checking for PP fork number", "batch", nextBatch)
+
+		ppFork := cfg.zk.PessimisticForkNumber
+		if ppFork == 0 {
+			return 0, fmt.Errorf("zkevm.pessimistic-fork-number flag must be set when running on a network that has never had an FEP rollup type assigned to it")
+		}
+
+		log.Info("Upgrading fork id", "from", 0, "to", ppFork, "batch", nextBatch)
+		if err := hermezDb.WriteForkIdBlockOnce(ppFork, executionAt+1); err != nil {
+			return latest, err
+		}
+
+		if err := hermezDb.WriteNewForkHistory(ppFork, nextBatch); err != nil {
+			return latest, err
+		}
+		log.Info("Written fork history for PP fork", "fork", ppFork, "batch", nextBatch)
+
+		return ppFork, nil
+	}
 
 	// iterate over the batch boundaries and find the latest fork that applies
 	for idx, batch := range allBatches {
@@ -314,6 +331,10 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 
 	if !chainConfig.IsNormalcy(previousBlockNumber + 1) {
 		header.GasLimit = utils.GetBlockGasLimitForFork(forkId)
+	}
+
+	if chainConfig.IsShanghai(header.Time) {
+		header.WithdrawalsHash = &EmptyWithdrawalsHash
 	}
 
 	header.Coinbase = coinbase
