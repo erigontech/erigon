@@ -77,15 +77,16 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.24](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 3.2T (Aug 2025). FullNode: 1.5TB (May 2025)
-- ArchiveNode Gnosis: 1.2T (Aug 2025). FullNode: 500GB (June 2024)
-- ArchiveNode Polygon Mainnet: 5.7T (Aug 2024). FullNode: 2Tb (April 2024)
+- ArchiveNode Ethereum Mainnet: 2TB (May 2025). FullNode: 1.1TB (May 2025)
+- ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
+- ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
-Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like gp3): Blocks Execution is slow
+Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
+gp3): Blocks Execution is slow
 on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
@@ -135,7 +136,7 @@ Running `make help` will list and describe the convenience commands available in
 2. Upgrade your Erigon binary.
 3. OPTIONAL: Upgrade snapshot files.
    1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
-   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See #snapshots-reset for more details.
+   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See [Resetting snapshots](#Resetting-snapshots) for more details.
 4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset your datadir, Erigon will sync to the latest remote snapshots.
 
 ### Datadir structure
@@ -182,31 +183,31 @@ datadir
 ### Erigon3 datadir size
 
 ```sh
-# eth-mainnet - archive - Aug 2025
+# eth-mainnet - archive - Nov 2024
 
 du -hsc /erigon/chaindata
 15G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-140G 	/erigon/snapshots/accessor
-250G	/erigon/snapshots/domain
-600G	/erigon/snapshots/history
-250G	/erigon/snapshots/idx
-3.1T	/erigon/snapshots
+120G 	/erigon/snapshots/accessor
+300G	/erigon/snapshots/domain
+280G	/erigon/snapshots/history
+430G	/erigon/snapshots/idx
+2.3T	/erigon/snapshots
 ```
 
 ```sh
-# bor-mainnet - archive - Aug 2025
+# bor-mainnet - archive - Nov 2024
 
 du -hsc /erigon/chaindata
-30G 	/erigon/chaindata
+20G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-400G	/erigon-data/snapshots/accessor
+360G	/erigon-data/snapshots/accessor
 1.1T	/erigon-data/snapshots/domain
-1.9G	/erigon-data/snapshots/history
-900T	/erigon-data/snapshots/idx
-5.7T	/erigon/snapshots
+750G	/erigon-data/snapshots/history
+1.5T	/erigon-data/snapshots/idx
+4.9T	/erigon/snapshots
 ```
 
 ### Erigon3 changes from Erigon2
@@ -220,10 +221,11 @@ du -hsc /erigon/snapshots/*
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
-  - `chaindata` is less than `30gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+  - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
-- **Beacon state Archive:* `--caplin.blocks-archive`, `caplin.states-archive`, `--caplin.blobs-archive`
-- **ExecutionStage included many E2 stages:* stage_hash_state, stage_trie, log_index, history_index, trace_index
+- **Other changes:**
+    - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
+    - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
 
 ### Logging
 

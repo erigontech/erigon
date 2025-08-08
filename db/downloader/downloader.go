@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"iter"
 	"math"
@@ -38,10 +37,15 @@ import (
 	"time"
 
 	"github.com/anacrolix/chansync"
+	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/anacrolix/torrent/webseed"
 	"github.com/c2h5oh/datasize"
 	"github.com/puzpuzpuz/xsync/v4"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
@@ -49,23 +53,17 @@ import (
 	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
 	"github.com/anacrolix/missinggo/v2/panicif"
 
-	g "github.com/anacrolix/generics"
-	"golang.org/x/sync/errgroup"
-
-	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/storage"
-
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 var debugWebseed = false

@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
@@ -65,7 +64,8 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/diagnostics"
@@ -801,7 +801,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorEvents skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+			snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
+			if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
 				return err
 			}
 		case integrity.BorSpans:
@@ -809,7 +810,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorSpans skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
+			if err := heimdall.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
@@ -817,11 +818,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorCheckpoints skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
-				return err
-			}
-		case integrity.ReceiptsNoDups:
-			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
+			if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.RCacheNoDups:
@@ -1575,7 +1572,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 	}
 
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore, bridgeStore)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
@@ -1846,7 +1843,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	compresCfg.Workers = workers
 	var word = make([]byte, 0, 4096)
 
-	if info.Type.Enum() == coresnaptype.Enums.Headers || info.Type.Enum() == coresnaptype.Enums.Bodies {
+	if info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies {
 		for g.HasNext() {
 			if blockFrom%1000 == 0 {
 				if compressor != nil {
@@ -1876,24 +1873,24 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			}
 			compressor.Close()
 		}
-	} else if info.Type.Enum() != coresnaptype.Enums.Transactions {
+	} else if info.Type.Enum() != snaptype2.Enums.Transactions {
 		return fmt.Errorf("unsupported type %s", info.Type.Enum().String())
 	} else {
 		// tx unmerge
 		for ; blockFrom < blockTo; blockFrom += 1000 {
-			um_fileinfo := coresnaptype.Enums.Bodies.Type().FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
+			um_fileinfo := snaptype2.Enums.Bodies.Type().FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
 			bodiesSegment, err := seg.NewDecompressor(um_fileinfo.Path)
 			if err != nil {
 				return err
 			}
 			defer bodiesSegment.Close()
 
-			_, expectedCount, err := coresnaptype.TxsAmountBasedOnBodiesSnapshots(bodiesSegment, um_fileinfo.Len()-1)
+			_, expectedCount, err := snaptype2.TxsAmountBasedOnBodiesSnapshots(bodiesSegment, um_fileinfo.Len()-1)
 			if err != nil {
 				return err
 			}
 
-			txfileinfo := um_fileinfo.As(coresnaptype.Enums.Transactions.Type())
+			txfileinfo := um_fileinfo.As(snaptype2.Enums.Transactions.Type())
 			compressor, err = seg.NewCompressor(ctx, "unmerge", txfileinfo.Path, dirs.Tmp, compresCfg, log.LvlTrace, logger)
 			if err != nil {
 				return err
@@ -2000,7 +1997,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 
-	from2, to2, ok := freezeblocks.CanRetire(to, blocksInSnapshots, coresnaptype.Enums.Headers, nil)
+	from2, to2, ok := freezeblocks.CanRetire(to, blocksInSnapshots, snaptype2.Enums.Headers, nil)
 	if ok {
 		from, to = from2, to2
 	}
