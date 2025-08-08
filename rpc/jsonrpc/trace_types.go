@@ -95,11 +95,11 @@ type CallTraceAction struct {
 }
 
 type CreateTraceAction struct {
-	From  common.Address  `json:"from"`
-        CreationMethod string `json:"creationMethod"`
-	Gas   hexutil.Big     `json:"gas"`
-	Init  hexutil.Bytes   `json:"init"`
-	Value hexutil.Big     `json:"value"`
+	From           common.Address `json:"from"`
+	CreationMethod string         `json:"creationMethod"`
+	Gas            hexutil.Big    `json:"gas"`
+	Init           hexutil.Bytes  `json:"init"`
+	Value          hexutil.Big    `json:"value"`
 }
 
 type SuicideTraceAction struct {
