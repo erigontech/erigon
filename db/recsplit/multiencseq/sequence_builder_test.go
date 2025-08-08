@@ -3,9 +3,10 @@ package multiencseq
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 )
 
 func TestMultiEncodingSeqBuilder(t *testing.T) {
