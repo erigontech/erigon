@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -48,6 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
