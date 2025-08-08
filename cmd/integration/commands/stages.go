@@ -266,9 +266,7 @@ var cmdPrintStages = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		logger := debug.SetupCobra(cmd, "integration")
-		mem.Print()
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
-		mem.Print()
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return

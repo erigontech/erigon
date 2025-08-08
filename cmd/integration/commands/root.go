@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -92,7 +93,9 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 		panic(opts.GetLabel())
 	}
 
+	mem.Print("before open mdbx")
 	rawDB := opts.MustOpen()
+	mem.Print("after open mdbx")
 	if applyMigrations {
 		migrator := migrations.NewMigrator(opts.GetLabel())
 		has, err := migrator.HasPendingMigrations(rawDB)
@@ -117,6 +120,8 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	}
 
 	_, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
+	mem.Print("after open files")
+
 	if err != nil {
 		return nil, err
 	}
