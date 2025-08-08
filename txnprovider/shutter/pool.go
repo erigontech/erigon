@@ -62,16 +62,31 @@ func NewPool(
 	opts ...Option,
 ) *Pool {
 	logger = logger.New("component", "shutter")
-	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
-	flatOpts := options{slotCalculator: slotCalculator}
+	flatOpts := options{}
 	for _, opt := range opts {
 		opt(&flatOpts)
 	}
+
 	blockListener := NewBlockListener(logger, stateChangesClient)
 	blockTracker := NewBlockTracker(logger, blockListener, currentBlockNumReader)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
-	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, flatOpts.slotCalculator, eonTracker)
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
+
+	var slotCalculator SlotCalculator
+	if flatOpts.slotCalculator != nil {
+		slotCalculator = flatOpts.slotCalculator
+	} else {
+		slotCalculator = NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
+	}
+
+	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
+	var decryptionKeysSource DecryptionKeysSource
+	if flatOpts.decryptionKeysSourceFactory != nil {
+		decryptionKeysSource = flatOpts.decryptionKeysSourceFactory(decryptionKeysValidator)
+	} else {
+		decryptionKeysSource = NewPubSubDecryptionKeysSource(logger, config.P2pConfig, decryptionKeysValidator)
+	}
+
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysSource)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
 	decryptedTxnsPool := NewDecryptedTxnsPool()
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(
@@ -80,7 +95,7 @@ func NewPool(
 		encryptedTxnsPool,
 		decryptedTxnsPool,
 		blockListener,
-		flatOpts.slotCalculator,
+		slotCalculator,
 	)
 	return &Pool{
 		logger:                  logger,
@@ -93,7 +108,7 @@ func NewPool(
 		decryptionKeysProcessor: decryptionKeysProcessor,
 		encryptedTxnsPool:       encryptedTxnsPool,
 		decryptedTxnsPool:       decryptedTxnsPool,
-		slotCalculator:          flatOpts.slotCalculator,
+		slotCalculator:          slotCalculator,
 	}
 }
 
@@ -307,6 +322,13 @@ func WithSlotCalculator(slotCalculator SlotCalculator) Option {
 	}
 }
 
+func WithDecryptionKeysSourceFactory(factory DecryptionKeysSourceFactory) Option {
+	return func(opts *options) {
+		opts.decryptionKeysSourceFactory = factory
+	}
+}
+
 type options struct {
-	slotCalculator SlotCalculator
+	slotCalculator              SlotCalculator
+	decryptionKeysSourceFactory DecryptionKeysSourceFactory
 }

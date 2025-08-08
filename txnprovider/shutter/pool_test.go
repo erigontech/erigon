@@ -23,18 +23,16 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -49,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -60,12 +57,7 @@ import (
 )
 
 func TestPoolCleanup(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-	pt := NewPoolTest(t)
+	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
 		// simulate expected contract calls for reading the first ekg after the first block event
 		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
@@ -113,12 +105,7 @@ func TestPoolCleanup(t *testing.T) {
 }
 
 func TestPoolSkipsBlobTxns(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-	pt := NewPoolTest(t)
+	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
 		// simulate expected contract calls for reading the first ekg after the first block event
 		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
@@ -160,12 +147,7 @@ func TestPoolSkipsBlobTxns(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-	pt := NewPoolTest(t)
+	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
 		// simulate expected contract calls for reading the first ekg after the first block event
 		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
@@ -222,122 +204,57 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 	})
 }
 
-func NewPoolTest(t *testing.T) PoolTest {
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	t.Cleanup(cancel)
-	logger := testlog.Logger(t, log.LvlTrace)
-	logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
-	logger.SetHandler(logHandler)
-	dataDir := t.TempDir()
-	nodeKeyConfig := p2p.NodeKeyConfig{}
-	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(dataDir))
-	require.NoError(t, err)
-	poolP2pPrivKeyBytes := make([]byte, 32)
-	nodeKey.D.FillBytes(poolP2pPrivKeyBytes)
-	poolP2pPrivKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(poolP2pPrivKeyBytes)
-	require.NoError(t, err)
-	poolPeerId, err := peer.IDFromPrivateKey(poolP2pPrivKey)
-	require.NoError(t, err)
-	keySenderPrivKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	keySenderPrivKeyBytes := make([]byte, 32)
-	keySenderPrivKey.D.FillBytes(keySenderPrivKeyBytes)
-	keySenderP2pPrivKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(keySenderPrivKeyBytes)
-	require.NoError(t, err)
-	keySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, 0, keySenderP2pPrivKey)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		err := keySender.Close()
-		require.NoError(t, err)
-	})
-	keySenderPeerId, err := peer.IDFromPrivateKey(keySenderP2pPrivKey)
-	require.NoError(t, err)
-	keySenderListenAddresses, err := keySender.InterfaceListenAddresses()
-	require.NoError(t, err)
-	var keySenderPort uint64 // get the port that the OS assigned to the key sender (we used localhost:0)
-	for _, addr := range keySenderListenAddresses {
-		for _, protocol := range addr.Protocols() {
-			if protocol.Code == multiaddr.P_TCP {
-				keySenderPortStr, err := addr.ValueForProtocol(multiaddr.P_TCP)
-				require.NoError(t, err)
-				keySenderPort, err = strconv.ParseUint(keySenderPortStr, 10, 64)
-				require.NoError(t, err)
-			}
-		}
-	}
-	require.Greater(t, keySenderPort, uint64(0))
-	require.NoError(t, err)
-	keySenderPeerAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", keySenderPort, keySenderPeerId)
-	config := shuttercfg.ConfigByChainName(networkname.Chiado)
-	config.PrivateKey = nodeKey
-	config.BootstrapNodes = []string{keySenderPeerAddr}
-	config.ReorgDepthAwareness = 3
-	baseTxnProvider := EmptyTxnProvider{}
-	ctrl := gomock.NewController(t)
-	contractBackend := NewMockContractBackend(ctrl)
-	contractBackend.PrepareMocks()
-	stateChangesClient := NewMockStateChangesClient(ctrl)
-	currentBlockNumReader := func(context.Context) (*uint64, error) { return nil, nil }
-	slotCalculator := NewMockSlotCalculator(ctrl, config)
-	slotCalculator.PrepareMocks(t)
-	pool := shutter.NewPool(
-		logger,
-		config,
-		baseTxnProvider,
-		contractBackend,
-		stateChangesClient,
-		currentBlockNumReader,
-		shutter.WithSlotCalculator(slotCalculator),
-	)
-	return PoolTest{
-		ctx:                ctx,
-		t:                  t,
-		config:             config,
-		logHandler:         logHandler,
-		stateChangesClient: stateChangesClient,
-		contractBackend:    contractBackend,
-		slotCalculator:     slotCalculator,
-		keySender:          keySender,
-		poolPeerId:         poolPeerId,
-		pool:               pool,
-	}
-}
-
 type PoolTest struct {
-	ctx                context.Context
-	t                  *testing.T
-	config             shuttercfg.Config
-	logHandler         *testhelpers.CollectingLogHandler
-	stateChangesClient *MockStateChangesClient
-	contractBackend    *MockContractBackend
-	slotCalculator     *MockSlotCalculator
-	keySender          testhelpers.DecryptionKeysSender
-	poolPeerId         peer.ID
-	pool               *shutter.Pool
+	*testing.T
 }
 
-func (pt PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle)) {
-	ctx, cancel := context.WithTimeout(pt.t.Context(), time.Minute)
-	pt.t.Cleanup(cancel)
-	eg := errgroup.Group{}
-	eg.Go(func() error { return pt.pool.Run(ctx) })
-	err := pt.keySender.WaitExternalPeerConnection(ctx, pt.poolPeerId)
-	require.NoError(pt.t, err)
-	handle := PoolTestHandle{
-		config:             pt.config,
-		logHandler:         pt.logHandler,
-		stateChangesClient: pt.stateChangesClient,
-		slotCalculator:     pt.slotCalculator,
-		contractBackend:    pt.contractBackend,
-		keySender:          pt.keySender,
-		pool:               pt.pool,
-		nextBlockNum:       1,
-		nextBlockTime:      pt.config.BeaconChainGenesisTimestamp + pt.config.SecondsPerSlot,
-	}
-	testCase(pt.ctx, pt.t, pt.pool, handle)
-	cancel()
-	err = eg.Wait()
-	require.ErrorIs(pt.t, err, context.Canceled)
+func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle)) {
+	synctest.Run(func() {
+		t.Parallel()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		t.Cleanup(cancel)
+		logger := testlog.Logger(t.T, log.LvlTrace)
+		logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
+		logger.SetHandler(logHandler)
+		config := shuttercfg.ConfigByChainName(networkname.Chiado)
+		config.ReorgDepthAwareness = 3
+		baseTxnProvider := EmptyTxnProvider{}
+		ctrl := gomock.NewController(t)
+		contractBackend := NewMockContractBackend(ctrl)
+		stateChangesClient := NewMockStateChangesClient(ctrl)
+		currentBlockNumReader := func(context.Context) (*uint64, error) { return nil, nil }
+		slotCalculator := NewMockSlotCalculator(ctrl, config)
+		keySenderFactory := &MockDecryptionKeysSourceFactory{}
+		pool := shutter.NewPool(
+			logger,
+			config,
+			baseTxnProvider,
+			contractBackend,
+			stateChangesClient,
+			currentBlockNumReader,
+			shutter.WithSlotCalculator(slotCalculator),
+			shutter.WithDecryptionKeysSourceFactory(keySenderFactory.NewDecryptionKeysSource),
+		)
+
+		contractBackend.PrepareMocks()
+		slotCalculator.PrepareMocks(t.T)
+		eg := errgroup.Group{}
+		eg.Go(func() error { return pool.Run(ctx) })
+		handle := PoolTestHandle{
+			config:             config,
+			logHandler:         logHandler,
+			stateChangesClient: stateChangesClient,
+			slotCalculator:     slotCalculator,
+			contractBackend:    contractBackend,
+			keySender:          keySenderFactory.sender,
+			nextBlockNum:       1,
+			nextBlockTime:      config.BeaconChainGenesisTimestamp + config.SecondsPerSlot,
+		}
+		testCase(ctx, t.T, pool, handle)
+		cancel()
+		err := eg.Wait()
+		require.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 type PoolTestHandle struct {
@@ -346,8 +263,7 @@ type PoolTestHandle struct {
 	stateChangesClient *MockStateChangesClient
 	contractBackend    *MockContractBackend
 	slotCalculator     *MockSlotCalculator
-	keySender          testhelpers.DecryptionKeysSender
-	pool               *shutter.Pool
+	keySender          *MockKeySender
 	nextBlockNum       uint64
 	nextBlockTime      uint64
 }
@@ -449,7 +365,7 @@ func (h *PoolTestHandle) SimulateDecryptionKeys(
 	ips ...*shutter.IdentityPreimage,
 ) {
 	slot := h.slotCalculator.CalcCurrentSlot()
-	err := h.keySender.PublishDecryptionKeys(ctx, ekg, slot, baseTxnIndex, ips, h.config.InstanceId)
+	err := h.keySender.SimulateDecryptionKeys(ctx, ekg, slot, baseTxnIndex, ips, h.config.InstanceId)
 	require.NoError(t, err)
 }
 
@@ -656,6 +572,84 @@ func (c *MockSlotCalculator) PrepareMocks(t *testing.T) {
 		CalcSlotStartTimestamp(gomock.Any()).
 		DoAndReturn(func(u uint64) uint64 { return c.real.CalcSlotStartTimestamp(u) }).
 		AnyTimes()
+}
+
+type MockDecryptionKeysSourceFactory struct {
+	sender *MockKeySender
+}
+
+func (f *MockDecryptionKeysSourceFactory) NewDecryptionKeysSource(validator pubsub.ValidatorEx) shutter.DecryptionKeysSource {
+	f.sender = &MockKeySender{validator: validator}
+	return f.sender
+}
+
+type MockKeySender struct {
+	mu        sync.Mutex
+	subs      []MockDecryptionKeysSubscription
+	validator pubsub.ValidatorEx
+}
+
+func (m *MockKeySender) Run(_ context.Context) error {
+	return nil
+}
+
+func (m *MockKeySender) Subscribe(_ context.Context) (shutter.DecryptionKeysSubscription, error) {
+	sub := make(MockDecryptionKeysSubscription)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.subs = append(m.subs, sub)
+	return sub, nil
+}
+
+func (m *MockKeySender) SimulateDecryptionKeys(
+	ctx context.Context,
+	ekg testhelpers.EonKeyGeneration,
+	slot uint64,
+	baseTxnIndex uint64,
+	ips []*shutter.IdentityPreimage,
+	instanceId uint64,
+) error {
+	envelope, err := testhelpers.DecryptionKeysPublishMsgEnveloped(ekg, slot, baseTxnIndex, ips, instanceId)
+	if err != nil {
+		return err
+	}
+
+	msg := testhelpers.MockDecryptionKeysMsg(shutter.DecryptionKeysTopic, envelope)
+	status := m.validator(ctx, "/p2p/mock-key-sender", msg)
+	if status != pubsub.ValidationAccept {
+		return fmt.Errorf("mock key sender rejected msg")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var eg errgroup.Group
+	for _, sub := range m.subs {
+		eg.Go(func() error {
+			return sub.Consume(ctx, msg)
+		})
+	}
+
+	return eg.Wait()
+}
+
+type MockDecryptionKeysSubscription chan *pubsub.Message
+
+func (s MockDecryptionKeysSubscription) Next(ctx context.Context) (*pubsub.Message, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case msg := <-s:
+		return msg, nil
+	}
+}
+
+func (s MockDecryptionKeysSubscription) Consume(ctx context.Context, m *pubsub.Message) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case s <- m:
+		return nil
+	}
 }
 
 func MockTxnSubmittedEventLog(
