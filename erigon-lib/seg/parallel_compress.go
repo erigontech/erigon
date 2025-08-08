@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"os"
 	"slices"
@@ -301,7 +302,7 @@ func (c *Compressor) compressWithPatternCandidates(ctx context.Context, countMet
 
 	var err error
 	intermediatePath := segmentFilePath + ".tmp"
-	defer os.Remove(intermediatePath)
+	defer dir.RemoveFile(intermediatePath)
 	var intermediateFile *os.File
 	if intermediateFile, err = os.Create(intermediatePath); err != nil {
 		return fmt.Errorf("create intermediate file: %w", err)

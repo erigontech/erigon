@@ -288,7 +288,7 @@ func (c *Compressor) CompressWithCustomMetadata(countMetaField, emptyWordsCountM
 			return err
 		}
 	}
-	defer os.Remove(c.tmpOutFilePath)
+	defer dir2.RemoveFile(c.tmpOutFilePath)
 
 	cf, err := os.Create(c.tmpOutFilePath)
 	if err != nil {
@@ -393,7 +393,7 @@ func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
 		return
 	}
 
-	// Remove the element with smallest score
+	// RemoveFile the element with smallest score
 	elem := heap.Pop(db).(*Pattern)
 	if elem == nil {
 		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
@@ -425,7 +425,7 @@ func (db *DictionaryBuilder) finish(hardLimit int) {
 	}
 
 	for db.Len() > hardLimit {
-		// Remove the element with smallest score
+		// RemoveFile the element with smallest score
 		heap.Pop(db)
 	}
 }
@@ -895,7 +895,7 @@ func (f *RawWordsFile) Close() {
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	os.Remove(f.filePath)
+	dir2.RemoveFile(f.filePath)
 }
 func (f *RawWordsFile) Append(v []byte) error {
 	f.count++

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -921,7 +920,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	db.Close()
 
 	// remove database files
-	require.NoError(t, os.RemoveAll(dirs.Chaindata))
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
 	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
@@ -1457,7 +1456,7 @@ func TestRebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	for _, fn := range fnames {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
-			require.NoError(t, os.Remove(fn))
+			require.NoError(t, dir.RemoveFile(fn))
 			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
@@ -1522,7 +1521,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	require.True(t, exist)
 	agg.closeDirtyFiles() // because windows
 
-	require.NoError(t, os.Remove(codeMergedFile))
+	require.NoError(t, dir.RemoveFile(codeMergedFile))
 
 	require.NoError(t, agg.OpenFolder())
 	tx, err = tdb.BeginTemporalRo(context.Background())

@@ -34,13 +34,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/downloader"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/types"
@@ -91,7 +92,7 @@ func cmp(cliCtx *cli.Context) error {
 			return err
 		}
 		tempDir = dataDir
-		defer os.RemoveAll(dataDir)
+		defer dir.RemoveAll(dataDir)
 	} else {
 		tempDir = filepath.Join(dataDir, "temp")
 
@@ -277,13 +278,13 @@ func cmp(cliCtx *cli.Context) error {
 		})
 	} else {
 		for _, snapType := range snapTypes {
-			if snapType.Enum() == coresnaptype.Enums.Headers {
+			if snapType.Enum() == snaptype2.Enums.Headers {
 				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
 					return c.compareHeaders(ctx, h1ents, h2ents, headerWorkers, logger)
 				})
 			}
 
-			if snapType.Enum() == coresnaptype.Enums.Bodies {
+			if snapType.Enum() == snaptype2.Enums.Bodies {
 				funcs = append(funcs, func(ctx context.Context) (time.Duration, time.Duration, time.Duration, error) {
 					return c.compareBodies(ctx, b1ents, b2ents, bodyWorkers, logger)
 				})
@@ -342,11 +343,11 @@ func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, las
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {
 
-					if snapInfo.Type().Enum() == coresnaptype.Enums.Headers {
+					if snapInfo.Type().Enum() == snaptype2.Enums.Headers {
 						hents = append(hents, ent)
 					}
 
-					if snapInfo.Type().Enum() == coresnaptype.Enums.Bodies {
+					if snapInfo.Type().Enum() == snaptype2.Enums.Bodies {
 						found := false
 
 						for _, bent := range bents {
@@ -362,7 +363,7 @@ func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, las
 						}
 					}
 
-					if snapInfo.Type().Enum() == coresnaptype.Enums.Transactions {
+					if snapInfo.Type().Enum() == snaptype2.Enums.Transactions {
 						found := false
 
 						for _, bent := range bents {
@@ -499,8 +500,8 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
 
 					g, gctx = errgroup.WithContext(ctx)
 					g.SetLimit(2)
@@ -561,7 +562,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				f2snaps.Close()
 
 				for _, file := range files {
-					os.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err
@@ -635,7 +636,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 					logger.Info("Indexing " + ent1.Body.Name())
 
-					return coresnaptype.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return snaptype2.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -673,7 +674,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info("Indexing " + ent1.Transactions.Name())
-					return coresnaptype.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return snaptype2.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				b2err := make(chan error, 1)
@@ -709,7 +710,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info("Indexing " + ent2.Body.Name())
-					return coresnaptype.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return snaptype2.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -750,7 +751,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info("Indexing " + ent2.Transactions.Name())
-					return coresnaptype.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return snaptype2.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				if err := g.Wait(); err != nil {
@@ -778,8 +779,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
 
 					return func() error {
 						for i := ent1.From; i < ent1.To; i++ {
@@ -816,7 +817,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				f2snaps.Close()
 
 				for _, file := range files {
-					os.Remove(file)
+					dir.RemoveFile(file)
 				}
 
 				return err
