@@ -204,7 +204,7 @@ test-all: test-erigon-lib-all
 ## test-all-race:             run all tests with the race flag
 test-all-race: test-erigon-lib-all-race
 	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
+		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \
