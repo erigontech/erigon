@@ -1101,7 +1101,7 @@ func (c *Bor) checkAndCommitSpan(header *types.Header, syscall consensus.SystemC
 		}
 	}
 
-	fmt.Printf("CURRENT_SPAN_2 = %+v\n", currentSpan)
+	// fmt.Printf("CURRENT_SPAN_2 = %+v\n", currentSpan)
 
 	// For subsequent calls, commit the next span on the first block of the last sprint of a span
 	sprintLength := c.config.CalculateSprintLength(headerNumber)

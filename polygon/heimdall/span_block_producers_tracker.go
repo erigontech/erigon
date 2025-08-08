@@ -166,6 +166,8 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	}
 	fmt.Printf("UPDATE_PRIORITY(observe_span(producers)):  validatorset=%+v\n", producers)
 
+	fmt.Printf(">>>>>>>>>>>>>>> newSpan.Id=%d newsSpan.Producers()=%+v\n", newSpan.Id, newSpan.Producers())
+
 	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducers.IncrementProposerPriority(1)
 	newProducerSelection := &SpanBlockProducerSelection{
@@ -208,12 +210,12 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 
 	// have we previously calculated the producers for the same sprint num (chain tip optimisation)
 	if selection, ok := t.recentSelections.Get(currentSprintNum); ok {
+		fmt.Printf("PRODUCERS_1: blockNum=%d , spanId=%d, producers=%+v\n", blockNum, selection.SpanId, selection.Producers.Copy())
 		return selection.Producers.Copy(), 0, nil
 	}
 
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
 	spanId := SpanIdAt(blockNum)
-	fmt.Printf("PRODUCERS: blockNum=%d, spanId=%d\n", blockNum, spanId)
 	var prevSprintNum uint64
 	if currentSprintNum > 0 {
 		prevSprintNum = currentSprintNum - 1
@@ -224,7 +226,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		selectionCopy := selection
 		selectionCopy.Producers = producersCopy
 		t.recentSelections.Add(currentSprintNum, selectionCopy)
-		fmt.Printf("INCREASE_PRIORITY(1): blockNum=%d, validatorset=%+v\n", blockNum, producersCopy)
+		fmt.Printf("INCREASE_PRIORITY(1), PRODUCERS_2: blockNum=%d, spanId=%d, prevSprintNum=%d,  currentSprintNum=-%d, validatorset=%+v\n", blockNum, spanId, prevSprintNum, currentSprintNum, producersCopy)
 		return producersCopy, 1, nil
 	}
 
@@ -250,7 +252,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
-	fmt.Printf("INCREASE_PRIORITY(2): blockNum=%d, validatorset=%+v\n", blockNum, producers)
+	fmt.Printf("INCREASE_PRIORITY(2), PRODUCERS_3: blockNum=%d, spanId=%d,  currentSprintNum=%d, validatorset=%+v\n", blockNum, spanId, currentSprintNum, producers)
 
 	t.recentSelections.Add(currentSprintNum, *producerSelection)
 	return producers, increments, nil
