@@ -243,8 +243,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"datadir", dirs.DataDir,
 		"ipv6-enabled", !disableIPV6,
 		"ipv4-enabled", !disableIPV4,
-		"download.rate", downloadRate.String(),
-		"upload.rate", uploadRate.String(),
+		"download.rate", downloadRateStr,
+		"upload.rate", uploadRateStr,
 		"webseed", webseeds,
 	)
 
@@ -333,7 +333,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	d.MainLoopInBackground(false)
+	// I'm kinda curious... but it was false before.
+	d.MainLoopInBackground(true)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)

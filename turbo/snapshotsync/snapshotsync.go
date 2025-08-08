@@ -347,9 +347,10 @@ func SyncSnapshots(
 	syncCfg ethconfig.Sync,
 ) error {
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
+	// TODO: Move this check further up to avoid starting "OtterSync" completely.
 	if snapCfg.Local {
 		if !headerchain {
-			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified", logPrefix))
+			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 		}
 		return nil
 	}
