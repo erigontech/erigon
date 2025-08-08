@@ -120,7 +120,6 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	}
 
 	_, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
-	mem.Print("after open files")
 
 	if err != nil {
 		return nil, err

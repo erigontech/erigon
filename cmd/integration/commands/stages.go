@@ -30,11 +30,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
 	chain2 "github.com/erigontech/erigon-lib/chain"
@@ -1113,48 +1113,53 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
-		g := &errgroup.Group{}
-		g.Go(func() error {
-			_allSnapshotsSingleton.OptimisticalyOpenFolder()
-			return nil
-		})
-		g.Go(func() error {
-			_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
-			return nil
-		})
-		g.Go(func() error {
-			err := _aggSingleton.OpenFolder()
-			if err != nil {
-				return fmt.Errorf("aggregator opening: %w", err)
-			}
-			return nil
-		})
-		g.Go(func() error {
-			chainConfig := fromdb.ChainConfig(db)
-			var beaconConfig *clparams.BeaconChainConfig
-			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
-			if err == nil {
-				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
-				if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
-					return fmt.Errorf("caplin snapshots: %w", err)
-				}
-				_allCaplinSnapshotsSingleton.LogStat("caplin")
-			}
-			return nil
-		})
+		mem.Print("before open files")
 
-		g.Go(func() error {
-			ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-			mtime := time.Time{}
-			if er == nil {
-				mtime = ls.ModTime()
-			}
-			logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-			return nil
-		})
-		if err = g.Wait(); err != nil {
-			return
+		//g := &errgroup.Group{}
+		//g.Go(func() error {
+		_allSnapshotsSingleton.OptimisticalyOpenFolder()
+		mem.Print("after BlockSnaps open")
+		//return nil
+		//})
+		//g.Go(func() error {
+		_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
+		//return nil
+		//})
+		//g.Go(func() error {
+		err := _aggSingleton.OpenFolder()
+		mem.Print("after Agg open")
+		if err != nil {
+			//return fmt.Errorf("aggregator opening: %w", err)
 		}
+		//return nil
+		//})
+		//g.Go(func() error {
+		//chainConfig := fromdb.ChainConfig(db)
+		var beaconConfig *clparams.BeaconChainConfig
+		_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
+		if err == nil {
+			_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
+			mem.Print("after Caplin open")
+			if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
+				//return fmt.Errorf("caplin snapshots: %w", err)
+			}
+			_allCaplinSnapshotsSingleton.LogStat("caplin")
+		}
+		//return nil
+		//})
+
+		//g.Go(func() error {
+		ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+		mtime := time.Time{}
+		if er == nil {
+			mtime = ls.ModTime()
+		}
+		logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
+		//return nil
+		//})
+		//if err = g.Wait(); err != nil {
+		//	return
+		//}
 
 		_allSnapshotsSingleton.LogStat("blocks")
 		_allBorSnapshotsSingleton.LogStat("bor")
