@@ -127,7 +127,7 @@ type Zk struct {
 	BadTxStoreValue                uint64
 	BadTxPurge                     bool
 	L2InfoTreeUpdatesBatchSize     uint64
-	L2InfoTreeUpdatesEnabled       bool
+	L2InfoTreeUpdatesURL           string
 
 	Hardfork        Hardfork
 	Commitment      Commitment `yaml:"zkevm.initial-commitment"`
