@@ -4,7 +4,7 @@ on:
   push:
     branches:
         - main
-        - release/*
+        - 'release/**'
         - docker_pectra
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC

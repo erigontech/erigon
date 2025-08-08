@@ -25,8 +25,6 @@ import (
 	"io"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
@@ -34,12 +32,13 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const (

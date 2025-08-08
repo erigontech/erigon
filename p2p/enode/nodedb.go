@@ -26,8 +26,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -164,7 +164,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 
 	if blob != nil && !bytes.Equal(blob, currentVer) {
 		db.Close()
-		if err := os.RemoveAll(path); err != nil {
+		if err := dir.RemoveAll(path); err != nil {
 			return nil, err
 		}
 		return newPersistentDB(ctx, logger, path)

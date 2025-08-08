@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type Store interface {
@@ -41,7 +40,7 @@ type Store interface {
 	EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, []uint64, error)                                    // [timeFrom, timeTo)
 
 	PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[common.Hash]uint64) error
-	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
+	PutEvents(ctx context.Context, events []*EventRecordWithTime) error
 	PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error
 	PutProcessedBlockInfo(ctx context.Context, info []ProcessedBlockInfo) error
 
@@ -50,6 +49,6 @@ type Store interface {
 	// block reader compatibility
 	BorStartEventId(ctx context.Context, hash common.Hash, blockHeight uint64) (uint64, error)
 	EventsByBlock(ctx context.Context, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error)
+	EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*EventRecordWithTime, bool, error)
 	PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error)
 }
