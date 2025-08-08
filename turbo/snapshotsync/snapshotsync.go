@@ -28,10 +28,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -39,8 +36,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
@@ -104,7 +104,7 @@ func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
 }
 
 func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddRequest {
-	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(coresnaptype.BlockSnapshotTypes))}
+	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
 			continue
@@ -353,9 +353,10 @@ func SyncSnapshots(
 ) error {
 	snapshots := blockReader.Snapshots()
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
+	// TODO: Move this check further up to avoid starting "OtterSync" completely.
 	if snapCfg.Local {
 		if !headerchain {
-			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified", logPrefix))
+			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 		}
 		return firstNonGenesisCheck(tx, snapshots, logPrefix, dirs)
 	}

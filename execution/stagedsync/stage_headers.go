@@ -27,8 +27,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -37,11 +35,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -640,22 +640,6 @@ func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block
 func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
-}
-func (cr ChainReaderImpl) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
-		return nil
-	}
-	return events
-}
-func (cr ChainReaderImpl) BorStartEventId(hash common.Hash, blockNum uint64) uint64 {
-	id, err := cr.blockReader.BorStartEventId(context.Background(), cr.tx, hash, blockNum)
-	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
-		return 0
-	}
-	return id
 }
 func (cr ChainReaderImpl) BorSpan(spanId uint64) *heimdall.Span {
 	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
