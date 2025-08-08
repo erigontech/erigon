@@ -305,7 +305,7 @@ func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	if err := a.openFolder(); err != nil {
-		return err
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
 	return nil
 }

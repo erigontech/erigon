@@ -136,11 +136,16 @@ It's recommended that you take a backup or filesystem snapshot of your datadir b
 
 When running Erigon 3.1, your snapshot files will be renamed automatically to a new file naming scheme.
 
-The downloader component in Erigon 3.1 will check the file data of snapshots when `--downloader.verify` is provided. Incorrect data will be repaired.
+The downloader component in Erigon 3.1 will check the file data of snapshots when `--downloader.verify` is provided.
+Incorrect data will be repaired.
 
-A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run, reusing existing files where possible.
-Do not run this before applying file renaming if you are upgrading from 3.0 as you will lose snapshots that used the old naming scheme.
-Use `snapshots reset` if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data.
+A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run,
+reusing existing files where possible.
+Do not run this before applying file renaming if you are upgrading from 3.0 as you will lose snapshots that used the old
+naming scheme.
+Use `snapshots reset` if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to
+having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain
+data.
 
 ### Datadir structure
 
@@ -224,7 +229,7 @@ du -hsc /erigon/snapshots/*
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
-    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+  - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
 - **Other changes:**
     - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
@@ -242,6 +247,7 @@ _Flags:_
 - `log.dir.prefix`
 - `log.dir.verbosity`
 - `log.dir.json`
+- `torrent.verbosity`
 
 In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an
 int value specifying the highest output log level:
@@ -263,6 +269,10 @@ debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
 Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk
 output `--log.dir.json`.
+
+#### Torrent client logging
+
+The torrent client in the Downloader logs to `logs/torrent.log` at the level specified by `torrent.verbosity` or WARN, whichever is lower. Logs at `torrent.verbosity` or higher are also passed through to the top level Erigon dir and console loggers (which must have their own levels set low enough to log the messages in their respective handlers).
 
 ### Modularity
 

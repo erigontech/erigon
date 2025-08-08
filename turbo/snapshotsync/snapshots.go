@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,18 +33,19 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/snaptype"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
@@ -1160,7 +1160,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.closeWhatNotInList(list)
 		return s.openSegments(list, true, false)
 	}(); err != nil {
-		return err
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
@@ -1493,7 +1493,7 @@ func (s *RoSnapshots) View() *View {
 	for _, t := range s.enums {
 		sgs[t] = s.visible[t].BeginRo()
 	}
-	return &View{s: s, segments: sgs, baseSegType: coresnaptype.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
+	return &View{s: s, segments: sgs, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 }
 
 func (v *View) Close() {
@@ -1597,7 +1597,7 @@ func removeOldFiles(toDel []string, snapDir string) {
 		withoutExt := f[:len(f)-len(ext)]
 		_ = dir.RemoveFile(withoutExt + ".idx")
 		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
+		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
 		if isTxnType {
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")

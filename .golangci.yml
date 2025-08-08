@@ -17,7 +17,6 @@ linters:
     - gosmopolitan
     - loggercheck
     - nilnesserr
-    - perfsprint
     - prealloc
     - reassign
     - spancheck
