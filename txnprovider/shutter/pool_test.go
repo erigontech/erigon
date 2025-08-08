@@ -57,6 +57,7 @@ import (
 )
 
 func TestPoolCleanup(t *testing.T) {
+	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
 		// simulate expected contract calls for reading the first ekg after the first block event
@@ -105,6 +106,7 @@ func TestPoolCleanup(t *testing.T) {
 }
 
 func TestPoolSkipsBlobTxns(t *testing.T) {
+	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
 		// simulate expected contract calls for reading the first ekg after the first block event
@@ -147,6 +149,7 @@ func TestPoolSkipsBlobTxns(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
+	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
 		// simulate expected contract calls for reading the first ekg after the first block event
@@ -174,7 +177,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		// simulate decryption keys
 		handle.SimulateCurrentSlot()
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn1.IdentityPreimage, encTxn2.IdentityPreimage)
-		// verify that only 1 txn gets decrypted and the blob txn gets skipped
 		require.Eventually(t, WaitDecryptedTxns(pool, 2), time.Minute, 10*time.Millisecond, "wait for decrypted txns populated")
 		gasLimit := encTxn1.GasLimit.Uint64()
 		// make sure both have the same gas limit so we can use it as an option for both ProvideTxns requests
@@ -210,9 +212,8 @@ type PoolTest struct {
 
 func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle)) {
 	synctest.Run(func() {
-		t.Parallel()
-		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-		t.Cleanup(cancel)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 		logger := testlog.Logger(t.T, log.LvlTrace)
 		logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
 		logger.SetHandler(logHandler)

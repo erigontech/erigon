@@ -283,6 +283,7 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission
 }
 
 func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregister := etp.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
@@ -292,9 +293,10 @@ func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) erro
 			// no-op
 		}
 	})
-
 	defer close(etp.initialLoadDone)
 	defer unregister()
+	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
+
 	for {
 		select {
 		case <-ctx.Done():

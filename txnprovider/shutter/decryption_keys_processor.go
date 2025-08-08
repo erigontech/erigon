@@ -288,6 +288,7 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnS
 }
 
 func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregister := dkp.blockListener.RegisterObserver(func(event BlockEvent) {
 		select {
@@ -296,6 +297,7 @@ func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 		}
 	})
 	defer unregister()
+	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
 
 	for {
 		select {
