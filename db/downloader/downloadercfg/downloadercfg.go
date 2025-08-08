@@ -75,7 +75,7 @@ type Cfg struct {
 	ClientConfig   *torrent.ClientConfig
 	SnapshotConfig *snapcfg.Cfg
 
-	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: Remove this.
+	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: RemoveFile this.
 	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
 	// the Downloader API and responsibilities.
 	AddTorrentsFromDisk bool

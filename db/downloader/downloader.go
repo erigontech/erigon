@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"iter"
 	"math"
@@ -908,7 +909,7 @@ func (d *Downloader) loadSpecFromDisk(name string) (spec g.Option[*torrent.Torre
 		return
 	}
 	removeMetainfo := func() {
-		err := os.Remove(miPath)
+		err := dir.RemoveFile(miPath)
 		if err != nil {
 			d.logger.Error("error removing metainfo file", "err", err, "name", name)
 		}
@@ -1447,7 +1448,7 @@ func (s *Downloader) Delete(name string) (err error) {
 		return
 	}
 	t.Drop()
-	err = os.Remove(s.filePathForName(name))
+	err = dir.RemoveFile(s.filePathForName(name))
 	if err != nil {
 		level := log.LvlError
 		if errors.Is(err, fs.ErrNotExist) {

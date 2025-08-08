@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"math"
 	"math/bits"
@@ -248,12 +249,12 @@ func (rs *RecSplit) Salt() uint32        { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
-		_ = os.Remove(rs.indexF.Name())
+		_ = dir.RemoveFile(rs.indexF.Name())
 		rs.indexF = nil
 	}
 	if rs.existenceFV0 != nil {
 		rs.existenceFV0.Close()
-		_ = os.Remove(rs.existenceFV0.Name())
+		_ = dir.RemoveFile(rs.existenceFV0.Name())
 		rs.existenceFV0 = nil
 	}
 	if rs.existenceFV1 != nil {

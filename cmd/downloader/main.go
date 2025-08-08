@@ -440,7 +440,7 @@ var torrentCat = &cobra.Command{
 }
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
-	Short:   "Remove all .torrent files from datadir directory",
+	Short:   "RemoveFile all .torrent files from datadir directory",
 	Example: "go run ./cmd/downloader torrent_clean --datadir=<datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
@@ -458,7 +458,7 @@ var torrentClean = &cobra.Command{
 			if !strings.HasSuffix(de.Name(), ".torrent") || strings.HasPrefix(de.Name(), ".") {
 				return nil
 			}
-			err = os.Remove(filepath.Join(dirs.Snap, path))
+			err = dir.RemoveFile(filepath.Join(dirs.Snap, path))
 			if err != nil {
 				logger.Warn("[snapshots.torrent] remove", "err", err, "path", path)
 				return err
@@ -610,7 +610,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 		for _, filePath := range files {
-			if err := os.Remove(filePath); err != nil {
+			if err := dir.RemoveFile(filePath); err != nil {
 				return err
 			}
 		}
