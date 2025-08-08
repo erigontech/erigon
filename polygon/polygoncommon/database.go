@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -108,6 +109,10 @@ func (db *Database) BeginRo(ctx context.Context) (kv.Tx, error) {
 func (db *Database) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	if db, ok := db.db.(kv.RwDB); ok {
 		return db.BeginRw(ctx)
+	}
+
+	if db.db == nil || reflect.ValueOf(db.db).IsNil() {
+		return nil, fmt.Errorf("db is nil (maybe it wasn't opened): %s", dbg.Stack())
 	}
 
 	return nil, fmt.Errorf("db is read only: %s", dbg.Stack())
