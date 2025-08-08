@@ -23,12 +23,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"math"
 	"math/bits"
 	"os"
 	"path/filepath"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/spaolacci/murmur3"
@@ -513,6 +514,13 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		var mask uint32
 		for {
 			mask = 0
+			//fail := uint32(0)
+			//for i := uint16(0); i < m; i++ {
+			//	bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
+			//	fail |= (mask & bit) >> 31 // will be 1 if collision, 0 otherwise
+			//	mask |= bit
+			//}
+			// failed := fail != 1
 			var fail bool
 			for i := uint16(0); !fail && i < m; i++ {
 				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)

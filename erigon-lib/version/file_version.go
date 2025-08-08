@@ -20,11 +20,15 @@ var (
 	ZeroVersion            = Version{}
 	V1_0          Version  = Version{1, 0}
 	V1_1          Version  = Version{1, 1}
+	V1_2          Version  = Version{1, 2}
 	V2_0          Version  = Version{2, 0}
+	V2_1          Version  = Version{2, 1}
 	V1_0_standart Versions = Versions{V1_0, V1_0}
 	V1_1_standart Versions = Versions{V1_1, V1_0}
+	V1_2_standart Versions = Versions{V1_2, V1_0}
 	V1_1_exact    Versions = Versions{V1_1, V1_1}
 	V2_0_standart Versions = Versions{V2_0, V1_0}
+	V2_1_standart Versions = Versions{V2_1, V1_0}
 )
 
 func (v Version) Less(rhd Version) bool {
@@ -150,6 +154,20 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	_, fName := filepath.Split(matches[0])
 	ver, _ := ParseVersion(fName)
 	return matches[0], ver, true, nil
+}
+
+func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {
+	_, fileVer, ok, err := FindFilesWithVersionsByPattern(pattern)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("file with this pattern not found")
+	}
+	if fileVer.Less(minSup) {
+		return fmt.Errorf("file version %s is less than supported version %s", fileVer.String(), minSup.String())
+	}
+	return nil
 }
 
 func ReplaceVersionWithMask(path string) (string, error) {

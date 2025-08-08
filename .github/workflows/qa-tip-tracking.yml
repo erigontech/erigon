@@ -57,7 +57,7 @@ jobs:
     - name: Run the datadir upgrade procedure
       working-directory: ${{ github.workspace }}
       run: |
-        ./build/bin/erigon seg update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+        ./build/bin/erigon snapshots update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
 
     - name: Print datadir contents after upgrade (for debugging)
       working-directory: ${{ github.workspace }}

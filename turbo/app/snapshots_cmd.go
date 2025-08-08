@@ -93,8 +93,8 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 }
 
 var snapshotCommand = cli.Command{
-	Name:    "seg",
-	Aliases: []string{"snapshots", "segments"},
+	Name:    "snapshots",
+	Aliases: []string{"seg", "snapshot", "segments", "segment"},
 	Usage:   `Managing historical data segments (partitions)`,
 	Before: func(cliCtx *cli.Context) error {
 		go mem.LogMemStats(cliCtx.Context, log.New())
@@ -214,7 +214,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
-			Usage:  "erigon seg uncompress a.seg | erigon seg compress b.seg",
+			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
@@ -295,6 +295,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
@@ -305,6 +306,15 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.PathFlag{Name: "dst", Required: true},
+			}),
+		},
+		{
+			Name:   "txnum",
+			Action: doBlkTxNum,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Int64Flag{Name: "block", Value: -1},
+				&cli.Int64Flag{Name: "txnum", Value: -1},
 			}),
 		},
 		{
@@ -402,6 +412,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	defer l.Unlock()
 
 	removeLatest := cliCtx.Bool("latest")
+	dryRun := cliCtx.Bool("dry-run")
 
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -439,9 +450,21 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				const trieStateKey = "state"
 
 				skipped := false
-				kvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
-				_, ek := os.Stat(kvi)
-				if ek == nil {
+
+				derivedKvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
+				fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+				if err != nil {
+					return err
+				}
+				kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					return err
+				}
+				if ok {
+					_, err := os.Stat(kvi)
+					if err != nil {
+						return err
+					}
 					idx, err := recsplit.OpenIndex(kvi)
 					if err != nil {
 						return err
@@ -452,45 +475,61 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					if found {
 						fmt.Printf("found state key with kvi %s\n", res.Path)
 						commitmentFilesWithState = append(commitmentFilesWithState, res)
+					} else {
+						fmt.Printf("skipping file because it doesn't have state key %s\n", fName)
 					}
 					skipped = true
 					_ = oft
 					rd.Close()
 					idx.Close()
+				} else {
+					log.Warn("[dbg] not found files for", "pattern", fPathMask)
 				}
 
 				if !skipped { // try to lookup in bt index
-					bt := strings.Replace(res.Path, ".kv", ".bt", 1)
-					_, eb := os.Stat(bt)
-					if eb == nil {
-						rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
-						if err != nil {
-							return err
-						}
-
-						getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
-						//for getter.HasNext() {
-						//	k, _ := getter.Next(nil)
-						//	if bytes.Equal(k, []byte(trieStateKey)) {
-						//		fmt.Printf("found state key without bt in %s\n", res.Path)
-						//		commitmentFilesWithState = append(commitmentFilesWithState, res)
-						//		break
-						//	}
-						//	getter.Skip()
-						//}
-						c, err := btindex.Seek(getter, []byte(trieStateKey))
-						if err != nil {
-							return err
-						}
-						if bytes.Equal(c.Key(), []byte(trieStateKey)) {
-							fmt.Printf("found state key using bt %s\n", res.Path)
-							commitmentFilesWithState = append(commitmentFilesWithState, res)
-						}
-						c.Close()
-						btindex.Close()
-						rd.Close()
+					derivedBt := strings.Replace(res.Path, ".kv", ".bt", 1)
+					fPathMask, err := version.ReplaceVersionWithMask(derivedBt)
+					if err != nil {
+						return err
+					}
+					bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return fmt.Errorf("can't find accessor for %s", res.Path)
+					}
+					_, err = os.Stat(bt)
+					if err != nil {
+						return err
 					}
 
+					rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
+					if err != nil {
+						return err
+					}
+
+					getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
+					//for getter.HasNext() {
+					//	k, _ := getter.Next(nil)
+					//	if bytes.Equal(k, []byte(trieStateKey)) {
+					//		fmt.Printf("found state key without bt in %s\n", res.Path)
+					//		commitmentFilesWithState = append(commitmentFilesWithState, res)
+					//		break
+					//	}
+					//	getter.Skip()
+					//}
+					c, err := btindex.Seek(getter, []byte(trieStateKey))
+					if err != nil {
+						return err
+					}
+					if bytes.Equal(c.Key(), []byte(trieStateKey)) {
+						fmt.Printf("found state key using bt %s\n", res.Path)
+						commitmentFilesWithState = append(commitmentFilesWithState, res)
+					}
+					c.Close()
+					btindex.Close()
+					rd.Close()
 				}
 			}
 
@@ -608,6 +647,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
+		if dryRun {
+			fmt.Printf("[dry-run] rm %s\n", res.Path)
+			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
+			continue
+		}
 		dir2.RemoveFile(res.Path)
 		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
@@ -811,14 +855,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
-		case integrity.BorMilestones:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorMilestones skipped because not bor chain")
-				continue
-			}
-			if err := integrity.ValidateBorMilestones(ctx, logger, dirs, borSnaps, failFast); err != nil {
-				return err
-			}
 		case integrity.ReceiptsNoDups:
 			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
 				return err
@@ -867,8 +903,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		}
 		sum += res.To - res.From
 		headerSegName := info.Name()
+
 		// check that all files exist
-		for _, snapType := range []string{"transactions", "bodies"} {
+		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
 			// check that the file exist
 			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
@@ -973,52 +1010,41 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	}
 
 	for _, res := range accFiles {
-		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
+		accName, err := version.ReplaceVersionWithMask(res.Name())
+		if err != nil {
+			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
+		}
 		for _, snapType := range kv.StateDomains {
-			newVersion := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
-			expectedFileName := strings.Replace(res.Name(), "accounts", snapType.String(), 1)
-			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
+			schemaVersionMinSup := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
+			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName), err)
 			}
 
-			oldVersion = newVersion
 			// check that the index file exist
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorBTree) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
+				schemaVersionMinSup = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.MinSupported
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
-				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return err
-				}
-				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorExistence) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
+				schemaVersionMinSup = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.MinSupported
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
-				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return err
-				}
-				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorHashMap) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
+				schemaVersionMinSup = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.MinSupported
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
-				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return err
-				}
-				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 		}
@@ -1083,41 +1109,41 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 	for _, res := range accFiles {
 		viTypes := []string{"accounts", "storage", "code"}
-
+		accName, err := version.ReplaceVersionWithMask(res.Name())
+		if err != nil {
+			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
+		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := libstate.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
 			}
-			oldVersion := versioned.GetVersions().II.DataEF.Current
-			expectedFileName := strings.Replace(res.Name(), "accounts", snapType, 1)
 
-			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
+			schemaVersionMinSup := versioned.GetVersions().II.DataEF.MinSupported
+			expectedFileName := strings.Replace(accName, "accounts", snapType, 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapIdx, expectedFileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName), err)
 			}
 			// Check accessors
-			newVersion := versioned.GetVersions().II.AccessorEFI.Current
-			efiFileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
-			efiFileName = version.ReplaceVersion(efiFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, efiFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", efiFileName, filepath.Join(dirs.SnapAccessors, efiFileName))
+			schemaVersionMinSup = versioned.GetVersions().II.AccessorEFI.MinSupported
+			fileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
 			if !slices.Contains(viTypes, snapType) {
 				continue
 			}
-			newVersion = versioned.GetVersions().Hist.AccessorVI.Current
-			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
-			viFileName = version.ReplaceVersion(viFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, viFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dirs.SnapAccessors, viFileName))
+			schemaVersionMinSup = versioned.GetVersions().Hist.AccessorVI.MinSupported
+			fileName = strings.Replace(expectedFileName, ".ef", ".vi", 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
-			newVersion = versioned.GetVersions().Hist.DataV.Current
+			schemaVersionMinSup = versioned.GetVersions().Hist.DataV.MinSupported
 			// check that .v
-			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
-			vFileName = version.ReplaceVersion(vFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapHistory, vFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dirs.SnapHistory, vFileName))
+			fileName = strings.Replace(expectedFileName, ".ef", ".v", 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapHistory, fileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapHistory, fileName), err)
 			}
 		}
 
@@ -1258,6 +1284,78 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 
 		return nil
 	})
+}
+
+func doBlkTxNum(cliCtx *cli.Context) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	blkNumber := cliCtx.Int64("block")
+	txNum := cliCtx.Int64("txnum")
+
+	if blkNumber < 0 && txNum < 0 {
+		return errors.New("provide atleast one positive value -- either block or txnum")
+	}
+	if blkNumber >= 0 && txNum >= 0 {
+		return errors.New("both block and txnum can't be provided")
+	}
+
+	ctx := cliCtx.Context
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	_, _, _, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	reader, _ := br.IO()
+	txNumReader := reader.TxnumReader(ctx)
+
+	if blkNumber >= 0 {
+		min, err := txNumReader.Min(tx, uint64(blkNumber))
+		if err != nil {
+			return err
+		}
+		max, err := txNumReader.Max(tx, uint64(blkNumber))
+		if err != nil {
+			return err
+		}
+		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max)
+	} else {
+		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			blk2, txNum2, err := txNumReader.Last(tx)
+			if err != nil {
+				return err
+			}
+			logger.Info("didn't find block for txNum", "txNum", txNum, "maxBlock", blk2, "maxTxNum", txNum2)
+		}
+		logger.Info("out", "txNum", txNum, "block", blk)
+	}
+	return nil
 }
 
 func doDiff(cliCtx *cli.Context) error {

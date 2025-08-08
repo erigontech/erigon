@@ -1345,7 +1345,7 @@ func BuildHashMapAccessor(ctx context.Context, d *seg.Reader, idxPath string, va
 	return buildHashMapAccessor(ctx, d, idxPath, values, cfg, ps, logger)
 }
 
-func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
 	if !values {
@@ -1357,7 +1357,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 	defer g.MadvNormal().DisableReadAhead()
 
 	var rs *recsplit.RecSplit
-	var err error
 	cfg.KeyCount = count
 	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -2126,5 +2125,5 @@ func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
 
 func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon seg reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
 }

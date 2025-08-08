@@ -281,10 +281,9 @@ func New(
 func (s *Sentinel) observeBandwidth(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
-		countSubnetsSubscribed := func() int {
-			count := 0
+		countAttSubnetsSubscribed, countColumnSidecarSubscribed := func() (attCount int, columnSidecarCount int) {
 			if s.subManager == nil {
-				return count
+				return
 			}
 			s.GossipManager().subscriptions.Range(func(key, value any) bool {
 				sub := value.(*GossipSubscription)
@@ -292,16 +291,20 @@ func (s *Sentinel) observeBandwidth(ctx context.Context) {
 					return true
 				}
 				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
-					count++
+					attCount++
+				}
+				if strings.Contains(sub.topic.String(), "data_column_sidecar") && sub.subscribed.Load() {
+					columnSidecarCount++
 				}
 				return true
 			})
-			return count
+			return
 		}()
 
 		multiplierForAdaptableTraffic := 1.0
 		if s.cfg.AdaptableTrafficRequirements {
-			multiplierForAdaptableTraffic = ((float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+			multiplierForAdaptableTraffic = ((float64(countAttSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+			multiplierForAdaptableTraffic += ((float64(countColumnSidecarSubscribed) / float64(s.cfg.BeaconConfig.NumberOfColumns)) * 16)
 		}
 		select {
 		case <-ctx.Done():

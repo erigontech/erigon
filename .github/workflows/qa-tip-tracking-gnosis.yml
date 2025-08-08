@@ -44,12 +44,10 @@ jobs:
       run: |
         rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
 
-    # Uncomment the following lines if you need to run the datadir upgrade procedure explicitly
-    # For now, it is executed automatically by erigon when it detects the old format.
-    #- name: Run the datadir upgrade procedure
-    #  working-directory: ${{ github.workspace }}
-    #  run: |
-    #    ./build/bin/erigon seg update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+    - name: Run the datadir upgrade procedure
+      working-directory: ${{ github.workspace }}
+      run: |
+        ./build/bin/erigon snapshots update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step

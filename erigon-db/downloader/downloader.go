@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"iter"
 	"math"
@@ -36,6 +35,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/anacrolix/chansync"
 	"github.com/anacrolix/torrent/types/infohash"
@@ -759,7 +760,9 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 func (d *Downloader) VerifyData(
 	ctx context.Context,
 	whiteList []string,
+	failFast bool,
 ) error {
+
 	var totalBytes int64
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
@@ -787,6 +790,46 @@ func (d *Downloader) VerifyData(
 		verifiedBytes  atomic.Int64
 		completedFiles atomic.Uint64
 	)
+
+	if failFast {
+		var completedBytes atomic.Uint64
+		g, ctx := errgroup.WithContext(ctx)
+
+		{
+			logEvery := time.NewTicker(10 * time.Second)
+			defer logEvery.Stop()
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-logEvery.C:
+						d.logger.Info("[snapshots] Verify",
+							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
+							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
+							"sz_gb", downloadercfg.DefaultPieceSize*completedBytes.Load()/1024/1024/1024,
+						)
+					}
+				}
+			}()
+		}
+
+		// torrent lib internally limiting amount of hashers per file
+		// set limit here just to make load predictable, not to control Disk/CPU consumption
+		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+		for _, t := range toVerify {
+			t := t
+			g.Go(func() error {
+				defer completedFiles.Add(1)
+				return VerifyFileFailFast(ctx, t, d.SnapDir(), &completedBytes)
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)
@@ -899,8 +942,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHash metainfo.Hash,
+	infoHash metainfo.Hash, // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) error {
 	d.lock.Lock()
@@ -917,8 +959,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHashHint g.Option[metainfo.Hash],
+	infoHashHint g.Option[metainfo.Hash], // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) (t *torrent.Torrent, err error) {
 	diskSpecOpt := d.loadSpecFromDisk(name)
