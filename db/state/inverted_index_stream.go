@@ -389,7 +389,8 @@ func (it *InvertedIterator1) advanceInDb() {
 		}
 		txNum := binary.BigEndian.Uint64(v)
 		if txNum < it.endTxNum {
-			it.nextDbKey = append(it.nextDbKey[:0], k...)
+			// Extract address part from step-prefixed key (skip first 8 bytes)
+			it.nextDbKey = append(it.nextDbKey[:0], k[8:]...)
 			return
 		}
 		if k, _, err = it.cursor.NextNoDup(); err != nil {
