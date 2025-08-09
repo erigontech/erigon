@@ -827,7 +827,7 @@ func (t *Tree) GetHashesByPosList(posList []PosItem) []common.Hash {
 
 func (t *Tree) hashIter(posList []PosItem) iter.Seq[common.Hash] {
 	return func(yield func(common.Hash) bool) {
-		cache := map[int64][32]byte{}
+		cache := map[int64]common.Hash{}
 		for _, next := range posList {
 			hash := t.getHashByNode(next.level, next.n, cache)
 			if !yield(hash) {
@@ -837,7 +837,7 @@ func (t *Tree) hashIter(posList []PosItem) iter.Seq[common.Hash] {
 	}
 }
 
-func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[int64][32]byte) common.Hash {
+func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[int64]common.Hash) common.Hash {
 	var twigId uint64
 	var levelStride uint64
 	if level <= 12 {

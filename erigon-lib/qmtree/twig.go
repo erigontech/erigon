@@ -18,7 +18,7 @@ type TwigStorage interface {
 	Truncate(size int64)
 
 	GetHashRoot(twigId uint64, leftRoot common.Hash) common.Hash
-	GetHashNode(twigId uint64, idx uint64, cache map[int64][32]byte) common.Hash
+	GetHashNode(twigId uint64, idx uint64, cache map[int64]common.Hash) common.Hash
 
 	CloneTemp() TwigStorage
 }

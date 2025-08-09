@@ -1,158 +1,96 @@
 package hpfile
 
-/// Temporary directory for unit test
-type tempDir struct {
-    dir: String,
+import (
+	"slices"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestHpFileNew(t *testing.T) {
+	dir, err := NewTempDir("hp_file_test")
+	require.NoError(t, err)
+	bufferSize := 64
+	segmentSize := uint64(128)
+	hp, err := NewFile(bufferSize, segmentSize, dir.String())
+	require.Equal(t, hp.bufferSize, bufferSize)
+	require.Equal(t, hp.segmentSize, segmentSize)
+	require.Equal(t, len(hp.fileMap.files), 1)
+
+	slice0 := slices.Repeat([]byte{1}, 44)
+	pos, err := hp.Append(slice0)
+	require.NoError(t, err)
+	require.Equal(t, 0, pos)
+	require.Equal(t, 44, hp.Size())
+
+	slice1a := slices.Repeat([]byte{2}, 16)
+	slice1b := slices.Repeat([]byte{3}, 10)
+	slice1 := slice1a
+	slice1 = append(slice1, slice1b...)
+	slice1 = append(slice1, slice1b...)
+	pos, err = hp.Append(slice1)
+	require.NoError(t, err)
+	require.Equal(t, 44, pos)
+	require.Equal(t, 70, hp.Size())
+
+	slice2a := slices.Repeat([]byte{4}, 25)
+	slice2b := slices.Repeat([]byte{5}, 25)
+	slice2 := slice2a
+	slice2 = append(slice2, slice2b...)
+	pos, err = hp.Append(slice2)
+	require.NoError(t, err)
+	require.Equal(t, 70, pos)
+	require.Equal(t, 120, hp.Size())
+
+	check0 := make([]byte, 44)
+	_, err = hp.ReadAt(check0, 0)
+	require.NoError(t, err)
+	require.Equal(t, slice0, check0)
+
+	check1 := make([]byte, 26)
+	_, err = hp.ReadAt(check1, 44)
+	require.NoError(t, err)
+	require.Equal(t, slice1, check1)
+
+	check2 := make([]byte, 50)
+	_, err = hp.ReadAt(check2, 70)
+	require.NoError(t, err)
+	require.Equal(t, slice2, check2)
+
+	slice3 := make([]byte, 16)
+	pos, err = hp.Append(slice3)
+	require.NoError(t, err)
+	require.Equal(t, 120, pos)
+	require.Equal(t, 136, hp.Size())
+
+	hp.Close()
+
+	hpNew, err := NewFile(64, 128, dir.String())
+
+	_, err = hpNew.ReadAt(check0, 0)
+	require.NoError(t, err)
+	require.Equal(t, slice0, check0)
+
+	_, err = hpNew.ReadAt(check1, 44)
+	require.NoError(t, err)
+	require.Equal(t, slice1, check1)
+
+	_, err = hpNew.ReadAt(check2, 70)
+	require.NoError(t, err)
+	require.Equal(t, slice2, check2)
+
+	check3 := make([]byte, 16)
+	_, err = hpNew.ReadAt(check3, 120)
+	require.NoError(t, err)
+	require.Equal(t, slice3, check3)
+
+	err = hpNew.PruneHead(64)
+	require.NoError(t, err)
+	err = hpNew.Truncate(120)
+	require.NoError(t, err)
+	require.Equal(t, hpNew.Size(), 120)
+	slice4 := make([]byte, 120)
+	_, err = hpNew.ReadAt(slice4, 120)
+	require.NoError(t, err)
+	require.Equal(t, len(slice4), 0)
 }
-
-impl TempDir {
-    /// Create a new TempDir
-    pub fn new(dir: &str) -> Self {
-        remove_dir_all(dir).unwrap_or(()); // ignore error
-        create_dir(dir).unwrap_or(()); // ignore error
-        Self {
-            dir: dir.to_string(),
-        }
-    }
-
-    /// Return the path of this temporary directory
-    pub fn to_str(&self) -> String {
-        self.dir.clone()
-    }
-
-    /// Return the names of the files in this directory
-    pub fn list(&self) -> Vec<String> {
-        TempDir::list_dir(&self.dir)
-    }
-
-    /// Return the names of the files in `dir`
-    pub fn list_dir(dir: &str) -> Vec<String> {
-        let mut result = vec![];
-        let paths = std::fs::read_dir(Path::new(dir)).unwrap();
-        for path in paths {
-            result.push(path.unwrap().path().to_str().unwrap().to_string());
-        }
-        result.sort();
-        result
-    }
-
-    /// Create a new file in this directory
-    pub fn create_file(&self, name: &str) {
-        let file_path = Path::new(&self.dir).join(Path::new(name));
-        File::create_new(file_path).unwrap();
-    }
-
-    /// Return the names of the files in `path` and its subdirectories recursively
-    pub fn list_all(path: &Path) -> Vec<String> {
-        let mut vec = Vec::new();
-        TempDir::_list_files(&mut vec, path);
-        vec.sort();
-        vec
-    }
-
-    fn _list_files(vec: &mut Vec<String>, path: &Path) {
-        if metadata(path).unwrap().is_dir() {
-            let paths = read_dir(path).unwrap();
-            for path_result in paths {
-                let full_path = path_result.unwrap().path();
-                if metadata(&full_path).unwrap().is_dir() {
-                    TempDir::_list_files(vec, &full_path);
-                } else {
-                    vec.push(String::from(full_path.to_str().unwrap()));
-                }
-            }
-        }
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        remove_dir_all(&self.dir).unwrap_or(()); // ignore error
-    }
-}
-
-
-func Test_hp_file_new(t *testing.T) {
-        let dir = TempDir::new("hp_file_test");
-        let buffer_size = 64;
-        let segment_size = 128;
-        let hp = HPFile::new(buffer_size, segment_size, dir.to_str(), false).unwrap();
-        assert_eq!(hp.buffer_size, buffer_size);
-        assert_eq!(hp.segment_size, segment_size);
-        assert_eq!(hp.file_map.len(), 1);
-
-        let slice0 = [1; 44];
-        let mut buffer = vec![];
-        let mut pos = hp.append(slice0.as_ref(), &mut buffer).unwrap();
-        assert_eq!(0, pos);
-        assert_eq!(44, hp.size());
-
-        let slice1a = [2; 16];
-        let slice1b = [3; 10];
-        let mut slice1 = vec![];
-        slice1.extend_from_slice(&slice1a);
-        slice1.extend_from_slice(&slice1b);
-        pos = hp.append(slice1.as_ref(), &mut buffer).unwrap();
-        assert_eq!(44, pos);
-        assert_eq!(70, hp.size());
-
-        let slice2a = [4; 25];
-        let slice2b = [5; 25];
-        let mut slice2 = vec![];
-        slice2.extend_from_slice(&slice2a);
-        slice2.extend_from_slice(&slice2b);
-        pos = hp.append(slice2.as_ref(), &mut buffer).unwrap();
-        assert_eq!(70, pos);
-        assert_eq!(120, hp.size());
-
-        let mut check0 = [0; 44];
-        hp.read_at(&mut check0, 0).unwrap();
-        assert_eq!(slice0.to_vec(), check0.to_vec());
-
-        hp.flush(&mut buffer, false).unwrap();
-
-        let mut check1 = [0; 26];
-        hp.read_at(&mut check1, 44).unwrap();
-        assert_eq!(slice1, check1);
-
-        let mut check2 = [0; 50];
-        hp.read_at(&mut check2, 70).unwrap();
-        assert_eq!(slice2, check2);
-
-        let slice3 = [0; 16];
-        pos = hp.append(slice3.to_vec().as_ref(), &mut buffer).unwrap();
-        assert_eq!(120, pos);
-        assert_eq!(136, hp.size());
-
-        hp.flush(&mut buffer, false).unwrap();
-
-        #[cfg(not(feature = "all_in_mem"))]
-        hp.close();
-
-        #[cfg(feature = "all_in_mem")]
-        let hp_new = hp;
-        #[cfg(not(feature = "all_in_mem"))]
-        let hp_new = HPFile::new(64, 128, dir.to_str(), false).unwrap();
-
-        hp_new.read_at(&mut check0, 0).unwrap();
-        assert_eq!(slice0.to_vec(), check0.to_vec());
-
-        hp_new.read_at(&mut check1, 44).unwrap();
-        assert_eq!(slice1, check1);
-
-        hp_new.read_at(&mut check2, 70).unwrap();
-        assert_eq!(slice2, check2);
-
-        let mut check3 = [0; 16];
-        hp_new.read_at(&mut check3, 120).unwrap();
-        assert_eq!(slice3.to_vec(), check3.to_vec());
-
-        hp_new.prune_head(64).unwrap();
-        hp_new.truncate(120).unwrap();
-        assert_eq!(hp_new.size(), 120);
-        let mut slice4 = vec![];
-        hp_new.read_at(&mut slice4, 120).unwrap();
-        assert_eq!(slice4.len(), 0);
-    }
-
-

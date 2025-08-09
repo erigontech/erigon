@@ -1,6 +1,7 @@
 package qmtree
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -24,92 +25,92 @@ type ProofPath struct {
 const OTHER_NODE_COUNT = 1 + 11 + 1 + 3 + 1
 
 func (p *ProofPath) ToBytes() []byte {
-	res := make([]byte, 0, (8 + (p.upper_path.len()+OTHER_NODE_COUNT)*32))
-	res.extend_from_slice(&p.serial_num.to_le_bytes())  // 8-byte
-	res.extend_from_slice(&p.left_of_twig[0].self_hash) // 1
-	for i := range p.left_of_twig {
+	res := make([]byte, 0, (8 + (len(p.UpperPath)+OTHER_NODE_COUNT)*32))
+	res = binary.LittleEndian.AppendUint64(res, p.SerialNum) // 8-byte
+	res = append(res, p.LeftOfTwig[0].SelfHash[:]...)        // 1
+	for i := range p.LeftOfTwig {
 		//11
-		res.extend_from_slice(&p.left_of_twig[i].peer_hash)
+		res = append(res, p.LeftOfTwig[i].PeerHash[:]...)
 	}
-	res.extend_from_slice(&p.right_of_twig[0].self_hash) //1
-	for i := range p.right_of_twig {
+	res = append(res, p.RightOfTwig[0].SelfHash[:]...) //1
+	for i := range p.RightOfTwig {
 		//3
-		res.extend_from_slice(&p.right_of_twig[i].peer_hash)
+		res = append(res, p.RightOfTwig[i].PeerHash[:]...)
 	}
-	for i := range p.upper_path {
-		res.extend_from_slice(&p.upper_path[i].peer_hash)
+	for i := range p.UpperPath {
+		res = append(res, p.UpperPath[i].PeerHash[:]...)
 	}
-	res.extend_from_slice(&p.root) //1
-	res
+	res = append(res, p.Root[:]...) //1
+	return res
 }
 
-func (p *ProofPath) Check(complete bool) error {
-	for i := range p.left_of_twig {
+func (p *ProofPath) Check(hasher Hasher, complete bool) error {
+	for i := range p.LeftOfTwig {
 		res := hasher.hash2x(
 			uint8(i),
-			p.left_of_twig[i].self_hash,
-			p.left_of_twig[i].peer_hash,
-			p.left_of_twig[i].peer_at_left,
+			p.LeftOfTwig[i].SelfHash,
+			p.LeftOfTwig[i].PeerHash,
+			p.LeftOfTwig[i].PeerAtLeft,
 		)
 
 		if complete {
-			p.left_of_twig[i+1].self_hash.copy_from_slice(&res)
-		} else if !res.eq(&p.left_of_twig[i+1].self_hash) {
-			return nil, fmt.Errorf("mismatch at left path, level: %d", i)
+			p.LeftOfTwig[i+1].SelfHash = res
+		} else if res != p.LeftOfTwig[i+1].SelfHash {
+			return fmt.Errorf("mismatch at left path, level: %d", i)
 		}
 	}
 
-	leaf_mt_root := p.hasher.hash2x(
+	leaf_mt_root := hasher.hash2x(
 		10,
-		&p.left_of_twig[10].self_hash,
-		&p.left_of_twig[10].peer_hash,
-		p.left_of_twig[10].peer_at_left,
+		p.LeftOfTwig[10].SelfHash,
+		p.LeftOfTwig[10].PeerHash,
+		p.LeftOfTwig[10].PeerAtLeft,
 	)
 
 	for i := range 2 {
 		res := hasher.hash2x(
 			uint8((i + 8)),
-			&p.right_of_twig[i].self_hash,
-			&p.right_of_twig[i].peer_hash,
-			p.right_of_twig[i].peer_at_left,
+			p.RightOfTwig[i].SelfHash,
+			p.RightOfTwig[i].PeerHash,
+			p.RightOfTwig[i].PeerAtLeft,
 		)
 		if complete {
-			p.right_of_twig[i+1].self_hash.copy_from_slice(&res)
-		} else if !res.eq(&p.right_of_twig[i+1].self_hash) {
-			return nil, fmt.Errorf("mismatch at right path, level: %d", i)
+			p.RightOfTwig[i+1].SelfHash = res
+		} else if res != p.RightOfTwig[i+1].SelfHash {
+			return fmt.Errorf("mismatch at right path, level: %d", i)
 		}
 	}
 
-	active_bits_mt_l3 := p.hasher.hash2x(
+	active_bits_mt_l3 := hasher.hash2x(
 		10,
-		&p.right_of_twig[2].self_hash,
-		&p.right_of_twig[2].peer_hash,
-		p.right_of_twig[2].peer_at_left,
+		p.RightOfTwig[2].SelfHash,
+		p.RightOfTwig[2].PeerHash,
+		p.RightOfTwig[2].PeerAtLeft,
 	)
 
-	twig_root := p.hasher.hash2(11, &leaf_mt_root, &active_bits_mt_l3)
+	twigRoot := hasher.hash2(11, leaf_mt_root, active_bits_mt_l3)
 	if complete {
-		p.upper_path[0].self_hash.copy_from_slice(&twig_root)
-	} else if !twig_root.eq(&p.upper_path[0].self_hash) {
+		p.UpperPath[0].SelfHash = twigRoot
+	} else if twigRoot != p.UpperPath[0].SelfHash {
 		return errors.New("mismatch at twig top")
 	}
 
-	for i := range p.upper_path {
-		level := TWIG_ROOT_LEVEL + i
-		res := p.hasher.hash2x(
+	for i := range p.UpperPath {
+		level := TwigRootLevel + i
+		res := hasher.hash2x(
 			uint8(level),
-			&p.upper_path[i].self_hash,
-			&p.upper_path[i].peer_hash,
-			p.upper_path[i].peer_at_left,
+			p.UpperPath[i].SelfHash,
+			p.UpperPath[i].PeerHash,
+			p.UpperPath[i].PeerAtLeft,
 		)
 
-		if i < p.upper_path.len()-1 {
+		if i < len(p.UpperPath)-1 {
 			if complete {
-				p.upper_path[i+1].self_hash.copy_from_slice(&res)
-			} else if !res.eq(&p.upper_path[i+1].self_hash) {
+				p.UpperPath[i+1].SelfHash = res
+			} else if res != p.UpperPath[i+1].SelfHash {
 				return fmt.Errorf("mismatch at upper path, level: %d", level)
 			}
-		} else if !res.eq(&p.root) {
+		} else if res != p.Root {
 			return errors.New("mismatch at root")
 		}
 	}
@@ -118,90 +119,99 @@ func (p *ProofPath) Check(complete bool) error {
 }
 
 func BytesToProofPath(bz []byte) (*ProofPath, error) {
-	n := bz.len() - 8
-	upper_count := (n/32 - OTHER_NODE_COUNT)
-	if n%32 != 0 || upper_count < 0 {
-		return nil, fmt.Errorf("Invalid byte slice length: *d", bz.len())
+	n := len(bz) - 8
+	upperCount := (n/32 - OTHER_NODE_COUNT)
+	if n%32 != 0 || upperCount < 0 {
+		return nil, fmt.Errorf("Invalid byte slice length: *d", len(bz))
 	}
-	upper_path := make([]byte, 0, upper_count)
-	empty_node := ProofNode{}
-	left_of_twig = [11]ProofNode{}
-	right_of_twig = [3]ProofNode{}
-	serial_num := LittleEndian.read_uint64(bz[0:8])
+	upperPath := make([]ProofNode, 0, upperCount)
+	emptyNode := ProofNode{}
+	leftOfTwig := [11]ProofNode{}
+	rightOfTwig := [3]ProofNode{}
+	serialNum := binary.LittleEndian.Uint64(bz[0:8])
 	bz = bz[8:]
-	left_of_twig[0].self_hash.copy_from_slice(bz[:32])
+	copy(leftOfTwig[0].SelfHash[:], bz[:32])
 	bz = bz[32:]
-	for i := range left_of_twig {
-		left_of_twig[i].peer_hash.copy_from_slice(bz[:32])
-		left_of_twig[i].peer_at_left = (serial_num>>i)&1 == 1
+	for i := range leftOfTwig {
+		copy(leftOfTwig[i].PeerHash[:], bz[:32])
+		leftOfTwig[i].PeerAtLeft = (serialNum>>i)&1 == 1
 		bz = bz[32:]
 	}
-	right_of_twig[0].self_hash.copy_from_slice(bz[:32])
+	copy(rightOfTwig[0].SelfHash[:], bz[:32])
 	bz = bz[32:]
-	for i := range right_of_twig {
-		right_of_twig[i].peer_hash.copy_from_slice(bz[:32])
-		right_of_twig[i].peer_at_left = (serial_num>>(8+i))&1 == 1
+	for i := range rightOfTwig {
+		copy(rightOfTwig[i].PeerHash[:], bz[:32])
+		rightOfTwig[i].PeerAtLeft = (serialNum>>(8+i))&1 == 1
 		bz = bz[32:]
 	}
-	for i := range upper_count {
-		node = empty_node
-		node.peer_hash.copy_from_slice(bz[:32])
-		node.peer_at_left = ((serial_num >> (FIRST_LEVEL_ABOVE_TWIG - 2 + i)) & 1) == 1
-		upper_path.push(node)
+	for i := range upperCount {
+		node := emptyNode
+		copy(node.PeerHash[:], bz[:32])
+		node.PeerAtLeft = ((serialNum >> (FIRST_LEVEL_ABOVE_TWIG - 2 + i)) & 1) == 1
+		upperPath = append(upperPath, node)
 		bz = bz[32:]
 	}
-	root = [32]byte{}
-	root.copy_from_slice(bz[:32])
+	root := common.Hash{}
+	copy(root[:], bz[:32])
 	return &ProofPath{
-		left_of_twig,
-		right_of_twig,
-		upper_path,
-		serial_num,
+		leftOfTwig,
+		rightOfTwig,
+		upperPath,
+		serialNum,
 		root,
 	}, nil
 }
 
-func CheckProof(path *ProofPath) ([]byte, error) {
-	path.check(false)
-	bz = path.to_bytes()
-	path2 = bytes_to_proof_path(&bz)
-	path2.check(true)
+func CheckProof(hasher Hasher, path *ProofPath) ([]byte, error) {
+	err := path.Check(hasher, false)
+	if err != nil {
+		return nil, err
+	}
+	bz := path.ToBytes()
+	path2, err := BytesToProofPath(bz)
+	if err != nil {
+		return nil, err
+	}
+	err = path2.Check(hasher, true)
+	if err != nil {
+		return nil, err
+	}
 	return bz, nil
 }
 
 func GetRightPath(twig *Twig, active_bits *ActiveBits, sn uint64) [3]ProofNode {
-	n = sn & TWIG_MASK
-	right = [3]ProofNode{}
-	self_id = n / 256
-	peer = self_id ^ 1
-	right[0].self_hash.copy_from_slice(active_bits.get_bits(self_id, 32))
-	right[0].peer_hash.copy_from_slice(active_bits.get_bits(peer, 32))
-	right[0].peer_at_left = (peer & 1) == 0
+	n := sn & TWIG_MASK
+	right := [3]ProofNode{}
+	selfId := n / 256
+	peer := selfId ^ 1
+	copy(right[0].SelfHash[:], active_bits.GetBits(int(selfId), 32))
+	copy(right[0].PeerHash[:], active_bits.GetBits(int(peer), 32))
+	right[0].PeerAtLeft = (peer & 1) == 0
 
-	self_ = n / 512
-	peer = self_ ^ 1
-	right[1].self_hash.copy_from_slice(&twig.active_bits_mtl1[self_])
-	right[1].peer_hash.copy_from_slice(&twig.active_bits_mtl1[peer])
-	right[1].peer_at_left = (peer & 1) == 0
+	selfId = n / 512
+	peer = selfId ^ 1
+	right[1].SelfHash = twig.activeBitsMtl1[selfId]
+	right[1].PeerHash = twig.activeBitsMtl1[peer]
+	right[1].PeerAtLeft = (peer & 1) == 0
 
-	self_ = n / 1024
-	peer = self_ ^ 1
-	right[2].self_hash.copy_from_slice(&twig.active_bits_mtl2[self_])
-	right[2].peer_hash.copy_from_slice(&twig.active_bits_mtl2[peer])
-	right[2].peer_at_left = (peer & 1) == 0
-	right
+	selfId = n / 1024
+	peer = selfId ^ 1
+	right[2].SelfHash = twig.activeBitsMtl2[selfId]
+	right[2].PeerHash = twig.activeBitsMtl2[peer]
+	right[2].PeerAtLeft = (peer & 1) == 0
+	return right
 }
 
-func GetLeftPath(sn uint64, get_hash func(uint64) common.Hash) [11]ProofNode {
-	n = sn & TWIG_MASK
-	left = [11]ProofNode{}
+func GetLeftPath(sn uint64, getHash func(uint64) common.Hash) [11]ProofNode {
+	n := sn & TWIG_MASK
+	left := [11]ProofNode{}
 	for level := range 11 {
-		stride = 2048 >> level
-		self_id = (n >> level)
-		peer = self_id ^ 1
-		left[level].self_hash.copy_from_slice(&get_hash(stride + self_id))
-		left[level].peer_hash.copy_from_slice(&get_hash(stride + peer))
-		left[level].peer_at_left = peer&1 == 0
+		stride := uint64(2048 >> level)
+		selfId := (n >> level)
+		peer := selfId ^ 1
+		left[level].SelfHash = getHash(uint64(stride + selfId))
+		left[level].PeerHash = getHash(stride + peer)
+		left[level].PeerAtLeft = peer&1 == 0
 	}
 	return left
 }
@@ -211,9 +221,9 @@ func GetLeftPathInMem(mt4twig TwigMT, sn uint64) [11]ProofNode {
 }
 
 func GetLeftPathOnDisk(tf TwigStorage, twig_id uint64, sn uint64) [11]ProofNode {
-	cache := map[uint64]common.Hash{}
-	GetLeftPath(sn, func(i uint64) common.Hash {
-		if v, ok := cache[i]; ok {
+	cache := map[int64]common.Hash{}
+	return GetLeftPath(sn, func(i uint64) common.Hash {
+		if v, ok := cache[int64(i)]; ok {
 			return v
 		} else {
 			return tf.GetHashNode(twig_id, i, cache)

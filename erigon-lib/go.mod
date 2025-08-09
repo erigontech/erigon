@@ -16,6 +16,7 @@ require (
 
 require (
 	github.com/FastFilter/xorfilter v0.2.1
+	github.com/OneOfOne/xxhash v1.2.8
 	github.com/RoaringBitmap/roaring/v2 v2.5.0
 	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c
 	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504

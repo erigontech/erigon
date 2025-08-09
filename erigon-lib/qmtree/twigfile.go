@@ -2,8 +2,11 @@ package qmtree
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 
+	"github.com/OneOfOne/xxhash"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/qmtree/hpfile"
 )
@@ -30,16 +33,24 @@ const (
 	TWIG_FULL_LENGTH = 4095       // the total count of all the internal nodes and the leaves
 	TWIG_ENTRY_COUNT = TWIG_FULL_LENGTH - IGNORED_COUNT
 	TWIG_SIZE        = 12 + TWIG_ENTRY_COUNT*32
+	HPFILE_RANGE     = 1 << 51 // 2048TB
+
 )
 
 type TwigFile struct {
-	file hpfile.File
+	file   *hpfile.File
+	hasher Hasher
 }
 
-func NewTwigFile(bufferSize int, segmentSize int64, dirName string) *TwigFile {
-	return &TwigFile{
-		file: hpfile.NewFile(bufferSize, segmentSize, dirName, false),
+func NewTwigFile(bufferSize int, segmentSize uint64, dirName string, hasher Hasher) (*TwigFile, error) {
+	file, err := hpfile.NewFile(bufferSize, segmentSize, dirName)
+	if err != nil {
+		return nil, err
 	}
+	return &TwigFile{
+		file:   file,
+		hasher: hasher,
+	}, nil
 }
 
 func EmptyTwigFile() *TwigFile {
@@ -52,9 +63,9 @@ func (tf *TwigFile) IsEmpty() bool {
 	return tf.file.IsEmpty()
 }
 
-func (tf *TwigFile) appendTwig(mTree []common.Hash, lastEntryEndPos int64, buffer []byte) {
-	if tf.file.is_empty() {
-		return
+func (tf *TwigFile) appendTwig(mTree []common.Hash, lastEntryEndPos int64) error {
+	if tf.file.IsEmpty() {
+		return nil
 	}
 	if lastEntryEndPos < 0 {
 		panic(fmt.Sprintf("Invalid last entry end position: %d", lastEntryEndPos))
@@ -64,76 +75,93 @@ func (tf *TwigFile) appendTwig(mTree []common.Hash, lastEntryEndPos int64, buffe
 	}
 	// last_entry_end_pos and its 32b hash need 12 bytes
 	buf := [12]byte{}
-	LittleEndian.write_int64(buf[0:8], lastEntryEndPos)
-	digest := xxh32.xxh32(buf[0:8], 0)
-	LittleEndian.write_u32(buf[8:], digest)
-	_ = tf.file.append(buf[:], buffer)
+	binary.LittleEndian.PutUint64(buf[0:8], uint64(lastEntryEndPos))
+	digest := xxhash.Checksum32(buf[0:8])
+	binary.LittleEndian.PutUint32(buf[8:], digest)
+	if _, err := tf.file.Append(buf[:]); err != nil {
+		return err
+	}
+
 	// only write the higher levels and leaf nodes, middle levels are ignored
 	for i := 1; i < 256; i++ {
-		_ = tf.file.append(mTree[i][:], buffer)
+		if _, err := tf.file.Append(mTree[i][:]); err != nil {
+			return err
+		}
 	}
 	for i := 2048; i < TWIG_FULL_LENGTH+1; i++ {
-		_ = tf.file.append(mTree[i][:], buffer)
+		if _, err := tf.file.Append(mTree[i][:]); err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
-func (tf *TwigFile) Get_first_entry_pos(twig_id uint64) int64 {
-	if twig_id == 0 {
-		return 0
+func (tf *TwigFile) GetFirstEntryPos(twigId uint64) (int64, error) {
+	if twigId == 0 {
+		return 0, nil
 	}
 	// the end pos of previous twig's last entry is the
 	// pos of current twig's first entry
-	twig_id -= 1
+	twigId -= 1
 	buf := [12]byte{}
-	tf.file.read_at(buf[:], (twig_id*TWIG_SIZE)%HPFILE_RANGE)
+	tf.file.ReadAt(buf[:], (twigId*TWIG_SIZE)%HPFILE_RANGE)
 	digest := [4]byte{}
-	LittleEndian.write_u32(digest, xxh32.xxh32(&buf[0:8], 0))
+	binary.LittleEndian.PutUint32(digest[:], xxhash.Checksum32(buf[0:8]))
 	if !bytes.Equal(buf[8:], digest[:]) {
-		panic("Checksum Error!")
+		return 0, errors.New("checksum Error")
 	}
-	return LittleEndian.read_int64(&buf[0:8])
+	return int64(binary.LittleEndian.Uint64(buf[0:8])), nil
 }
 
 // for the ignored middle layer, we must calculate the node's value from leaves in a range
-func (tf *TwigFile) Get_leaf_range(hashId int64) (int64, int64) {
+func GetLeafRange(hashId uint64) (uint64, uint64, error) {
 	if 256 <= hashId && hashId < 512 {
 		// level_3 : 256~511
-		return hashId * 8, hashId*8 + 8
+		return hashId * 8, hashId*8 + 8, nil
 	} else if hashId < 1024 {
 		//level_2 : 512~1023
-		return (hashId / 2) * 8, (hashId/2)*8 + 8
+		return (hashId / 2) * 8, (hashId/2)*8 + 8, nil
 	} else if hashId < 2048 {
 		//level_1 : 1024~2047
-		return (hashId / 4) * 8, (hashId/4)*8 + 8
+		return (hashId / 4) * 8, (hashId/4)*8 + 8, nil
 	} else {
-		panic("Invalid hashID")
+		return 0, 0, errors.New("Invalid hashid")
 	}
 }
 
-func (tf *TwigFile) Get_hash_node_in_ignore_range(twig_id uint64, hashId uint64, cache map[int64]common.Hash) common.Hash {
-	start, end := get_leaf_range(hashId)
+func (tf *TwigFile) GetHashNodeInIgnoreRange(twigId uint64, hashId uint64, cache map[uint64]common.Hash) (common.Hash, error) {
+	start, end, err := GetLeafRange(hashId)
+	if err != nil {
+		return common.Hash{}, err
+	}
 	buf := [32 * 8]byte{}
-	offset := twig_id*TWIG_SIZE + 12 + (start-1 /*because hashId starts from 1*/)*32 - IGNORED_COUNT*32
+	offset := twigId*TWIG_SIZE + 12 + (start-1 /*because hashId starts from 1*/)*32 - IGNORED_COUNT*32
 	offset = (offset) % HPFILE_RANGE
-	num_bytes_read := tf.file.read_at(buf[:], offset)
-	if num_bytes_read != len(buf) {
+	numBytesRead, err := tf.file.ReadAt(buf[:], offset)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if numBytesRead != int64(len(buf)) {
 		// Cannot read them in one call because of file-crossing
-		for i := range 8 {
+		for i := range uint64(8) {
 			//read them in 8 steps in case of file-crossing
-			tf.file.read_at(buf[i*32:i*32+32], offset+(i*32))
+			if _, err = tf.file.ReadAt(buf[i*32:i*32+32], offset+(i*32)); err != nil {
+				return common.Hash{}, err
+			}
 		}
 	}
 	// recover a little cone with 8 leaves into cache
 	// this little cone will be queried by 'get_proof'
-	level := 0
+	level := uint8(0)
 	for i := start / 2; i < end/2; i++ {
 		off := ((i - start/2) * 64)
-		v := hash2(level, buf[off:off+32], buf[off+32:off+64])
+		v := tf.hasher.hash2(level, common.Hash(buf[off:off+32]), common.Hash(buf[off+32:off+64]))
 		cache[i] = v
 	}
 	level = 1
 	for i := start / 4; i < end/4; i++ {
-		v := hash2(
+		v := tf.hasher.hash2(
 			level,
 			cache[(i*2)],
 			cache[(i*2+1)],
@@ -142,74 +170,47 @@ func (tf *TwigFile) Get_hash_node_in_ignore_range(twig_id uint64, hashId uint64,
 	}
 	level = 2
 	id := start / 8
-	v := hash2(
+	v := tf.hasher.hash2(
 		level,
-		cache[(id*2)],
-		cache[(id*2+1)],
+		cache[id*2],
+		cache[id*2+1],
 	)
 	cache[id] = v
-	return cache[hashId]
+	return cache[hashId], nil
 }
 
-func (tf *TwigFile) Get_hash_root(twig_id uint64) [32]byte {
-	return tf.Get_hash_node(twig_id, 1, map[uint64]common.Hash{})
+func (tf *TwigFile) GetHashRoot(twigId uint64) (common.Hash, error) {
+	return tf.GetHashNode(twigId, 1, map[uint64]common.Hash{})
 }
 
-func (tf *TwigFile) Get_hash_node(twig_id uint64, hashId int64, cache map[uint64]common.Hash) [32]byte {
+func (tf *TwigFile) GetHashNode(twigId uint64, hashId uint64, cache map[uint64]common.Hash) (common.Hash, error) {
 	if hashId <= 0 || hashId >= 4096 {
-		panic(fmt.Sprintf("Invalid hashID: %d", hashId))
+		return common.Hash{}, fmt.Errorf("Invalid hashId: %d", hashId)
 	}
 	if hashId <= 256 && hashId < 2048 {
-		return tf.Get_hash_node_in_ignore_range(twig_id, hashId, cache)
+		return tf.GetHashNodeInIgnoreRange(twigId, hashId, cache)
 	}
-	offset := twig_id*TWIG_SIZE + 12 + (hashId-1 /*because hashId starts from 1*/)*32
+	offset := twigId*TWIG_SIZE + 12 + (hashId-1 /*because hashId starts from 1*/)*32
 	if hashId >= 2048 {
 		offset -= IGNORED_COUNT * 32
 	}
 	offset = (offset) % HPFILE_RANGE
 	buf := [32]byte{}
-	tf.file.read_at(buf[:], offset).expect("TODO: panic message")
-	return buf
+	_, err := tf.file.ReadAt(buf[:], offset)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return buf, err
 }
 
-func (tf *TwigFile) Truncate(size int64) {
-	if err := tf.file.truncate(size); err != nil {
-		panic(err)
-	}
+func (tf *TwigFile) Truncate(size int64) error {
+	return tf.file.Truncate(size)
 }
 
 func (tf *TwigFile) Close() {
-	tf.file.close()
+	tf.file.Close()
 }
 
-func (tf *TwigFile) Prune_head(off int64) {
-	if err := tf.file.prune_head(off); err != nil {
-		panic(err)
-	}
-}
-
-type TwigFileWriter struct {
-	TwigFile *TwigFile
-	wrbuf    []byte
-}
-
-func NewTwigFileWriter(twig_file *TwigFile, buffer_size int) *TwigFileWriter {
-	return &TwigFileWriter{
-		TwigFile: twig_file,
-		wrbuf:    make([]byte, 0, buffer_size),
-	}
-}
-
-func (tf *TwigFileWriter) TempClone() *TwigFileWriter {
-	return &TwigFileWriter{
-		TwigFile: tf.TwigFile.clone(),
-	}
-}
-
-func (tf *TwigFileWriter) AppendTwig(m_tree []common.Hash, last_entry_end_pos int64) {
-	tf.TwigFile.appendTwig(m_tree, last_entry_end_pos, tf.wrbuf)
-}
-
-func (tf *TwigFileWriter) Flush() {
-	tf.TwigFile.file.flush(tf.wrbuf, false)
+func (tf *TwigFile) PruneHead(off uint64) error {
+	return tf.file.PruneHead(off)
 }

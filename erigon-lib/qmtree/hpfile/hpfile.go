@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -88,9 +90,9 @@ type File struct {
 // / - `Ok`: A successfully initialized `HPFile`
 // / - `Err`: Encounted some file system error.
 // /
-func NewFile(wrBufSize uint64, segmentSize uint64, dirName string) (*File, error) {
+func NewFile(wrBufSize int, segmentSize uint64, dirName string) (*File, error) {
 
-	if segmentSize%wrBufSize != 0 {
+	if segmentSize%uint64(wrBufSize) != 0 {
 		return nil, fmt.Errorf("Invalid segmentSize:%d writeBufferSize:%d", segmentSize, wrBufSize)
 	}
 
@@ -318,10 +320,10 @@ func (f *File) Flush(buffer []byte, eof bool) error {
 	largestId := f.largestId.Load()
 	entry := f.fileMap.files[largestId]
 	if len(buffer) > 0 {
-		tail_len := len(buffer) % IO_BLK_SIZE
-		if eof && tail_len != 0 {
+		tailLen := len(buffer) % IO_BLK_SIZE
+		if eof && tailLen != 0 {
 			// force the file size aligned with IO_BLK_SIZE
-			buffer = append(buffer, make([]byte, IO_BLK_SIZE-tail_len, 0)...)
+			buffer = append(buffer, make([]byte, IO_BLK_SIZE-tailLen, 0)...)
 		}
 		entry.file.Seek(0, io.SeekEnd)
 		entry.file.WriteAll(buffer)
@@ -666,4 +668,93 @@ func (f *file) ReadAt(bz []byte, offset int64) (int64, error) {
 	readLen := int64(min(len(bz), int(l-offset)))
 	copy(bz, f.data[offset:int(offset+readLen)])
 	return readLen, nil
+}
+
+// / Temporary directory for unit test
+type tempDir struct {
+	dir string
+}
+
+// / Create a new TempDir
+func NewTempDir(dir string) (tempDir, error) {
+	os.RemoveAll(dir) // ignore error
+	err := os.Mkdir(dir, 0700)   // ignore error
+	return tempDir{
+		dir: dir,
+	}, err
+}
+
+// / Return the path of this temporary directory
+func (td tempDir) String() string {
+	return td.dir
+}
+
+// / Return the names of the files in this directory
+func (td tempDir) List() ([]string, error) {
+	return listDir(td.dir)
+}
+
+// / Return the names of the files in `dir`
+func listDir(dir string) ([]string, error) {
+	var result []string
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		result = append(result, entry.Name())
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// / Create a new file in this directory
+func (td tempDir) CreateFile(name string) error {
+	filePath := path.Join(td.dir, name)
+	file, err := os.Create(filePath)
+	file.Close()
+	return err
+}
+
+// / Return the names of the files in `path` and its subdirectories recursively
+func (td tempDir) ListAll(p string) ([]string, error) {
+	result, err := listFiles(path.Join(td.dir, p))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func listFiles(loc string) ([]string, error) {
+	entries, err := os.ReadDir(loc)
+	if err != nil {
+		return nil, err
+	}
+	var results []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirEntries, err := os.ReadDir(path.Join(loc, entry.Name()))
+			if err != nil {
+				return nil, err
+			}
+			for _, dirEntry := range dirEntries {
+				fullPath := path.Join(entry.Name(), dirEntry.Name())
+				if dirEntry.IsDir() {
+					paths, err := listFiles(fullPath)
+					if err != nil {
+						return nil, err
+					}
+					results = append(results, paths...)
+				} else {
+					results = append(results, fullPath)
+				}
+			}
+		}
+	}
+	return results, nil
+}
+
+func (td tempDir) Drop() {
+	os.RemoveAll(td.dir) // ignore error
 }

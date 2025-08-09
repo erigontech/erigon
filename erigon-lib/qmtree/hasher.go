@@ -6,6 +6,7 @@ type Hasher interface {
 	// node_hash_in_place
 	nodeHash(level uint8, left common.Hash, right common.Hash) common.Hash
 	hash2(level uint8, h0 common.Hash, h1 common.Hash) common.Hash
+	hash2x(level uint8, h0 common.Hash, h1 common.Hash, b bool) common.Hash
 
 	nullMtForTwig() TwigMT
 	nullTwig() Twig
@@ -56,6 +57,10 @@ func (h Sha256Hasher) nodeHash(level uint8, left common.Hash, right common.Hash)
 	return common.Hash{}
 }
 func (h Sha256Hasher) hash2(level uint8, h0 common.Hash, h1 common.Hash) common.Hash {
+	return common.Hash{}
+}
+
+func (h Sha256Hasher) hash2x(level uint8, h0 common.Hash, h1 common.Hash, b bool) common.Hash {
 	return common.Hash{}
 }
 
