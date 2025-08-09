@@ -3,11 +3,12 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"gopkg.in/yaml.v3"
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
 	"text/template"
 )
 
@@ -76,7 +77,7 @@ func goStruct(dom string) string {
 	case "tracesto":
 		return "TracesToIdx"
 	default:
-		return strings.Title(dom) + "Domain"
+		return cases.Title(language.Und).String(dom) + "Domain"
 	}
 }
 
