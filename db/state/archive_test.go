@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 func TestArchiveWriter(t *testing.T) {
