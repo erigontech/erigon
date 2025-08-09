@@ -242,6 +242,7 @@ func (a *ApiHandler) init() {
 
 			if a.routerCfg.Debug {
 				r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
+				r.Get("/debug/data_column_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1DebugBeaconDataColumnSidecars))
 			}
 			if a.routerCfg.Config {
 				r.Route("/config", func(r chi.Router) {
@@ -255,7 +256,6 @@ func (a *ApiHandler) init() {
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV1BlindedBlocks))
 					}
-					r.Get("/data_column_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1DebugBeaconDataColumnSidecars))
 					r.Route("/rewards", func(r chi.Router) {
 						r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsSyncCommittees))
 						r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconRewardsBlocks))

@@ -184,12 +184,23 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read block slot: %x", blockRoot))
+	}
+	if slot == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
+	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read canonical block root: %x", blockRoot))
+	}
+
 	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -210,17 +221,21 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 		if canonicalRoot != blockRoot {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read state: %x", blockRoot))
 		}
-		state, err := a.stateReader.ReadHistoricalState(ctx, tx, *slot)
+		historicalState, err := a.stateReader.ReadHistoricalState(ctx, tx, *slot)
 		if err != nil {
 			return nil, err
 		}
-		if state == nil {
+		if historicalState == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read state: %x", blockRoot))
 		}
-		return newBeaconResponse(state).WithFinalized(true).WithVersion(state.Version()).WithOptimistic(isOptimistic), nil
+		state = historicalState
 	}
 
-	return newBeaconResponse(state).WithFinalized(false).WithVersion(state.Version()).WithOptimistic(isOptimistic), nil
+	return newBeaconResponse(state).
+		WithHeader("Eth-Consensus-Version", state.Version().String()).
+		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithVersion(state.Version()).
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 }
 
 type finalityCheckpointsResponse struct {
