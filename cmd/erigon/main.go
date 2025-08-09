@@ -60,6 +60,9 @@ func runErigon(cliCtx *cli.Context) (err error) {
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
 
+	// Log the full command used to start the program (with sensitive info like URLs and IP addresses redacted)
+	logger.Info("Startup command", "cmd", log.RedactArgs(os.Args))
+
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)

@@ -20,7 +20,7 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 // Algorithms for reconstituting the state from state history
