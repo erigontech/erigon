@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/google/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 type EncryptedTxnsPool struct {
@@ -152,6 +152,17 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	return txns, err
 }
 
+func (etp *EncryptedTxnsPool) AllSubmissions() []EncryptedTxnSubmission {
+	etp.mu.RLock()
+	defer etp.mu.RUnlock()
+	submissions := make([]EncryptedTxnSubmission, 0, etp.submissions.Len())
+	etp.submissions.Ascend(func(item EncryptedTxnSubmission) bool {
+		submissions = append(submissions, item)
+		return true
+	})
+	return submissions
+}
+
 func (etp *EncryptedTxnsPool) DeleteUpTo(eon EonIndex, to TxnIndex) {
 	etp.mu.Lock()
 	defer etp.mu.Unlock()
@@ -168,7 +179,7 @@ func (etp *EncryptedTxnsPool) DeleteUpTo(eon EonIndex, to TxnIndex) {
 	}
 
 	for _, item := range toDelete {
-		etp.submissions.Delete(item)
+		etp.deleteSubmission(item)
 	}
 
 	etp.logger.Debug(
@@ -225,7 +236,7 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts
 	defer etp.mu.Unlock()
 
 	if event.Raw.Removed {
-		etp.submissions.Delete(encryptedTxnSubmission)
+		etp.deleteSubmission(encryptedTxnSubmission)
 		return nil
 	}
 
@@ -272,6 +283,7 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission
 }
 
 func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregister := etp.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
@@ -281,9 +293,10 @@ func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) erro
 			// no-op
 		}
 	})
-
 	defer close(etp.initialLoadDone)
 	defer unregister()
+	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -358,10 +371,8 @@ func (etp *EncryptedTxnsPool) addSubmission(submission EncryptedTxnSubmission) {
 	etp.submissions.ReplaceOrInsert(submission)
 	submissionsLen := etp.submissions.Len()
 	if submissionsLen > etp.config.MaxPooledEncryptedTxns {
-		del, _ := etp.submissions.DeleteMin()
-		encryptedTxnsPoolDeleted.Inc()
-		encryptedTxnsPoolTotalCount.Dec()
-		encryptedTxnsPoolTotalBytes.Sub(float64(len(del.EncryptedTransaction)))
+		del, _ := etp.submissions.Min()
+		etp.deleteSubmission(del)
 	}
 
 	encryptedTxnSize := float64(len(submission.EncryptedTransaction))
@@ -369,6 +380,13 @@ func (etp *EncryptedTxnsPool) addSubmission(submission EncryptedTxnSubmission) {
 	encryptedTxnsPoolTotalCount.Inc()
 	encryptedTxnsPoolTotalBytes.Add(encryptedTxnSize)
 	encryptedTxnSizeBytes.Observe(encryptedTxnSize)
+}
+
+func (etp *EncryptedTxnsPool) deleteSubmission(submission EncryptedTxnSubmission) {
+	etp.submissions.Delete(submission)
+	encryptedTxnsPoolDeleted.Inc()
+	encryptedTxnsPoolTotalCount.Dec()
+	encryptedTxnsPoolTotalBytes.Sub(float64(len(submission.EncryptedTransaction)))
 }
 
 type submissionsContinuer func(*contracts.SequencerTransactionSubmitted) bool
