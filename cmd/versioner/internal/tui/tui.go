@@ -75,7 +75,7 @@ func Run(file string) error {
 	return err
 }
 
-func newModel(file string, s schema.Schema) model {
+func newModel(file string, s schema.Schema) *model {
 	cats := schema.Cats(s)
 
 	l := table.New(table.WithColumns([]table.Column{{Title: "Schemas", Width: 18}}))
@@ -91,7 +91,7 @@ func newModel(file string, s schema.Schema) model {
 	ti.CharLimit = 8
 	ti.Prompt = "↳ "
 
-	m := model{
+	m := &model{
 		file:   file,
 		cur:    s,
 		orig:   clone(s),
@@ -219,9 +219,9 @@ func (m *model) updateStatus() {
 	m.status = base + " • " + tag + " • Ctrl+S=Save&Exit"
 }
 
-func (m model) Init() tea.Cmd { return nil }
+func (m *model) Init() tea.Cmd { return nil }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		k := msg.String()
@@ -371,7 +371,7 @@ func (m *model) beginEdit() {
 	m.foc = fEdit
 }
 
-func (m model) View() string {
+func (m *model) View() string {
 	title := lipgloss.NewStyle().Bold(true).Render("Schema Versions")
 	left := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
 		lipgloss.JoinVertical(lipgloss.Left, "Schemas", m.left.View()),
