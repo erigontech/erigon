@@ -13,7 +13,7 @@ var inspectCmd = &cobra.Command{
 	Use:   "inspect",
 	Short: "List all SchemaGen fields and their types",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fields := InspectSchemaFields(state.Schema)
+		fields := InspectSchemaFields(&state.Schema)
 		data, err := json.MarshalIndent(fields, "", "  ")
 		if err != nil {
 			return err
@@ -30,13 +30,13 @@ type FieldInfo struct {
 }
 
 // InspectSchemaFields uses reflection to list SchemaGen fields and classify their types
-func InspectSchemaFields(s state.SchemaGen) []FieldInfo {
+func InspectSchemaFields(s *state.SchemaGen) []FieldInfo {
 	return inspectSchemaFields(s)
 }
 
-func inspectSchemaFields(s state.SchemaGen) []FieldInfo {
+func inspectSchemaFields(s *state.SchemaGen) []FieldInfo {
 	var result []FieldInfo
-	v := reflect.ValueOf(s)
+	v := reflect.ValueOf(*s)
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -67,7 +67,7 @@ func parseName(name string) (string, string) {
 	return name, ""
 }
 
-func getNames(s state.SchemaGen) (res map[string]string, domains []string) {
+func getNames(s *state.SchemaGen) (res map[string]string, domains []string) {
 	fields := inspectSchemaFields(s)
 	res = make(map[string]string)
 	for _, f := range fields {
