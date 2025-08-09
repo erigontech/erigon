@@ -298,7 +298,6 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 }
 
 func TestSentinelStatusRequest(t *testing.T) {
-	t.Skip("TODO: fix me")
 	listenAddrHost := "127.0.0.1"
 
 	ctx := context.Background()
@@ -355,9 +354,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 	require.Equal(t, uint8(0), code[0])
 
 	resp := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0); err != nil {
-		return
-	}
+	err = ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0)
 	require.NoError(t, err)
 
 	require.Equal(t, resp, req)
