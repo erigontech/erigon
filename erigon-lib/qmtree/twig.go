@@ -44,7 +44,7 @@ func (mtree TwigMT) Sync(hasher Hasher, start int32, end int32) {
 		j := (cur_start >> 1) << 1 //clear the lowest bit of cur_start
 		for j <= end_round && j+1 < base {
 			i := int(base + j)
-			mtree[i/2] = hasher.nodeHash(level, mtree[i], mtree[i+1])
+			mtree[i/2] = hasher.nodeHash(level, mtree[i][:], mtree[i+1][:])
 			j += 2
 		}
 		cur_start >>= 1
@@ -89,19 +89,19 @@ func (t *Twig) syncL1(hasher Hasher, pos uint64, activeBits ActiveBits) {
 	case 0:
 		copy(hash0[:], activeBits.GetBits(0, 32))
 		copy(hash1[:], activeBits.GetBits(1, 32))
-		t.activeBitsMtl1[0] = hasher.nodeHash(8, hash0, hash1)
+		t.activeBitsMtl1[0] = hasher.nodeHash(8, hash0[:], hash1[:])
 	case 1:
 		copy(hash0[:], activeBits.GetBits(2, 32))
 		copy(hash1[:], activeBits.GetBits(3, 32))
-		t.activeBitsMtl1[1] = hasher.nodeHash(8, hash0, hash1)
+		t.activeBitsMtl1[1] = hasher.nodeHash(8, hash0[:], hash1[:])
 	case 2:
 		copy(hash0[:], activeBits.GetBits(4, 32))
 		copy(hash1[:], activeBits.GetBits(5, 32))
-		t.activeBitsMtl1[2] = hasher.nodeHash(8, hash0, hash1)
+		t.activeBitsMtl1[2] = hasher.nodeHash(8, hash0[:], hash1[:])
 	case 3:
 		copy(hash0[:], activeBits.GetBits(6, 32))
 		copy(hash1[:], activeBits.GetBits(7, 32))
-		t.activeBitsMtl1[3] = hasher.nodeHash(8, hash0, hash1)
+		t.activeBitsMtl1[3] = hasher.nodeHash(8, hash0[:], hash1[:])
 	default:
 		panic("invalid twig position")
 	}
@@ -110,51 +110,51 @@ func (t *Twig) syncL1(hasher Hasher, pos uint64, activeBits ActiveBits) {
 func (t *Twig) syncL2(hasher Hasher, pos uint64) {
 	switch pos {
 	case 0:
-		t.activeBitsMtl2[0] = hasher.nodeHash(9, t.activeBitsMtl1[0], t.activeBitsMtl1[1])
+		t.activeBitsMtl2[0] = hasher.nodeHash(9, t.activeBitsMtl1[0][:], t.activeBitsMtl1[1][:])
 	case 1:
-		t.activeBitsMtl2[1] = hasher.nodeHash(9, t.activeBitsMtl1[2], t.activeBitsMtl1[3])
+		t.activeBitsMtl2[1] = hasher.nodeHash(9, t.activeBitsMtl1[2][:], t.activeBitsMtl1[3][:])
 	default:
 		panic("Can not reach here!")
 	}
 }
 
 func (t *Twig) syncL3(hasher Hasher) {
-	t.activeBitsMtl3 = hasher.nodeHash(10, t.activeBitsMtl2[0], t.activeBitsMtl2[1])
+	t.activeBitsMtl3 = hasher.nodeHash(10, t.activeBitsMtl2[0][:], t.activeBitsMtl2[1][:])
 }
 
 func (t *Twig) syncTop(hasher Hasher) {
-	t.twigRoot = hasher.nodeHash(11, t.leftRoot, t.activeBitsMtl3)
+	t.twigRoot = hasher.nodeHash(11, t.leftRoot[:], t.activeBitsMtl3[:])
 }
 
 type ActiveBits [256]byte
 
-func (ab ActiveBits) SetBit(offset uint32) {
+func (ab *ActiveBits) SetBit(offset uint32) {
 	if offset > LeafCountInTwig {
-		panic("Invalid ID")
+		panic("invalid id")
 	}
 	mask := 1 << (offset & 0x7)
 	pos := int(offset >> 3)
 	ab[pos] |= byte(mask)
 }
 
-func (ab ActiveBits) ClearBit(offset uint32) {
+func (ab *ActiveBits) ClearBit(offset uint32) {
 	if offset > LeafCountInTwig {
-		panic("Invalid ID")
+		panic("invalid id")
 	}
 	mask := 1 << (offset & 0x7)
 	pos := int(offset >> 3)
 	ab[pos] &= byte(^mask) //bit-wise not
 }
 
-func (ab ActiveBits) GetBit(offset uint32) bool {
+func (ab *ActiveBits) GetBit(offset uint32) bool {
 	if offset > LeafCountInTwig {
-		panic("Invalid ID")
+		panic("invalid id")
 	}
 	mask := 1 << (offset & 0x7)
 	pos := int(offset >> 3)
 	return (ab[pos] & byte(mask)) != 0
 }
 
-func (ab ActiveBits) GetBits(pageNum int, pageSize int) []byte {
+func (ab *ActiveBits) GetBits(pageNum int, pageSize int) []byte {
 	return ab[pageNum*pageSize : (pageNum+1)*pageSize]
 }

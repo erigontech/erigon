@@ -1,6 +1,7 @@
 package hpfile
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -66,6 +67,7 @@ type File struct {
 	dirName        string // where we store the small files
 	segmentSize    uint64 // the size of each small file
 	bufferSize     int    // the write buffer's size
+	buffer         bytes.Buffer
 	fileMap        *FileMap
 	largestId      atomic.Uint64
 	latestFileSize atomic.Int64
@@ -191,7 +193,9 @@ func parseFilename(segmentSize uint64, fileName string) (uint64, error) {
 }
 
 func loadFileMap(dirName string, segmentSize uint64, idList []uint64, largestId uint64) (*FileMap, int64, error) {
-	fileMap := FileMap{}
+	fileMap := FileMap{
+		files: map[uint64]*fileEntry{},
+	}
 	var latestFileSize int64
 
 	for _, id := range idList {
@@ -313,21 +317,22 @@ func (f *File) Truncate(size int64) error {
 // / - `Ok`: It's flushed successfully
 // / - `Err`: Encounted some file system error.
 // /
-func (f *File) Flush(buffer []byte, eof bool) error {
+func (f *File) Flush(eof bool) error {
 	if f.IsEmpty() {
 		return nil
 	}
 	largestId := f.largestId.Load()
 	entry := f.fileMap.files[largestId]
-	if len(buffer) > 0 {
-		tailLen := len(buffer) % IO_BLK_SIZE
+	if buflen := f.buffer.Len(); buflen > 0 {
+		tailLen := buflen % IO_BLK_SIZE
 		if eof && tailLen != 0 {
 			// force the file size aligned with IO_BLK_SIZE
-			buffer = append(buffer, make([]byte, IO_BLK_SIZE-tailLen, 0)...)
+			f.buffer.Write(make([]byte, IO_BLK_SIZE-tailLen, 0))
 		}
 		entry.file.Seek(0, io.SeekEnd)
-		entry.file.WriteAll(buffer)
-		f.fileSizeOnDisk.Add(int64(len(buffer)))
+		entry.file.WriteAll(f.buffer.Bytes())
+		f.fileSizeOnDisk.Add(int64(f.buffer.Len()))
+		f.buffer.Reset()
 	}
 
 	return entry.file.SyncAll()
@@ -468,26 +473,27 @@ func (f *File) Append(bz []byte) (uint64, error) {
 	oldSize := f.latestFileSize.Load() + int64(len(bz))
 	f.fileSize.Add(int64(len(bz)))
 	splitPos := 0
-	extraBytes := len(bz) - f.bufferSize
+	extraBytes := (f.buffer.Len() + len(bz)) - f.bufferSize
 	if extraBytes > 0 {
 		// flush bufferSize bytes to disk
 		splitPos = len(bz) - extraBytes
-		buffer := bz[0:splitPos]
+		f.buffer.Write(bz[0:splitPos])
 		if entry, ok := f.fileMap.files[largestId]; ok {
-			if _, err := entry.file.WriteAll(buffer); err != nil {
+			if _, err := entry.file.WriteAll(f.buffer.Bytes()); err != nil {
 				panic("Fail to write file")
 			}
-			f.fileSizeOnDisk.Add(int64(len(buffer)))
+			f.fileSizeOnDisk.Add(int64(f.buffer.Len()))
+			f.buffer.Reset()
 		}
 	}
-	buffer := bz[splitPos:] //put remained bytes into buffer
+	f.buffer.Write(bz[splitPos:]) //put remained bytes into buffer
 	overflowByteCount := oldSize + int64(len(bz)) - int64(f.segmentSize)
 	if overflowByteCount >= 0 {
-		f.Flush(buffer, true)
+		f.Flush(true)
 		largestId += 1
 		f.largestId.Add(1)
 		//open new file as writable
-		newFile := fmt.Sprintf("%d/%d-%d", f.dirName, largestId, f.segmentSize)
+		newFile := fmt.Sprintf("%s/%d-%d", f.dirName, largestId, f.segmentSize)
 		file, err := (&options{}).createNew(newFile)
 		if err != nil {
 			(&options{}).read(true).write(true).open(newFile)
@@ -516,7 +522,7 @@ func (f *File) PruneHead(offset uint64) error {
 
 	for _, id := range idsToRemove {
 		delete(f.fileMap.files, id)
-		fileName := fmt.Sprintf("%d/%d-%d", f.dirName, id, f.segmentSize)
+		fileName := fmt.Sprintf("%s/%d-%d", f.dirName, id, f.segmentSize)
 		os.Remove(fileName)
 	}
 
@@ -572,19 +578,15 @@ func (o *options) write(_ bool) *options {
 	return o
 }
 
-func (o *options) customFlags(_ int32) *options {
-	return o
-}
-
 func (o *options) create(_ bool) *options {
 	return o
 }
 
-func (o *options) open(path string) (*file, error) {
+func (o *options) open(_ string) (*file, error) {
 	return &file{}, nil
 }
 
-func (o *options) createNew(path string) (*file, error) {
+func (o *options) createNew(_ string) (*file, error) {
 	return &file{}, nil
 }
 
@@ -628,18 +630,52 @@ func (f *file) SetLen(l int64) error {
 	return nil
 }
 
-func (f *file) Seek(offset int64, whence int) error {
+func (f *file) Seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case io.SeekCurrent:
-
+		pos := f.pos + int(offset)
+		switch {
+		case pos >= len(f.data):
+			f.pos = len(f.data)
+			return int64(f.pos), io.EOF
+		case pos < 0:
+			f.pos = 0
+			return 0, nil
+		default:
+			f.pos = pos
+			return int64(pos), nil
+		}
 	case io.SeekStart:
+		switch {
+		case offset >= int64(len(f.data)):
+			f.pos = len(f.data)
+			return int64(f.pos), io.EOF
+		case offset < 0:
+			f.pos = 0
+			return 0, nil
+		default:
+			f.pos = int(offset)
+			return offset, nil
+		}
 	case io.SeekEnd:
+		pos := f.pos + int(offset)
+		switch {
+		case pos > 0:
+			f.pos = len(f.data)
+			return int64(f.pos), io.EOF
+		case pos < 0:
+			f.pos = len(f.data) + int(offset)
+			return int64(f.pos), nil
+		default:
+			f.pos = len(f.data)
+			return int64(f.pos), nil
+		}
 	}
-	return fmt.Errorf("can't seek: unknown whence value")
+	return 0, fmt.Errorf("can't seek: unknown whence value")
 }
 
 func (f *file) Write(buffer []byte) (int64, error) {
-	copy(f.data[f.pos:], buffer)
+	f.data = append(f.data, buffer...)
 	return int64(len(buffer)), nil
 }
 
@@ -677,8 +713,8 @@ type tempDir struct {
 
 // / Create a new TempDir
 func NewTempDir(dir string) (tempDir, error) {
-	os.RemoveAll(dir) // ignore error
-	err := os.Mkdir(dir, 0700)   // ignore error
+	os.RemoveAll(dir)          // ignore error
+	err := os.Mkdir(dir, 0700) // ignore error
 	return tempDir{
 		dir: dir,
 	}, err

@@ -10,7 +10,7 @@ import (
 func TestNewBits(t *testing.T) {
 	bits := ActiveBits{}
 	for i := range 255 {
-		require.Equal(t, 0, bits[i])
+		require.Equal(t, byte(0), bits[i])
 	}
 }
 
@@ -18,16 +18,16 @@ func TestSetBit(t *testing.T) {
 	bits := ActiveBits{}
 
 	bits.SetBit(25)
-	require.Equal(t, 0b00000010, bits[3])
+	require.Equal(t, byte(0b00000010), bits[3])
 
 	bits.SetBit(70)
-	require.Equal(t, 0b01000000, bits[8])
+	require.Equal(t, byte(0b01000000), bits[8])
 
 	bits.SetBit(83)
-	require.Equal(t, 0b00001000, bits[10])
+	require.Equal(t, byte(0b00001000), bits[10])
 
 	bits.SetBit(801)
-	require.Equal(t, 0b00000010, bits[100])
+	require.Equal(t, byte(0b00000010), bits[100])
 }
 
 func TestClearBits(t *testing.T) {
@@ -35,12 +35,12 @@ func TestClearBits(t *testing.T) {
 
 	bits.SetBit(2047)
 	bits.SetBit(2044)
-	require.Equal(t, 0b10010000, bits[255])
+	require.Equal(t, byte(0b10010000), bits[255])
 
 	bits.ClearBit(2047)
-	require.Equal(t, 0b00010000, bits[255])
+	require.Equal(t, byte(0b00010000), bits[255])
 	bits.ClearBit(2044)
-	require.Equal(t, 0b00000000, bits[255])
+	require.Equal(t, byte(0b00000000), bits[255])
 }
 
 func TestGetBit(t *testing.T) {
@@ -48,7 +48,7 @@ func TestGetBit(t *testing.T) {
 
 	bits.SetBit(2047)
 	bits.SetBit(2044)
-	require.Equal(t, 0b10010000, bits[255])
+	require.Equal(t, byte(0b10010000), bits[255])
 
 	require.True(t, bits.GetBit(2047))
 	require.False(t, bits.GetBit(2046))
@@ -60,20 +60,35 @@ func TestGetBit(t *testing.T) {
 	require.False(t, bits.GetBit(2040))
 }
 
-// #[should_panic(expected = "Invalid ID")]
 func TestSetBitIdxOutOfRange(t *testing.T) {
+	defer func() {
+		x := recover()
+		require.NotNil(t, x)
+		require.Equal(t, "invalid id", x)
+	}()
+
 	bits := ActiveBits{}
 	bits.SetBit(LEAF_COUNT_IN_TWIG + 1)
 }
 
-// #[should_panic(expected = "Invalid ID")]
 func TestClearBitIdxOutOfRange(t *testing.T) {
+	defer func() {
+		x := recover()
+		require.NotNil(t, x)
+		require.Equal(t, "invalid id", x)
+	}()
+
 	bits := ActiveBits{}
 	bits.ClearBit(LEAF_COUNT_IN_TWIG + 1)
 }
 
-// #[should_panic(expected = "Invalid ID")]
 func TestGetBitIdxOutOfRange(t *testing.T) {
+	defer func() {
+		x := recover()
+		require.NotNil(t, x)
+		require.Equal(t, "invalid id", x)
+	}()
+
 	bits := ActiveBits{}
 	bits.GetBit(LEAF_COUNT_IN_TWIG + 1)
 }
@@ -90,7 +105,7 @@ func TestGetBits(t *testing.T) {
 			113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127})
 }
 
-func Testsync(t *testing.T) {
+func TestSync(t *testing.T) {
 	var twig Twig
 	var activeBits ActiveBits
 	for i := range byte(255) {

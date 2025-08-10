@@ -1,12 +1,16 @@
 package qmtree
 
-import "github.com/erigontech/erigon-lib/common"
+import (
+	"crypto/sha256"
+
+	"github.com/erigontech/erigon-lib/common"
+)
 
 type Hasher interface {
 	// node_hash_in_place
-	nodeHash(level uint8, left common.Hash, right common.Hash) common.Hash
-	hash2(level uint8, h0 common.Hash, h1 common.Hash) common.Hash
-	hash2x(level uint8, h0 common.Hash, h1 common.Hash, b bool) common.Hash
+	nodeHash(level uint8, left []byte, right []byte) common.Hash
+	hash2(level uint8, h0 []byte, h1 []byte) common.Hash
+	hash2x(level uint8, h0 []byte, h1 []byte, b bool) common.Hash
 
 	nullMtForTwig() TwigMT
 	nullTwig() Twig
@@ -35,11 +39,11 @@ func nullMtForTwig(hasher Hasher) TwigMT {
 func nullNodeInHigherTree(hasher Hasher, nullTwig *Twig) [64]common.Hash {
 	var nullNodeInHigherTree [64]common.Hash
 
-	nullNodeInHigherTree[FirstLevelAboveTwig] = hasher.hash2(TwigRootLevel, nullTwig.twigRoot, nullTwig.twigRoot)
+	nullNodeInHigherTree[FirstLevelAboveTwig] = hasher.hash2(TwigRootLevel, nullTwig.twigRoot[:], nullTwig.twigRoot[:])
 
 	for i := FirstLevelAboveTwig + 1; i < 64; i++ {
 		nullNodeInHigherTree[int(i)] = hasher.hash2(
-			byte(i-1), nullNodeInHigherTree[int(i-1)], nullNodeInHigherTree[int(i-1)])
+			byte(i-1), nullNodeInHigherTree[int(i-1)][:], nullNodeInHigherTree[int(i-1)][:])
 	}
 
 	return nullNodeInHigherTree
@@ -53,15 +57,27 @@ type Sha256Hasher struct {
 	}
 }
 
-func (h Sha256Hasher) nodeHash(level uint8, left common.Hash, right common.Hash) common.Hash {
-	return common.Hash{}
-}
-func (h Sha256Hasher) hash2(level uint8, h0 common.Hash, h1 common.Hash) common.Hash {
-	return common.Hash{}
+func (_ Sha256Hasher) nodeHash(level uint8, left []byte, right []byte) common.Hash {
+	hasher := sha256.New()
+	hasher.Write([]byte{level})
+	hasher.Write(left)
+	hasher.Write(right)
+	return common.Hash(hasher.Sum(nil))
 }
 
-func (h Sha256Hasher) hash2x(level uint8, h0 common.Hash, h1 common.Hash, b bool) common.Hash {
-	return common.Hash{}
+func (_ Sha256Hasher) hash2(level uint8, h0 []byte, h1 []byte) common.Hash {
+	hasher := sha256.New()
+	hasher.Write([]byte{level})
+	hasher.Write(h0)
+	hasher.Write(h1)
+	return common.Hash(hasher.Sum(nil))
+}
+
+func (h Sha256Hasher) hash2x(level uint8, h0 []byte, h1 []byte, exchange bool) common.Hash {
+	if exchange {
+		return h.hash2(level, h1, h0)
+	}
+	return h.hash2(level, h0, h1)
 }
 
 func (h Sha256Hasher) initNulls() {

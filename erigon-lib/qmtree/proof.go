@@ -48,8 +48,8 @@ func (p *ProofPath) Check(hasher Hasher, complete bool) error {
 	for i := range p.LeftOfTwig {
 		res := hasher.hash2x(
 			uint8(i),
-			p.LeftOfTwig[i].SelfHash,
-			p.LeftOfTwig[i].PeerHash,
+			p.LeftOfTwig[i].SelfHash[:],
+			p.LeftOfTwig[i].PeerHash[:],
 			p.LeftOfTwig[i].PeerAtLeft,
 		)
 
@@ -62,16 +62,16 @@ func (p *ProofPath) Check(hasher Hasher, complete bool) error {
 
 	leaf_mt_root := hasher.hash2x(
 		10,
-		p.LeftOfTwig[10].SelfHash,
-		p.LeftOfTwig[10].PeerHash,
+		p.LeftOfTwig[10].SelfHash[:],
+		p.LeftOfTwig[10].PeerHash[:],
 		p.LeftOfTwig[10].PeerAtLeft,
 	)
 
 	for i := range 2 {
 		res := hasher.hash2x(
 			uint8((i + 8)),
-			p.RightOfTwig[i].SelfHash,
-			p.RightOfTwig[i].PeerHash,
+			p.RightOfTwig[i].SelfHash[:],
+			p.RightOfTwig[i].PeerHash[:],
 			p.RightOfTwig[i].PeerAtLeft,
 		)
 		if complete {
@@ -83,12 +83,12 @@ func (p *ProofPath) Check(hasher Hasher, complete bool) error {
 
 	active_bits_mt_l3 := hasher.hash2x(
 		10,
-		p.RightOfTwig[2].SelfHash,
-		p.RightOfTwig[2].PeerHash,
+		p.RightOfTwig[2].SelfHash[:],
+		p.RightOfTwig[2].PeerHash[:],
 		p.RightOfTwig[2].PeerAtLeft,
 	)
 
-	twigRoot := hasher.hash2(11, leaf_mt_root, active_bits_mt_l3)
+	twigRoot := hasher.hash2(11, leaf_mt_root[:], active_bits_mt_l3[:])
 	if complete {
 		p.UpperPath[0].SelfHash = twigRoot
 	} else if twigRoot != p.UpperPath[0].SelfHash {
@@ -99,8 +99,8 @@ func (p *ProofPath) Check(hasher Hasher, complete bool) error {
 		level := TwigRootLevel + i
 		res := hasher.hash2x(
 			uint8(level),
-			p.UpperPath[i].SelfHash,
-			p.UpperPath[i].PeerHash,
+			p.UpperPath[i].SelfHash[:],
+			p.UpperPath[i].PeerHash[:],
 			p.UpperPath[i].PeerAtLeft,
 		)
 
@@ -122,7 +122,7 @@ func BytesToProofPath(bz []byte) (*ProofPath, error) {
 	n := len(bz) - 8
 	upperCount := (n/32 - OTHER_NODE_COUNT)
 	if n%32 != 0 || upperCount < 0 {
-		return nil, fmt.Errorf("Invalid byte slice length: *d", len(bz))
+		return nil, fmt.Errorf("Invalid byte slice length: %d", len(bz))
 	}
 	upperPath := make([]ProofNode, 0, upperCount)
 	emptyNode := ProofNode{}

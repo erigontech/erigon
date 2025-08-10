@@ -56,7 +56,7 @@ func calcMaxLevel(youngestTwigId uint64) uint8 {
 type NodePos uint64
 
 func nodePos(level uint8, n uint64) NodePos {
-	return NodePos(uint64(level<<56) | n)
+	return NodePos((uint64(level) << 56) | n)
 }
 
 func (np NodePos) Level() uint64 {
@@ -67,7 +67,7 @@ func (np NodePos) Nth() uint64 {
 	return uint64(np<<8) >> 8 // extract the low 56 bits
 }
 
-func (np NodePos) string() string {
+func (np NodePos) String() string {
 	return fmt.Sprintf("NodePos: %d (level: %d, nth: %d)", np, np.Level(), np.Nth())
 }
 
@@ -358,7 +358,7 @@ func doSyncJob(upperTree *UpperTree, hasher Hasher, nodes map[NodePos][32]byte, 
 			if !ok {
 				right = hasher.nullTwig().twigRoot
 			}
-			nodes[pos] = hasher.nodeHash(level-1, left, right)
+			nodes[pos] = hasher.nodeHash(level-1, left[:], right[:])
 		} else {
 			nodePosL := nodePos((level - 1), 2*i)
 			nodePosR := nodePos((level - 1), 2*i+1)
@@ -390,7 +390,7 @@ func doSyncJob(upperTree *UpperTree, hasher Hasher, nodes map[NodePos][32]byte, 
 					nodePosR))
 			}
 
-			nodes[pos] = hasher.nodeHash(level-1, nodeL, nodeR)
+			nodes[pos] = hasher.nodeHash(level-1, nodeL[:], nodeR[:])
 		}
 	}
 }
@@ -482,13 +482,10 @@ func (t *Tree) TruncateFiles(entryFileSize int64, twigFileSize int64) {
 	}
 }
 
-func (t *Tree) GetActiveBits(twigId uint64) *ActiveBits {
+func (t *Tree) GetActiveBits(twigId uint64) (*ActiveBits, bool) {
 	shardIdx, key := GetShardIdxAndKey(twigId)
 	bits, ok := t.activeBitShards[shardIdx][key]
-	if !ok {
-		panic(fmt.Sprintf("cannot find twig %s", twigId))
-	}
-	return bits
+	return bits, ok
 }
 
 func (t *Tree) getActiveBits(twigId uint64) *ActiveBits {
@@ -516,10 +513,6 @@ func (t *Tree) setEntryActiviation(sn uint64, active bool) {
 
 func (t *Tree) touchPos(sn uint64) {
 	t.touchedPosOf512b[sn/512] = struct{}{}
-}
-
-func (t *Tree) clearTouchedPos() {
-	t.touchedPosOf512b = map[uint64]struct{}{}
 }
 
 func (t *Tree) ActiveEntry(sn uint64) {

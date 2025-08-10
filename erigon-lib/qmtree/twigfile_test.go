@@ -11,7 +11,7 @@ import (
 
 func generateTwig(rand_num uint32, twig TwigMT, hasher Hasher) {
 	// let mut rand_num = rand_num;
-	for i := 2048; i <= 4096; i++ {
+	for i := 2048; i < 4096; i++ {
 		j := 0
 		for j+4 < 32 {
 			binary.LittleEndian.PutUint32(twig[i][j:j+4], rand_num)
@@ -36,7 +36,7 @@ func TestTwigFile(t *testing.T) {
 	tf.appendTwig(twigs[0][:], 789)
 	tf.appendTwig(twigs[1][:], 1000789)
 	tf.appendTwig(twigs[2][:], 2000789)
-
+	tf.file.Flush(false)
 	tf.Close()
 
 	tf, err = NewTwigFile(64*1024, 1024*1024, dir.String(), hasher)
@@ -44,19 +44,19 @@ func TestTwigFile(t *testing.T) {
 
 	pos, err := tf.GetFirstEntryPos(0)
 	require.NoError(t, err)
-	require.Equal(t, 0, pos)
+	require.Equal(t, int64(0), pos)
 
 	pos, err = tf.GetFirstEntryPos(1)
 	require.NoError(t, err)
-	require.Equal(t, 789, pos)
+	require.Equal(t, int64(789), pos)
 
 	pos, err = tf.GetFirstEntryPos(2)
 	require.NoError(t, err)
-	require.Equal(t, 1000789, pos)
+	require.Equal(t, int64(1000789), pos)
 
 	pos, err = tf.GetFirstEntryPos(1)
 	require.NoError(t, err)
-	require.Equal(t, 2000789, pos)
+	require.Equal(t, int64(2000789), pos)
 
 	for twigId := range uint64(3) {
 		for i := uint64(1); i < 4096; i++ {

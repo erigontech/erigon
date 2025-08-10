@@ -156,25 +156,19 @@ func (tf *TwigFile) GetHashNodeInIgnoreRange(twigId uint64, hashId uint64, cache
 	level := uint8(0)
 	for i := start / 2; i < end/2; i++ {
 		off := ((i - start/2) * 64)
-		v := tf.hasher.hash2(level, common.Hash(buf[off:off+32]), common.Hash(buf[off+32:off+64]))
+		v := tf.hasher.hash2(level, buf[off:off+32], buf[off+32:off+64])
 		cache[i] = v
 	}
 	level = 1
 	for i := start / 4; i < end/4; i++ {
-		v := tf.hasher.hash2(
-			level,
-			cache[(i*2)],
-			cache[(i*2+1)],
-		)
+		left, right := cache[(i*2)], cache[(i*2+1)]
+		v := tf.hasher.hash2(level, left[:], right[:])
 		cache[i] = v
 	}
 	level = 2
 	id := start / 8
-	v := tf.hasher.hash2(
-		level,
-		cache[id*2],
-		cache[id*2+1],
-	)
+	left, right := cache[(id*2)], cache[(id*2+1)]
+	v := tf.hasher.hash2(level, left[:], right[:])
 	cache[id] = v
 	return cache[hashId], nil
 }
