@@ -179,7 +179,6 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
 
-	tx.GetAccessList()
 	// Add accounts with authorizations to the prestate before they get applied.
 	var b [32]byte
 	data := bytes.NewBuffer(nil)
@@ -190,6 +189,10 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 			continue
 		}
 		t.lookupAccount(*addr)
+	}
+
+	if t.create && t.config.DiffMode {
+		t.created[t.to] = true
 	}
 }
 
