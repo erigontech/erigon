@@ -590,14 +590,6 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap
 func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	start := time.Now()
 
-	doms, _ := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
-	fmt.Println("PRUNE", s.LogPrefix(), "block in domains", doms.BlockNum())
-
-	defer func() {
-		doms, _ := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
-		fmt.Println("DONE PRUNE", s.LogPrefix(), "block in domains", doms.BlockNum())
-	}()
-
 	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
 	if err != nil {
 		return err
