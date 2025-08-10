@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -1062,7 +1062,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 		segtype := s.dirty[f.Type.Enum()]
 		if segtype == nil {
-			log.Debug("[snapshot] rebuildSegments: unknown type", "t", f.Type.Enum().String())
+			log.Debug("[snapshots] rebuildSegments: unknown type", "t", f.Type.Enum().String())
 			continue
 		}
 
