@@ -105,7 +105,6 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
-func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.aggStep }
 func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
 	return ht.files.EndTxNum() / ht.aggStep
 }

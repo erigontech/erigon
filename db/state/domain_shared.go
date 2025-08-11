@@ -162,6 +162,13 @@ func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []b
 	return gt.sd.HasPrefix(name, prefix, gt.tx)
 }
 
+func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) uint64 {
+	if ttx, ok := gt.tx.(kv.TemporalTx); ok {
+		ttx.StepsInFiles(entitySet...)
+	}
+	return 0
+}
+
 func (sd *SharedDomains) AsGetter(tx kv.Tx) kv.TemporalGetter {
 	return &temporalGetter{sd, tx}
 }
@@ -558,10 +565,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 		return sd.updateAccountCode(ks, v, txNum, prevVal, prevStep)
 	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
 		sd.put(domain, ks, v, txNum)
-		if domain == kv.CommitmentDomain && string(k) == "state" {
-			txNum, blockNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-			fmt.Println("PUT STATE", blockNum, txNum)
-		}
 		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, v) {

@@ -169,9 +169,14 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
-	state, _, err = sdc.mainTtx.Branch(keyCommitmentState)
+	var step uint64
+
+	state, step, err = sdc.mainTtx.Branch(keyCommitmentState)
 	if err != nil {
 		return 0, 0, nil, err
+	}
+	if frozenSteps := sdc.mainTtx.getter.StepsInFiles(kv.CommitmentDomain); step < frozenSteps {
+		return 0, 0, nil, fmt.Errorf("commitment state out of date: commitment step: %d, expected step: %d", step, frozenSteps)
 	}
 	if len(state) < 16 {
 		return 0, 0, nil, nil

@@ -739,6 +739,10 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
 }
 
+func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) uint64 {
+	return m.db.(kv.TemporalTx).StepsInFiles(entitySet...)
+}
+
 func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	// panic("not supported")
 	return m.db.(kv.TemporalTx).RangeAsOf(name, fromKey, toKey, ts, asc, limit)

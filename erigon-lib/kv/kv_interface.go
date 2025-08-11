@@ -542,7 +542,9 @@ type (
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
+	StepsInFiles(entitySet ...Domain) uint64
 }
+
 type TemporalTx interface {
 	Tx
 	TemporalGetter
