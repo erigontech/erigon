@@ -52,7 +52,7 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -824,7 +824,7 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 		if deadlines < maxPermitsPerPeer {
 			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
 			if byMinBlock.Len() > peerCount {
-				// Remove the worst peer
+				// RemoveFile the worst peer
 				peerRef := heap.Pop(&byMinBlock).(PeerRef)
 				latestDeadline := peerRef.pi.LatestDeadline()
 				if pokePeer == nil || latestDeadline.Before(pokeDeadline) {

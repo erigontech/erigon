@@ -29,12 +29,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	polygontracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
@@ -109,12 +109,8 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	if *config.BorTraceEnabled {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 
-		var ok bool
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
-		}
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+
 		if err != nil {
 			return err
 		}
@@ -156,7 +152,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 		if isBorStateSyncTxn {
 			var stateSyncEvents []*types.Message
-			stateSyncEvents, err = api.stateSyncEvents(ctx, tx, block.Hash(), blockNumber, chainConfig)
+			stateSyncEvents, err = api.bridgeReader.Events(ctx, block.Hash(), blockNumber)
 			if err != nil {
 				return err
 			}
@@ -245,11 +241,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
-		}
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -258,7 +250,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 			stream.WriteNil()
 			return nil
 		}
-		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
+		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}
@@ -307,7 +299,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 
 	if isBorStateSyncTxn {
-		stateSyncEvents, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		stateSyncEvents, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
 			return err
 		}

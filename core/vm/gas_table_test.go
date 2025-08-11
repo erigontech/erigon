@@ -29,19 +29,19 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -102,9 +102,9 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	dirs, logger := datadir.New(t.TempDir()), log.New()
-	salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
 	require.NoError(t, err)
-	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
+	agg, err := dbstate.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -113,12 +113,12 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 	return _db
 }
 
-func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *state3.SharedDomains) {
+func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *dbstate.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -192,7 +192,7 @@ func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := common.BytesToAddress([]byte("contract"))
 
-		domains, err := state3.NewSharedDomains(tx, log.New())
+		domains, err := dbstate.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 

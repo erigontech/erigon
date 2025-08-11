@@ -27,23 +27,12 @@ import (
 	"go.uber.org/mock/gomock"
 
 	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
-
-func TestUseBridgeReader(t *testing.T) {
-	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
-	var br *mockBridgeReader
-	bor := New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
-	require.False(t, bor.useBridgeReader)
-	br = &mockBridgeReader{}
-	bor = New(polychain.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
-	require.True(t, bor.useBridgeReader)
-}
 
 var _ bridgeReader = mockBridgeReader{}
 
@@ -57,10 +46,6 @@ func (m mockBridgeReader) EventsWithinTime(context.Context, time.Time, time.Time
 	panic("mock")
 }
 
-func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
-	panic("mock")
-}
-
 var _ spanReader = mockSpanReader{}
 
 type mockSpanReader struct{}
@@ -69,7 +54,7 @@ func (m mockSpanReader) Span(context.Context, uint64) (*heimdall.Span, bool, err
 	panic("mock")
 }
 
-func (m mockSpanReader) Producers(context.Context, uint64) (*valset.ValidatorSet, error) {
+func (m mockSpanReader) Producers(context.Context, uint64) (*heimdall.ValidatorSet, error) {
 	panic("mock")
 }
 
@@ -78,7 +63,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),
@@ -120,10 +105,7 @@ func TestCommitStatesIndore(t *testing.T) {
 		return nil, nil
 	}
 
-	err := bor.CommitStates(nil, header, statefull.ChainContext{
-		Chain: cr,
-	}, syscall, nil, true)
-
+	err := bor.CommitStates(header, statefull.ChainContext{Chain: cr}, syscall, true)
 	require.NoError(t, err)
 	require.Equal(t, 1, called)
 }

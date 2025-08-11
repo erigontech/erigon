@@ -25,9 +25,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -35,27 +32,27 @@ import (
 	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -685,7 +682,6 @@ func SilkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Confi
 
 func NewDefaultStages(ctx context.Context,
 	db kv.TemporalRwDB,
-	snapDb kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
@@ -695,10 +691,6 @@ func NewDefaultStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient heimdall.Client,
-	heimdallStore heimdall.Store,
-	bridgeStore bridge.Store,
-	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[common.Hash, common.Address],
 	logger log.Logger,
 	tracer *tracers.Tracer,

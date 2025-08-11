@@ -27,10 +27,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -399,7 +399,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 
 	if chainConfig.Bor != nil {
-		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
 		}

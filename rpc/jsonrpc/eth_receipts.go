@@ -20,20 +20,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/RoaringBitmap/roaring/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -66,9 +67,9 @@ func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (ty
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	var begin, end uint64
-	logs := types.Logs{}
+	logs := types.RPCLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
@@ -109,7 +110,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 
 			if uint64(fromBlock) > latest {
-				return types.Logs{}, nil
+				return types.RPCLogs{}, nil
 			}
 		}
 		end = latest
@@ -145,21 +146,26 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if err != nil {
 		return nil, err
 	}
-	logs = make(types.Logs, len(erigonLogs))
+
+	rpcLogs := make(types.RPCLogs, len(erigonLogs))
 	for i, log := range erigonLogs {
-		logs[i] = &types.Log{
-			Address:     log.Address,
-			Topics:      log.Topics,
-			Data:        log.Data,
-			BlockNumber: log.BlockNumber,
-			TxHash:      log.TxHash,
-			TxIndex:     log.TxIndex,
-			BlockHash:   log.BlockHash,
-			Index:       log.Index,
-			Removed:     log.Removed,
+		rpcLogs[i] = &types.RPCLog{
+			Log: types.Log{
+				Address:     log.Address,
+				Topics:      log.Topics,
+				Data:        log.Data,
+				BlockNumber: log.BlockNumber,
+				TxHash:      log.TxHash,
+				TxIndex:     log.TxIndex,
+				BlockHash:   log.BlockHash,
+				Index:       log.Index,
+				Removed:     log.Removed,
+			},
+			BlockTimestamp: log.Timestamp,
 		}
 	}
-	return logs, nil
+
+	return rpcLogs, nil
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
@@ -272,7 +278,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					}
 				}
 				// check for state sync event logs
-				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
+				events, err := api.bridgeReader.Events(ctx, header.Hash(), blockNum)
 				if err != nil {
 					return logs, err
 				}
@@ -436,14 +442,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 
 	if isBorStateSyncTx {
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
-		}
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		if err != nil {
 			return nil, err
 		}
@@ -471,7 +470,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
 
-		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -540,7 +539,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	if chainConfig.Bor != nil {
-		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
 			return nil, err
 		}

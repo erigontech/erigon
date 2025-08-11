@@ -24,12 +24,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -37,7 +35,9 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -203,12 +203,6 @@ func ExecuteTraceTx(
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
-	}
-
-	if streaming {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("structLogs")
-		stream.WriteArrayStart()
 	}
 
 	result, err := execCb(evm, refunds)

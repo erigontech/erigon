@@ -38,11 +38,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -51,13 +46,18 @@ import (
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/state/stats"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -288,7 +288,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
+	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false); err != nil {
+		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
 
@@ -640,14 +641,14 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
-					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
+					if state.info.Type.Enum() == snaptype2.Enums.Headers {
 						if state.info.To > _max {
 							_max = state.info.To
 						}
 					}
 				} else {
 					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
-						if info.Type.Enum() == coresnaptype.Enums.Headers {
+						if info.Type.Enum() == snaptype2.Enums.Headers {
 							if info.To > _max {
 								_max = info.To
 							}
@@ -821,7 +822,7 @@ func (u *snapshotUploader) uploadManifest(ctx context.Context, remoteRefresh boo
 	}
 
 	_ = os.WriteFile(filepath.Join(u.cfg.dirs.Snap, manifestFile), manifestEntries.Bytes(), 0644)
-	defer os.Remove(filepath.Join(u.cfg.dirs.Snap, manifestFile))
+	defer dir.RemoveFile(filepath.Join(u.cfg.dirs.Snap, manifestFile))
 
 	return u.uploadSession.Upload(ctx, manifestFile)
 }
@@ -1145,14 +1146,14 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 		}
 
 		for _, f := range toRemove {
-			_ = os.Remove(f)
-			_ = os.Remove(f + ".torrent")
+			_ = dir.RemoveFile(f)
+			_ = dir.RemoveFile(f + ".torrent")
 			ext := filepath.Ext(f)
 			withoutExt := f[:len(f)-len(ext)]
-			_ = os.Remove(withoutExt + ".idx")
+			_ = dir.RemoveFile(withoutExt + ".idx")
 
 			if strings.HasSuffix(withoutExt, "transactions") {
-				_ = os.Remove(withoutExt + "-to-block.idx")
+				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			}
 		}
 	}

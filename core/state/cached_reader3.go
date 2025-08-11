@@ -17,12 +17,12 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // CachedReader3 is a wrapper for an instance of type StateReader
