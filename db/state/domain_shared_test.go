@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {

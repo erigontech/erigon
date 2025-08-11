@@ -21,11 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {

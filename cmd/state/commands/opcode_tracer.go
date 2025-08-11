@@ -22,7 +22,6 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,10 +32,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 
-	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -50,6 +49,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
+	chain2 "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/types"
@@ -453,7 +453,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = genesis.Config.ChainName
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot.Tracer().Hooks}

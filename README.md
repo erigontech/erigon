@@ -77,15 +77,16 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.24](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 3.2T (Aug 2025). FullNode: 1.5TB (May 2025)
-- ArchiveNode Gnosis: 1.2T (Aug 2025). FullNode: 500GB (June 2024)
-- ArchiveNode Polygon Mainnet: 5.7T (Aug 2024). FullNode: 2Tb (April 2024)
+- ArchiveNode Ethereum Mainnet: 1.6TB (May 2025). FullNode: 1.1TB (May 2025)
+- ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
+- ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
-Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like gp3): Blocks Execution is slow
+Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
+gp3): Blocks Execution is slow
 on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
@@ -131,14 +132,12 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Upgrading from 3.0 to 3.1
 
-* Erigon3.1 has 2 upgrade options (backup recommended in both):
-    * Just upgrade Erigon binary - it will work on old files
-    * Upgrade binary and data:
-        * upgrade Erigon version
-      * run `./build/bin/erigon snapshot reset --datadir /your-datadir` . After this command: at next start of Erigon -
-        will download latest files (but re-use unchanged files)
-      * start Erigon - it will download changed files
-      * it will take many hours (can increase speed by `--torrent.download.rate=1g`)
+1. Backup your datadir.
+2. Upgrade your Erigon binary.
+3. OPTIONAL: Upgrade snapshot files.
+   1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
+   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See [Resetting snapshots](#Resetting-snapshots) for more details.
+4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset your datadir, Erigon will sync to the latest remote snapshots.
 
 ### Datadir structure
 
@@ -184,31 +183,31 @@ datadir
 ### Erigon3 datadir size
 
 ```sh
-# eth-mainnet - archive - Aug 2025
+# eth-mainnet - archive - Nov 2024
 
 du -hsc /erigon/chaindata
 15G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-140G 	/erigon/snapshots/accessor
-250G	/erigon/snapshots/domain
-600G	/erigon/snapshots/history
-250G	/erigon/snapshots/idx
-3.1T	/erigon/snapshots
+120G 	/erigon/snapshots/accessor
+300G	/erigon/snapshots/domain
+280G	/erigon/snapshots/history
+430G	/erigon/snapshots/idx
+2.3T	/erigon/snapshots
 ```
 
 ```sh
-# bor-mainnet - archive - Aug 2025
+# bor-mainnet - archive - Nov 2024
 
 du -hsc /erigon/chaindata
-30G 	/erigon/chaindata
+20G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-400G	/erigon-data/snapshots/accessor
+360G	/erigon-data/snapshots/accessor
 1.1T	/erigon-data/snapshots/domain
-1.9G	/erigon-data/snapshots/history
-900T	/erigon-data/snapshots/idx
-5.7T	/erigon/snapshots
+750G	/erigon-data/snapshots/history
+1.5T	/erigon-data/snapshots/idx
+4.9T	/erigon/snapshots
 ```
 
 ### Erigon3 changes from Erigon2
@@ -222,10 +221,11 @@ du -hsc /erigon/snapshots/*
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
-  - `chaindata` is less than `30gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+  - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
-- **Beacon state Archive:* `--caplin.blocks-archive`, `caplin.states-archive`, `--caplin.blobs-archive`
-- **ExecutionStage included many E2 stages:* stage_hash_state, stage_trie, log_index, history_index, trace_index
+- **Other changes:**
+    - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
+    - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
 
 ### Logging
 
@@ -239,6 +239,7 @@ _Flags:_
 - `log.dir.prefix`
 - `log.dir.verbosity`
 - `log.dir.json`
+- `torrent.verbosity`
 
 In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an
 int value specifying the highest output log level:
@@ -260,6 +261,14 @@ debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
 Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk
 output `--log.dir.json`.
+
+#### Torrent client logging
+
+The torrent client in the Downloader logs to `logs/torrent.log` at the level specified by `torrent.verbosity` or WARN, whichever is lower. Logs at `torrent.verbosity` or higher are also passed through to the top level Erigon dir and console loggers (which must have their own levels set low enough to log the messages in their respective handlers).
+
+### Resetting snapshots
+
+Erigon 3.1 adds the command `erigon snapshots reset`. This modifies your datadir so that Erigon will sync to the latest remote snapshots on next run. You must pass `--datadir`. If the chain cannot be inferred from the chaindata, you must pass `--chain`. `--local=false` will prevent locally generated snapshots from also being removed. Pass `--dry-run` and/or `--verbosity=5` for more information.
 
 ### Modularity
 
@@ -402,7 +411,7 @@ hours: [OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-bl
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/db/etl/README.md).</code>
 
 **Plain state**
 

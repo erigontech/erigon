@@ -24,7 +24,6 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -38,10 +37,12 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/aa"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -64,6 +65,7 @@ type EthBackendServer struct {
 	notifications         *shards.Notifications
 	db                    kv.RoDB
 	blockReader           services.FullBlockReader
+	bridgeStore           bridge.Store
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter  *LogsFilterAggregator
@@ -82,7 +84,7 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
-	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
+	bridgeStore bridge.Store, logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,
@@ -90,6 +92,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 		notifications:         notifications,
 		db:                    db,
 		blockReader:           blockReader,
+		bridgeStore:           bridgeStore,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
@@ -408,7 +411,7 @@ func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnL
 	}
 	defer tx.Rollback()
 
-	blockNum, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
+	blockNum, ok, err := s.bridgeStore.EventTxnToBlockNum(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +428,7 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsR
 	}
 	defer tx.Rollback()
 
-	events, err := s.blockReader.EventsByBlock(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
+	events, err := s.bridgeStore.EventsByBlock(ctx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
 	if err != nil {
 		return nil, err
 	}

@@ -5,14 +5,15 @@ import (
 	"math"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
+	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type testAggConfig struct {

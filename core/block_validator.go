@@ -20,7 +20,7 @@
 package core
 
 import (
-	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims
