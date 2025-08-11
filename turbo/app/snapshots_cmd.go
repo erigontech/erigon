@@ -1606,7 +1606,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if chainConfig.Bor != nil {
 		borSnaps.DownloadComplete() // mark as ready
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+		if err = bridgeStore.Prepare(ctx); err != nil {
+			return
+		}
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
+		if err = heimdallStore.Prepare(ctx); err != nil {
+			return
+		}
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore, bridgeStore)
@@ -2039,6 +2045,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		from, to = from2, to2
 	}
 
+	logger.Info("retiring blocks", "from", from, "to", to)
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
@@ -2047,6 +2054,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	logger.Info("pruning blocks")
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
