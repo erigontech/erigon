@@ -164,7 +164,7 @@ func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []b
 
 func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) uint64 {
 	if ttx, ok := gt.tx.(kv.TemporalTx); ok {
-		ttx.StepsInFiles(entitySet...)
+		return ttx.StepsInFiles(entitySet...)
 	}
 	return 0
 }
