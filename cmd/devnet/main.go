@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -29,7 +30,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	_ "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
 	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/requests"
 	erigon_app "github.com/erigontech/erigon/turbo/app"
@@ -165,6 +166,10 @@ func (ph PanicHandler) Log(r *log.Record) error {
 	fmt.Printf("Msg: %s\nStack: %s\n", r.Msg, dbg.Stack())
 	os.Exit(2)
 	return nil
+}
+
+func (ph PanicHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 func main() {

@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 func NewPeerTracker(
@@ -108,6 +108,17 @@ func (pt *PeerTracker) Run(ctx context.Context) error {
 
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func (pt *PeerTracker) ListPeers() []*PeerId {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	peerIds := make([]*PeerId, 0, len(pt.peerSyncProgresses))
+	for _, peerSyncProgress := range pt.peerSyncProgresses {
+		peerIds = append(peerIds, peerSyncProgress.peerId)
+	}
+	pt.peerShuffle(peerIds)
+	return peerIds
 }
 
 func (pt *PeerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {

@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -37,6 +37,9 @@ type AdminAPI interface {
 
 	// AddPeer requests connecting to a remote node.
 	AddPeer(ctx context.Context, url string) (bool, error)
+
+	// RemovePeer requests connecting to a remote node.
+	RemovePeer(ctx context.Context, url string) (bool, error)
 }
 
 // AdminAPIImpl data structure to store things needed for admin_* commands.
@@ -75,6 +78,17 @@ func (api *AdminAPIImpl) AddPeer(ctx context.Context, url string) (bool, error) 
 	}
 	if result == nil {
 		return false, errors.New("nil addPeer response")
+	}
+	return result.Success, nil
+}
+
+func (api *AdminAPIImpl) RemovePeer(ctx context.Context, url string) (bool, error) {
+	result, err := api.ethBackend.RemovePeer(ctx, &remote.RemovePeerRequest{Url: url})
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, errors.New("nil removePeer response")
 	}
 	return result.Success, nil
 }

@@ -35,7 +35,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -44,10 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -55,8 +51,12 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/runtime"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var runCommand = cli.Command{
@@ -94,36 +94,49 @@ func readGenesis(genesisPath string) *types.Genesis {
 }
 
 type execStats struct {
-	time           time.Duration // The execution time.
-	allocs         int64         // The number of heap allocations during execution.
-	bytesAllocated int64         // The cumulative number of bytes allocated during execution.
+	Time           time.Duration `json:"time"`           // The execution time.
+	Allocs         int64         `json:"allocs"`         // The number of heap allocations during execution.
+	BytesAllocated int64         `json:"bytesAllocated"` // The cumulative number of bytes allocated during execution.
+	GasUsed        uint64        `json:"gasUsed"`        // the amount of gas used during execution
 }
 
-func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []byte, gasLeft uint64, stats execStats, err error) {
+func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []byte, stats execStats, err error) {
 	if bench {
+		// Do one warm-up run
+		output, gasUsed, err := execFunc()
 		result := testing.Benchmark(func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				output, gasLeft, err = execFunc()
+				haveOutput, haveGasUsed, haveErr := execFunc()
+				if !bytes.Equal(haveOutput, output) {
+					panic(fmt.Sprintf("output differs\nhave %x\nwant %x\n", haveOutput, output))
+				}
+				if haveGasUsed != gasUsed {
+					panic(fmt.Sprintf("gas differs, have %v want %v", haveGasUsed, gasUsed))
+				}
+				if haveErr != err {
+					panic(fmt.Sprintf("err differs, have %v want %v", haveErr, err))
+				}
 			}
 		})
 
 		// Get the average execution time from the benchmarking result.
 		// There are other useful stats here that could be reported.
-		stats.time = time.Duration(result.NsPerOp())
-		stats.allocs = result.AllocsPerOp()
-		stats.bytesAllocated = result.AllocedBytesPerOp()
+		stats.Time = time.Duration(result.NsPerOp())
+		stats.Allocs = result.AllocsPerOp()
+		stats.BytesAllocated = result.AllocedBytesPerOp()
+		stats.GasUsed = gasUsed
 	} else {
 		var memStatsBefore, memStatsAfter goruntime.MemStats
 		dbg.ReadMemStats(&memStatsBefore)
 		startTime := time.Now()
-		output, gasLeft, err = execFunc()
-		stats.time = time.Since(startTime)
+		output, stats.GasUsed, err = execFunc()
+		stats.Time = time.Since(startTime)
 		dbg.ReadMemStats(&memStatsAfter)
-		stats.allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
-		stats.bytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
+		stats.Allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
+		stats.BytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}
 
-	return output, gasLeft, stats, err
+	return output, stats, err
 }
 
 func runCmd(ctx *cli.Context) error {
@@ -168,7 +181,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
+	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
 	if err != nil {
 		return err
 	}
@@ -183,7 +196,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := state2.NewSharedDomains(tx, log.Root())
+	sd, err := dbstate.NewSharedDomains(tx, log.Root())
 	if err != nil {
 		return err
 	}
@@ -309,12 +322,13 @@ func runCmd(ctx *cli.Context) error {
 			statedb.SetCode(receiver, code)
 		}
 		execFunc = func() ([]byte, uint64, error) {
-			return runtime.Call(receiver, input, &runtimeConfig)
+			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
+			return output, initialGas - gasLeft, err
 		}
 	}
 
 	bench := ctx.Bool(BenchFlag.Name)
-	output, leftOverGas, stats, err := timedExec(bench, execFunc)
+	output, stats, err := timedExec(bench, execFunc)
 
 	if ctx.Bool(DumpFlag.Name) {
 		rules := &chain.Rules{}
@@ -364,7 +378,7 @@ func runCmd(ctx *cli.Context) error {
 execution time:  %v
 allocations:     %d
 allocated bytes: %d
-`, initialGas-leftOverGas, stats.time, stats.allocs, stats.bytesAllocated)
+`, stats.GasUsed, stats.Time, stats.Allocs, stats.BytesAllocated)
 		if printErr != nil {
 			log.Warn("Failed to print to stderr", "err", printErr)
 		}

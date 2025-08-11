@@ -37,6 +37,7 @@ Param(
         "state",
         "test-short",
         "test-all",
+        "test-all-race",
         "txpool",
         "all"
     )]
@@ -522,6 +523,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-short") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
+    $env:GOEXPERIMENT = "synctest"
     $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
@@ -536,6 +538,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-all") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
+    $env:GOEXPERIMENT = "synctest"
     $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
@@ -544,10 +547,20 @@ if ($BuildTarget -eq "db-tools") {
     } else {
         Write-Host "`n Tests completed"
     }
-
+} elseif ($BuildTarget -eq "test-all-race") {
+    Write-Host " Running all tests ..."
+    $env:GODEBUG = "cgocheck=0"
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m -race ./..."
+    Invoke-Expression -Command $TestCommand | Out-Host
+    if (!($?)) {
+        Write-Host " ERROR : Tests failed"
+        exit 1
+    } else {
+        Write-Host "`n Tests completed"
+    }
 } else {
 
-    # This has a naive assumption every target has a compilation unit wih same name
+    # This has a naive assumption every target has a compilation unit with the same name
 
     Write-Host "`n Building $BuildTarget"
     $outExecutable = [string](Join-Path $Erigon.BinPath "$BuildTarget.exe")

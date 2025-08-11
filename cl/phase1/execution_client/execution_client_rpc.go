@@ -30,11 +30,11 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/jwt"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -97,6 +97,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 		engineMethod = rpc_helper.EngineNewPayloadV3
 	case clparams.ElectraVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV4
+	// TODO: Add Fulu case
 	default:
 		return PayloadStatusNone, errors.New("invalid payload version")
 	}

@@ -28,15 +28,15 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/execution/types"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -279,7 +279,7 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnS
 
 	var txnSlot txpool.TxnSlot
 	var sender common.Address
-	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], true, true, nil)
+	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], false, true, nil)
 	if err != nil {
 		return nil, common.Address{}, err
 	}
@@ -288,6 +288,7 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnS
 }
 
 func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregister := dkp.blockListener.RegisterObserver(func(event BlockEvent) {
 		select {
@@ -296,6 +297,7 @@ func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 		}
 	})
 	defer unregister()
+	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
 
 	for {
 		select {

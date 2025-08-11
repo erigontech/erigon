@@ -23,21 +23,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type AAValidationResult struct {
@@ -90,7 +88,6 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
-	Tracer        *calltracer.CallTracer
 
 	Config *chain.Config
 
@@ -124,7 +121,11 @@ func (t *TxTask) Sender() *common.Address {
 }
 
 func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
-	if t.TxIndex < 0 || t.Final {
+	if t.TxIndex < 0 {
+		return
+	}
+	if t.Final {
+		t.BlockReceipts.AssertLogIndex(t.BlockNum)
 		return
 	}
 
@@ -137,19 +138,20 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
 			var err error
-			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
+			var logIndexAfterTx uint32
+			cumulativeGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
 			if err != nil {
 				panic(err)
 			}
+			firstLogIndex = logIndexAfterTx
 		}
 	}
 
 	cumulativeGasUsed += t.GasUsed
 	if t.GasUsed == 0 {
-		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+		msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
 		panic(msg)
 	}
-
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
 }

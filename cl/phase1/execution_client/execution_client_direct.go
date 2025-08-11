@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const reorgTooDeepDepth = 3
@@ -79,6 +79,9 @@ func (cc *ExecutionClientDirect) NewPayload(
 
 	startInsertBlockAndWait := time.Now()
 	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+			return PayloadStatusInvalidated, err
+		}
 		return PayloadStatusNone, err
 	}
 	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlockAndWait)

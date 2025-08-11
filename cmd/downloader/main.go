@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/c2h5oh/datasize"
 	"github.com/go-viper/mapstructure/v2"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -44,29 +43,32 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/snapcfg"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/paths"
+	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
-	_ "github.com/erigontech/erigon-db/snaptype" //hack
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+
+	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
 func main() {
@@ -225,16 +227,26 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	var downloadRate, uploadRate datasize.ByteSize
-	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
+	downloadRate, err := utils.GetStringFlagRateLimit(downloadRateStr)
+	if err != nil {
 		return err
 	}
-	if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
+	uploadRate, err := utils.GetStringFlagRateLimit(uploadRateStr)
+	if err != nil {
 		return err
 	}
 
-	logger.Info("[snapshots] cli flags", "chain", chain, "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String(), "webseed", webseeds)
-	staticPeers := common.CliString2Array(staticPeersStr)
+	logger.Info(
+		"[snapshots] cli flags",
+		"chain", chain,
+		"addr", downloaderApiAddr,
+		"datadir", dirs.DataDir,
+		"ipv6-enabled", !disableIPV6,
+		"ipv4-enabled", !disableIPV4,
+		"download.rate", downloadRateStr,
+		"upload.rate", uploadRateStr,
+		"webseed", webseeds,
+	)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
@@ -253,15 +265,15 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		dirs,
 		version,
 		torrentLogLevel,
-		downloadRate,
-		uploadRate,
 		torrentPort,
 		torrentConnsPerFile,
-		staticPeers,
 		webseedsList,
 		chain,
 		dbWritemap,
-		downloadercfg.NewCfgOpts{},
+		downloadercfg.NewCfgOpts{
+			DownloadRateLimit: downloadRate.TorrentRateLimit(),
+			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+		},
 	)
 	if err != nil {
 		return err
@@ -289,7 +301,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	d.HandleTorrentClientStatus()
+	d.HandleTorrentClientStatus(nil)
 
 	err = d.AddTorrentsFromDisk(ctx)
 	if err != nil {
@@ -318,10 +330,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	d.MainLoopInBackground(false)
+	// I'm kinda curious... but it was false before.
+	d.MainLoopInBackground(true)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
-		for _, it := range snapcfg.KnownCfg(chain).Preverified {
+		snapCfg, _ := snapcfg.KnownCfg(chain)
+		for _, it := range snapCfg.Preverified.Items {
 			downloadItems = append(downloadItems, &proto_downloader.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
@@ -426,7 +440,7 @@ var torrentCat = &cobra.Command{
 }
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
-	Short:   "Remove all .torrent files from datadir directory",
+	Short:   "RemoveFile all .torrent files from datadir directory",
 	Example: "go run ./cmd/downloader torrent_clean --datadir=<datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
@@ -444,7 +458,7 @@ var torrentClean = &cobra.Command{
 			if !strings.HasSuffix(de.Name(), ".torrent") || strings.HasPrefix(de.Name(), ".") {
 				return nil
 			}
-			err = os.Remove(filepath.Join(dirs.Snap, path))
+			err = dir.RemoveFile(filepath.Join(dirs.Snap, path))
 			if err != nil {
 				logger.Warn("[snapshots.torrent] remove", "err", err, "path", path)
 				return err
@@ -566,17 +580,11 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "history/"+fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
 		files = append(files, "idx/"+fName)
 	}
 
@@ -602,7 +610,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 		for _, filePath := range files {
-			if err := os.Remove(filePath); err != nil {
+			if err := dir.RemoveFile(filePath); err != nil {
 				return err
 			}
 		}
@@ -620,13 +628,6 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 
 	for _, t := range torrents {
-		// we don't release commitment history in this time. let's skip it here.
-		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
-		if strings.Contains(t.DisplayName, "idx") && strings.Contains(t.DisplayName, "commitment") {
-			continue
-		}
 		res[t.DisplayName] = t.InfoHash.String()
 	}
 	serialized, err := toml.Marshal(res)
@@ -730,7 +731,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		chainConfig := params.ChainConfigByChainName(chainName)
+		chainConfig := chainspec.ChainConfigByChainName(chainName)
 		if chainConfig == nil {
 			return fmt.Errorf("unknown chain: %s", chainName)
 		}

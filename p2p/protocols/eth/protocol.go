@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-p2p/forkid"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/forkid"
 )
 
 var ProtocolToString = map[uint]string{
@@ -43,20 +43,7 @@ const ProtocolName = "eth"
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
-
-// ######################
-// # TWEAK FOR PERFNET2 #
-// ######################
-// we've doubled the max
-// message size since
-// Reth and Geth
-// bootnodes were
-// sending us larger
-// messages and getting
-// penalized
-// ######################
-
-const ProtocolMaxMsgSize = 2 * maxMessageSize
+const ProtocolMaxMsgSize = maxMessageSize
 
 const (
 	// Protocol messages in eth/64

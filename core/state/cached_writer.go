@@ -20,8 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -68,9 +67,9 @@ func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation 
 		return nil
 	}
 	if value.IsZero() {
-		cw.cache.SetStorageDelete(address.Bytes(), incarnation, key.Bytes())
+		cw.cache.SetStorageDelete(address.Bytes(), incarnation, key[:])
 	} else {
-		cw.cache.SetStorageWrite(address.Bytes(), incarnation, key.Bytes(), value.Bytes())
+		cw.cache.SetStorageWrite(address.Bytes(), incarnation, key[:], value.Bytes())
 	}
 	return nil
 }

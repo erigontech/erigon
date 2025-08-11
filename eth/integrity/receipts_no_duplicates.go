@@ -5,20 +5,23 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+// CheckReceiptsNoDups performs integrity checks on receipts to ensure no duplicates exist.
+// This function uses parallel processing for improved performance.
+func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	defer func() {
-		log.Info("[integrity] ReceiptsNoDuplicates: done", "err", err)
+		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
 
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
+
+	txNumsReader := blockReader.TxnumReader(ctx)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -26,40 +29,29 @@ func ReceiptsNoDuplicates(ctx context.Context, db kv.TemporalRoDB, blockReader s
 	}
 	defer tx.Rollback()
 
-	txNumsReader := blockReader.TxnumReader(ctx)
-
-	receiptDomainProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
+	receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
 
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptDomainProgress)
+	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
 
 	{
-		log.Info("[integrity] ReceiptsNoDuplicates starting", "fromBlock", fromBlock, "toBlock", toBlock)
-		receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
+		log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
 		if accProgress != receiptProgress {
 			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
 			log.Warn(err.Error())
 		}
 	}
+	tx.Rollback()
 
-	if err := ReceiptsNoDuplicatesRange(ctx, fromBlock, toBlock, tx, blockReader, failFast); err != nil {
-		return err
-	}
-	return nil
+	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, ReceiptsNoDupsRange)
 }
 
-func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
+func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
 	txNumsReader := blockReader.TxnumReader(ctx)
 	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
 	if err != nil {
 		return err
-	}
-	if fromTxNum < 2 {
-		fromTxNum = 2 //i don't remember why need this
 	}
 
 	if toBlock > 0 {
@@ -72,35 +64,35 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 	}
 
 	prevCumUsedGas := -1
-	prevLogIdx := uint32(0)
-	prevBN := uint64(1)
+	prevLogIdxAfterTx := uint32(0)
+	blockNum := fromBlock
+	var _min, _max uint64
+	_min, _ = txNumsReader.Min(tx, fromBlock)
+	_max, _ = txNumsReader.Max(tx, fromBlock)
 	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		cumUsedGas, _, logIdx, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+		cumUsedGas, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 		if err != nil {
 			return err
 		}
-		blockNum := badFoundBlockNum(tx, prevBN-1, txNumsReader, txNum)
-		_min, _ := txNumsReader.Min(tx, blockNum)
+
 		blockChanged := txNum == _min
 		if blockChanged {
 			prevCumUsedGas = 0
-			prevLogIdx = 0
+			prevLogIdxAfterTx = 0
 		}
 
-		_max, _ := txNumsReader.Max(tx, blockNum)
-
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
-		if !strongMonotonicCumGasUsed && cumUsedGas != 0 {
-			err := fmt.Errorf("ReceiptsNoDuplicates: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
+		if !strongMonotonicCumGasUsed && txNum != _min && txNum != _max { // system tx can be skipped
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
 			if failFast {
 				return err
 			}
 			log.Error(err.Error())
 		}
 
-		monotonicLogIdx := logIdx >= prevLogIdx
-		if !monotonicLogIdx {
-			err := fmt.Errorf("ReceiptsNoDuplicates: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, prevLogIdx=%d", txNum, blockNum, _min, _max, logIdx, prevLogIdx)
+		monotonicLogIdx := logIdxAfterTx >= prevLogIdxAfterTx
+		if !monotonicLogIdx && txNum != _min && txNum != _max {
+			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdxAfterTx=%d, prevLogIdxAfterTx=%d", txNum, blockNum, _min, _max, logIdxAfterTx, prevLogIdxAfterTx)
 			if failFast {
 				return err
 			}
@@ -108,26 +100,21 @@ func ReceiptsNoDuplicatesRange(ctx context.Context, fromBlock, toBlock uint64, t
 		}
 
 		prevCumUsedGas = int(cumUsedGas)
-		prevLogIdx = logIdx
-		prevBN = blockNum
+		prevLogIdxAfterTx = logIdxAfterTx
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[integrity] ReceiptsNoDuplicates", "progress", fmt.Sprintf("%.1fm/%.1fm", float64(txNum)/1_000_000, float64(toTxNum)/1_000_000))
-		default:
+		if txNum == _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(tx, blockNum)
+		}
+
+		if txNum%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 	}
 	return nil
-}
-
-func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsReader, curTxNum uint64) uint64 {
-	txNumMax, _ := txNumsReader.Max(tx, fromBlock)
-	i := uint64(0)
-	for txNumMax < curTxNum {
-		i++
-		txNumMax, _ = txNumsReader.Max(tx, fromBlock+i)
-	}
-	return fromBlock + i
 }

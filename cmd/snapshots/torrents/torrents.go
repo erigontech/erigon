@@ -28,17 +28,17 @@ import (
 	gosync "sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/snapshots/manifest"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
@@ -162,7 +162,7 @@ func torrents(cliCtx *cli.Context, command string) error {
 			return err
 		}
 		tempDir = dataDir
-		defer os.RemoveAll(dataDir)
+		defer dir.RemoveAll(dataDir)
 	} else {
 		tempDir = filepath.Join(dataDir, "temp")
 
@@ -391,7 +391,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file))
 
 			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
@@ -399,7 +399,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
 
 			return srcSession.Upload(gctx, file+".torrent")
 		})
@@ -484,7 +484,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				return err
 			}
 
-			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			defer dir.RemoveFile(filepath.Join(srcSession.LocalFsRoot(), file))
 
 			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
@@ -494,7 +494,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			torrentPath := filepath.Join(srcSession.LocalFsRoot(), file+".torrent")
 
-			defer os.Remove(torrentPath)
+			defer dir.RemoveFile(torrentPath)
 
 			lmi, err := metainfo.LoadFromFile(torrentPath)
 

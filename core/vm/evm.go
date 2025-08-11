@@ -26,42 +26,21 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon/core/state"
-
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 var emptyHash = common.Hash{}
 
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
-	var precompiles map[common.Address]PrecompiledContract
-	switch {
-	case evm.chainRules.IsOsaka:
-		precompiles = PrecompiledContractsOsaka
-	case evm.chainRules.IsBhilai:
-		precompiles = PrecompiledContractsBhilai
-	case evm.chainRules.IsPrague:
-		precompiles = PrecompiledContractsPrague
-	case evm.chainRules.IsNapoli:
-		precompiles = PrecompiledContractsNapoli
-	case evm.chainRules.IsCancun:
-		precompiles = PrecompiledContractsCancun
-	case evm.chainRules.IsBerlin:
-		precompiles = PrecompiledContractsBerlin
-	case evm.chainRules.IsIstanbul:
-		precompiles = PrecompiledContractsIstanbul
-	case evm.chainRules.IsByzantium:
-		precompiles = PrecompiledContractsByzantium
-	default:
-		precompiles = PrecompiledContractsHomestead
-	}
+	precompiles := Precompiles(evm.chainRules)
 	p, ok := precompiles[addr]
 	return p, ok
 }
@@ -179,6 +158,10 @@ func (evm *EVM) Interpreter() Interpreter {
 }
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+	if evm.abort.Load() {
+		return ret, leftOverGas, nil
+	}
+
 	depth := evm.interpreter.Depth()
 
 	p, isPrecompile := evm.precompile(addr)
@@ -585,3 +568,12 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas u
 		tracer.OnExit(depth, ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
 	}
 }
+
+// Depth returns the current depth
+func (evm *EVM) Depth() int {
+	return evm.interpreter.Depth()
+}
+
+func (evm *EVM) IncDepth() { evm.interpreter.IncDepth() }
+
+func (evm *EVM) DecDepth() { evm.interpreter.DecDepth() }

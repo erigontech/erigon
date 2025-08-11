@@ -19,28 +19,27 @@ package freezeblocks_test
 import (
 	"context"
 	"math/big"
-	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -65,10 +64,6 @@ func baseIdRange(base, indexer, len int) []uint64 {
 func TestDump(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
-	}
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win")
 	}
 
 	type test struct {
@@ -96,15 +91,15 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize:   1000,
-			chainConfig: params.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnetChainConfig,
 		},
 		{
 			chainSize:   2000,
-			chainConfig: params.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnetChainConfig,
 		},
 		{
 			chainSize: 1000,
-			chainConfig: withConfig(params.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -113,7 +108,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 2000,
-			chainConfig: withConfig(params.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -262,7 +257,7 @@ func TestDump(t *testing.T) {
 			logger := log.New()
 
 			tmpDir, snapDir := t.TempDir(), t.TempDir()
-			snConfig := snapcfg.KnownCfg(networkname.Mainnet)
+			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
 			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)

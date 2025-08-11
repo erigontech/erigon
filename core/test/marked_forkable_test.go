@@ -5,43 +5,42 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type Num = state.Num
 type RootNum = state.RootNum
-type ForkableId = ee.ForkableId
+type ForkableId = kv.ForkableId
 type MarkedTxI = state.MarkedTxI
 type UnmarkedTxI = state.UnmarkedTxI
 
-func registerEntity(dirs datadir.Dirs, name string) ee.ForkableId {
+func registerEntity(dirs datadir.Dirs, name string) state.ForkableId {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, ee.NewSnapshotConfig(&ee.SnapshotCreationConfig{
+	return registerEntityWithSnapshotConfig(dirs, name, state.NewSnapshotConfig(&state.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{20, 40},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, ee.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+	}, state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
 
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ee.SnapshotConfig) ee.ForkableId {
-	return ee.RegisterForkable(name, dirs, nil, ee.WithSnapshotConfig(cfg))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *state.SnapshotConfig) state.ForkableId {
+	return state.RegisterForkable(name, dirs, nil, state.WithSnapshotConfig(cfg))
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
@@ -54,13 +53,13 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 
 func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[state.MarkedTxI]) {
 	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ee.ForkableId(0), headerId)
+	require.Equal(t, state.ForkableId(0), headerId)
 
 	// create marked forkable
-	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
+	freezer := snaptype2.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
 	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, log,
-		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
+		state.WithIndexKeyFactory(&snaptype2.HeaderAccessorIndexKeyFactory{}))
 
 	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, state.IdentityRootRelationInstance, log,
 		state.App_WithFreezer(freezer),
@@ -79,11 +78,11 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 		p.Close()
 		p.RecalcVisibleFiles(0)
 
-		ee.Cleanup()
+		state.Cleanup()
 		db.Close()
-		os.RemoveAll(dirs.Snap)
-		os.RemoveAll(dirs.Chaindata)
-		os.RemoveAll(dirs.SnapIdx)
+		dir.RemoveAll(dirs.Snap)
+		dir.RemoveAll(dirs.Chaindata)
+		dir.RemoveAll(dirs.SnapIdx)
 	})
 }
 
@@ -93,13 +92,13 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 func TestMarkedForkableRegistration(t *testing.T) {
 	// just registration goes fine
 	t.Cleanup(func() {
-		ee.Cleanup()
+		state.Cleanup()
 	})
 	dirs := datadir.New(t.TempDir())
 	blockId := registerEntity(dirs, "blocks")
-	require.Equal(t, ee.ForkableId(0), blockId)
+	require.Equal(t, state.ForkableId(0), blockId)
 	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ee.ForkableId(1), headerId)
+	require.Equal(t, state.ForkableId(1), headerId)
 }
 
 func TestMarked_PutToDb(t *testing.T) {
@@ -149,7 +148,7 @@ func TestPrune(t *testing.T) {
 			headerId, ma := setupHeader(t, log, dir, db)
 
 			ctx := context.Background()
-			cfg := ee.Registry.SnapshotConfig(headerId)
+			cfg := state.Registry.SnapshotConfig(headerId)
 			extras_count := uint64(5) // in db
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
 
@@ -247,7 +246,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
 	require.NoError(t, err)
-	cfg := ee.Registry.SnapshotConfig(headerId)
+	cfg := state.Registry.SnapshotConfig(headerId)
 	entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 2
 	buffer := &bytes.Buffer{}
 

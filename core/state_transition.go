@@ -27,20 +27,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 /*
@@ -160,7 +160,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, nil, evm.Config())
+			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -418,22 +418,24 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			// Recover from dependency panic and retry the execution.
-			if r != state.ErrDependency {
-				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+	if st.evm.IntraBlockState().IsVersioned() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Recover from dependency panic and retry the execution.
+				if r != state.ErrDependency {
+					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+				}
+				st.gp.AddGas(st.gasUsed())
+				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
+				if depTxIndex < 0 {
+					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
+				}
+				err = ErrExecAbortError{
+					DependencyTxIndex: depTxIndex,
+					OriginError:       err}
 			}
-			st.gp.AddGas(st.gasUsed())
-			depTxIndex := st.evm.IntraBlockState().DepTxIndex()
-			if depTxIndex < 0 {
-				err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
-			}
-			err = ErrExecAbortError{
-				DependencyTxIndex: depTxIndex,
-				OriginError:       err}
-		}
-	}()
+		}()
+	}
 
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
@@ -595,7 +597,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
-		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, burnAmount, st.gasPrice, st.gasUsed())
+		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
 	result = &evmtypes.ExecutionResult{

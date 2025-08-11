@@ -4,6 +4,7 @@ package gdbme
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"os/exec"
 	"strings"
@@ -67,12 +68,12 @@ quit
 		fmt.Fprintln(os.Stderr, "Error: could not create temp file for LLDB script:", err)
 		os.Exit(1)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer dir.RemoveFile(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(lldbScript)
-	tmpFile.Close()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: could not write LLDB script:", err)
+	closeErr := tmpFile.Close()
+	if err != nil || closeErr != nil {
+		fmt.Fprintln(os.Stderr, "Error: could not write or close LLDB script:", err, closeErr)
 		os.Exit(1)
 	}
 

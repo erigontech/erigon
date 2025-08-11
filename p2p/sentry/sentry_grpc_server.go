@@ -52,11 +52,14 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/dnsdisc"
-	"github.com/erigontech/erigon-p2p/enode"
-	"github.com/erigontech/erigon-p2p/forkid"
-	"github.com/erigontech/erigon-p2p/protocols/eth"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/dnsdisc"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 const (
@@ -277,7 +280,7 @@ func makeP2PServer(
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
 	if len(p2pConfig.BootstrapNodes) == 0 {
-		urls := p2pConfig.LookupBootnodeURLs(genesisHash)
+		urls := chainspec.BootnodeURLsByGenesisHash(genesisHash)
 		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
 		if err != nil {
 			return nil, fmt.Errorf("bad bootnodes option: %w", err)
@@ -821,7 +824,7 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 		if deadlines < maxPermitsPerPeer {
 			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
 			if byMinBlock.Len() > peerCount {
-				// Remove the worst peer
+				// RemoveFile the worst peer
 				peerRef := heap.Pop(&byMinBlock).(PeerRef)
 				latestDeadline := peerRef.pi.LatestDeadline()
 				if pokePeer == nil || latestDeadline.Before(pokeDeadline) {
@@ -970,12 +973,6 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *proto_sentry.Ou
 	msgcode, protocolVersions := ss.messageCode(req.Id)
 	if protocolVersions.Cardinality() == 0 ||
 		(msgcode != eth.NewBlockMsg &&
-			// ######################
-			// # TWEAK FOR PERFNET2 #
-			// ######################
-			msgcode != eth.GetBlockHeadersMsg &&
-			msgcode != eth.GetBlockBodiesMsg &&
-			// ######################
 			msgcode != eth.NewPooledTransactionHashesMsg && // to broadcast new local transactions
 			msgcode != eth.NewBlockHashesMsg) {
 		return reply, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
@@ -1006,7 +1003,7 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			if url := ss.p2p.LookupDNSNetwork(genesisHash, "all"); url != "" {
+			if url := chainspec.KnownDNSNetwork(genesisHash); url != "" {
 				ss.p2p.DiscoveryDNS = []string{url}
 			}
 
@@ -1279,6 +1276,21 @@ func (ss *GrpcServer) AddPeer(_ context.Context, req *proto_sentry.AddPeerReques
 	p2pServer.AddPeer(node)
 
 	return &proto_sentry.AddPeerReply{Success: true}, nil
+}
+
+func (ss *GrpcServer) RemovePeer(_ context.Context, req *proto_sentry.RemovePeerRequest) (*proto_sentry.RemovePeerReply, error) {
+	node, err := enode.Parse(enode.ValidSchemes, req.Url)
+	if err != nil {
+		return nil, err
+	}
+
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+	p2pServer.RemovePeer(node)
+
+	return &proto_sentry.RemovePeerReply{Success: true}, nil
 }
 
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {

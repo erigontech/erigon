@@ -27,8 +27,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -182,6 +182,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 	sub := EncryptedSubmission{
 		OriginalTxn:      signedTxn,
 		SubmissionTxn:    submissionTxn,
+		EncryptedTxn:     encryptedTxn,
 		EonIndex:         eon.Index,
 		IdentityPreimage: ip,
 		GasLimit:         gasLimit,
@@ -193,6 +194,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 type EncryptedSubmission struct {
 	OriginalTxn      types.Transaction
 	SubmissionTxn    types.Transaction
+	EncryptedTxn     *shuttercrypto.EncryptedMessage
 	EonIndex         shutter.EonIndex
 	IdentityPreimage *shutter.IdentityPreimage
 	GasLimit         *big.Int
