@@ -530,10 +530,10 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			if fi.Size() > f.Length() {
 				// This isn't concurrent-safe?
 				os.Chmod(fp, 0o644)
-				err = os.Truncate(fp, f.Length())
-				if err != nil {
-					d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
-				}
+				//err = os.Truncate(fp, f.Length())
+				//if err != nil {
+				//	d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
+				//}
 				os.Chmod(fp, 0o444)
 				// End not concurrent safe
 			}
@@ -929,8 +929,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHash metainfo.Hash,
+	infoHash metainfo.Hash, // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) error {
 	panicif.Zero(infoHash)
@@ -950,8 +949,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHashHint g.Option[metainfo.Hash],
+	infoHashHint g.Option[metainfo.Hash], // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) (t *torrent.Torrent, err error) {
 	diskSpecOpt := d.loadSpecFromDisk(name)
