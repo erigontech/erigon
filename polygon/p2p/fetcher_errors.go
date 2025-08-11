@@ -22,7 +22,7 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var ErrInvalidFetchBlocksAmount = errors.New("invalid fetch blocks amount")

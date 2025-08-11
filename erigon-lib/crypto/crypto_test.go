@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"reflect"
 	"testing"
@@ -263,7 +264,7 @@ func TestSaveECDSA(t *testing.T) {
 	}
 	file := f.Name()
 	f.Close()
-	defer os.Remove(file)
+	defer dir.RemoveFile(file)
 
 	key, _ := HexToECDSA(testPrivHex)
 	if e := SaveECDSA(file, key); e != nil {

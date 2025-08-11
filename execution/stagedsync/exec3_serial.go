@@ -6,18 +6,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/types"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 

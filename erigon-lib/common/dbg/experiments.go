@@ -91,6 +91,7 @@ var (
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
+	TraceDeletion        = EnvBool("TRACE_DELETION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

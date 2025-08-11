@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -34,10 +33,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
@@ -67,14 +66,6 @@ func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
 
 func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
-}
-
-func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	return nil, nil
-}
-
-func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
-	return nil, nil
 }
 
 func (h *test_heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
@@ -320,7 +311,6 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
-		heimdall,
 		stateReceiver,
 		logger,
 		nil,

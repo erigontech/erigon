@@ -28,10 +28,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -39,8 +36,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
@@ -104,7 +104,7 @@ func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
 }
 
 func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddRequest {
-	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(coresnaptype.BlockSnapshotTypes))}
+	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
 			continue
@@ -352,121 +352,125 @@ func SyncSnapshots(
 	syncCfg ethconfig.Sync,
 ) error {
 	snapshots := blockReader.Snapshots()
-	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
-	if snapCfg.Local {
-		if !headerchain {
-			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified", logPrefix))
-		}
-		return firstNonGenesisCheck(tx, snapshots, logPrefix, dirs)
-	}
-	log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 	borSnapshots := blockReader.BorSnapshots()
-
-	frozenBlocks := blockReader.Snapshots().SegmentsMax()
-
-	// Find minimum block to download.
-	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-		if err := snapshots.OpenFolder(); err != nil {
-			return err
+	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
+	// Skip getMinimumBlocksToDownload if we can because it's slow.
+	if snapCfg.Local {
+		// This belongs higher up the call chain.
+		if !headerchain {
+			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 		}
-		if cc.Bor != nil {
-			if err := borSnapshots.OpenFolder(); err != nil {
+	} else {
+		// This clause belongs in another function.
+
+		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
+
+		frozenBlocks := blockReader.Snapshots().SegmentsMax()
+
+		// Find minimum block to download.
+		if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
+			if err := snapshots.OpenFolder(); err != nil {
+				return err
+			}
+			if cc.Bor != nil {
+				if err := borSnapshots.OpenFolder(); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
+		//Corner cases:
+		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
+		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
+		// - After "download once" - Erigon will produce and seed new files
+
+		// send all hashes to the Downloader service
+		preverifiedBlockSnapshots := snapCfg.Preverified
+		downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
+
+		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
+		blackListForPruning := make(map[string]struct{})
+		wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
+		if !headerchain && wantToPrune {
+			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
+			if err != nil {
+				return err
+			}
+			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune)
+			if err != nil {
+				return err
+			}
+
+			blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+			if err != nil {
 				return err
 			}
 		}
-		return nil
-	}
 
-	//Corner cases:
-	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
-	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
-	// - After "download once" - Erigon will produce and seed new files
+		// build all download requests
+		for _, p := range preverifiedBlockSnapshots.Items {
+			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
+				continue
+			}
+			if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
+				continue
+			}
 
-	// send all hashes to the Downloader service
-	preverifiedBlockSnapshots := snapCfg.Preverified
-	downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
+			if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
+				continue
+			}
+			if !blobs && strings.Contains(p.Name, snaptype.BlobSidecars.Name()) {
+				continue
+			}
+			if !caplinState && strings.Contains(p.Name, "caplin/") {
+				continue
+			}
+			if headerchain &&
+				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
+				continue
+			}
+			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
+				continue
+			}
 
-	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
-	blackListForPruning := make(map[string]struct{})
-	wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
-	if !headerchain && wantToPrune {
-		maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
-		if err != nil {
-			return err
-		}
-		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune)
-		if err != nil {
-			return err
-		}
+			if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+				continue
+			}
 
-		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
-		if err != nil {
-			return err
-		}
-	}
+			if _, ok := blackListForPruning[p.Name]; ok {
+				continue
+			}
+			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
+				continue
+			}
 
-	// build all download requests
-	for _, p := range preverifiedBlockSnapshots.Items {
-		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
-			continue
-		}
-		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
-			continue
-		}
+			if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
+				continue
+			}
 
-		if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
-			continue
-		}
-		if !blobs && strings.Contains(p.Name, snaptype.BlobSidecars.Name()) {
-			continue
-		}
-		if !caplinState && strings.Contains(p.Name, "caplin/") {
-			continue
-		}
-		if headerchain &&
-			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
-			continue
-		}
-		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
-			continue
+			downloadRequest = append(downloadRequest, DownloadRequest{
+				Path:        p.Name,
+				TorrentHash: p.Hash,
+			})
 		}
 
-		if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
-			continue
-		}
+		// Only add the preverified hashes until the initial sync completed for the first time.
 
-		if _, ok := blackListForPruning[p.Name]; ok {
-			continue
+		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
+				log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			break
 		}
-		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
-			continue
-		}
-
-		if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
-			continue
-		}
-
-		downloadRequest = append(downloadRequest, DownloadRequest{
-			Path:        p.Name,
-			TorrentHash: p.Hash,
-		})
-	}
-
-	// Only add the preverified hashes until the initial sync completed for the first time.
-
-	log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
-			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		break
 	}
 
 	// Check for completion immediately, then growing intervals.
@@ -511,6 +515,7 @@ func SyncSnapshots(
 	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
 		return err
 	}
+
 	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
 }
