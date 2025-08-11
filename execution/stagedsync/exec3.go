@@ -1244,7 +1244,7 @@ func ExecV3(ctx context.Context,
 
 	if lastTxStep := uint64(outputTxNum.Load()) / doms.StepSize(); lastTxStep <= applyTx.(kv.TemporalRwTx).StepsInFiles(kv.CommitmentDomain) {
 
-		logger.Warn("["+execStage.LogPrefix()+"] + can't persist comittement step too low", "txNum", outputTxNum.Load(), "step", lastTxStep)
+		logger.Warn("["+execStage.LogPrefix()+"] + can't persist comittement: txn step too low", "txNum", outputTxNum.Load(), "step", lastTxStep)
 		return fmt.Errorf("can't persist comittement for txNum %d: step %d is frozen", outputTxNum.Load(), lastTxStep)
 	}
 
