@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,7 +42,7 @@ import (
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
-	domains             *state.SharedDomains
+	domains             *dbstate.SharedDomains
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	logger              log.Logger
@@ -49,7 +50,7 @@ type StateV3 struct {
 	trace               bool
 }
 
-func NewStateV3(domains *state.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
+func NewStateV3(domains *dbstate.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		applyPrevAccountBuf: make([]byte, 256),

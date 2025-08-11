@@ -15,16 +15,16 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	statelib "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -473,7 +473,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	rawDb := memdb.NewStateDB("")
 	defer rawDb.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, logger)
+	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, logger)
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -484,7 +484,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -586,7 +586,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	rawDb := memdb.NewStateDB("")
 	defer rawDb.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, log.New())
+	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -597,7 +597,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 

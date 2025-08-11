@@ -36,20 +36,19 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/services"
@@ -547,7 +546,7 @@ func ExecV3(ctx context.Context,
 		}()
 	}
 
-	agg := cfg.db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
+	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if !inMemExec && !isMining {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
@@ -693,7 +692,7 @@ func ExecV3(ctx context.Context,
 	defer func() {
 		executor.LogComplete(stepsInDb)
 
-		doms, _ := libstate.NewSharedDomains(applyTx.(kv.TemporalTx), log.New())
+		doms, _ := dbstate.NewSharedDomains(applyTx.(kv.TemporalTx), log.New())
 		fmt.Println("EXEC COMPLETE", "block in domains", doms.BlockNum(), executor.domains().BlockNum())
 		v, _, _ := executor.domains().GetLatest(kv.CommitmentDomain, applyTx, []byte("state"))
 		txNum, blockNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
@@ -761,7 +760,7 @@ func ExecV3(ctx context.Context,
 					computeCommitmentDuration += time.Since(start)
 					shouldGenerateChangesets = true // now we can generate changesets for the safety net
 				}
-				changeset := &libstate.StateChangeSet{}
+				changeset := &dbstate.StateChangeSet{}
 				if shouldGenerateChangesets && blockNum > 0 {
 					executor.domains().SetChangesetAccumulator(changeset)
 				}
@@ -862,7 +861,7 @@ func ExecV3(ctx context.Context,
 					computeCommitmentDuration += time.Since(start)
 					executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 					if !inMemExec {
-						if err := libstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+						if err := dbstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
 							return err
 						}
 					}
@@ -893,15 +892,15 @@ func ExecV3(ctx context.Context,
 					executor.LogExecuted()
 
 					//TODO: https://github.com/erigontech/erigon/issues/10724
-					//if executor.tx().(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
+					//if executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
 					//	//small prune cause MDBX_TXN_FULL
-					//	if _, err := executor.tx().(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
+					//	if _, err := executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
 					//		return err
 					//	}
 					//}
 
 					isBatchFull := executor.readState().SizeEstimate() >= commitThreshold
-					canPrune := state2.AggTx(applyTx).CanPrune(applyTx, outputTxNum.Load())
+					canPrune := dbstate.AggTx(applyTx).CanPrune(applyTx, outputTxNum.Load())
 					needCalcRoot := isBatchFull || havePartialBlock || canPrune
 					// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
 
@@ -1036,7 +1035,7 @@ func ExecV3(ctx context.Context,
 				}
 			}()
 
-			changeset := &libstate.StateChangeSet{}
+			changeset := &dbstate.StateChangeSet{}
 			if shouldGenerateChangesets && blockNum > 0 {
 				executor.domains().SetChangesetAccumulator(changeset)
 			}
@@ -1122,7 +1121,7 @@ func ExecV3(ctx context.Context,
 
 								executor.domains().SavePastChangesetAccumulator(applyResult.BlockHash, blockNum, changeset)
 								if !inMemExec {
-									if err := libstate.WriteDiffSet(applyTx, blockNum, applyResult.BlockHash, changeset); err != nil {
+									if err := dbstate.WriteDiffSet(applyTx, blockNum, applyResult.BlockHash, changeset); err != nil {
 										return err
 									}
 								}
@@ -1166,7 +1165,7 @@ func ExecV3(ctx context.Context,
 						}
 
 						if shouldGenerateChangesets && blockNum > 0 {
-							changeset = &libstate.StateChangeSet{}
+							changeset = &dbstate.StateChangeSet{}
 							executor.domains().SetChangesetAccumulator(changeset)
 						}
 					}
@@ -1239,8 +1238,8 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	if false {
-		dumpPlainStateDebug(applyTx, executor.domains())
+	if false && !inMemExec {
+		dumpPlainStateDebug(applyTx.(kv.TemporalRwTx), executor.domains())
 	}
 
 	if !useExternalTx && applyTx != nil {

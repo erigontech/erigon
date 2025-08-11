@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -366,7 +366,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 				if txTask.IsBlockEnd() { // block changed
 					cumulativeBlobGasUsedInBlock = 0
-				} 
+				}
 			}
 
 			if produce.RCacheDomain {

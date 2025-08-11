@@ -12,30 +12,29 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/eth/consensuschain"
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
-	"github.com/erigontech/erigon/turbo/shards"
 )
 
 /*
@@ -87,7 +86,7 @@ type executor interface {
 
 	//these are reset by commit - so need to be read from the executor once its processing
 	readState() *state.StateV3Buffered
-	domains() *libstate.SharedDomains
+	domains() *dbstate.SharedDomains
 
 	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
 	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
@@ -351,9 +350,9 @@ func (d *blockDuration) Add(i time.Duration) {
 type txExecutor struct {
 	sync.RWMutex
 	cfg                      ExecuteBlockCfg
-	agg                      *libstate.Aggregator
+	agg                      *dbstate.Aggregator
 	rs                       *state.StateV3Buffered
-	doms                     *libstate.SharedDomains
+	doms                     *dbstate.SharedDomains
 	u                        Unwinder
 	isMining                 bool
 	inMemExec                bool
@@ -389,7 +388,7 @@ func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *libstate.SharedDomains {
+func (te *txExecutor) domains() *dbstate.SharedDomains {
 	return te.doms
 }
 
