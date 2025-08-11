@@ -35,6 +35,7 @@ import (
 type HeimdallSimulator struct {
 	snapshots                *heimdall.RoSnapshots
 	blockReader              *freezeblocks.BlockReader
+	heimdallStore            heimdall.Store
 	bridgeStore              bridge.Store
 	iterations               []uint64 // list of final block numbers for an iteration
 	lastAvailableBlockNumber uint64
@@ -49,6 +50,17 @@ type sprintLengthCalculator struct{}
 func (sprintLengthCalculator) CalculateSprintLength(number uint64) uint64 {
 	return 16
 }
+
+type noopHeimdallStore struct{}
+
+func (noopHeimdallStore) Checkpoints() heimdall.EntityStore[*heimdall.Checkpoint] { return nil }
+func (noopHeimdallStore) Milestones() heimdall.EntityStore[*heimdall.Milestone]   { return nil }
+func (noopHeimdallStore) Spans() heimdall.EntityStore[*heimdall.Span]             { return nil }
+func (noopHeimdallStore) SpanBlockProducerSelections() heimdall.EntityStore[*heimdall.SpanBlockProducerSelection] {
+	return nil
+}
+func (noopHeimdallStore) Prepare(ctx context.Context) error { return errors.New("noop") }
+func (noopHeimdallStore) Close()                            {}
 
 type noopBridgeStore struct{}
 
@@ -162,14 +174,11 @@ func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger
 	}
 
 	h := HeimdallSimulator{
-		snapshots: snapshots,
-		blockReader: freezeblocks.NewBlockReader(nil, snapshots,
-			heimdallStore{
-				spans: heimdall.NewSpanSnapshotStore(heimdall.NoopEntityStore[*heimdall.Span]{Type: heimdall.Spans}, snapshots),
-			}),
-		bridgeStore: bridge.NewSnapshotStore(noopBridgeStore{}, snapshots, sprintLengthCalculator{}),
-
-		iterations: iterations,
+		snapshots:     snapshots,
+		blockReader:   freezeblocks.NewBlockReader(nil, snapshots),
+		bridgeStore:   bridge.NewSnapshotStore(noopBridgeStore{}, snapshots, sprintLengthCalculator{}),
+		heimdallStore: heimdall.NewSnapshotStore(noopHeimdallStore{}, snapshots),
+		iterations:    iterations,
 
 		logger: logger,
 	}
@@ -267,5 +276,5 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 }
 
 func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (*heimdall.Span, bool, error) {
-	return h.blockReader.Span(ctx, nil, spanId)
+	return h.heimdallStore.Spans().Entity(ctx, spanId)
 }

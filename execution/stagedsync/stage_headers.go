@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -800,12 +799,4 @@ func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block
 func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
-}
-func (cr ChainReaderImpl) BorSpan(spanId uint64) *heimdall.Span {
-	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
-	if err != nil {
-		cr.logger.Error("[staged sync] BorSpan failed", "err", err)
-		return nil
-	}
-	return span
 }

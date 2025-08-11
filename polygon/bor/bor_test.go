@@ -208,10 +208,6 @@ func (r headerReader) GetTd(common.Hash, uint64) *big.Int {
 	return nil
 }
 
-func (r headerReader) BorSpan(spanId uint64) *heimdall.Span {
-	return r.validator.heimdall.currentSpan
-}
-
 type spanner struct {
 	*bor.ChainSpanner
 	validatorAddress common.Address

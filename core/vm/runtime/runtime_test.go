@@ -401,7 +401,6 @@ func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool 
 func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
 func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
 func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
-func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte                   { return nil }
 
 type dummyChain struct {
 	counter int
