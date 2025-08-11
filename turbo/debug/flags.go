@@ -266,7 +266,8 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
-	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
+	torrentMsg := fmt.Sprintf("curl -s http://%s/downloader/torrentClientStatus > torrentStatus.txt", address)
+	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg, "torrent", torrentMsg)
 
 	if metricsMux == nil {
 		pprofMux := http.NewServeMux()
