@@ -80,7 +80,7 @@ System Requirements
 RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 2TB (May 2025). FullNode: 1.1TB (May 2025)
+- ArchiveNode Ethereum Mainnet: 1.6TB (May 2025). FullNode: 1.1TB (May 2025)
 - ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
 - ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
