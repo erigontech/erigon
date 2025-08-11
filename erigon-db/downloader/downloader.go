@@ -508,10 +508,10 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			if fi.Size() > f.Length() {
 				// This isn't concurrent-safe?
 				os.Chmod(fp, 0o644)
-				err = os.Truncate(fp, f.Length())
-				if err != nil {
-					d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
-				}
+				//err = os.Truncate(fp, f.Length())
+				//if err != nil {
+				//	d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
+				//}
 				os.Chmod(fp, 0o444)
 				// End not concurrent safe
 			}
