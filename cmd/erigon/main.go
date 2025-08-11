@@ -19,8 +19,11 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"net/http"
 	"os"
 
+	"github.com/anacrolix/envpprof"
+	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -36,12 +39,15 @@ import (
 )
 
 func main() {
+	defer envpprof.Stop()
+	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
 	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			log.Warn("Fprintln error", "err", printErr)
 		}
+		envpprof.Stop()
 		os.Exit(1)
 	}
 }
@@ -53,6 +59,9 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	}
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
+
+	// Log the full command used to start the program (with sensitive info like URLs and IP addresses redacted)
+	logger.Info("Startup command", "cmd", log.RedactArgs(os.Args))
 
 	// initializing the node and providing the current git commit there
 

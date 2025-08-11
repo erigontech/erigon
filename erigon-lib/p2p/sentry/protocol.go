@@ -49,7 +49,7 @@ var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
 		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
 		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
 	},
-	sentryproto.Protocol_WIT1: {
+	sentryproto.Protocol_WIT0: {
 		sentryproto.MessageId_GET_BLOCK_WITNESS_HASHES_W0: struct{}{},
 		sentryproto.MessageId_BLOCK_WITNESS_HASHES_W0:     struct{}{},
 		sentryproto.MessageId_NEW_WITNESS_W0:              struct{}{},

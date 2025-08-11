@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -235,7 +236,7 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, 
 		baseDataID:     baseDataID,
 	}
 
-	_ = os.Remove(idx.tmpIdxFilePath)
+	_ = dir.RemoveFile(idx.tmpIdxFilePath)
 
 	var err error
 	idx.f, err = os.Create(idx.tmpIdxFilePath)
@@ -346,7 +347,7 @@ func (w *FixedSizeBitmapsWriter) Build() error {
 	}
 	w.f = nil
 
-	_ = os.Remove(w.indexFile)
+	_ = dir.RemoveFile(w.indexFile)
 	if err := os.Rename(w.tmpIdxFilePath, w.indexFile); err != nil {
 		return err
 	}

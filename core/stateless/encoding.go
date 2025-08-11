@@ -20,7 +20,7 @@ import (
 	"io"
 
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // toExtWitness converts our internal witness representation to the consensus one.

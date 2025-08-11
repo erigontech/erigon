@@ -10,32 +10,27 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/urfave/cli/v2"
 )
 
 var (
-	removeUnknownFlag = cli.BoolFlag{
-		Name:     "remove-unknown",
-		Usage:    "Remove files not described in snapshot set.",
-		Value:    false,
-		Aliases:  []string{"u"},
-		Category: "Reset",
-	}
-	chaindataFlag = cli.BoolFlag{
-		Name:     "chaindata",
-		Usage:    "Remove chaindata too.",
-		Value:    false,
-		Aliases:  []string{"c"},
+	removeLocalFlag = cli.BoolFlag{
+		Name:     "local",
+		Usage:    "Remove files not described in snapshot set (probably generated locally).",
+		Value:    true,
+		Aliases:  []string{"l"},
 		Category: "Reset",
 	}
 	dryRunFlag = cli.BoolFlag{
@@ -54,9 +49,8 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		err = fmt.Errorf("setting up logging: %w", err)
 		return
 	}
-	removeUnknown := removeUnknownFlag.Get(cliCtx)
+	removeLocal := removeLocalFlag.Get(cliCtx)
 	dryRun := dryRunFlag.Get(cliCtx)
-	removeChainData := chaindataFlag.Get(cliCtx)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 
 	dirs := datadir.Open(dataDirPath)
@@ -103,13 +97,13 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	)
 	removeFunc := func(path string) error {
 		logger.Debug("Removing snapshot dir file", "path", path)
-		return os.Remove(filepath.Join(dirs.Snap, path))
+		return dir.RemoveFile(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
 		removeFunc = dryRunRemove
 	}
 	reset := reset{
-		removeUnknown: removeUnknown,
+		removeUnknown: removeLocal,
 		logger:        logger,
 	}
 	logger.Info("Resetting snapshots directory", "path", dirs.Snap)
@@ -125,10 +119,20 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"torrents", reset.stats.removed.torrentFiles,
 		"data", reset.stats.removed.dataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
-	if removeChainData {
+	if removeLocal {
+		for _, extraDir := range []string{
+			kv.HeimdallDB,
+			kv.PolygonBridgeDB,
+		} {
+			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
+			err = dir.RemoveAll(extraFullPath)
+			if err != nil {
+				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
+			}
+		}
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
-			err = os.RemoveAll(dirs.Chaindata)
+			err = dir.RemoveAll(dirs.Chaindata)
 		}
 		if err != nil {
 			err = fmt.Errorf("removing chaindata dir: %w", err)

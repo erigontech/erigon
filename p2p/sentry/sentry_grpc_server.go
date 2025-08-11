@@ -582,6 +582,7 @@ func runWitPeer(
 	logger log.Logger,
 ) *p2p.PeerError {
 	protocol := uint(wit.WIT1)
+	logger.Info("[p2p] wit protocol active", "peer", peerInfo.peer.ID(), "version", protocol)
 	for {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
@@ -594,6 +595,7 @@ func runWitPeer(
 		if err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
 		}
+		logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", msg.Code, "size", msg.Size)
 
 		if msg.Size > wit.MaxMessageSize {
 			msg.Discard()
@@ -601,7 +603,19 @@ func runWitPeer(
 		}
 
 		switch msg.Code {
-		case wit.GetMsgWitness | wit.MsgWitness:
+		case wit.GetMsgWitness:
+			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "GetMsgWitness", "size", msg.Size)
+			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
+				continue
+			}
+
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			send(wit.ToProto[protocol][msg.Code], peerID, b)
+		case wit.MsgWitness:
+			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "MsgWitness", "size", msg.Size)
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -613,6 +627,7 @@ func runWitPeer(
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessMsg:
 			// add hashes to peer
+			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "NewWitnessMsg", "size", msg.Size)
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
@@ -632,6 +647,7 @@ func runWitPeer(
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessHashesMsg:
 			// add hashes to peer
+			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "NewWitnessHashesMsg", "size", msg.Size)
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
@@ -730,6 +746,12 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
+
+			for _, cap := range peer.Caps() {
+				if cap.Name == wit.ProtocolName {
+					logger.Info("[p2p] Peer supports wit protocol", "peer", peer.ID(), "version", cap.Version)
+				}
+			}
 
 			ss.GoodPeers.Store(peerID, peerInfo)
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
@@ -944,7 +966,7 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 		if deadlines < maxPermitsPerPeer {
 			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
 			if byMinBlock.Len() > peerCount {
-				// Remove the worst peer
+				// RemoveFile the worst peer
 				peerRef := heap.Pop(&byMinBlock).(PeerRef)
 				latestDeadline := peerRef.pi.LatestDeadline()
 				if pokePeer == nil || latestDeadline.Before(pokeDeadline) {
@@ -1405,6 +1427,21 @@ func (ss *GrpcServer) AddPeer(_ context.Context, req *proto_sentry.AddPeerReques
 	p2pServer.AddPeer(node)
 
 	return &proto_sentry.AddPeerReply{Success: true}, nil
+}
+
+func (ss *GrpcServer) RemovePeer(_ context.Context, req *proto_sentry.RemovePeerRequest) (*proto_sentry.RemovePeerReply, error) {
+	node, err := enode.Parse(enode.ValidSchemes, req.Url)
+	if err != nil {
+		return nil, err
+	}
+
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+	p2pServer.RemovePeer(node)
+
+	return &proto_sentry.RemovePeerReply{Success: true}, nil
 }
 
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {

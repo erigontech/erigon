@@ -84,7 +84,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	s.seenSidecar.Add(seenKey, struct{}{})
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockRoot) ||
+		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
 			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
 			// already processed
 			return ErrIgnore
