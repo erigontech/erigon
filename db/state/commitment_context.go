@@ -459,13 +459,16 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, er
 
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.withHistory {
+			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+		}
+
+		if enc == nil {
 			var ok bool
+			// reading from domain files this way will dereference domain key correctly, rotx.GetAsOf
 			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
 				enc = nil
 			}
-		} else {
-			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 		}
 	} else {
 		enc, _, err = sdc.getter.GetLatest(d, plainKey)
