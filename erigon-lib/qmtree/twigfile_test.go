@@ -23,9 +23,9 @@ func generateTwig(rand_num uint32, twig TwigMT, hasher Hasher) {
 }
 
 func TestTwigFile(t *testing.T) {
-	dir, err := hpfile.NewTempDir("./twig")
-
+	dir, err := hpfile.NewTempDir("twigs")
 	defer dir.Drop()
+
 	hasher := Sha256Hasher{}
 	tf, err := NewTwigFile(64*1024, 1024*1024, dir.String(), hasher)
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestTwigFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1000789), pos)
 
-	pos, err = tf.GetFirstEntryPos(1)
+	pos, err = tf.GetFirstEntryPos(3)
 	require.NoError(t, err)
 	require.Equal(t, int64(2000789), pos)
 
@@ -63,18 +63,18 @@ func TestTwigFile(t *testing.T) {
 			cache := map[uint64]common.Hash{}
 			hash, err := tf.GetHashNode(twigId, i, cache)
 			require.NoError(t, err)
-			require.Equal(t, hash[:], twigs[twigId][i][:])
+			require.Equal(t, hash, twigs[twigId][i])
 		}
 	}
 	for twigId := range uint64(3) {
 		cache := map[uint64]common.Hash{}
 		for i := uint64(1); i < 4096; i++ {
-			if bz, ok := cache[i]; ok {
-				require.Equal(t, &twigs[twigId][i], bz)
+			if hash, ok := cache[i]; ok {
+				require.Equal(t, twigs[twigId][i], hash)
 			} else {
-				bz, err := tf.GetHashNode(twigId, i, cache)
+				hash, err := tf.GetHashNode(twigId, i, cache)
 				require.NoError(t, err)
-				require.Equal(t, bz, twigs[twigId][i])
+				require.Equal(t, hash, twigs[twigId][i])
 			}
 		}
 	}

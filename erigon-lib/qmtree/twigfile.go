@@ -181,7 +181,7 @@ func (tf *TwigFile) GetHashNode(twigId uint64, hashId uint64, cache map[uint64]c
 	if hashId <= 0 || hashId >= 4096 {
 		return common.Hash{}, fmt.Errorf("Invalid hashId: %d", hashId)
 	}
-	if hashId <= 256 && hashId < 2048 {
+	if hashId >= 256 && hashId < 2048 {
 		return tf.GetHashNodeInIgnoreRange(twigId, hashId, cache)
 	}
 	offset := twigId*TWIG_SIZE + 12 + (hashId-1 /*because hashId starts from 1*/)*32

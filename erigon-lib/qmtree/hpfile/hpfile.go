@@ -578,16 +578,12 @@ func (o *options) write(_ bool) *options {
 	return o
 }
 
-func (o *options) create(_ bool) *options {
-	return o
+func (o *options) open(path string) (*file, error) {
+	return (&file{}).Open(path)
 }
 
-func (o *options) open(_ string) (*file, error) {
-	return &file{}, nil
-}
-
-func (o *options) createNew(_ string) (*file, error) {
-	return &file{}, nil
+func (o *options) createNew(path string) (*file, error) {
+	return (&file{}).CreateNew(path)
 }
 
 type metadata struct {
@@ -604,106 +600,77 @@ func (m *metadata) IsEmpty() bool {
 
 type file struct {
 	sync.RWMutex
-	data []byte
-	pos  int
+	file *os.File
 }
 
 func (f *file) Open(path string) (*file, error) {
-	return &file{}, nil
+	var err error
+	f.file, err = os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 func (f *file) Metadata() (*metadata, error) {
+	info, err := f.file.Stat()
+	if err != nil {
+		return nil, err
+	}
 	return &metadata{
-		len: int64(len(f.data)),
+		len: info.Size(),
 	}, nil
 }
 
 func (f *file) CreateNew(path string) (*file, error) {
-	return &file{}, nil
+	var err error
+	f.file, err = os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 func (f *file) SetLen(l int64) error {
-	if int64(len(f.data)) <= l {
-		f.data = nil
-	}
-	f.data = f.data[:l]
-	return nil
+	return f.file.Truncate(l)
 }
 
 func (f *file) Seek(offset int64, whence int) (int64, error) {
-	switch whence {
-	case io.SeekCurrent:
-		pos := f.pos + int(offset)
-		switch {
-		case pos >= len(f.data):
-			f.pos = len(f.data)
-			return int64(f.pos), io.EOF
-		case pos < 0:
-			f.pos = 0
-			return 0, nil
-		default:
-			f.pos = pos
-			return int64(pos), nil
-		}
-	case io.SeekStart:
-		switch {
-		case offset >= int64(len(f.data)):
-			f.pos = len(f.data)
-			return int64(f.pos), io.EOF
-		case offset < 0:
-			f.pos = 0
-			return 0, nil
-		default:
-			f.pos = int(offset)
-			return offset, nil
-		}
-	case io.SeekEnd:
-		pos := f.pos + int(offset)
-		switch {
-		case pos > 0:
-			f.pos = len(f.data)
-			return int64(f.pos), io.EOF
-		case pos < 0:
-			f.pos = len(f.data) + int(offset)
-			return int64(f.pos), nil
-		default:
-			f.pos = len(f.data)
-			return int64(f.pos), nil
-		}
-	}
-	return 0, fmt.Errorf("can't seek: unknown whence value")
+	return f.file.Seek(offset, whence)
 }
 
 func (f *file) Write(buffer []byte) (int64, error) {
-	f.data = append(f.data, buffer...)
-	return int64(len(buffer)), nil
+	n, err := f.file.Write(buffer)
+	return int64(n), err
 }
 
 func (f *file) WriteAll(buffer []byte) (int64, error) {
-	return f.Write(buffer)
+	buflen := int64(len(buffer))
+	written := int64(0)
+
+	for written < buflen {
+		n, err := f.Write(buffer[written:])
+		written += n
+		if err != nil {
+			return written, err
+		}
+	}
+
+	return written, nil
 }
 
 func (f *file) SyncAll() error {
-	return nil
+	return f.file.Sync()
 }
 
 func (f *file) Read(bz []byte) (int64, error) {
-	//? do we need a read pos
-	l := len(f.data) - f.pos
-	readLen := min(len(bz), l)
-	copy(bz, f.data[:readLen])
-	f.pos += readLen
-	return int64(readLen), nil
+	readLen, err := f.file.Read(bz)
+	return int64(readLen), err
 }
 
 func (f *file) ReadAt(bz []byte, offset int64) (int64, error) {
-	l := int64(len(f.data))
-	if offset > l {
-		return 0, nil
-	}
-	readLen := int64(min(len(bz), int(l-offset)))
-	copy(bz, f.data[offset:int(offset+readLen)])
-	return readLen, nil
+	readLen, err := f.file.ReadAt(bz, offset)
+	return int64(readLen), err
 }
 
 // / Temporary directory for unit test
@@ -713,8 +680,7 @@ type tempDir struct {
 
 // / Create a new TempDir
 func NewTempDir(dir string) (tempDir, error) {
-	os.RemoveAll(dir)          // ignore error
-	err := os.Mkdir(dir, 0700) // ignore error
+	dir, err := os.MkdirTemp("", dir+"-*")
 	return tempDir{
 		dir: dir,
 	}, err
