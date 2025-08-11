@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -36,14 +36,14 @@ type BorAPI interface {
 	GetSigners(number *rpc.BlockNumber) ([]common.Address, error)
 	GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	GetCurrentProposer() (common.Address, error)
-	GetCurrentValidators() ([]*valset.Validator, error)
+	GetCurrentValidators() ([]*heimdall.Validator, error)
 	GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (common.Address, error)
 	GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error)
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
 type spanProducersReader interface {
-	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Producers(ctx context.Context, blockNum uint64) (*heimdall.ValidatorSet, error)
 }
 
 // BorImpl is implementation of the BorAPI interface
