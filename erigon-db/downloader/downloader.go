@@ -923,15 +923,15 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	// if we don't have the torrent file we build it if we have the .seg file
 	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFS)
 	if err != nil {
-		return fmt.Errorf("AddNewSeedableFile: %w", err)
+		return fmt.Errorf("building metainfo for new seedable file: %w", err)
 	}
-	ts, err := d.torrentFS.LoadByName(name)
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	// The above BuildTorrentIfNeed should put the metainfo in the right place for name.
+	// addPreverifiedTorrent is the correct wrapper to check for existing torrents in the client.
+	_, err = d.addPreverifiedTorrent(g.None[metainfo.Hash](), name)
 	if err != nil {
-		return fmt.Errorf("AddNewSeedableFile: %w", err)
-	}
-	_, _, err = d.addTorrentSpec(ts, name)
-	if err != nil {
-		return fmt.Errorf("addTorrentSpec: %w", err)
+		return fmt.Errorf("adding torrent: %w", err)
 	}
 	return nil
 }
