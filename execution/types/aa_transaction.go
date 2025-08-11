@@ -12,10 +12,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/fixedgas"
 )
 
 const (

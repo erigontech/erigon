@@ -28,10 +28,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/fixedgas"
 	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/execution/types"
 )
