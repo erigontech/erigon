@@ -4,8 +4,8 @@ import (
 	"math/big"
 	"path"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/paths"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/paths"
 )
 
 var (

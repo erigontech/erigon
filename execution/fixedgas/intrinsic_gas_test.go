@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 func TestShanghaiIntrinsicGas(t *testing.T) {

@@ -19,7 +19,7 @@
 
 package chainspec
 
-import "github.com/erigontech/erigon-lib/chain/networkname"
+import "github.com/erigontech/erigon/execution/chain/networkname"
 
 // mainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
 // the main Ethereum network.
