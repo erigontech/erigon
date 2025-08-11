@@ -1474,6 +1474,11 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		}
 		return v, v != nil, nil
 	}
+	if dt.name == kv.CommitmentDomain {
+		// we need to dereference commitment keys to get actual value. DomainRoTx itself does not have
+		// pointers to storage and account domains to do the reference. Aggregator tx must be called instead
+		return nil, false, nil
+	}
 
 	var ok bool
 	v, _, ok, err = dt.GetLatest(key, roTx)
