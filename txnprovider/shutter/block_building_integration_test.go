@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/rpc/rpccfg"
+
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
@@ -34,7 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
+	chainparams "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/race"
@@ -57,7 +59,6 @@ import (
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -177,12 +178,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 			)
 			require.NoError(t, err)
 		})
-
-		t.Run("build shutter block without blob txns", func(t *testing.T) {
-			//
-			//  TODO
-			//
-		})
 	})
 
 	t.Run("eon 1", func(t *testing.T) {
@@ -300,7 +295,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployerPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
-	shutterConfig := shuttercfg.ConfigByChainName(chainspec.Chiado.Config.ChainName)
+	shutterConfig := shuttercfg.ConfigByChainName(chainspec.ChiadoChainConfig.ChainName)
 	shutterConfig.Enabled = false // first we need to deploy the shutter smart contracts
 	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 	shutterConfig.PrivateKey = nodeKey
@@ -339,7 +334,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanNode(ethNode))
 
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, chainspec.Chiado.Config)
+	err = copier.Copy(&chainConfig, chainspec.Chiado.Config)
+	require.NoError(t, err)
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
@@ -349,15 +345,15 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis := chainspec.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
-	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.ConsolidationRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}
-	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.WithdrawalRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}

@@ -21,8 +21,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	downloadertype "github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/seg"
+	downloadertype "github.com/erigontech/erigon/db/snaptype"
 )
 
 //Sqeeze: ForeignKeys-aware compression of file
@@ -62,7 +62,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 	}
 
 	for _, f := range filesToRemove {
-		if err := os.Remove(f); err != nil {
+		if err := dir.RemoveFile(f); err != nil {
 			return err
 		}
 	}

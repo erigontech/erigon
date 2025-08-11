@@ -79,7 +79,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -105,7 +104,7 @@ var (
 )
 
 type HeimdallReader interface {
-	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Producers(ctx context.Context, blockNum uint64) (*heimdall.ValidatorSet, error)
 	Close()
 }
 
@@ -425,7 +424,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
-		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
+		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		txNumsReader := blockReader.TxnumReader(ctx)
 
 		agg, err := dbstate.NewAggregator(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)

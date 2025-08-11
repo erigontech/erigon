@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -34,7 +33,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -42,15 +40,16 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
@@ -920,7 +919,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	db.Close()
 
 	// remove database files
-	require.NoError(t, os.RemoveAll(dirs.Chaindata))
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
 	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
@@ -1465,7 +1464,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	for _, fn := range fnames {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
-			require.NoError(t, os.Remove(fn))
+			require.NoError(t, dir.RemoveFile(fn))
 			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
@@ -1530,7 +1529,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	require.True(t, exist)
 	agg.closeDirtyFiles() // because windows
 
-	require.NoError(t, os.Remove(codeMergedFile))
+	require.NoError(t, dir.RemoveFile(codeMergedFile))
 
 	require.NoError(t, agg.OpenFolder())
 	tx, err = tdb.BeginTemporalRo(context.Background())

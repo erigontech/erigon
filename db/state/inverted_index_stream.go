@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 )
 
 // InvertedIdxStreamFiles allows iteration over range of txn numbers

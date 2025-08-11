@@ -43,7 +43,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -59,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
@@ -67,7 +67,7 @@ import (
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
-	_ "github.com/erigontech/erigon/db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
@@ -243,8 +243,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"datadir", dirs.DataDir,
 		"ipv6-enabled", !disableIPV6,
 		"ipv4-enabled", !disableIPV4,
-		"download.rate", downloadRate.String(),
-		"upload.rate", uploadRate.String(),
+		"download.rate", downloadRateStr,
+		"upload.rate", uploadRateStr,
 		"webseed", webseeds,
 	)
 
@@ -330,7 +330,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	d.MainLoopInBackground(false)
+	// I'm kinda curious... but it was false before.
+	d.MainLoopInBackground(true)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)
@@ -439,7 +440,7 @@ var torrentCat = &cobra.Command{
 }
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
-	Short:   "Remove all .torrent files from datadir directory",
+	Short:   "RemoveFile all .torrent files from datadir directory",
 	Example: "go run ./cmd/downloader torrent_clean --datadir=<datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
@@ -457,7 +458,7 @@ var torrentClean = &cobra.Command{
 			if !strings.HasSuffix(de.Name(), ".torrent") || strings.HasPrefix(de.Name(), ".") {
 				return nil
 			}
-			err = os.Remove(filepath.Join(dirs.Snap, path))
+			err = dir.RemoveFile(filepath.Join(dirs.Snap, path))
 			if err != nil {
 				logger.Warn("[snapshots.torrent] remove", "err", err, "path", path)
 				return err
@@ -609,7 +610,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 		for _, filePath := range files {
-			if err := os.Remove(filePath); err != nil {
+			if err := dir.RemoveFile(filePath); err != nil {
 				return err
 			}
 		}

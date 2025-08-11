@@ -30,12 +30,13 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
@@ -113,7 +114,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
-	defer os.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
@@ -145,7 +146,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 
 	logger := log.New()
 	tmp := b.TempDir()
-	b.Cleanup(func() { os.RemoveAll(tmp) })
+	b.Cleanup(func() { dir.RemoveAll(tmp) })
 
 	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
@@ -226,7 +227,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
-	defer os.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp)
 
 	indexPath := dataPath + "i"
 	idx, err := recsplit.OpenIndex(indexPath)

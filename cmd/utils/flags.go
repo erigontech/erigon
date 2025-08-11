@@ -40,7 +40,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/metrics"
@@ -54,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
@@ -682,7 +682,7 @@ var (
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,
-		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
+		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name: "torrent.download.rate",
@@ -2104,14 +2104,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 // Convenience type for optional flag value representing a rate limit that should print nicely for
 // humans too.
 type RateLimitFlagValue g.Option[rate.Limit]
-
-// Human-readable representation of the rate limit value, or "Inf" if the value is not set.
-func (me RateLimitFlagValue) String() string {
-	if !me.Ok {
-		return "Inf"
-	}
-	return datasize.ByteSize(me.Value).String()
-}
 
 // Converts the parsed rate limit to the type expected by the Downloader torrent configuration.
 func (me RateLimitFlagValue) TorrentRateLimit() g.Option[rate.Limit] {

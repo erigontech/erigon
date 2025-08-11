@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
@@ -42,9 +43,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -1542,7 +1543,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 	fn := ff.src.decompressor.FilePath()
 	h.Close()
 
-	err := os.Remove(fn)
+	err := dir.RemoveFile(fn)
 	require.NoError(t, err)
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
