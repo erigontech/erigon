@@ -133,7 +133,7 @@ type RwDB interface {
 	// BeginRw - creates transaction
 	// A transaction and its cursors must only be used by a single
 	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
-	//  It happen automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
+	//  It happens automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
 	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
@@ -290,7 +290,7 @@ type RwCursorDupSort interface {
 	RwCursor
 
 	PutNoDupData(key, value []byte) error // PutNoDupData - inserts key without dupsort
-	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all of the data items for the current key
+	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
 	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
@@ -341,27 +341,27 @@ type Putter interface {
 	Delete(table string, k []byte) error
 
 	/*
-		// if need N id's:
+		IncrementSequence - AutoIncrement generator.
+		Example reserve 1 ID:
+		id, err := tx.IncrementSequence(table, 1)
+		if err != nil {
+			return err
+		}
+		// use id
+
+		Example reserving N ID's:
 		baseId, err := tx.IncrementSequence(table, N)
 		if err != nil {
 		   return err
 		}
 		for i := 0; i < N; i++ {    // if N == 0, it will work as expected
-		    id := baseId + i
-		    // use id
+			id := baseId + i
+			// use id
 		}
-
-
-		// or if need only 1 id:
-		id, err := tx.IncrementSequence(table, 1)
-		if err != nil {
-		    return err
-		}
-		// use id
 	*/
 	IncrementSequence(table string, amount uint64) (uint64, error)
 
-	// allow set arbitrary value to sequence (for example to decrement it to exact value)
+	// ResetSequence allow set arbitrary value to sequence (for example to decrement it to exact value)
 	ResetSequence(table string, newValue uint64) error
 	Append(table string, k, v []byte) error
 	AppendDup(table string, k, v []byte) error
@@ -389,9 +389,9 @@ type TemporalTx interface {
 	TemporalGetter
 	WithFreezeInfo
 
-	// DomainGetAsOf - state as of given `ts`
+	// GetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - returns account's value before `txNum` transaction changed it
-	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
+	// To re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
 	GetAsOf(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
@@ -409,8 +409,7 @@ type TemporalTx interface {
 	// `ok == true && v != nil && len(v) == 0` means key-creation even
 	HistorySeek(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 
-	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
-	//   no duplicates
+	// HistoryRange - producing "state patch": sorted and deduplicated list of keys updated at [fromTs,toTs) with their most-recent value
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
 
 	Debug() TemporalDebugTx
@@ -430,7 +429,7 @@ type TemporalDebugTx interface {
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 
-	// return the earliest known txnum in history of a given domain
+	// HistoryStartFrom return the earliest known txnum in history of a given domain
 	HistoryStartFrom(domainName Domain) uint64
 
 	DomainProgress(domain Domain) (txNum uint64)
@@ -580,7 +579,7 @@ type DBSummaries struct { // the summaries are particular to a DB instance
 	DbCommitTotal       metrics.Summary
 }
 
-// this only needs to be called once during startup
+// InitMDBXMGauges this only needs to be called once during startup
 func InitMDBXMGauges() *DBGauges {
 	return &DBGauges{
 		DbSize:         metrics.GetOrCreateGaugeVec(`db_size`, []string{dbLabelName}),
@@ -605,7 +604,6 @@ func InitMDBXMGauges() *DBGauges {
 	}
 }
 
-// initialize summaries for a particular MDBX instance
 func InitSummaries(dbLabel Label) {
 	_, ok := MDBXSummaries.Load(dbLabel)
 	if !ok {
@@ -640,8 +638,8 @@ func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
 
 }
 
-var MDBXGauges *DBGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
-var MDBXSummaries sync.Map                   // dbName => Summaries mapping
+var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
+var MDBXSummaries sync.Map         // dbName => Summaries mapping
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
