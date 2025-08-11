@@ -691,18 +691,6 @@ func ExecV3(ctx context.Context,
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx)
 	defer func() {
 		executor.LogComplete(stepsInDb)
-
-		doms, _ := dbstate.NewSharedDomains(applyTx.(kv.TemporalTx), log.New())
-		fmt.Println("EXEC COMPLETE", "block in domains", doms.BlockNum(), executor.domains().BlockNum())
-		v, _, _ := executor.domains().GetLatest(kv.CommitmentDomain, applyTx, []byte("state"))
-		txNum, blockNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-		fmt.Println("IN STATE PREV", blockNum, txNum)
-		v, _, _ = doms.GetLatest(kv.CommitmentDomain, applyTx, []byte("state"))
-		txNum, blockNum = binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-		fmt.Println("IN STATE NEW", blockNum, txNum)
-		if doms.BlockNum() != executor.domains().BlockNum() {
-			panic(fmt.Errorf("doms mismatch %d != %d", doms.BlockNum(), executor.domains().BlockNum()))
-		}
 	}()
 
 	computeCommitmentDuration := time.Duration(0)
@@ -1242,10 +1230,25 @@ func ExecV3(ctx context.Context,
 		dumpPlainStateDebug(applyTx.(kv.TemporalRwTx), executor.domains())
 	}
 
-	if lastTxStep := uint64(outputTxNum.Load()) / doms.StepSize(); lastTxStep <= applyTx.(kv.TemporalRwTx).StepsInFiles(kv.CommitmentDomain) {
+	var lastCommittedTxNum uint64
+	var lastCommittedBlockNum uint64
 
-		logger.Warn("["+execStage.LogPrefix()+"] + can't persist comittement: txn step too low", "txNum", outputTxNum.Load(), "step", lastTxStep)
-		return fmt.Errorf("can't persist comittement for txNum %d: step %d is frozen", outputTxNum.Load(), lastTxStep)
+	if parallel {
+		lastCommittedTxNum = executor.(*parallelExecutor).lastCommittedTxNum
+		lastCommittedBlockNum = executor.(*parallelExecutor).lastCommittedBlockNum
+	} else {
+		lastCommittedTxNum = executor.(*serialExecutor).lastCommittedTxNum
+		lastCommittedBlockNum = executor.(*serialExecutor).lastCommittedBlockNum
+	}
+
+	lastCommitedStep := uint64(lastCommittedTxNum) / doms.StepSize()
+
+	if lastFrozenStep := applyTx.(kv.TemporalRwTx).StepsInFiles(kv.CommitmentDomain); lastCommitedStep <= lastFrozenStep {
+		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
+			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommitedStep,
+			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*doms.StepSize())-1)
+		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
+			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
 	}
 
 	if !useExternalTx && applyTx != nil {
