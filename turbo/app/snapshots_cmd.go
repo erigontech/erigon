@@ -775,6 +775,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 			continue
 		}
 		found = true
+		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -823,6 +824,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.RCacheNoDups:
 			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
+		case integrity.Publishable:
+			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
 		default:
