@@ -122,6 +122,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -635,6 +636,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		heimdallService = heimdall.NewService(heimdall.ServiceConfig{
 			Store:     heimdallStore,
+			Db:        polygoncommon.AsDatabase(rawChainDB),
 			BorConfig: borConfig,
 			Client:    heimdallClient,
 			Logger:    logger,

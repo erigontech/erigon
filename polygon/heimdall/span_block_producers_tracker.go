@@ -27,12 +27,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 func newSpanBlockProducersTracker(
 	logger log.Logger,
 	borConfig *borcfg.BorConfig,
 	store EntityStore[*SpanBlockProducerSelection],
+	db *polygoncommon.Database,
 ) *spanBlockProducersTracker {
 	recentSelectionsLru, err := lru.New[uint64, SpanBlockProducerSelection](1024)
 	if err != nil {
@@ -43,6 +45,7 @@ func newSpanBlockProducersTracker(
 		logger:           logger,
 		borConfig:        borConfig,
 		store:            store,
+		db:               db,
 		recentSelections: recentSelectionsLru,
 		newSpans:         make(chan *Span),
 		idleSignal:       make(chan struct{}),
@@ -53,6 +56,7 @@ type spanBlockProducersTracker struct {
 	logger           log.Logger
 	borConfig        *borcfg.BorConfig
 	store            EntityStore[*SpanBlockProducerSelection]
+	db               *polygoncommon.Database
 	recentSelections *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
 	newSpans         chan *Span
 	queued           atomic.Int32
@@ -72,7 +76,20 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-
+			// update spans index: span.StartBlock => span.Id
+			tx, err := t.db.BeginRw(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			err = UpdateSpansIndex(tx, *newSpan)
+			if err != nil {
+				return err
+			}
+			err = tx.Commit()
+			if err != nil {
+				return err
+			}
 			t.queued.Add(-1)
 			if t.queued.Load() == 0 {
 				select {

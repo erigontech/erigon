@@ -37,6 +37,7 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorMilestones:         {},
 	kv.BorMilestoneEnds:      {},
 	kv.BorSpans:              {},
+	kv.BorSpansIndex:         {},
 	kv.BorProducerSelections: {},
 }
 

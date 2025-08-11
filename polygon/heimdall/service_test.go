@@ -176,6 +176,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupMilestones()
 	suite.service = NewService(ServiceConfig{
 		Store:     store,
+		Db:        store.db,
 		BorConfig: borConfig,
 		Client:    suite.client,
 		Logger:    suite.logger,
