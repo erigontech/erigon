@@ -951,8 +951,7 @@ func (d *Downloader) RequestSnapshot(
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
 func (d *Downloader) addPreverifiedTorrent(
-// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHashHint g.Option[metainfo.Hash],
+	infoHashHint g.Option[metainfo.Hash], // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) (t *torrent.Torrent, err error) {
 	diskSpecOpt := d.loadSpecFromDisk(name)
