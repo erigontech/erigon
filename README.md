@@ -80,7 +80,7 @@ System Requirements
 RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 2TB (May 2025). FullNode: 1.1TB (May 2025)
+- ArchiveNode Ethereum Mainnet: 1.6TB (May 2025). FullNode: 1.1TB (May 2025)
 - ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
 - ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
@@ -239,6 +239,7 @@ _Flags:_
 - `log.dir.prefix`
 - `log.dir.verbosity`
 - `log.dir.json`
+- `torrent.verbosity`
 
 In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an
 int value specifying the highest output log level:
@@ -410,7 +411,7 @@ hours: [OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-bl
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/db/etl/README.md).</code>
 
 **Plain state**
 

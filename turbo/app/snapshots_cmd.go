@@ -50,20 +50,20 @@ import (
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
@@ -775,6 +775,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 			continue
 		}
 		found = true
+		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -823,6 +824,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.RCacheNoDups:
 			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
+		case integrity.Publishable:
+			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
 		default:

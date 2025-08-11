@@ -10,7 +10,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon/execution/trie"
 )
 
 type WitnessDBWriter struct {

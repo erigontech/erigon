@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -1290,7 +1290,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 }
 
 func (r *BlockReader) IntegrityTxnID(failFast bool) error {
-	defer log.Info("[integrity] IntegrityTxnID done")
+	defer log.Info("[integrity] BlocksTxnID done")
 	view := r.sn.View()
 	defer view.Close()
 
@@ -1306,7 +1306,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 			return err
 		}
 		if b.BaseTxnID.U64() != expectedFirstTxnID {
-			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxnID, sn.Src().Count(), expectedFirstTxnID)
+			err := fmt.Errorf("[integrity] BlocksTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxnID, sn.Src().Count(), expectedFirstTxnID)
 			if failFast {
 				return err
 			} else {

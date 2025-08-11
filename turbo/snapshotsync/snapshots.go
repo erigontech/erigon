@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -1160,7 +1160,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.closeWhatNotInList(list)
 		return s.openSegments(list, true, false)
 	}(); err != nil {
-		return err
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
