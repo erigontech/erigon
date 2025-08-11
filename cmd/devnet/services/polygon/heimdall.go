@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -90,7 +90,7 @@ type Heimdall struct {
 	chainConfig        *chain.Config
 	borConfig          *borcfg.BorConfig
 	listenAddr         string
-	validatorSet       *valset.ValidatorSet
+	validatorSet       *heimdall.ValidatorSet
 	pendingCheckpoint  *heimdall.Checkpoint
 	latestCheckpoint   *CheckpointAck
 	ackWaiter          *sync.Cond
@@ -187,7 +187,7 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
-	nextSpan.SelectedProducers = make([]valset.Validator, len(h.validatorSet.Validators))
+	nextSpan.SelectedProducers = make([]heimdall.Validator, len(h.validatorSet.Validators))
 
 	for i, v := range h.validatorSet.Validators {
 		nextSpan.SelectedProducers[i] = *v
@@ -388,7 +388,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 func (h *Heimdall) addValidator(validatorAddress common.Address, votingPower int64, proposerPriority int64) {
 
 	if h.validatorSet == nil {
-		h.validatorSet = valset.NewValidatorSet([]*valset.Validator{
+		h.validatorSet = heimdall.NewValidatorSet([]*heimdall.Validator{
 			{
 				ID:               1,
 				Address:          validatorAddress,
@@ -397,7 +397,7 @@ func (h *Heimdall) addValidator(validatorAddress common.Address, votingPower int
 			},
 		})
 	} else {
-		h.validatorSet.UpdateWithChangeSet([]*valset.Validator{
+		h.validatorSet.UpdateWithChangeSet([]*heimdall.Validator{
 			{
 				ID:               uint64(len(h.validatorSet.Validators) + 1),
 				Address:          validatorAddress,
