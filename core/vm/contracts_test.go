@@ -204,16 +204,6 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 	})
 }
 
-// Benchmarks the sample inputs from the ECRECOVER precompile.
-func BenchmarkPrecompiledEcrecover(bench *testing.B) {
-	t := precompiledTest{
-		Input:    "38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e000000000000000000000000000000000000000000000000000000000000001b38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02",
-		Expected: "000000000000000000000000ceaccac640adf55b2028469bd36ba501f28b699d",
-		Name:     "",
-	}
-	benchmarkPrecompiled(bench, "01", t)
-}
-
 // Benchmarks the sample inputs from the SHA256 precompile.
 func BenchmarkPrecompiledSha256(bench *testing.B) {
 	t := precompiledTest{
@@ -314,7 +304,8 @@ func TestPrecompileBlake2FMalformedInput(t *testing.T) {
 	}
 }
 
-func TestPrecompiledEcrecover(t *testing.T) { testJson("ecRecover", "01", t) }
+func TestPrecompiledEcrecover(t *testing.T)      { testJson("ecRecover", "01", t) }
+func BenchmarkPrecompiledEcrecover(b *testing.B) { benchJson("ecRecover", "01", b) }
 
 func testJson(name, addr string, t *testing.T) {
 	tests, err := loadJson(name)
