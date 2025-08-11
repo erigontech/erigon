@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/tests/testports"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -234,15 +235,15 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
 	dirs := datadir.New(dataDir)
-	sentryPort, err := testhelpers.NextFreePort()
+	sentryPort, err := testports.NextFreePort()
 	require.NoError(t, err)
-	engineApiPort, err := testhelpers.NextFreePort()
+	engineApiPort, err := testports.NextFreePort()
 	require.NoError(t, err)
-	jsonRpcPort, err := testhelpers.NextFreePort()
+	jsonRpcPort, err := testports.NextFreePort()
 	require.NoError(t, err)
-	shutterPort, err := testhelpers.NextFreePort()
+	shutterPort, err := testports.NextFreePort()
 	require.NoError(t, err)
-	decryptionKeySenderPort, err := testhelpers.NextFreePort()
+	decryptionKeySenderPort, err := testports.NextFreePort()
 	require.NoError(t, err)
 
 	const localhost = "127.0.0.1"
