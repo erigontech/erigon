@@ -182,6 +182,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 	sub := EncryptedSubmission{
 		OriginalTxn:      signedTxn,
 		SubmissionTxn:    submissionTxn,
+		EncryptedTxn:     encryptedTxn,
 		EonIndex:         eon.Index,
 		IdentityPreimage: ip,
 		GasLimit:         gasLimit,
@@ -193,6 +194,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 type EncryptedSubmission struct {
 	OriginalTxn      types.Transaction
 	SubmissionTxn    types.Transaction
+	EncryptedTxn     *shuttercrypto.EncryptedMessage
 	EonIndex         shutter.EonIndex
 	IdentityPreimage *shutter.IdentityPreimage
 	GasLimit         *big.Int
