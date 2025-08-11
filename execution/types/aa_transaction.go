@@ -64,6 +64,10 @@ func (tx *AccountAbstractionTransaction) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
+func (tx *AccountAbstractionTransaction) GetAuthorizations() []Authorization {
+	return tx.Authorizations
+}
+
 func (tx *AccountAbstractionTransaction) Protected() bool {
 	return true
 }

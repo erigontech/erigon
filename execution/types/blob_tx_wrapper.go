@@ -350,6 +350,10 @@ func (txw *BlobTxWrapper) GetData() []byte { return txw.Tx.GetData() }
 
 func (txw *BlobTxWrapper) GetAccessList() AccessList { return txw.Tx.GetAccessList() }
 
+func (txw *BlobTxWrapper) GetAuthorizations() []Authorization {
+	return nil
+}
+
 func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
 
 func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
