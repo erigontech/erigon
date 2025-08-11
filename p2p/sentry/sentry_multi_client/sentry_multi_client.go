@@ -646,8 +646,18 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentr
 	}
 
 	witnessSize := make(map[common.Hash]uint64, len(seen))
+	headers := make(map[common.Hash]*types.Header, len(seen))
 	for witnessBlockHash := range seen {
-		sizeBytes, err := tx.GetOne(kv.BorWitnessSizes, witnessBlockHash[:])
+		header, err := cs.blockReader.HeaderByHash(ctx, tx, witnessBlockHash)
+		if err != nil {
+			return fmt.Errorf("reading header for witness hash %x: %w", witnessBlockHash, err)
+		}
+		if header == nil {
+			continue
+		}
+		headers[witnessBlockHash] = header
+		key := dbutils.HeaderKey(header.Number.Uint64(), witnessBlockHash)
+		sizeBytes, err := tx.GetOne(kv.BorWitnessSizes, key)
 		if err != nil {
 			return fmt.Errorf("reading witness size for hash %x: %w", witnessBlockHash, err)
 		}
@@ -677,7 +687,12 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentr
 			if cachedRLPBytes, exists := witnessCache[witnessPage.Hash]; exists {
 				witnessBytes = cachedRLPBytes
 			} else {
-				queriedBytes, err := tx.GetOne(kv.BorWitnesses, witnessPage.Hash[:])
+				header, ok := headers[witnessPage.Hash]
+				if !ok || header == nil {
+					continue
+				}
+				key := dbutils.HeaderKey(header.Number.Uint64(), witnessPage.Hash)
+				queriedBytes, err := tx.GetOne(kv.BorWitnesses, key)
 				if err != nil {
 					return fmt.Errorf("reading witness for hash %x: %w", witnessPage.Hash, err)
 				}
@@ -755,15 +770,17 @@ func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.Inbou
 	witBytes := witBuf.Bytes()
 	witLen := uint64(len(witBytes))
 
-	if err := tx.Put(kv.BorWitnesses, bHash.Bytes(), witBytes); err != nil {
+	key := dbutils.HeaderKey(query.Witness.Header().Number.Uint64(), bHash)
+
+	if err := tx.Put(kv.BorWitnesses, key, witBytes); err != nil {
 		return fmt.Errorf("error writing witness, err: %w", err)
 	}
 
-	if err := tx.Put(kv.BorWitnessSizes, bHash.Bytes(), dbutils.EncodeBlockNumber(witLen)); err != nil {
+	if err := tx.Put(kv.BorWitnessSizes, key, dbutils.EncodeBlockNumber(witLen)); err != nil {
 		return fmt.Errorf("error writing witness size, err: %w", err)
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 func MakeInboundMessage() *proto_sentry.InboundMessage {

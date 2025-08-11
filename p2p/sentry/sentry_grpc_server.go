@@ -786,36 +786,38 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		ToProto:   eth.ToProto[protocol],
 	})
 
-	// TODO: only for bor
-	ss.Protocols = append(ss.Protocols, p2p.Protocol{
-		Name:           wit.ProtocolName,
-		Version:        wit.ProtocolVersions[0],
-		Length:         wit.ProtocolLengths[wit.ProtocolVersions[0]],
-		DialCandidates: disc,
-		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
-			peerID := peer.Pubkey()
-			peerInfo := ss.getPeer(peerID)
-			peerInfo.witProtocol = wit.ProtocolVersions[0]
+	// Add WIT protocol if enabled
+	if cfg.EnableWitProtocol {
+		ss.Protocols = append(ss.Protocols, p2p.Protocol{
+			Name:           wit.ProtocolName,
+			Version:        wit.ProtocolVersions[0],
+			Length:         wit.ProtocolLengths[wit.ProtocolVersions[0]],
+			DialCandidates: disc,
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
+				peerID := peer.Pubkey()
+				peerInfo := ss.getPeer(peerID)
+				peerInfo.witProtocol = wit.ProtocolVersions[0]
 
-			return runWitPeer(
-				ctx,
-				peerID,
-				rw,
-				peerInfo,
-				ss.send,
-				ss.hasSubscribers,
-				logger,
-			)
-		},
-		NodeInfo: func() interface{} {
-			return readNodeInfo()
-		},
-		PeerInfo: func(peerID [64]byte) interface{} {
-			return nil
-		},
-		FromProto: wit.FromProto[wit.ProtocolVersions[0]],
-		ToProto:   wit.ToProto[wit.ProtocolVersions[0]],
-	})
+				return runWitPeer(
+					ctx,
+					peerID,
+					rw,
+					peerInfo,
+					ss.send,
+					ss.hasSubscribers,
+					logger,
+				)
+			},
+			NodeInfo: func() interface{} {
+				return readNodeInfo()
+			},
+			PeerInfo: func(peerID [64]byte) interface{} {
+				return nil
+			},
+			FromProto: wit.FromProto[wit.ProtocolVersions[0]],
+			ToProto:   wit.ToProto[wit.ProtocolVersions[0]],
+		})
+	}
 
 	return ss
 }

@@ -38,7 +38,6 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorMilestoneEnds:      {},
 	kv.BorSpans:              {},
 	kv.BorProducerSelections: {},
-	kv.BorWitnesses:          {},
 }
 
 //go:generate mockgen -typed=true -source=./entity_store.go -destination=./entity_store_mock.go -package=heimdall
