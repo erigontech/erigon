@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/paths"
 )
 
 //go:embed chainspecs
