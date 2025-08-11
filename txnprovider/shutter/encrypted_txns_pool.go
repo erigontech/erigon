@@ -242,6 +242,7 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts
 
 	lastEncryptedTxnSubmission, ok := etp.submissions.Max()
 	if ok && encryptedTxnSubmission.TxnIndex <= lastEncryptedTxnSubmission.TxnIndex {
+		etp.logger.Warn("submission is behind last known", "last", lastEncryptedTxnSubmission.TxnIndex, "event", encryptedTxnSubmission.TxnIndex)
 		return nil
 		//
 		// TODO looks like we have an issue on unwind
@@ -274,12 +275,12 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission
 		"toTxnIndex", new.TxnIndex,
 	)
 
-	if endBlockNum-startBlockNum > etp.config.EncryptedTxnsLookBackDistance {
+	if startBlockNum+etp.config.EncryptedTxnsLookBackDistance < endBlockNum {
 		startBlockNum = endBlockNum - etp.config.EncryptedTxnsLookBackDistance
 		etp.logger.Info("adjusted gap as it is too big", "startBlockNum", startBlockNum, "endBlockNum", endBlockNum)
 	}
 
-	return etp.loadSubmissions(startBlockNum, endBlockNum, stopAtTxnIndexSubmissionsContinuer(fromTxnIndex))
+	return etp.loadSubmissions(startBlockNum, endBlockNum)
 }
 
 func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
@@ -323,7 +324,7 @@ func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(blockNum uint64) e
 	}
 
 	etp.logger.Info("loading past submissions on first block", "start", start, "end", end)
-	err := etp.loadSubmissions(start, end, alwaysContinueSubmissionsContinuer)
+	err := etp.loadSubmissions(start, end)
 	if err != nil {
 		return fmt.Errorf("failed to load submissions on init: %w", err)
 	}
@@ -331,7 +332,7 @@ func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(blockNum uint64) e
 	return nil // we are done
 }
 
-func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64, cont submissionsContinuer) error {
+func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64) error {
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime)
@@ -356,11 +357,13 @@ func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64, cont submission
 	}()
 
 	for submissionsIter.Next() {
-		if !cont(submissionsIter.Event) {
-			return nil
-		}
-
 		encryptedTxnSubmission := EncryptedTxnSubmissionFromLogEvent(submissionsIter.Event)
+		etp.logger.Debug(
+			"loaded encrypted txn submission",
+			"eonIndex", encryptedTxnSubmission.EonIndex,
+			"txnIndex", encryptedTxnSubmission.TxnIndex,
+			"blockNum", encryptedTxnSubmission.BlockNum,
+		)
 		etp.addSubmission(encryptedTxnSubmission)
 	}
 
@@ -387,16 +390,4 @@ func (etp *EncryptedTxnsPool) deleteSubmission(submission EncryptedTxnSubmission
 	encryptedTxnsPoolDeleted.Inc()
 	encryptedTxnsPoolTotalCount.Dec()
 	encryptedTxnsPoolTotalBytes.Sub(float64(len(submission.EncryptedTransaction)))
-}
-
-type submissionsContinuer func(*contracts.SequencerTransactionSubmitted) bool
-
-func alwaysContinueSubmissionsContinuer(*contracts.SequencerTransactionSubmitted) bool {
-	return true
-}
-
-func stopAtTxnIndexSubmissionsContinuer(txnIndex TxnIndex) submissionsContinuer {
-	return func(event *contracts.SequencerTransactionSubmitted) bool {
-		return TxnIndex(event.TxIndex) >= txnIndex
-	}
 }
