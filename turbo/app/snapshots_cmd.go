@@ -684,6 +684,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
+		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -739,6 +740,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.ReceiptsNoDups:
 			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
+		case integrity.Publishable:
+			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
 		default:
