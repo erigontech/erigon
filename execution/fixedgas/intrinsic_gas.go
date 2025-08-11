@@ -20,8 +20,8 @@
 package fixedgas
 
 import (
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.

@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -146,7 +146,7 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 	}
 
 	cumulativeGasUsed += t.GasUsed
-	if t.GasUsed == 0  && !t.Rules.IsArbitrum {
+	if t.GasUsed == 0 && !t.Rules.IsArbitrum {
 		msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
 		panic(msg)
 	}

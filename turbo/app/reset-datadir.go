@@ -12,7 +12,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
@@ -22,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/turbo/debug"
 )
 

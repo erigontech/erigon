@@ -22,10 +22,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	accounts_steps "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
 	contracts_steps "github.com/erigontech/erigon/cmd/devnet/contracts/steps"
 	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/rpc/requests"
 )
 

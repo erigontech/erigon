@@ -22,7 +22,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func TestTransaction(t *testing.T) {

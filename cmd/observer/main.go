@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/cmd/observer/observer"
 	"github.com/erigontech/erigon/cmd/observer/reports"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.Logger) error {

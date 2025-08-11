@@ -19,12 +19,12 @@ package tool
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	arbparams "github.com/erigontech/erigon/arb/chain/params"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 func Check(e error) {
