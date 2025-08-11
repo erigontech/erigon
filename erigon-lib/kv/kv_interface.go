@@ -82,6 +82,8 @@ MediumLevel:
 
 HighLevel:
      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
+
+General advise: for deeper understanding read `mdbx.h`
 */
 
 /*
@@ -248,9 +250,6 @@ type RwCursor interface {
 	// this operation.
 	DeleteCurrent() error
 }
-
-/*
- */
 
 /*
 CursorDupSort
