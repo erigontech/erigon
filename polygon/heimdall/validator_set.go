@@ -44,7 +44,6 @@ const (
 	PriorityWindowSizeFactor = 2
 )
 
-// Validator represets Volatile state for each Validator
 type Validator struct {
 	ID               uint64         `json:"ID"`
 	Address          common.Address `json:"signer"`
