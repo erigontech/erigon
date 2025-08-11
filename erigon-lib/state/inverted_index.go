@@ -1277,6 +1277,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
+	versionOfRs := uint8(0)
+	if !ii.version.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+		versionOfRs = 1
+	}
 	cfg := recsplit.RecSplitArgs{
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
@@ -1285,7 +1289,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 
-		Version:            1,
+		Version:            versionOfRs,
 		Enums:              true,
 		LessFalsePositives: true,
 	}
