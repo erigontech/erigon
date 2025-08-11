@@ -41,6 +41,21 @@ func TestBridgeStoreLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 		NewSnapshotStore(NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil).LastFrozenEventId())
 }
 
+func TestBridgeStoreLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T) {
+	t.Parallel()
+
+	logger := testlog.Logger(t, log.LvlInfo)
+	dir := t.TempDir()
+	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	defer borRoSnapshots.Close()
+	err := borRoSnapshots.OpenFolder()
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+	require.Equal(t, uint64(0), NewSnapshotStore(NewMdbxStore(dataDir, logger, false, 1), borRoSnapshots, nil).LastFrozenEventId())
+}
+
 func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	t.Parallel()
 
