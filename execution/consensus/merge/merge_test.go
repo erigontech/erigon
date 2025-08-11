@@ -65,10 +65,6 @@ func (r readerMock) FrozenBlocks() uint64 {
 }
 func (r readerMock) FrozenBorBlocks(align bool) uint64 { return 0 }
 
-func (r readerMock) BorSpan(spanId uint64) []byte {
-	return nil
-}
-
 // The thing only that changes between normal ethash checks other than POW, is difficulty
 // and nonce so we are gonna test those
 func TestVerifyHeaderDifficulty(t *testing.T) {

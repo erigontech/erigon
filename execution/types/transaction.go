@@ -75,6 +75,7 @@ type Transaction interface {
 	SigningHash(chainID *big.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
+	GetAuthorizations() []Authorization // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int

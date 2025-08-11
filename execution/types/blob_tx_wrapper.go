@@ -318,22 +318,19 @@ func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rul
 }
 
 func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction, error) {
-	signedBlobTxn, err := txw.Tx.WithSignature(signer, sig)
+	signedCopy, err := txw.Tx.WithSignature(signer, sig)
 	if err != nil {
 		return nil, err
 	}
-	v, r, s := signedBlobTxn.RawSignatureValues()
+	//goland:noinspection GoVetCopyLock
 	blobTxnWrapper := &BlobTxWrapper{
-		Tx:             *txw.Tx.copy(),
+		// it's ok to copy here - because it's constructor of object - no parallel access yet
+		Tx:             *signedCopy.(*BlobTx), //nolint
 		WrapperVersion: txw.WrapperVersion,
 		Blobs:          make(Blobs, len(txw.Blobs)),
 		Commitments:    make(BlobKzgs, len(txw.Commitments)),
 		Proofs:         make(KZGProofs, len(txw.Proofs)),
 	}
-	blobTxnWrapper.Tx.V = *new(uint256.Int).Set(v)
-	blobTxnWrapper.Tx.R = *new(uint256.Int).Set(r)
-	blobTxnWrapper.Tx.S = *new(uint256.Int).Set(s)
-	blobTxnWrapper.Tx.ChainID = new(uint256.Int).Set(signedBlobTxn.GetChainID())
 	copy(blobTxnWrapper.Blobs, txw.Blobs)
 	copy(blobTxnWrapper.Commitments, txw.Commitments)
 	copy(blobTxnWrapper.Proofs, txw.Proofs)
@@ -349,6 +346,10 @@ func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
 func (txw *BlobTxWrapper) GetData() []byte { return txw.Tx.GetData() }
 
 func (txw *BlobTxWrapper) GetAccessList() AccessList { return txw.Tx.GetAccessList() }
+
+func (txw *BlobTxWrapper) GetAuthorizations() []Authorization {
+	return nil
+}
 
 func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
 
