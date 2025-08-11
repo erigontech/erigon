@@ -97,7 +97,7 @@ type domainCfg struct {
 	Compression seg.FileCompression
 	CompressCfg seg.Cfg
 	Accessors   Accessors // list of indexes for given domain
-	valuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	valuesTable string    // `largeVals=true: k + ^step -> v`; `largeVals=false: k -> ^step + v`
 	largeValues bool
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
@@ -197,24 +197,27 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 // maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
 // Does not use history table to find the latest step
 func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
-	lstIdx, err := kv.FirstKey(tx, d.valuesTable)
+	firstKey, err := kv.FirstKey(tx, d.valuesTable)
 	if err != nil {
-		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", lstIdx, "err", err)
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", firstKey, "err", err)
 		return 0
 	}
-	if len(lstIdx) == 0 {
+	if len(firstKey) == 0 {
 		return 0
 	}
 	if d.largeValues {
-		return ^binary.BigEndian.Uint64(lstIdx[len(lstIdx)-8:])
+		lastStepBytes := firstKey[len(firstKey)-8:]
+		step := ^binary.BigEndian.Uint64(lastStepBytes)
+		return step
 	}
-	lstVal, err := tx.GetOne(d.valuesTable, lstIdx)
+	firstVal, err := tx.GetOne(d.valuesTable, firstKey)
 	if err != nil {
-		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", lstIdx, "err", err)
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", firstKey, "err", err)
 		return 0
 	}
-
-	return ^binary.BigEndian.Uint64(lstVal)
+	lastStepBytes := firstVal[:8]
+	step := ^binary.BigEndian.Uint64(lastStepBytes)
+	return step
 }
 
 func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
