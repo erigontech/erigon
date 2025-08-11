@@ -316,8 +316,25 @@ func (txw *BlobTxWrapper) GetTo() *common.Address { return txw.Tx.GetTo() }
 func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
 }
+
 func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction, error) {
-	return txw.Tx.WithSignature(signer, sig)
+	signedCopy, err := txw.Tx.WithSignature(signer, sig)
+	if err != nil {
+		return nil, err
+	}
+	//goland:noinspection GoVetCopyLock
+	blobTxnWrapper := &BlobTxWrapper{
+		// it's ok to copy here - because it's constructor of object - no parallel access yet
+		Tx:             *signedCopy.(*BlobTx), //nolint
+		WrapperVersion: txw.WrapperVersion,
+		Blobs:          make(Blobs, len(txw.Blobs)),
+		Commitments:    make(BlobKzgs, len(txw.Commitments)),
+		Proofs:         make(KZGProofs, len(txw.Proofs)),
+	}
+	copy(blobTxnWrapper.Blobs, txw.Blobs)
+	copy(blobTxnWrapper.Commitments, txw.Commitments)
+	copy(blobTxnWrapper.Proofs, txw.Proofs)
+	return blobTxnWrapper, nil
 }
 
 func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
