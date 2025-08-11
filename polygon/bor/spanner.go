@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -109,7 +108,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 	const method = "commitSpan"
 
 	// get validators bytes
-	validators := make([]valset.MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
+	validators := make([]heimdall.MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
 	for _, val := range heimdallSpan.ValidatorSet.Validators {
 		validators = append(validators, val.MinimalVal())
 	}
@@ -119,7 +118,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 	}
 
 	// get producers bytes
-	producers := make([]valset.MinimalVal, 0, len(heimdallSpan.SelectedProducers))
+	producers := make([]heimdall.MinimalVal, 0, len(heimdallSpan.SelectedProducers))
 	for _, val := range heimdallSpan.SelectedProducers {
 		producers = append(producers, val.MinimalVal())
 	}

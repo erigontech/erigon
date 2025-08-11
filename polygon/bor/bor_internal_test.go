@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -55,7 +54,7 @@ func (m mockSpanReader) Span(context.Context, uint64) (*heimdall.Span, bool, err
 	panic("mock")
 }
 
-func (m mockSpanReader) Producers(context.Context, uint64) (*valset.ValidatorSet, error) {
+func (m mockSpanReader) Producers(context.Context, uint64) (*heimdall.ValidatorSet, error) {
 	panic("mock")
 }
 
