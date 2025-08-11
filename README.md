@@ -131,15 +131,12 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Upgrading from 3.0 to 3.1
 
-It's recommended that you take a backup or filesystem snapshot of your datadir before upgrading.
-
-When running Erigon 3.1, your snapshot files will be renamed automatically to a new file naming scheme.
-
-The downloader component in Erigon 3.1 will check the file data of snapshots when `--downloader.verify` is provided. Incorrect data will be repaired.
-
-A new `snapshots reset` subcommand is added, that lets you trigger Erigon to perform an initial sync on the next run, reusing existing files where possible.
-Do not run this before applying file renaming if you are upgrading from 3.0 as you will lose snapshots that used the old naming scheme.
-Use `snapshots reset` if your datadir is corrupted, or your client is unable to obtain missing snapshot data due to having committed to a snapshot that is no longer available. It will remove any locally generated files, and your chain data.
+1. Backup your datadir.
+2. Upgrade your Erigon binary.
+3. OPTIONAL: Upgrade snapshot files.
+   1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
+   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See [Resetting snapshots](#Resetting-snapshots) for more details.
+4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset your datadir, Erigon will sync to the latest remote snapshots.
 
 ### Datadir structure
 
@@ -266,6 +263,10 @@ output `--log.dir.json`.
 #### Torrent client logging
 
 The torrent client in the Downloader logs to `logs/torrent.log` at the level specified by `torrent.verbosity` or WARN, whichever is lower. Logs at `torrent.verbosity` or higher are also passed through to the top level Erigon dir and console loggers (which must have their own levels set low enough to log the messages in their respective handlers).
+
+### Resetting snapshots
+
+Erigon 3.1 adds the command `erigon snapshots reset`. This modifies your datadir so that Erigon will sync to the latest remote snapshots on next run. You must pass `--datadir`. If the chain cannot be inferred from the chaindata, you must pass `--chain`. `--local=false` will prevent locally generated snapshots from also being removed. Pass `--dry-run` and/or `--verbosity=5` for more information.
 
 ### Modularity
 
