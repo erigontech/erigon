@@ -35,7 +35,7 @@ import (
 
 func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
 	defer func() {
-		log.Info("[integrity] ValidateBorEvents: done", "err", err)
+		log.Info("[integrity] BorEvents: done", "err", err)
 	}()
 
 	var cc *chain.Config
@@ -147,7 +147,7 @@ func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs,
 	defer snapshotStore.Close()
 	defer baseStore.Close()
 	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
-	logger.Info("[integrity] ValidateBorSpans: done", "err", err)
+	logger.Info("[integrity] BorSpans: done", "err", err)
 	return err
 }
 
@@ -161,6 +161,6 @@ func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir
 	defer snapshotStore.Close()
 	defer baseStore.Close()
 	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
-	logger.Info("[integrity] ValidateBorCheckpoints: done", "err", err)
+	logger.Info("[integrity] BorCheckpoints: done", "err", err)
 	return err
 }
