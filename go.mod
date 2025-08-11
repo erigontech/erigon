@@ -31,7 +31,7 @@ require (
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.58.2-0.20250808032922-b6e9e69c96b4
+	github.com/anacrolix/torrent v1.58.2-0.20250811011913-5c778813ff6d
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.18.0
