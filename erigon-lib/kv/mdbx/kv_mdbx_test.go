@@ -254,6 +254,27 @@ func TestRangeDupSort(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, vals, 1)
 	})
+
+	t.Run("dup_delete", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+
+		table := "Table"
+		key := []byte("keyy1")
+		tx.AppendDup(table, key, []byte("value1.1"))
+		tx.AppendDup(table, key, []byte("value1.2"))
+
+		require.NoError(t, tx.Delete(table, key))
+
+		it, err := tx.RangeDupSort(table, key, nil, nil, order.Desc, -1)
+		require.NoError(t, err)
+		require.False(t, it.HasNext())
+		// require.True(t, it.HasNext())
+		// k, v, err := it.Next()
+		// require.NoError(t, err)
+		// require.Equal(t, string(key), string(k))
+		// require.Equal(t, "value1.2", string(v))
+
+	})
 }
 
 func TestLastDup(t *testing.T) {

@@ -363,6 +363,11 @@ type InvertedIndexBufferedWriter struct {
 	aggregationStep uint64
 	txNumBytes      [8]byte
 	name            kv.InvertedIdx
+
+	keysAddTime   uint64
+	valuesAddTime uint64
+
+	keysFlushTime, valuesFlushTime uint64
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -376,19 +381,34 @@ func (w *InvertedIndexBufferedWriter) Add(key []byte, txNum uint64) error {
 	return w.add(key, key, txNum)
 }
 
+func timeFn(fn func() error, update *uint64) error {
+	currTime := time.Now()
+	if err := fn(); err != nil {
+		*update += uint64(time.Since(currTime))
+		return err
+	}
+	*update += uint64(time.Since(currTime))
+	return nil
+}
+
 func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) error {
+
 	if w.discard {
 		return nil
 	}
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
-	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
+	if err := timeFn(func() error {
+		return w.indexKeys.Collect(w.txNumBytes[:], key)
+	}, &w.keysAddTime); err != nil {
 		return err
 	}
-	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
+
+	if err := timeFn(func() error {
+		return w.index.Collect(indexKey, w.txNumBytes[:])
+	}, &w.valuesAddTime); err != nil {
 		return err
 	}
-	return nil
 }
 
 func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -396,10 +416,14 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 		return nil
 	}
 
-	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := timeFn(func() error {
+		return w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
+	}, &w.keysFlushTime); err != nil {
 		return err
 	}
-	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := timeFn(func() error {
+		return w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
+	}, &w.valuesFlushTime); err != nil {
 		return err
 	}
 	w.close()
@@ -416,6 +440,12 @@ func (w *InvertedIndexBufferedWriter) close() {
 	if w.indexKeys != nil {
 		w.indexKeys.Close()
 	}
+
+	fmt.Printf("entity: %s\n", w.name.String())
+	fmt.Printf("keys add times: %d\n", w.keysAddTime)
+	fmt.Printf("values add times: %d\n", w.valuesAddTime)
+	fmt.Printf("keys flush times: %d\n", w.keysFlushTime)
+	fmt.Printf("values flush times: %d\n", w.valuesFlushTime)
 }
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
