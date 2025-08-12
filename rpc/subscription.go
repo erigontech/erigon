@@ -27,10 +27,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math/rand"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,24 +51,18 @@ func NewID() ID {
 	return globalGen()
 }
 
-// randomIDGenerator returns a function generates a random IDs.
+// randomIDGenerator returns a function that generates cryptographically-strong random IDs.
+// Falls back to timestamp + monotonic counter if crypto/rand fails.
 func randomIDGenerator() func() ID {
-	var buf = make([]byte, 8)
-	var seed int64
-	if _, err := crand.Read(buf); err == nil {
-		seed = int64(binary.BigEndian.Uint64(buf))
-	} else {
-		seed = int64(time.Now().Nanosecond())
-	}
-	var (
-		mu  sync.Mutex
-		rng = rand.New(rand.NewSource(seed)) // nolint: gosec
-	)
+	var fallbackCounter uint64
+
 	return func() ID {
-		mu.Lock()
-		defer mu.Unlock()
 		id := make([]byte, 16)
-		rng.Read(id)
+		if _, err := crand.Read(id); err != nil {
+			// Robust fallback without math/rand: timestamp + monotonic counter
+			binary.LittleEndian.PutUint64(id[:8], uint64(time.Now().UnixNano()))
+			binary.LittleEndian.PutUint64(id[8:], atomic.AddUint64(&fallbackCounter, 1))
+		}
 		return encodeID(id)
 	}
 }
