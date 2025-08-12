@@ -182,7 +182,7 @@ func verifyRegistrationSignature(msg *AggregateRegistrationMessage, sig []byte, 
 
 		pk := new(blst.P1Affine).Uncompress(pubKeyBytes)
 		if pk == nil {
-			return fmt.Errorf("could not uncompress validator public key")
+			return errors.New("could not uncompress validator public key")
 		}
 
 		pubKeys = append(pubKeys, pk)
@@ -202,7 +202,7 @@ func verifyRegistrationSignature(msg *AggregateRegistrationMessage, sig []byte, 
 		})
 	}
 	if !valid {
-		return fmt.Errorf("signature verification failed")
+		return errors.New("signature verification failed")
 	}
 	return nil
 }
