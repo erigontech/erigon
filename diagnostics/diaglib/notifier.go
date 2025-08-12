@@ -1,4 +1,4 @@
-package diagnostics
+package diaglib
 
 import (
 	"net/http"

@@ -14,17 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics_test
+package diaglib_test
 
 import (
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
-var mockInboundPeerStats = diagnostics.PeerStatistics{
+var mockInboundPeerStats = diaglib.PeerStatistics{
 	PeerType:     "Sentinel",
 	BytesIn:      10,
 	CapBytesIn:   map[string]uint64{"msgCap1": 10},
@@ -34,7 +35,7 @@ var mockInboundPeerStats = diagnostics.PeerStatistics{
 	TypeBytesOut: map[string]uint64{},
 }
 
-var mockOutboundPeerStats = diagnostics.PeerStatistics{
+var mockOutboundPeerStats = diaglib.PeerStatistics{
 	PeerType:     "Sentinel",
 	BytesIn:      0,
 	CapBytesIn:   map[string]uint64{},
@@ -44,7 +45,7 @@ var mockOutboundPeerStats = diagnostics.PeerStatistics{
 	TypeBytesOut: map[string]uint64{"msgType1": 10},
 }
 
-var mockInboundUpdMsg = diagnostics.PeerStatisticMsgUpdate{
+var mockInboundUpdMsg = diaglib.PeerStatisticMsgUpdate{
 	PeerName: "",
 	PeerType: "Sentinel",
 	PeerID:   "test1",
@@ -54,7 +55,7 @@ var mockInboundUpdMsg = diagnostics.PeerStatisticMsgUpdate{
 	Bytes:    10,
 }
 
-var mockOutboundUpdMsg = diagnostics.PeerStatisticMsgUpdate{
+var mockOutboundUpdMsg = diaglib.PeerStatisticMsgUpdate{
 	PeerName: "",
 	PeerType: "Sentinel",
 	PeerID:   "test1",
@@ -66,12 +67,12 @@ var mockOutboundUpdMsg = diagnostics.PeerStatisticMsgUpdate{
 
 func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
 	//test handing inbound message
-	inboundPeerStats := diagnostics.PeerStatisticsFromMsgUpdate(mockInboundUpdMsg, nil)
+	inboundPeerStats := diaglib.PeerStatisticsFromMsgUpdate(mockInboundUpdMsg, nil)
 	require.Equal(t, mockInboundPeerStats, inboundPeerStats)
 
-	inboundPeerStats = diagnostics.PeerStatisticsFromMsgUpdate(mockInboundUpdMsg, inboundPeerStats)
+	inboundPeerStats = diaglib.PeerStatisticsFromMsgUpdate(mockInboundUpdMsg, inboundPeerStats)
 
-	require.Equal(t, diagnostics.PeerStatistics{
+	require.Equal(t, diaglib.PeerStatistics{
 		PeerType:     "Sentinel",
 		BytesIn:      20,
 		CapBytesIn:   map[string]uint64{"msgCap1": 20},
@@ -82,12 +83,12 @@ func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
 	}, inboundPeerStats)
 
 	//test handing outbound message
-	outboundPeerStats := diagnostics.PeerStatisticsFromMsgUpdate(mockOutboundUpdMsg, nil)
+	outboundPeerStats := diaglib.PeerStatisticsFromMsgUpdate(mockOutboundUpdMsg, nil)
 	require.Equal(t, mockOutboundPeerStats, outboundPeerStats)
 
-	outboundPeerStats = diagnostics.PeerStatisticsFromMsgUpdate(mockOutboundUpdMsg, outboundPeerStats)
+	outboundPeerStats = diaglib.PeerStatisticsFromMsgUpdate(mockOutboundUpdMsg, outboundPeerStats)
 
-	require.Equal(t, diagnostics.PeerStatistics{
+	require.Equal(t, diaglib.PeerStatistics{
 		PeerType:     "Sentinel",
 		BytesIn:      0,
 		CapBytesIn:   map[string]uint64{},
@@ -100,7 +101,7 @@ func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
 }
 
 func TestAddPeer(t *testing.T) {
-	var peerStats = diagnostics.NewPeerStats(100)
+	var peerStats = diaglib.NewPeerStats(100)
 
 	peerStats.AddPeer("test1", mockInboundUpdMsg)
 	require.Equal(t, 1, peerStats.GetPeersCount())
@@ -109,13 +110,13 @@ func TestAddPeer(t *testing.T) {
 }
 
 func TestUpdatePeer(t *testing.T) {
-	peerStats := diagnostics.NewPeerStats(1000)
+	peerStats := diaglib.NewPeerStats(1000)
 
 	peerStats.AddPeer("test1", mockInboundUpdMsg)
 	peerStats.UpdatePeer("test1", mockInboundUpdMsg, mockInboundPeerStats)
 	require.Equal(t, 1, peerStats.GetPeersCount())
 
-	require.Equal(t, diagnostics.PeerStatistics{
+	require.Equal(t, diaglib.PeerStatistics{
 		PeerType:     "Sentinel",
 		BytesIn:      20,
 		CapBytesIn:   map[string]uint64{"msgCap1": 20},
@@ -127,7 +128,7 @@ func TestUpdatePeer(t *testing.T) {
 }
 
 func TestAddOrUpdatePeer(t *testing.T) {
-	peerStats := diagnostics.NewPeerStats(100)
+	peerStats := diaglib.NewPeerStats(100)
 
 	peerStats.AddOrUpdatePeer("test1", mockInboundUpdMsg)
 	require.Equal(t, 1, peerStats.GetPeersCount())
@@ -137,7 +138,7 @@ func TestAddOrUpdatePeer(t *testing.T) {
 	peerStats.AddOrUpdatePeer("test1", mockInboundUpdMsg)
 	require.Equal(t, 1, peerStats.GetPeersCount())
 
-	require.Equal(t, diagnostics.PeerStatistics{
+	require.Equal(t, diaglib.PeerStatistics{
 		PeerType:     "Sentinel",
 		BytesIn:      20,
 		CapBytesIn:   map[string]uint64{"msgCap1": 20},
@@ -152,7 +153,7 @@ func TestAddOrUpdatePeer(t *testing.T) {
 }
 
 func TestGetPeers(t *testing.T) {
-	peerStats := diagnostics.NewPeerStats(10)
+	peerStats := diaglib.NewPeerStats(10)
 
 	peerStats.AddOrUpdatePeer("test1", mockInboundUpdMsg)
 	peerStats.AddOrUpdatePeer("test2", mockInboundUpdMsg)
@@ -165,7 +166,7 @@ func TestGetPeers(t *testing.T) {
 
 func TestRemovePeersWhichExceedLimit(t *testing.T) {
 	limit := 100
-	peerStats := diagnostics.NewPeerStats(limit)
+	peerStats := diaglib.NewPeerStats(limit)
 
 	for i := 1; i < 105; i++ {
 		pid := "test" + strconv.Itoa(i)
@@ -185,7 +186,7 @@ func TestRemovePeersWhichExceedLimit(t *testing.T) {
 
 func TestRemovePeer(t *testing.T) {
 	limit := 10
-	peerStats := diagnostics.NewPeerStats(limit)
+	peerStats := diaglib.NewPeerStats(limit)
 
 	for i := 1; i < 11; i++ {
 		pid := "test" + strconv.Itoa(i)
@@ -198,12 +199,12 @@ func TestRemovePeer(t *testing.T) {
 	require.Equal(t, limit-1, peerStats.GetPeersCount())
 
 	firstPeerStats := peerStats.GetPeerStatistics("test1")
-	require.True(t, firstPeerStats.Equal(diagnostics.PeerStatistics{}))
+	require.True(t, firstPeerStats.Equal(diaglib.PeerStatistics{}))
 }
 
 func TestAddingPeersAboveTheLimit(t *testing.T) {
 	limit := 100
-	peerStats := diagnostics.NewPeerStats(limit)
+	peerStats := diaglib.NewPeerStats(limit)
 
 	for i := 1; i < 105; i++ {
 		pid := "test" + strconv.Itoa(i)
