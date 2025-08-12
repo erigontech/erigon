@@ -35,8 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/prune"
@@ -284,20 +282,11 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
 	snapshots := blockReader.Snapshots()
-	borSnapshots := blockReader.BorSnapshots()
 
 	// Find minimum block to download.
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-		if err := snapshots.OpenFolder(); err != nil {
-			return err
-		}
-		if cc.Bor != nil {
-			if err := borSnapshots.OpenFolder(); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 
@@ -417,20 +406,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
 		}
-	}
-
-	if err := snapshots.OpenFolder(); err != nil {
-		return err
-	}
-
-	if cc.Bor != nil {
-		if err := borSnapshots.OpenFolder(); err != nil {
-			return err
-		}
-	}
-
-	if err := agg.OpenFolder(); err != nil {
-		return err
 	}
 
 	// ProhibitNewDownloads implies - so only make the download request once,
