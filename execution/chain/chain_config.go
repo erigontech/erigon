@@ -24,9 +24,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 // Config is the core config which determines the blockchain settings.
