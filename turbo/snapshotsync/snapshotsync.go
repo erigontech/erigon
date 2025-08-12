@@ -449,7 +449,13 @@ func SyncSnapshots(
 			return ctx.Err()
 		default:
 		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
+		var localLogPrefix string
+		if headerchain {
+			localLogPrefix = fmt.Sprintf("[%s] Syncing headers", logPrefix)
+		} else {
+			localLogPrefix = fmt.Sprintf("[%s] Syncing files", logPrefix)
+		}
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, localLogPrefix); err != nil {
 			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 			time.Sleep(10 * time.Second)
 			continue
