@@ -62,8 +62,6 @@ func (s *SnapshotStore) Prepare(ctx context.Context) error {
 	return eg.Wait()
 }
 
-var ErrSpanNotFound = errors.New("span not found")
-
 type SpanSnapshotStore struct {
 	EntityStore[*Span]
 	snapshots *RoSnapshots
