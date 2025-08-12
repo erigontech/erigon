@@ -1160,8 +1160,6 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.closeWhatNotInList(list)
 		return s.openSegments(list, true, false)
 	}(); err != nil {
-		err = fmt.Errorf("OpenFolder: %w", err)
-		panic(err)
 		return err
 	}
 
