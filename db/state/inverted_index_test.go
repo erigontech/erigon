@@ -333,10 +333,6 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
-		latestStep, frozenStep := ic.Progress2(tx)
-		require.Equal(t, 2, int(latestStep))
-		require.Equal(t, 1, int(frozenStep))
-
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
@@ -809,4 +805,200 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = ii.openFolder()
 	require.NoError(t, err)
 	ii.Close()
+}
+
+func TestInvertedIndex_Progress2(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	t.Run("empty_index", func(t *testing.T) {
+		db, ii := testDbAndInvertedIndex(t, 16, logger)
+		ctx := context.Background()
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+
+		latestTxNum, frozenTxNum := ic.Progress2(tx)
+		require.Equal(t, uint64(0), latestTxNum, "empty index should have latestTxNum=0")
+		require.Equal(t, uint64(0), frozenTxNum, "empty index should have frozenTxNum=0")
+	})
+
+	t.Run("db_only_no_files", func(t *testing.T) {
+		db, ii := testDbAndInvertedIndex(t, 16, logger)
+		ctx := context.Background()
+
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+
+		err = writer.Add([]byte("key1"), 32)
+		require.NoError(t, err)
+		err = writer.Add([]byte("key2"), 48)
+		require.NoError(t, err)
+		err = writer.Flush(ctx, tx)
+		require.NoError(t, err)
+
+		latestTxNum, frozenTxNum := ic.Progress2(tx)
+		require.Equal(t, uint64(3), latestTxNum, "latestTxNum should be maxTxNumInDB/aggStep = 48/16 = 3")
+		require.Equal(t, uint64(0), frozenTxNum, "frozenTxNum should be 0 when no files")
+	})
+
+	t.Run("files_only_no_db", func(t *testing.T) {
+		db, ii := testDbAndInvertedIndex(t, 16, logger)
+		ctx := context.Background()
+
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+
+		err = writer.Add([]byte("key1"), 16)
+		require.NoError(t, err)
+		err = writer.Add([]byte("key2"), 32)
+		require.NoError(t, err)
+		err = writer.Flush(ctx, tx)
+		require.NoError(t, err)
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+
+		bs, err := ii.collate(ctx, 0, roTx)
+		require.NoError(t, err)
+		sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
+		require.NoError(t, err)
+		ii.integrateDirtyFiles(sf, 0, 48)
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+		ic.Close()
+
+		ic = ii.BeginFilesRo()
+		defer ic.Close()
+
+		latestTxNum, frozenTxNum := ic.Progress2(roTx)
+		require.Equal(t, uint64(2), latestTxNum, "latestTxNum should be maxTxNumInDB/aggStep = 32/16 = 2")
+		require.Equal(t, uint64(3), frozenTxNum, "frozenTxNum should be files.EndTxNum()/aggStep = 48/16 = 3")
+	})
+
+	t.Run("both_db_and_files", func(t *testing.T) {
+		db, ii := testDbAndInvertedIndex(t, 16, logger)
+		ctx := context.Background()
+
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+
+		err = writer.Add([]byte("key1"), 16)
+		require.NoError(t, err)
+		err = writer.Add([]byte("key2"), 32)
+		require.NoError(t, err)
+		err = writer.Flush(ctx, tx)
+		require.NoError(t, err)
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+
+		bs, err := ii.collate(ctx, 0, roTx)
+		require.NoError(t, err)
+		sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
+		require.NoError(t, err)
+		ii.integrateDirtyFiles(sf, 0, 48)
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+		ic.Close()
+
+		tx2, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx2.Rollback()
+
+		ic = ii.BeginFilesRo()
+		defer ic.Close()
+		writer = ic.NewWriter()
+		defer writer.close()
+
+		err = writer.Add([]byte("key3"), 64)
+		require.NoError(t, err)
+		err = writer.Add([]byte("key4"), 80)
+		require.NoError(t, err)
+		err = writer.Flush(ctx, tx2)
+		require.NoError(t, err)
+
+		latestTxNum, frozenTxNum := ic.Progress2(tx2)
+		require.Equal(t, uint64(5), latestTxNum, "latestTxNum should be maxTxNumInDB/aggStep = 80/16 = 5")
+		require.Equal(t, uint64(3), frozenTxNum, "frozenTxNum should be files.EndTxNum()/aggStep = 48/16 = 3")
+	})
+
+	t.Run("different_agg_step", func(t *testing.T) {
+		db, ii := testDbAndInvertedIndex(t, 32, logger)
+		ctx := context.Background()
+
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+
+		err = writer.Add([]byte("key1"), 64)
+		require.NoError(t, err)
+		err = writer.Add([]byte("key2"), 96)
+		require.NoError(t, err)
+		err = writer.Flush(ctx, tx)
+		require.NoError(t, err)
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+
+		bs, err := ii.collate(ctx, 0, roTx)
+		require.NoError(t, err)
+		sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
+		require.NoError(t, err)
+		ii.integrateDirtyFiles(sf, 0, 128)
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+		ic.Close()
+
+		tx2, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx2.Rollback()
+
+		ic = ii.BeginFilesRo()
+		defer ic.Close()
+		writer = ic.NewWriter()
+		defer writer.close()
+
+		err = writer.Add([]byte("key3"), 160)
+		require.NoError(t, err)
+		err = writer.Flush(ctx, tx2)
+		require.NoError(t, err)
+
+		latestTxNum, frozenTxNum := ic.Progress2(tx2)
+		require.Equal(t, uint64(5), latestTxNum, "latestTxNum should be maxTxNumInDB/aggStep = 160/32 = 5")
+		require.Equal(t, uint64(4), frozenTxNum, "frozenTxNum should be files.EndTxNum()/aggStep = 128/32 = 4")
+	})
 }
