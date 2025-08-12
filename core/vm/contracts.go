@@ -566,32 +566,43 @@ var (
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
+	header := getData(input, 0, 3*32)
 	var (
-		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+		baseLen = new(big.Int).SetBytes(header[0:32]).Uint64()
+		expLen  = new(big.Int).SetBytes(header[32:64]).Uint64()
+		modLen  = new(big.Int).SetBytes(header[64:96]).Uint64()
+
+		// 32 - 8 bytes are truncated in the Uint64 conversion above
+		baseLenHighBitsAreZero = allZero(header[0 : 32-8])
+		expLenHighBitsAreZero  = allZero(header[32 : 64-8])
+		modLenHighBitsAreZero  = allZero(header[64 : 96-8])
 	)
 	if c.osaka {
 		// EIP-7823: Set upper bounds for MODEXP
-		if baseLen > 1024 {
+		if !baseLenHighBitsAreZero || baseLen > 1024 {
 			return nil, errModExpBaseLengthTooLarge
 		}
-		if expLen > 1024 {
+		if !expLenHighBitsAreZero || expLen > 1024 {
 			return nil, errModExpExponentLengthTooLarge
 		}
-		if modLen > 1024 {
+		if !modLenHighBitsAreZero || modLen > 1024 {
 			return nil, errModExpModulusLengthTooLarge
 		}
+	}
+
+	// Handle a special case when mod length is zero
+	if modLen == 0 && modLenHighBitsAreZero {
+		return []byte{}, nil
+	}
+
+	if !baseLenHighBitsAreZero || !expLenHighBitsAreZero || !modLenHighBitsAreZero {
+		return nil, ErrOutOfGas
 	}
 
 	if len(input) > 96 {
 		input = input[96:]
 	} else {
 		input = input[:0]
-	}
-	// Handle a special case when both the base and mod length is zero
-	if baseLen == 0 && modLen == 0 {
-		return []byte{}, nil
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
