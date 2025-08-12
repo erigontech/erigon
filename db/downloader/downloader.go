@@ -531,11 +531,10 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 				// This isn't concurrent-safe?
 				os.Chmod(fp, 0o644)
 				log.Warn("[dbg] Truncate!", "from", fi.Size(), "to", f.Length(), "name", f.Path())
-				panic("truncate")
-				err = os.Truncate(fp, f.Length())
-				if err != nil {
-					d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
-				}
+				//err = os.Truncate(fp, f.Length())
+				//if err != nil {
+				//	d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
+				//}
 				os.Chmod(fp, 0o444)
 				// End not concurrent safe
 			}
@@ -931,8 +930,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
-// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
-	infoHash metainfo.Hash,
+	infoHash metainfo.Hash, // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
 ) error {
 	panicif.Zero(infoHash)
