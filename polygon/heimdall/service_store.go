@@ -43,7 +43,7 @@ func NewMdbxStore(logger log.Logger, dataDir string, accede bool, roTxLimit int6
 func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 	spanIndex := RangeIndexFunc(
 		func(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-			tx, err := db.BeginRw(ctx)
+			tx, err := db.BeginRo(ctx)
 			if err != nil {
 				return 0, false, err
 			}

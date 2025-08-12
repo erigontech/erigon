@@ -259,12 +259,23 @@ var (
 		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
-				spanFrom := uint64(SpanIdAt(blockFrom))
-				spanTo := uint64(SpanIdAt(blockTo))
+				tx, err := db.BeginRo(ctx)
+				if err != nil {
+					return 0, err
+				}
+
+				spanFrom, err := SpanIdAtNew(tx, blockFrom)
+				if err != nil {
+					return 0, err
+				}
+				spanTo, err := SpanIdAtNew(tx, blockTo)
+				if err != nil {
+					return 0, err
+				}
 
 				logger.Debug("Extracting spans to snapshots", "blockFrom", blockFrom, "blockTo", blockTo, "spanFrom", spanFrom, "spanTo", spanTo)
 
-				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
+				return extractValueRange(ctx, kv.BorSpans, uint64(spanFrom), uint64(spanTo), db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{Indexes.BorSpanId},
 		snaptype.IndexBuilderFunc(
