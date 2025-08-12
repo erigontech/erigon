@@ -197,24 +197,26 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 // maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
 // Does not use history table to find the latest step
 func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
-	lstIdx, err := kv.FirstKey(tx, d.valuesTable)
+	firstKeys, err := kv.FirstKey(tx, d.valuesTable)
 	if err != nil {
-		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", lstIdx, "err", err)
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", firstKeys, "err", err)
 		return 0
 	}
-	if len(lstIdx) == 0 {
+	if len(firstKeys) == 0 {
 		return 0
 	}
 	if d.largeValues {
-		return ^binary.BigEndian.Uint64(lstIdx[len(lstIdx)-8:])
+		stepBytes := firstKeys[len(firstKeys)-8:]
+		return ^binary.BigEndian.Uint64(stepBytes)
 	}
-	lstVal, err := tx.GetOne(d.valuesTable, lstIdx)
+	firstVal, err := tx.GetOne(d.valuesTable, firstKeys)
 	if err != nil {
-		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", lstIdx, "err", err)
+		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", firstKeys, "err", err)
 		return 0
 	}
 
-	return ^binary.BigEndian.Uint64(lstVal)
+	stepBytes := firstVal[:8]
+	return ^binary.BigEndian.Uint64(stepBytes)
 }
 
 func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
