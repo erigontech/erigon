@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
 )
