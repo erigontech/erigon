@@ -18,7 +18,6 @@ package snapshotsync
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -28,7 +27,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -338,7 +336,6 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 func SyncSnapshots(
 	ctx context.Context,
 	logPrefix, task string,
-	dirs datadir.Dirs,
 	headerchain, blobs, caplinState bool,
 	prune prune.Mode,
 	caplin CaplinMode,
@@ -349,7 +346,6 @@ func SyncSnapshots(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
-	snapshots := blockReader.Snapshots()
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
@@ -481,26 +477,6 @@ func SyncSnapshots(
 		interval = min(interval*2, 20*time.Second)
 	}
 	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
-
-	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
-		return err
-	}
-
 	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
-	return nil
-}
-
-func firstNonGenesisCheck(tx kv.RwTx, snapshots BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
-	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
-	if err != nil {
-		return err
-	}
-	if firstNonGenesis != nil {
-		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
-		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
-			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
-		}
-	}
 	return nil
 }
