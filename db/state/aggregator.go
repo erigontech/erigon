@@ -1723,7 +1723,7 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 		// this is not accurate, okay for reporting...
 		// if historyDisabled, there's no way to get progress in
 		// terms of exact txNum
-		return uint64(at.d[name].d.maxStepInDBNoHistory(tx)) * at.a.stepSize
+		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize)
 	}
 	return at.d[name].HistoryProgress(tx)
 }
