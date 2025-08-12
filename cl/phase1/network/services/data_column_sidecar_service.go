@@ -110,7 +110,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	}
 
 	// [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
-	if *subnet != das.ComputeSubnetForDataColumnSidecar(msg.Index) {
+	if subnet != nil && *subnet != das.ComputeSubnetForDataColumnSidecar(msg.Index) {
 		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
