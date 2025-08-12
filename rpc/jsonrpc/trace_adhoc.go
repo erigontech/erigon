@@ -418,6 +418,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 	if create {
 		action := CreateTraceAction{}
 		action.From = from
+		action.CreationMethod = strings.ToLower(typ.String())
 		action.Gas.ToInt().SetUint64(gas)
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
