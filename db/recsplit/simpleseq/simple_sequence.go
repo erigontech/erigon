@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream"
 )
 
 // SimpleSequence is a simpler representation of number sequences meant to be a drop-in

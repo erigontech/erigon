@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func IdxStepsCountV3(tx kv.Tx) float64 {

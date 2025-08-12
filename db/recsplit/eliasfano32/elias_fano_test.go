@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream"
 )
 
 // This is a very implementation-dependant test using mainnet production data.

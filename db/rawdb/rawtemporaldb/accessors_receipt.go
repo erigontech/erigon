@@ -3,8 +3,8 @@ package rawtemporaldb
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 var (
