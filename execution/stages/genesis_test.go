@@ -27,7 +27,6 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -36,7 +35,8 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -179,7 +179,7 @@ func TestSetupGenesis(t *testing.T) {
 			//cc := tool.ChainConfigFromDB(db)
 			freezingCfg := ethconfig.Defaults.Snapshot
 			//freezingCfg.ChainName = cc.ChainName //TODO: nil-pointer?
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()), heimdall.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()), nil, nil)
+			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()), heimdall.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()))
 			config, genesis, err := test.fn(t, db, tmpdir)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

@@ -22,12 +22,10 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/chain"
 	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -35,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -42,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -51,7 +49,7 @@ type test_heimdall struct {
 	currentSpan  *heimdall.Span
 	chainConfig  *chain.Config
 	borConfig    *borcfg.BorConfig
-	validatorSet *valset.ValidatorSet
+	validatorSet *heimdall.ValidatorSet
 	spans        map[heimdall.SpanId]*heimdall.Span
 }
 
@@ -67,14 +65,6 @@ func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
 
 func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
-}
-
-func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	return nil, nil
-}
-
-func (h *test_heimdall) FetchChainManagerStatus(ctx context.Context) (*heimdall.ChainManagerStatus, error) {
-	return nil, nil
 }
 
 func (h *test_heimdall) FetchStatus(ctx context.Context) (*heimdall.Status, error) {
@@ -108,7 +98,7 @@ func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
-	nextSpan.SelectedProducers = make([]valset.Validator, len(h.validatorSet.Validators))
+	nextSpan.SelectedProducers = make([]heimdall.Validator, len(h.validatorSet.Validators))
 
 	for i, v := range h.validatorSet.Validators {
 		nextSpan.SelectedProducers[i] = *v
@@ -217,10 +207,6 @@ func (r headerReader) GetTd(common.Hash, uint64) *big.Int {
 	return nil
 }
 
-func (r headerReader) BorSpan(spanId uint64) *heimdall.Span {
-	return r.validator.heimdall.currentSpan
-}
-
 type spanner struct {
 	*bor.ChainSpanner
 	validatorAddress common.Address
@@ -236,8 +222,8 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.Syste
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(spanId uint64, chain bor.ChainHeaderReader) ([]*valset.Validator, error) {
-	return []*valset.Validator{
+func (c *spanner) GetCurrentValidators(spanId uint64, chain bor.ChainHeaderReader) ([]*heimdall.Validator, error) {
+	return []*heimdall.Validator{
 		{
 			ID:               1,
 			Address:          c.validatorAddress,
@@ -305,7 +291,7 @@ func (v validator) verifyBlocks(blocks []*types.Block) error {
 	return nil
 }
 
-func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
+func newValidator(t *testing.T, testHeimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
 	ctrl := gomock.NewController(t)
 	stateReceiver := bor.NewMockStateReceiver(ctrl)
@@ -314,10 +300,10 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
-		heimdall.chainConfig,
+		testHeimdall.chainConfig,
 		nil, /* blockReader */
 		&spanner{
-			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),
+			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), testHeimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
 		stateReceiver,
@@ -331,8 +317,8 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	hex.EncodeToString(crypto.MarshalPubkey(&validatorKey.PublicKey)),
 	strings.ToLower(validatorAddress.Hex()))*/
 
-	if heimdall.validatorSet == nil {
-		heimdall.validatorSet = valset.NewValidatorSet([]*valset.Validator{
+	if testHeimdall.validatorSet == nil {
+		testHeimdall.validatorSet = heimdall.NewValidatorSet([]*heimdall.Validator{
 			{
 				ID:               1,
 				Address:          validatorAddress,
@@ -341,9 +327,9 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 			},
 		})
 	} else {
-		heimdall.validatorSet.UpdateWithChangeSet([]*valset.Validator{
+		testHeimdall.validatorSet.UpdateWithChangeSet([]*heimdall.Validator{
 			{
-				ID:               uint64(len(heimdall.validatorSet.Validators) + 1),
+				ID:               uint64(len(testHeimdall.validatorSet.Validators) + 1),
 				Address:          validatorAddress,
 				VotingPower:      1000,
 				ProposerPriority: 1,
@@ -357,8 +343,8 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 
 	checkStateRoot := true
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
-		heimdall,
+		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
+		testHeimdall,
 		blocks,
 	}
 }

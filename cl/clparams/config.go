@@ -34,11 +34,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 var LatestStateFileName = "latest.ssz_snappy"
@@ -992,6 +992,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Fulu
 	ValidatorCustodyRequirement:      8,
 	BalancePerAdditionalCustodyGroup: 32_000_000_000,
+	BlobSchedule:                     []BlobParameters{},
 }
 
 func mainnetConfig() BeaconChainConfig {

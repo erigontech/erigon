@@ -40,18 +40,18 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/seg"
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -138,7 +138,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, "", 0, log.New()), nil, nil, nil)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, "", 0, log.New()), nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }

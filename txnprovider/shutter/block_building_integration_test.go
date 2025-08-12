@@ -33,8 +33,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/race"
@@ -48,7 +46,9 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain"
+	chainparams "github.com/erigontech/erigon/execution/chain/params"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
@@ -176,12 +176,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 				testhelpers.OrderedInclusion{TxnIndex: 3, TxnHash: simpleTxn.Hash()},
 			)
 			require.NoError(t, err)
-		})
-
-		t.Run("build shutter block without blob txns", func(t *testing.T) {
-			//
-			//  TODO
-			//
 		})
 	})
 
@@ -339,7 +333,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanNode(ethNode))
 
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	err = copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	require.NoError(t, err)
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
@@ -349,15 +344,15 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis := chainspec.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
-	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.ConsolidationRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}
-	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.WithdrawalRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}

@@ -30,7 +30,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	_ "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
@@ -43,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
 	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/requests"
 	erigon_app "github.com/erigontech/erigon/turbo/app"

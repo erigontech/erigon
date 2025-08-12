@@ -12,6 +12,7 @@ replace (
 )
 
 require (
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.9
 	github.com/erigontech/secp256k1 v1.2.0
@@ -29,13 +30,13 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.8.0
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/chansync v0.6.0
+	github.com/anacrolix/chansync v0.6.1-0.20250805140455-89f141559964
 	github.com/anacrolix/envpprof v1.4.0
 	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b
-	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250626123431-aa4691b19d56
-	github.com/anacrolix/torrent v1.58.2-0.20250720014114-dda1d97c6a22
+	github.com/anacrolix/missinggo/v2 v2.10.0
+	github.com/anacrolix/torrent v1.58.2-0.20250811011913-5c778813ff6d
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.18.0
@@ -106,6 +107,7 @@ require (
 	github.com/supranational/blst v0.3.14
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
+	github.com/ugorji/go/codec v1.2.13
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.30
@@ -146,7 +148,7 @@ require (
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/mmsg v1.0.1 // indirect
 	github.com/anacrolix/multiless v0.4.0 // indirect
-	github.com/anacrolix/stm v0.4.1-0.20221221005312-96d17df0e496 // indirect
+	github.com/anacrolix/stm v0.5.0 // indirect
 	github.com/anacrolix/sync v0.5.4 // indirect
 	github.com/anacrolix/upnp v0.1.4 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
@@ -171,7 +173,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
@@ -286,7 +287,6 @@ require (
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
-	github.com/ugorji/go/codec v1.2.13 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xrash/smetrics v0.0.0-20250705151800-55b8f293f342 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect

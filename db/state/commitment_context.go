@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -20,9 +19,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types/accounts"
-	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 type SharedDomainsCommitmentContext struct {
@@ -459,13 +459,16 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, er
 
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.withHistory {
+			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+		}
+
+		if enc == nil {
 			var ok bool
+			// reading from domain files this way will dereference domain key correctly, rotx.GetAsOf
 			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
 				enc = nil
 			}
-		} else {
-			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 		}
 	} else {
 		enc, _, err = sdc.getter.GetLatest(d, plainKey)

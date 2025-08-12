@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 type CursorType uint8

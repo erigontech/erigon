@@ -37,15 +37,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 var (
@@ -1473,6 +1473,11 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 			fmt.Printf("DomainGetAsOf(%s, %x, %d) -> found in history\n", dt.d.filenameBase, key, txNum)
 		}
 		return v, v != nil, nil
+	}
+	if dt.name == kv.CommitmentDomain {
+		// we need to dereference commitment keys to get actual value. DomainRoTx itself does not have
+		// pointers to storage and account domains to do the reference. Aggregator tx must be called instead
+		return nil, false, nil
 	}
 
 	var ok bool
