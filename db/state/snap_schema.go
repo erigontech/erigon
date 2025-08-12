@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // each entitiy has a data_file (e.g. is .seg, .v, .kv; and even .ef for ii), this could be fed to
