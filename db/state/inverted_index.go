@@ -409,6 +409,8 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	}, &w.valuesAddTime); err != nil {
 		return err
 	}
+
+	return nil
 }
 
 func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
