@@ -18,16 +18,17 @@ package shutter
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
+	"time"
 
 	"github.com/holiman/uint256"
 	blst "github.com/supranational/blst/bindings/go"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -61,17 +62,31 @@ type ValidatorRegistryChecker struct {
 }
 
 func (c ValidatorRegistryChecker) FilterRegistered(ctx context.Context, validators ValidatorInfo) (ValidatorInfo, error) {
+	startTime := time.Now()
 	callOpts := bind.CallOpts{Context: ctx}
-	numUpdates, err := c.registry.GetNumUpdates(&callOpts)
+	totalUpdates, err := c.registry.GetNumUpdates(&callOpts)
 	if err != nil {
 		return nil, err
 	}
-
+	defer func() {
+		c.logger.Info("process registry", "duration", time.Since(startTime), "totalUpdates", totalUpdates)
+	}()
+	c.logger.Debug("processing registry", "totalUpdates", totalUpdates)
+	progressLogTicker := time.NewTicker(time.Second * 15)
+	defer progressLogTicker.Stop()
 	registered := make(ValidatorInfo, len(validators))
 	nonces := make(map[int64]uint32, len(validators))
-	numUpdatesU64 := numUpdates.Uint64()
+	totalUpdatesU64 := totalUpdates.Uint64()
 	bigI := new(big.Int)
-	for i := uint64(0); i < numUpdatesU64; i++ {
+	for i := uint64(0); i < totalUpdatesU64; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-progressLogTicker.C:
+			c.logger.Debug("periodic progress", "atUpdate", i, "totalUpdates", totalUpdatesU64)
+		default:
+			// continue
+		}
 		update, err := c.registry.GetUpdate(&callOpts, bigI.SetUint64(i))
 		if err != nil {
 			return nil, err
@@ -92,7 +107,7 @@ func (c ValidatorRegistryChecker) FilterRegistered(ctx context.Context, validato
 
 		validatorPubKey, ok := validators[ValidatorIndex(msg.ValidatorIndex)]
 		if !ok {
-			c.logger.Warn(
+			c.logger.Trace(
 				"ignoring registration message since it is not for a validator of interest",
 				"updateIndex", i,
 				"validatorIndex", msg.ValidatorIndex,
@@ -151,9 +166,12 @@ func checkStaticRegistrationMsgFields(msg *AggregateRegistrationMessage, chainId
 }
 
 func checkNonces(msg *AggregateRegistrationMessage, nonces map[int64]uint32) error {
+	if msg.Nonce > math.MaxInt32 {
+		return fmt.Errorf("invalid nonce %d", msg.Nonce)
+	}
 	for _, validatorIdx := range msg.ValidatorIndices() {
-		latestNonce := nonces[validatorIdx]
-		if msg.Nonce <= latestNonce {
+		latestNonce, ok := nonces[validatorIdx]
+		if ok && msg.Nonce <= latestNonce {
 			return fmt.Errorf("nonce %d is lte latest nonce %d for validator %d", msg.Nonce, latestNonce, validatorIdx)
 		}
 	}
@@ -175,7 +193,7 @@ func verifyRegistrationSignature(msg *AggregateRegistrationMessage, sig []byte, 
 			return fmt.Errorf("could not find validator public key for index %d", validatorIdx)
 		}
 
-		pubKeyBytes, err := hex.DecodeString(string(pubKey))
+		pubKeyBytes, err := hexutil.Decode(string(pubKey))
 		if err != nil {
 			return fmt.Errorf("could not hex decode validator public key: %w", err)
 		}

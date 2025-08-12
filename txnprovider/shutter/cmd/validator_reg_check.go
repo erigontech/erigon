@@ -84,7 +84,7 @@ func validatorRegCheck(ctx context.Context, chain, elUrl, validatorInfoFile stri
 		}
 	}
 	if len(missing) == 0 {
-		logger.Info("all validators are registered")
+		logger.Info("all validators are registered", "count", len(validatorInfo))
 		return nil
 	}
 	for index, pubKey := range missing {
