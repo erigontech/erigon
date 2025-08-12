@@ -332,7 +332,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
 			return err
 		}
-
 	}
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
