@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
@@ -301,8 +301,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-						Stage: diagnostics.SnapshotFillDBStage{
+					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
+						Stage: diaglib.SnapshotFillDBStage{
 							StageName: string(stage),
 							Current:   header.Number.Uint64(),
 							Total:     blocksAvailable,
@@ -343,8 +343,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-						Stage: diagnostics.SnapshotFillDBStage{
+					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
+						Stage: diaglib.SnapshotFillDBStage{
 							StageName: string(stage),
 							Current:   blockNum,
 							Total:     blocksAvailable,
@@ -383,8 +383,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 		default:
-			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-				Stage: diagnostics.SnapshotFillDBStage{
+			diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
+				Stage: diaglib.SnapshotFillDBStage{
 					StageName: string(stage),
 					Current:   blocksAvailable, // as we are done with other stages
 					Total:     blocksAvailable,

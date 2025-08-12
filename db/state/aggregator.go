@@ -45,13 +45,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 type Aggregator struct {
@@ -540,16 +540,16 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 }
 
 func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
-	segmentsStats := make([]diagnostics.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
+	segmentsStats := make([]diaglib.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
 	for k, v := range indexPercent {
-		segmentsStats = append(segmentsStats, diagnostics.SnapshotSegmentIndexingStatistics{
+		segmentsStats = append(segmentsStats, diaglib.SnapshotSegmentIndexingStatistics{
 			SegmentName: k,
 			Percent:     v,
 			Alloc:       alloc,
 			Sys:         sys,
 		})
 	}
-	diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+	diaglib.Send(diaglib.SnapshotIndexingStatistics{
 		Segments:    segmentsStats,
 		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
 	})
