@@ -409,7 +409,6 @@ type bigModExp struct {
 }
 
 var (
-	big1      = big.NewInt(1)
 	big3      = big.NewInt(3)
 	big7      = big.NewInt(7)
 	big20     = big.NewInt(20)
@@ -521,7 +520,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 		}
 	}
 	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
-	adjExpLen = math.BigMax(adjExpLen, big1)
+	adjExpLen = math.BigMax(adjExpLen, common.Big1)
 
 	// Calculate the gas cost of the operation
 	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
@@ -613,17 +612,12 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		v    []byte
 	)
 	switch {
-	case mod.BitLen() == 0:
-		// Modulo 0 is undefined, return zero
-		return common.LeftPadBytes([]byte{}, int(modLen)), nil
+	case mod.Cmp(common.Big1) <= 0:
+		// Leave the result as zero for mod 0 (undefined) and 1
 	case base.Cmp(common.Big1) == 0:
-		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
-		v = base.Mod(base, mod).Bytes()
-	//case mod.Bit(0) == 0:
-	//	// Modulo is even
-	//	v = math.FastExp(base, exp, mod).Bytes()
+		// If base == 1 (and mod > 1), then the result is 1
+		v = common.Big1.Bytes()
 	default:
-		// Modulo is odd
 		v = base.Exp(base, exp, mod).Bytes()
 	}
 	return common.LeftPadBytes(v, int(modLen)), nil
@@ -1384,7 +1378,7 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 	// Verify the secp256r1 signature
 	if secp256r1.Verify(hash, r, s, x, y) {
 		// Signature is valid
-		return common.LeftPadBytes(big1.Bytes(), 32), nil
+		return common.LeftPadBytes(common.Big1.Bytes(), 32), nil
 	} else {
 		// Signature is invalid
 		return nil, nil
