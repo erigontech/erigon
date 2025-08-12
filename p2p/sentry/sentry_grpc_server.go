@@ -582,7 +582,8 @@ func runWitPeer(
 	logger log.Logger,
 ) *p2p.PeerError {
 	protocol := uint(wit.WIT1)
-	logger.Info("[p2p] wit protocol active", "peer", peerInfo.peer.ID(), "version", protocol)
+	pubkey := peerInfo.peer.Pubkey()
+	logger.Info("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
 	for {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
@@ -595,7 +596,7 @@ func runWitPeer(
 		if err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
 		}
-		logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", msg.Code, "size", msg.Size)
+		logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", msg.Code, "size", msg.Size)
 
 		if msg.Size > wit.MaxMessageSize {
 			msg.Discard()
@@ -604,7 +605,7 @@ func runWitPeer(
 
 		switch msg.Code {
 		case wit.GetMsgWitness:
-			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "GetMsgWitness", "size", msg.Size)
+			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "GetMsgWitness", "size", msg.Size)
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -615,7 +616,7 @@ func runWitPeer(
 			}
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.MsgWitness:
-			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "MsgWitness", "size", msg.Size)
+			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "MsgWitness", "size", msg.Size)
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -627,7 +628,7 @@ func runWitPeer(
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessMsg:
 			// add hashes to peer
-			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "NewWitnessMsg", "size", msg.Size)
+			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "NewWitnessMsg", "size", msg.Size)
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
@@ -647,7 +648,7 @@ func runWitPeer(
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessHashesMsg:
 			// add hashes to peer
-			logger.Trace("[p2p] wit message received", "peer", peerInfo.peer.ID(), "msg", "NewWitnessHashesMsg", "size", msg.Size)
+			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "NewWitnessHashesMsg", "size", msg.Size)
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
@@ -659,10 +660,11 @@ func runWitPeer(
 			}
 
 			for _, hash := range query.Hashes {
+				log.Info("adding known witness hash", "hash", hex.EncodeToString(hash[:]))
 				peerInfo.AddKnownWitness(hash)
 			}
 		default:
-			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(peerID[:]), msg.Code))
+			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(pubkey[:]), msg.Code))
 		}
 	}
 }
@@ -722,12 +724,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 			peerID := peer.Pubkey()
 			printablePeerID := hex.EncodeToString(peerID[:])
-			if ss.getPeer(peerID) != nil {
-				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
-			}
 			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
 
-			peerInfo := NewPeerInfo(peer, rw)
+			// Get or create shared PeerInfo (thread-safe)
+			peerInfo := ss.getOrCreatePeer(peer, rw)
 			peerInfo.protocol = protocol
 			defer peerInfo.Close()
 
@@ -745,15 +745,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			}
 
 			// handshake is successful
-			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
+			logger.Info("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
 
-			for _, cap := range peer.Caps() {
-				if cap.Name == wit.ProtocolName {
-					logger.Info("[p2p] Peer supports wit protocol", "peer", peer.ID(), "version", cap.Version)
-				}
-			}
-
-			ss.GoodPeers.Store(peerID, peerInfo)
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
@@ -788,6 +781,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 	// Add WIT protocol if enabled
 	if cfg.EnableWitProtocol {
+		log.Info("[wit] running wit protocol")
 		ss.Protocols = append(ss.Protocols, p2p.Protocol{
 			Name:           wit.ProtocolName,
 			Version:        wit.ProtocolVersions[0],
@@ -795,7 +789,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			DialCandidates: nil,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 				peerID := peer.Pubkey()
-				peerInfo := ss.getPeer(peerID)
+				// Get or create shared PeerInfo (thread-safe)
+				peerInfo := ss.getOrCreatePeer(peer, rw)
 				peerInfo.witProtocol = wit.ProtocolVersions[0]
 
 				return runWitPeer(
@@ -863,6 +858,8 @@ type GrpcServer struct {
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
 	logger               log.Logger
+	// Mutex to synchronize PeerInfo creation between protocols
+	peerCreationMutex sync.Mutex
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
@@ -884,6 +881,30 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 		ss.GoodPeers.Delete(peerID)
 	}
 	return nil
+}
+
+// getOrCreatePeer safely gets or creates PeerInfo, ensuring only one is created per peer
+func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
+	peerID := peer.Pubkey()
+
+	// First, try to get existing PeerInfo without locking
+	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
+		return peerInfo
+	}
+
+	// If not found, use mutex to ensure only one PeerInfo is created
+	ss.peerCreationMutex.Lock()
+	defer ss.peerCreationMutex.Unlock()
+
+	// Double-check after acquiring lock (another goroutine might have created it)
+	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
+		return peerInfo
+	}
+
+	// Create new PeerInfo and store it
+	peerInfo := NewPeerInfo(peer, rw)
+	ss.GoodPeers.Store(peerID, peerInfo)
+	return peerInfo
 }
 
 func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
