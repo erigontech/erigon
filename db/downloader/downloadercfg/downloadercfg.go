@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	"golang.org/x/time/rate"
 
 	g "github.com/anacrolix/generics"
@@ -139,6 +140,10 @@ func New(
 	opts NewCfgOpts,
 ) (_ *Cfg, err error) {
 	torrentConfig := defaultTorrentClientConfig()
+
+	torrentConfig.MetainfoSourcesMerger = func(t *torrent.Torrent, info *metainfo.MetaInfo) error {
+		return t.SetInfoBytes(info.InfoBytes)
+	}
 
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
