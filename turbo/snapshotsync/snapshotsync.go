@@ -440,6 +440,7 @@ func SyncSnapshots(
 			}
 
 			if _, ok := blackListForPruning[p.Name]; ok {
+				log.Warn("[dbg2] blacklist1", "name", p.Name)
 				continue
 			}
 			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
