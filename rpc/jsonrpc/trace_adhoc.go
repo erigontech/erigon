@@ -30,13 +30,13 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	math2 "github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -418,6 +418,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 	if create {
 		action := CreateTraceAction{}
 		action.From = from
+		action.CreationMethod = strings.ToLower(typ.String())
 		action.Gas.ToInt().SetUint64(gas)
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())

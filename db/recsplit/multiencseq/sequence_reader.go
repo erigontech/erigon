@@ -3,7 +3,7 @@ package multiencseq
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/recsplit/simpleseq"
 )

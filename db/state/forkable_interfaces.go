@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 )
 

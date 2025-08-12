@@ -46,11 +46,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/version"
@@ -59,6 +56,8 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -68,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/diagnostics"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
@@ -1584,7 +1584,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if chainConfig.Bor != nil {
 		borSnaps.DownloadComplete() // mark as ready
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+		if err = bridgeStore.Prepare(ctx); err != nil {
+			return
+		}
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
+		if err = heimdallStore.Prepare(ctx); err != nil {
+			return
+		}
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
@@ -2017,6 +2023,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		from, to = from2, to2
 	}
 
+	logger.Info("retiring blocks", "from", from, "to", to)
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
@@ -2025,6 +2032,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	logger.Info("pruning blocks")
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
