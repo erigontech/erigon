@@ -28,6 +28,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -106,9 +107,9 @@ type PatriciaContext interface {
 	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	Branch(prefix []byte) ([]byte, uint64, error)
+	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// store branch data
-	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
+	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error
 	// fetch account with given plain key
 	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
