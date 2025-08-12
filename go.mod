@@ -29,7 +29,7 @@ require (
 	github.com/99designs/gqlgen v0.17.66
 	github.com/FastFilter/xorfilter v0.2.1 // indirect
 	github.com/Masterminds/sprig/v3 v3.2.3
-	github.com/RoaringBitmap/roaring/v2 v2.5.0
+	github.com/RoaringBitmap/roaring/v2 v2.9.0
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/torrent v1.58.2-0.20250720014114-dda1d97c6a22
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500

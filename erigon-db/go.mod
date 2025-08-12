@@ -14,7 +14,7 @@ replace (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.5.0
+	github.com/RoaringBitmap/roaring/v2 v2.9.0
 	github.com/anacrolix/chansync v0.6.0
 	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647
 	github.com/anacrolix/go-libutp v1.3.2
