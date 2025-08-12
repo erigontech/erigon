@@ -23,7 +23,7 @@ require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.66
 	github.com/Masterminds/sprig/v3 v3.2.3
-	github.com/RoaringBitmap/roaring/v2 v2.5.0
+	github.com/RoaringBitmap/roaring/v2 v2.9.0
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/chansync v0.6.1-0.20250805140455-89f141559964
 	github.com/anacrolix/envpprof v1.4.0
