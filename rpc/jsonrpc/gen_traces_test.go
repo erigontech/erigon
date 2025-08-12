@@ -328,6 +328,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
     {
         "action": {
             "from": "0x000000000000000000000000000000000000bbbb",
+            "creationMethod": "create2",
             "gas": "0xb49d",
             "init": "0x600360035560046004556158ff6000526002601ef3",
             "value": "0x0"
