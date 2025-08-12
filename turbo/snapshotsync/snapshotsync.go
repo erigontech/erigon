@@ -410,6 +410,7 @@ func SyncSnapshots(
 
 		// build all download requests
 		for _, p := range preverifiedBlockSnapshots.Items {
+			log.Warn("[dbg2] preverified item1", "name", p.Name)
 			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
 				continue
 			}
@@ -448,6 +449,7 @@ func SyncSnapshots(
 			if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
 				continue
 			}
+			log.Warn("[dbg2] preverified item2", "name", p.Name)
 
 			downloadRequest = append(downloadRequest, DownloadRequest{
 				Path:        p.Name,
