@@ -14,17 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics_test
+package diaglib_test
 
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/stretchr/testify/require"
 )
 
-func NewTestDiagnosticClient() (*diagnostics.DiagnosticClient, error) {
-	return &diagnostics.DiagnosticClient{}, nil
+func NewTestDiagnosticClient() (*diaglib.DiagnosticClient, error) {
+	return &diaglib.DiagnosticClient{}, nil
 }
 
 func TestUpdateFileDownloadingStats(t *testing.T) {
@@ -44,13 +44,13 @@ func TestUpdateFileDownloadingStats(t *testing.T) {
 
 	sd = d.SyncStatistics().SnapshotDownload.SegmentsDownloading
 
-	toccompare := diagnostics.SegmentDownloadStatistics{
+	toccompare := diaglib.SegmentDownloadStatistics{
 		Name:            "test",
 		TotalBytes:      1,
 		DownloadedBytes: 1,
-		Webseeds:        make([]diagnostics.SegmentPeer, 0),
-		Peers:           make([]diagnostics.SegmentPeer, 0),
-		DownloadedStats: diagnostics.FileDownloadedStatistics{
+		Webseeds:        make([]diaglib.SegmentPeer, 0),
+		Peers:           make([]diaglib.SegmentPeer, 0),
+		DownloadedStats: diaglib.FileDownloadedStatistics{
 			TimeTook:    1.0,
 			AverageRate: 1,
 		},
@@ -59,19 +59,19 @@ func TestUpdateFileDownloadingStats(t *testing.T) {
 }
 
 var (
-	fileDownloadedUpdMock = diagnostics.FileDownloadedStatisticsUpdate{
+	fileDownloadedUpdMock = diaglib.FileDownloadedStatisticsUpdate{
 		FileName:    "test",
 		TimeTook:    1.0,
 		AverageRate: 1,
 	}
 
-	segmentDownloadStatsMock = diagnostics.SegmentDownloadStatistics{
+	segmentDownloadStatsMock = diaglib.SegmentDownloadStatistics{
 		Name:            "test",
 		TotalBytes:      1,
 		DownloadedBytes: 1,
-		Webseeds:        make([]diagnostics.SegmentPeer, 0),
-		Peers:           make([]diagnostics.SegmentPeer, 0),
-		DownloadedStats: diagnostics.FileDownloadedStatistics{},
+		Webseeds:        make([]diaglib.SegmentPeer, 0),
+		Peers:           make([]diaglib.SegmentPeer, 0),
+		DownloadedStats: diaglib.FileDownloadedStatistics{},
 	}
 )
 
@@ -82,23 +82,23 @@ func TestPercentDiownloaded(t *testing.T) {
 	torrentMetadataReady := int32(10)
 
 	//Test metadata not ready
-	progress := diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, torrentMetadataReady, files)
+	progress := diaglib.GetShanpshotsPercentDownloaded(downloaded, total, torrentMetadataReady, files)
 	require.Equal(t, "calculating...", progress)
 
 	//Test metadata ready
-	progress = diagnostics.GetShanpshotsPercentDownloaded(downloaded, total, files, files)
+	progress = diaglib.GetShanpshotsPercentDownloaded(downloaded, total, files, files)
 	require.Equal(t, "10%", progress)
 
 	//Test 100 %
-	progress = diagnostics.GetShanpshotsPercentDownloaded(total, total, files, files)
+	progress = diaglib.GetShanpshotsPercentDownloaded(total, total, files, files)
 	require.Equal(t, "100%", progress)
 
 	//Test 0 %
-	progress = diagnostics.GetShanpshotsPercentDownloaded(0, total, files, files)
+	progress = diaglib.GetShanpshotsPercentDownloaded(0, total, files, files)
 	require.Equal(t, "0%", progress)
 
 	//Test more than 100 %
-	progress = diagnostics.GetShanpshotsPercentDownloaded(total+1, total, files, files)
+	progress = diaglib.GetShanpshotsPercentDownloaded(total+1, total, files, files)
 	require.Equal(t, "100%", progress)
 }
 
@@ -106,14 +106,14 @@ func TestFillDBFromSnapshots(t *testing.T) {
 	d, err := NewTestDiagnosticClient()
 	require.NoError(t, err)
 
-	d.SetFillDBInfo(diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
+	d.SetFillDBInfo(diaglib.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
 	stats := d.SyncStatistics()
 	require.NotEmpty(t, stats.SnapshotFillDB.Stages)
-	require.Equal(t, diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10}, stats.SnapshotFillDB.Stages[0])
+	require.Equal(t, diaglib.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10}, stats.SnapshotFillDB.Stages[0])
 }
 
 func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
-	dts := []diagnostics.SnapshotSegmentIndexingStatistics{
+	dts := []diaglib.SnapshotSegmentIndexingStatistics{
 		{
 			SegmentName: "test",
 			Percent:     50,
@@ -125,7 +125,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 	d, err := NewTestDiagnosticClient()
 	require.NoError(t, err)
 
-	d.AddOrUpdateSegmentIndexingState(diagnostics.SnapshotIndexingStatistics{
+	d.AddOrUpdateSegmentIndexingState(diaglib.SnapshotIndexingStatistics{
 		Segments:    dts,
 		TimeElapsed: -1,
 	})
@@ -137,7 +137,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 	require.Zero(t, stats.SnapshotIndexing.TimeElapsed)
 	require.False(t, stats.SnapshotIndexing.IndexingFinished)
 
-	dts = []diagnostics.SnapshotSegmentIndexingStatistics{
+	dts = []diaglib.SnapshotSegmentIndexingStatistics{
 		{
 			SegmentName: "test",
 			Percent:     100,
@@ -152,7 +152,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 		},
 	}
 
-	d.AddOrUpdateSegmentIndexingState(diagnostics.SnapshotIndexingStatistics{
+	d.AddOrUpdateSegmentIndexingState(diaglib.SnapshotIndexingStatistics{
 		Segments:    dts,
 		TimeElapsed: 20,
 	})
@@ -164,7 +164,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 	require.False(t, finished)
 
 	//test indexing finished
-	dts = []diagnostics.SnapshotSegmentIndexingStatistics{
+	dts = []diaglib.SnapshotSegmentIndexingStatistics{
 		{
 			SegmentName: "test2",
 			Percent:     100,
@@ -172,7 +172,7 @@ func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
 			Sys:         0,
 		},
 	}
-	d.AddOrUpdateSegmentIndexingState(diagnostics.SnapshotIndexingStatistics{
+	d.AddOrUpdateSegmentIndexingState(diaglib.SnapshotIndexingStatistics{
 		Segments:    dts,
 		TimeElapsed: 20,
 	})

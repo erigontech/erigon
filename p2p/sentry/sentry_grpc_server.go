@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -548,9 +548,9 @@ func runPeer(
 }
 
 func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
+	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
-		stats := diagnostics.PeerStatisticMsgUpdate{
+		stats := diaglib.PeerStatisticMsgUpdate{
 			PeerName: peerName,
 			PeerID:   peerID,
 			Inbound:  inbound,
@@ -560,7 +560,7 @@ func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType s
 			PeerType: "Sentry",
 		}
 
-		diagnostics.Send(stats)
+		diaglib.Send(stats)
 	}
 }
 

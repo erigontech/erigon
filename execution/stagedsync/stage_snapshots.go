@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/erigontech/erigon-lib/estimate"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -247,15 +247,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
+	diaglib.Send(diaglib.CurrentSyncStage{Stage: string(stages.Snapshots)})
 
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin {
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	subStages := diagnostics.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
-	diagnostics.Send(diagnostics.SetSyncSubStageList{
+	subStages := diaglib.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
+	diaglib.Send(diaglib.SetSyncSubStageList{
 		Stage: string(stages.Snapshots),
 		List:  subStages,
 	})
@@ -263,7 +263,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	log.Info("[OtterSync] Starting Ottersync")
 	log.Info(snapshotsync.GreatOtterBanner)
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
@@ -293,7 +293,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
@@ -327,13 +327,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 		return err
 	}
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -367,7 +367,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}

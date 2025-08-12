@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/erigontech/erigon-lib/sysutils"
 )
 

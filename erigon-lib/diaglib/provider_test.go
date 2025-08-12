@@ -14,14 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics_test
+package diaglib_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -29,8 +29,8 @@ type testInfo struct {
 	count int
 }
 
-func (ti testInfo) Type() diagnostics.Type {
-	return diagnostics.TypeOf(ti)
+func (ti testInfo) Type() diaglib.Type {
+	return diaglib.TypeOf(ti)
 }
 
 func StartDiagnostics(ctx context.Context) error {
@@ -44,7 +44,7 @@ func StartDiagnostics(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			diagnostics.Send(testInfo{count})
+			diaglib.Send(testInfo{count})
 			count++
 		}
 	}
@@ -56,8 +56,8 @@ func TestProviderRegistration(t *testing.T) {
 	}
 
 	// diagnostics receiver
-	ctx, ch, cancel := diagnostics.Context[testInfo](context.Background(), 1)
-	diagnostics.StartProviders(ctx, diagnostics.TypeOf(testInfo{}), log.Root())
+	ctx, ch, cancel := diaglib.Context[testInfo](context.Background(), 1)
+	diaglib.StartProviders(ctx, diaglib.TypeOf(testInfo{}), log.Root())
 
 	go StartDiagnostics(ctx)
 

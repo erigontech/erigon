@@ -47,6 +47,7 @@ import (
 
 	"github.com/anacrolix/chansync"
 	g "github.com/anacrolix/generics"
+
 	// Make Go expvars available to Prometheus for diagnostics.
 	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -60,7 +61,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -625,13 +626,13 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 
 	var noMetadata []string
 
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.SnapshoFilesList{}).Enabled()
+	isDiagEnabled := diaglib.TypeOf(diaglib.SnapshoFilesList{}).Enabled()
 	if isDiagEnabled {
 		filesList := make([]string, 0, len(torrents))
 		for _, t := range torrents {
 			filesList = append(filesList, t.Name())
 		}
-		diagnostics.Send(diagnostics.SnapshoFilesList{Files: filesList})
+		diaglib.Send(diaglib.SnapshoFilesList{Files: filesList})
 	}
 
 	for _, t := range torrents {
@@ -672,7 +673,7 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 		_, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
 		_, segmentPeers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 
-		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+		diaglib.Send(diaglib.SegmentDownloadStatistics{
 			Name:            torrentName,
 			TotalBytes:      uint64(tLen),
 			DownloadedBytes: uint64(bytesCompleted),
@@ -722,15 +723,15 @@ func calculateRate(current, previous uint64, prevRate uint64, interval time.Dura
 }
 
 // Adds segment peer fields common to Peer instances.
-func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, segment *diagnostics.SegmentPeer) {
+func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, segment *diaglib.SegmentPeer) {
 	segment.DownloadRate = uint64(stats.DownloadRate)
 	segment.UploadRate = uint64(stats.LastWriteUploadRate)
 	segment.PiecesCount = uint64(stats.RemotePieceCount)
 	segment.RemoteAddr = peer.RemoteAddr.String()
 }
 
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diagnostics.SegmentPeer) {
-	seeds := make([]diagnostics.SegmentPeer, 0, len(weebseedPeersOfThisFile))
+func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diaglib.SegmentPeer) {
+	seeds := make([]diaglib.SegmentPeer, 0, len(weebseedPeersOfThisFile))
 	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 	webseedRates = append(webseedRates, "file", fName)
 	for _, peer := range weebseedPeersOfThisFile {
@@ -738,7 +739,7 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
 				stats := peer.Stats()
 				if !finished {
-					seed := diagnostics.SegmentPeer{
+					seed := diaglib.SegmentPeer{
 						Url:         peerUrl.Host,
 						TorrentName: fName,
 					}
@@ -762,15 +763,15 @@ func webPeerUrl(peer *torrent.Peer) (*url.URL, error) {
 	return url.Parse(root)
 }
 
-func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diagnostics.SegmentPeer) {
-	peers := make([]diagnostics.SegmentPeer, 0, len(peersOfThisFile))
+func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diaglib.SegmentPeer) {
+	peers := make([]diaglib.SegmentPeer, 0, len(peersOfThisFile))
 	rates := make([]interface{}, 0, len(peersOfThisFile)*2)
 	rates = append(rates, "file", fName)
 
 	for _, peer := range peersOfThisFile {
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
 		stats := peer.Stats()
-		segPeer := diagnostics.SegmentPeer{
+		segPeer := diaglib.SegmentPeer{
 			Url:         url,
 			PeerId:      peer.PeerID,
 			TorrentName: fName,
@@ -1380,7 +1381,7 @@ func (d *Downloader) logStats() {
 
 	log.Info(fmt.Sprintf("[%s] %s", cmp.Or(d.logPrefix, "snapshots"), state), logCtx...)
 
-	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+	diaglib.Send(diaglib.SnapshotDownloadStatistics{
 		Downloaded:           bytesDone,
 		Total:                d.stats.BytesTotal,
 		TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
