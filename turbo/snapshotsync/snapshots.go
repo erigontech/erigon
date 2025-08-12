@@ -1162,7 +1162,7 @@ func (s *RoSnapshots) OpenFolder() error {
 	}(); err != nil {
 		err = fmt.Errorf("OpenFolder: %w", err)
 		panic(err)
-		return
+		return err
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
