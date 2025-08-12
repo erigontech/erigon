@@ -2,15 +2,11 @@ module github.com/erigontech/erigon-lib
 
 go 1.24
 
-replace (
-	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
-	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
-)
+replace github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
 
 require github.com/erigontech/secp256k1 v1.2.0
 
 require (
-	github.com/FastFilter/xorfilter v0.2.1
 	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
@@ -19,12 +15,10 @@ require (
 	github.com/crate-crypto/go-eth-kzg v1.3.0
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
-	github.com/edsrzf/mmap-go v1.2.0
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.2
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.18.0
