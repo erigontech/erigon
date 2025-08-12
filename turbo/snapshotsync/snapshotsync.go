@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -343,7 +342,6 @@ func SyncSnapshots(
 	headerchain, blobs, caplinState bool,
 	prune prune.Mode,
 	caplin CaplinMode,
-	agg *state.Aggregator,
 	tx kv.RwTx,
 	blockReader blockReader,
 	txNumsReader rawdbv3.TxNumsReader,
@@ -352,7 +350,6 @@ func SyncSnapshots(
 	syncCfg ethconfig.Sync,
 ) error {
 	snapshots := blockReader.Snapshots()
-	borSnapshots := blockReader.BorSnapshots()
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
@@ -369,14 +366,7 @@ func SyncSnapshots(
 
 		// Find minimum block to download.
 		if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-			if err := snapshots.OpenFolder(); err != nil {
-				return err
-			}
-			if cc.Bor != nil {
-				if err := borSnapshots.OpenFolder(); err != nil {
-					return err
-				}
-			}
+
 			return nil
 		}
 
@@ -491,26 +481,6 @@ func SyncSnapshots(
 		interval = min(interval*2, 20*time.Second)
 	}
 	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
-
-	if !headerchain {
-		if err := agg.ReloadSalt(); err != nil {
-			return err
-		}
-	}
-
-	if err := snapshots.OpenFolder(); err != nil {
-		return err
-	}
-
-	if cc.Bor != nil {
-		if err := borSnapshots.OpenFolder(); err != nil {
-			return err
-		}
-	}
-
-	if err := agg.OpenFolder(); err != nil {
-		return err
-	}
 
 	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
 		return err
