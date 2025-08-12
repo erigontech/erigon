@@ -18,7 +18,6 @@ package snapshotsync
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"strconv"
@@ -27,16 +26,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/prune"
@@ -284,20 +279,9 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
-	snapshots := blockReader.Snapshots()
-	borSnapshots := blockReader.BorSnapshots()
-
+func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
 	// Find minimum block to download.
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-		if err := snapshots.OpenFolder(); err != nil {
-			return err
-		}
-		if cc.Bor != nil {
-			if err := borSnapshots.OpenFolder(); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 
@@ -419,20 +403,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		}
 	}
 
-	if err := snapshots.OpenFolder(); err != nil {
-		return err
-	}
-
-	if cc.Bor != nil {
-		if err := borSnapshots.OpenFolder(); err != nil {
-			return err
-		}
-	}
-
-	if err := agg.OpenFolder(); err != nil {
-		return err
-	}
-
 	// ProhibitNewDownloads implies - so only make the download request once,
 	//
 	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
@@ -494,16 +464,5 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		}
 	}
 
-	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
-	if err != nil {
-		return err
-	}
-	if firstNonGenesis != nil {
-		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
-		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
-			return fmt.Errorf("some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
-		}
-	}
 	return nil
 }
