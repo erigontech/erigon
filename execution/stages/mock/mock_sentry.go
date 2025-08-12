@@ -33,7 +33,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -64,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -298,9 +298,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 
-	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
-
-	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore)
+	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,

@@ -523,6 +523,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-short") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
+    $env:GOEXPERIMENT = "synctest"
     $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
@@ -537,6 +538,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-all") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
+    $env:GOEXPERIMENT = "synctest"
     $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {

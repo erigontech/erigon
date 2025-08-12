@@ -32,7 +32,6 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 type SortedRange interface {

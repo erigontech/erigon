@@ -37,11 +37,9 @@ import (
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -70,6 +68,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -77,9 +76,9 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -105,7 +104,7 @@ var (
 )
 
 type HeimdallReader interface {
-	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Producers(ctx context.Context, blockNum uint64) (*heimdall.ValidatorSet, error)
 	Close()
 }
 
@@ -425,7 +424,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
-		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore)
+		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		txNumsReader := blockReader.TxnumReader(ctx)
 
 		agg, err := dbstate.NewAggregator(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
