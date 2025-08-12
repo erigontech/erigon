@@ -1301,10 +1301,10 @@ func (d *Downloader) SetLogPrefix(prefix string) {
 // Currently only called if not all torrents are complete.
 func (d *Downloader) logProgress() {
 	var m runtime.MemStats
-	prefix := d.logPrefix
+	logPrefix := d.logPrefix
 
 	if d.logPrefix == "" {
-		prefix = "snapshots"
+		logPrefix = "snapshots"
 	}
 
 	dbg.ReadMemStats(&m)
@@ -1323,7 +1323,7 @@ func (d *Downloader) logProgress() {
 		// We have work to do so start timing.
 		d.setStartTime()
 		// TODO: Include what we're syncing.
-		log.Info(fmt.Sprintf("[%s] Syncing", prefix),
+		log.Info(logPrefix,
 			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
 			"files", fmt.Sprintf(
 				"%d/%d",

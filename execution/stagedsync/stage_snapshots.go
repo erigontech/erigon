@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/downloader"
@@ -271,16 +272,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		ctx,
 		s.LogPrefix(),
 		"header-chain",
-		cfg.dirs,
 		true, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
 		cfg.prune,
 		cstate,
-		agg,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
@@ -288,6 +286,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	// Erigon can start on datadir with broken files `transactions.seg` files and Downloader will
+	// fix them, but only if Erigon call `.Add()` for broken files. But `headerchain` feature
+	// calling `.Add()` only for header/body files (not for `transactions.seg`) and `.OpenFolder()` will fail
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
 		return err
 	}
@@ -297,21 +298,40 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		ctx,
 		s.LogPrefix(),
 		"remaining snapshots",
-		cfg.dirs,
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
 		cfg.prune,
 		cstate,
-		agg,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
 		return err
+	}
+
+	{ // Now can open all files
+		if err := agg.ReloadSalt(); err != nil {
+			return err
+		}
+		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
+			return err
+		}
+
+		if cfg.chainConfig.Bor != nil {
+			if err := cfg.blockReader.BorSnapshots().OpenFolder(); err != nil {
+				return err
+			}
+		}
+		if err := agg.OpenFolder(); err != nil {
+			return err
+		}
+
+		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
+			return err
+		}
 	}
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
@@ -385,6 +405,21 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+func firstNonGenesisCheck(tx kv.RwTx, snapshots snapshotsync.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return err
+	}
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
+		}
+	}
 	return nil
 }
 
