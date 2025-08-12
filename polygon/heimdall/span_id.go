@@ -72,7 +72,7 @@ func UpdateSpansIndex(tx kv.RwTx, span Span) error {
 }
 
 // Read Span Id of the span where block given by blockNum belongs to
-func SpandIdAtNew(tx kv.Tx, blockNum uint64) (SpanId, error) {
+func SpanIdAtNew(tx kv.Tx, blockNum uint64) (SpanId, error) {
 	cursor, err := tx.Cursor(kv.BorSpansIndex)
 	if err != nil {
 		return 0, err
