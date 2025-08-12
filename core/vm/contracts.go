@@ -590,8 +590,8 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		}
 	}
 
-	// Handle a special case when both the base and mod length is zero
-	if baseLen == 0 && modLen == 0 && baseLenHighBitsAreZero && modLenHighBitsAreZero {
+	// Handle a special case when mod length is zero
+	if modLen == 0 && modLenHighBitsAreZero {
 		return []byte{}, nil
 	}
 
