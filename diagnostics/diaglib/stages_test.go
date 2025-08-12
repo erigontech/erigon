@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/diaglib"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 func TestInitSyncStages(t *testing.T) {

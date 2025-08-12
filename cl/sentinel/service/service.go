@@ -31,7 +31,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 const gracePeerCount = 8

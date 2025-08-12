@@ -19,8 +19,9 @@ package diaglib_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/diaglib"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 func NewTestDiagnosticClient() (*diaglib.DiagnosticClient, error) {
