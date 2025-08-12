@@ -374,6 +374,11 @@ type Putter interface {
 
 // ---- Temporal part
 
+// Step - amount of txNums in the smallest file
+type Step uint64
+
+func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
+
 type (
 	Domain      uint16
 	Appendable  uint16
@@ -440,10 +445,6 @@ type TemporalDebugTx interface {
 	CanUnwindToBlockNum() (uint64, error)
 	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
 }
-
-type Step uint64
-
-func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
