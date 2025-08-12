@@ -444,10 +444,10 @@ func (w *InvertedIndexBufferedWriter) close() {
 	}
 
 	fmt.Printf("[iitiming] entity: %s\n", w.name.String())
-	fmt.Printf("[iitiming] keys add times: %d\n", w.keysAddTime)
-	fmt.Printf("[iitiming] values add times: %d\n", w.valuesAddTime)
-	fmt.Printf("[iitiming] keys flush times: %d\n", w.keysFlushTime)
-	fmt.Printf("[iitiming] values flush times: %d\n", w.valuesFlushTime)
+	fmt.Printf("[iitiming] keys add times: %d\n", w.keysAddTime/1000_000)
+	fmt.Printf("[iitiming] values add times: %d\n", w.valuesAddTime/1000_000)
+	fmt.Printf("[iitiming] keys flush times: %d\n", w.keysFlushTime/1000_000)
+	fmt.Printf("[iitiming] values flush times: %d\n", w.valuesFlushTime/1000_000)
 }
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
@@ -940,6 +940,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
+	startTime := time.Now()
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if fn != nil {
 			if err = fn(key, txnm); err != nil {
@@ -963,9 +964,12 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
 
+	fmt.Printf("[iitiming] pruning iiValues entity: %s time: %d\n", iit.name.String(), time.Since(startTime)/1000_000)
+
 	if stat.MinTxNum != math.MaxUint64 {
 		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
+		startTime = time.Now()
 		for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
@@ -978,6 +982,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 				return nil, err
 			}
 		}
+		fmt.Printf("[iitiming] pruning iiKeys entity: %s time: %d\n", iit.name.String(), time.Since(startTime)/1000_000)
 	}
 
 	return stat, err
