@@ -566,11 +566,12 @@ var (
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
+	// TODO: This can be done without any allocation.
 	header := getData(input, 0, 3*32)
 	var (
-		baseLen = new(big.Int).SetBytes(header[0:32]).Uint64()
-		expLen  = new(big.Int).SetBytes(header[32:64]).Uint64()
-		modLen  = new(big.Int).SetBytes(header[64:96]).Uint64()
+		baseLen = binary.BigEndian.Uint64(header[32-8 : 32])
+		expLen  = binary.BigEndian.Uint64(header[64-8 : 64])
+		modLen  = binary.BigEndian.Uint64(header[96-8 : 96])
 
 		// 32 - 8 bytes are truncated in the Uint64 conversion above
 		baseLenHighBitsAreZero = allZero(header[0 : 32-8])
