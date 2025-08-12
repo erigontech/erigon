@@ -77,7 +77,7 @@ func validatorRegCheck(ctx context.Context, chain, elUrl, validatorInfoFile stri
 	if err != nil {
 		return fmt.Errorf("failed to filter registered validators: %w", err)
 	}
-	var missing shutter.ValidatorInfo
+	missing := shutter.ValidatorInfo{}
 	for index, pubKey := range validatorInfo {
 		if _, ok := registered[index]; !ok {
 			missing[index] = pubKey
