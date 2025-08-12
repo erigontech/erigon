@@ -282,11 +282,9 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}
 
 	t.Parallel()
-
-	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -334,6 +332,10 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		from, to := ic.stepsRangeInDB(tx)
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
+
+		latestStep, frozenStep := ic.Progress2(tx)
+		require.Equal(t, 2, int(latestStep))
+		require.Equal(t, 1, int(frozenStep))
 
 		ic = ii.BeginFilesRo()
 		defer ic.Close()

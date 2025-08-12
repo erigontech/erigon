@@ -748,28 +748,6 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 	return it, nil
 }
 
-func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, ii.keysTable)
-	if len(fst) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		return min(fstInDb, math.MaxUint64)
-	}
-	return math.MaxUint64
-}
-
-func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
-	lst, _ := kv.LastKey(tx, ii.keysTable)
-	if len(lst) > 0 {
-		lstInDb := binary.BigEndian.Uint64(lst)
-		return max(lstInDb, 0)
-	}
-	return 0
-}
-
-func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
-	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
-}
-
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 }
@@ -1258,4 +1236,52 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 		to = from
 	}
 	return from, to
+}
+
+func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, ii.keysTable)
+	if len(fst) > 0 {
+		fstInDb := binary.BigEndian.Uint64(fst)
+		return min(fstInDb, math.MaxUint64)
+	}
+	return math.MaxUint64
+}
+
+func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
+	lst, _ := kv.LastKey(tx, ii.keysTable)
+	if len(lst) > 0 {
+		lstInDb := binary.BigEndian.Uint64(lst)
+		return max(lstInDb, 0)
+	}
+	return 0
+}
+
+func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
+	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
+}
+func (iit *InvertedIndexRoTx) ProgressSteps2(tx kv.Tx) (latestStep uint64, frozenStep uint64) {
+	latestTxNum, frozenTxNum := iit.Progress2(tx)
+	return latestTxNum / iit.aggStep, frozenTxNum / iit.aggStep
+}
+
+func (iit *InvertedIndexRoTx) Progress2(tx kv.Tx) (latestTxNum uint64, frozenTxNum uint64) {
+	//TODO: if zero - get from files
+	latestTxNum = iit.ii.maxTxNumInDB(tx) / iit.aggStep
+
+	//TODO: if files disabled - get from db
+	frozenTxNum = iit.files.EndTxNum() / iit.aggStep
+
+	//UseCases:
+	//
+	//func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	//	maxStepInFiles := iit.files.EndTxNum() / iit.aggStep
+	//	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.aggStep
+	//	return maxStepInFiles < maxStepInDB
+	//}
+	//
+	//CanPrune(tx kv.Tx) bool {
+	//	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+	//}
+
+	return latestTxNum, frozenTxNum
 }
