@@ -792,7 +792,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			Name:           wit.ProtocolName,
 			Version:        wit.ProtocolVersions[0],
 			Length:         wit.ProtocolLengths[wit.ProtocolVersions[0]],
-			DialCandidates: disc,
+			DialCandidates: nil,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 				peerID := peer.Pubkey()
 				peerInfo := ss.getPeer(peerID)
