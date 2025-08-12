@@ -168,7 +168,7 @@ func verifyRegistrationSignature(msg *AggregateRegistrationMessage, sig []byte, 
 		return errors.New("could not uncompress signature")
 	}
 
-	var pubKeys []*blst.P1Affine
+	pubKeys := make([]*blst.P1Affine, 0, len(validators))
 	for _, validatorIdx := range msg.ValidatorIndices() {
 		pubKey, ok := validators[ValidatorIndex(validatorIdx)]
 		if !ok {
