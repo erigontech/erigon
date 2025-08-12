@@ -18,7 +18,6 @@ package freezeblocks
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 
@@ -324,29 +323,6 @@ func (r *RemoteBlockReader) Ready(ctx context.Context) <-chan error {
 	return ch
 }
 
-func (r *RemoteBlockReader) Span(_ context.Context, _ kv.Tx, _ uint64) (*heimdall.Span, bool, error) {
-	panic("not implemented")
-}
-
-func (r *RemoteBlockReader) LastSpanId(_ context.Context, _ kv.Tx) (uint64, bool, error) {
-	panic("not implemented")
-}
-
-func (r *RemoteBlockReader) LastFrozenSpanId() uint64 {
-	panic("not implemented")
-}
-
-func (r *RemoteBlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, errors.New("not implemented")
-}
-
-func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Milestone, bool, error) {
-	return nil, false, nil
-}
-
-func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, errors.New("not implemented")
-}
 func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	bdRaw, err := r.client.CanonicalBodyForStorage(ctx, &remote.CanonicalBodyForStorageRequest{BlockNumber: blockNum})
 	if err != nil {
@@ -362,9 +338,7 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 	}
 	return body, nil
 }
-func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Checkpoint, bool, error) {
-	return nil, false, nil
-}
+
 func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
 	if r == nil {
 		// tests
@@ -376,10 +350,9 @@ func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReade
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
-	sn            *RoSnapshots
-	borSn         *heimdall.RoSnapshots
-	heimdallStore heimdall.Store
-	txBlockIndex  *txBlockIndexWithBlockReader
+	sn           *RoSnapshots
+	borSn        *heimdall.RoSnapshots
+	txBlockIndex *txBlockIndexWithBlockReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
 	headerByNumCache *lru.Cache[uint64, *types.Header]
@@ -387,10 +360,10 @@ type BlockReader struct {
 
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 
-func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots, heimdallStore heimdall.Store) *BlockReader {
+func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshotsync.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
-	br := &BlockReader{sn: sn, borSn: borSn, heimdallStore: heimdallStore}
+	br := &BlockReader{sn: sn, borSn: borSn}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
 	br.txBlockIndex = txnumReader
@@ -1290,7 +1263,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 }
 
 func (r *BlockReader) IntegrityTxnID(failFast bool) error {
-	defer log.Info("[integrity] IntegrityTxnID done")
+	defer log.Info("[integrity] BlocksTxnID done")
 	view := r.sn.View()
 	defer view.Close()
 
@@ -1306,7 +1279,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 			return err
 		}
 		if b.BaseTxnID.U64() != expectedFirstTxnID {
-			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxnID, sn.Src().Count(), expectedFirstTxnID)
+			err := fmt.Errorf("[integrity] BlocksTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxnID, sn.Src().Count(), expectedFirstTxnID)
 			if failFast {
 				return err
 			} else {
@@ -1412,91 +1385,6 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 		number--
 	}
 	return hash, number
-}
-
-func (r *BlockReader) LastFrozenSpanId() uint64 {
-	if r.heimdallStore == nil {
-		return 0
-	}
-
-	return r.heimdallStore.Spans().LastFrozenEntityId()
-}
-
-func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
-	if r.heimdallStore == nil {
-		err := fmt.Errorf("span %d not found: no heimdall store", spanId)
-		return nil, false, fmt.Errorf("%w: %w", heimdall.ErrSpanNotFound, err)
-	}
-
-	if tx == nil {
-		return r.heimdallStore.Spans().Entity(ctx, spanId)
-	}
-
-	return r.heimdallStore.Spans().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
-	}).WithTx(tx).Entity(ctx, spanId)
-}
-
-func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	if r.heimdallStore == nil {
-		return 0, false, errors.New("no heimdall store")
-	}
-
-	if tx == nil {
-		return r.heimdallStore.Spans().LastEntityId(ctx)
-	}
-
-	return r.heimdallStore.Spans().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
-	}).WithTx(tx).LastEntityId(ctx)
-}
-
-func (r *BlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	if r.heimdallStore == nil {
-		return 0, false, errors.New("no heimdall store")
-	}
-
-	return r.heimdallStore.Milestones().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
-	}).WithTx(tx).LastEntityId(ctx)
-}
-
-func (r *BlockReader) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error) {
-	if r.heimdallStore == nil {
-		return nil, false, errors.New("no heimdall store")
-	}
-
-	return r.heimdallStore.Milestones().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Milestone]
-	}).WithTx(tx).Entity(ctx, milestoneId)
-}
-
-func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	if r.heimdallStore == nil {
-		return 0, false, errors.New("no heimdall store")
-	}
-
-	return r.heimdallStore.Checkpoints().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
-	}).WithTx(tx).LastEntityId(ctx)
-}
-
-func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error) {
-	if r.heimdallStore == nil {
-		return nil, false, errors.New("no heimdall store")
-	}
-
-	return r.heimdallStore.Checkpoints().(interface {
-		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Checkpoint]
-	}).WithTx(tx).Entity(ctx, checkpointId)
-}
-
-func (r *BlockReader) LastFrozenCheckpointId() uint64 {
-	if r.heimdallStore == nil {
-		return 0
-	}
-
-	return r.heimdallStore.Checkpoints().LastFrozenEntityId()
 }
 
 // ---- Data Integrity part ----
