@@ -209,6 +209,7 @@ type blockReader interface {
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
 	FrozenFiles() (list []string)
+	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
@@ -341,7 +342,6 @@ func SyncSnapshots(
 	caplin CaplinMode,
 	tx kv.RwTx,
 	blockReader blockReader,
-	txNumsReader rawdbv3.TxNumsReader,
 	cc *chain.Config,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
@@ -354,8 +354,9 @@ func SyncSnapshots(
 			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 		}
 	} else {
-		// This clause belongs in another function.
+		txNumsReader := blockReader.TxnumReader(ctx)
 
+		// This clause belongs in another function.
 		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()

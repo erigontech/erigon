@@ -279,7 +279,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
@@ -300,7 +299,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		ctx,
 		s.LogPrefix(),
 		"remaining snapshots",
-		cfg.dirs,
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
@@ -308,7 +306,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
