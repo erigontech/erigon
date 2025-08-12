@@ -443,11 +443,11 @@ func (w *InvertedIndexBufferedWriter) close() {
 		w.indexKeys.Close()
 	}
 
-	fmt.Printf("entity: %s\n", w.name.String())
-	fmt.Printf("keys add times: %d\n", w.keysAddTime)
-	fmt.Printf("values add times: %d\n", w.valuesAddTime)
-	fmt.Printf("keys flush times: %d\n", w.keysFlushTime)
-	fmt.Printf("values flush times: %d\n", w.valuesFlushTime)
+	fmt.Printf("[iitiming] entity: %s\n", w.name.String())
+	fmt.Printf("[iitiming] keys add times: %d\n", w.keysAddTime)
+	fmt.Printf("[iitiming] values add times: %d\n", w.valuesAddTime)
+	fmt.Printf("[iitiming] keys flush times: %d\n", w.keysFlushTime)
+	fmt.Printf("[iitiming] values flush times: %d\n", w.valuesFlushTime)
 }
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
