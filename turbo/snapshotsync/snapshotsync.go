@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -343,7 +342,6 @@ func SyncSnapshots(
 	headerchain, blobs, caplinState bool,
 	prune prune.Mode,
 	caplin CaplinMode,
-	agg *state.Aggregator,
 	tx kv.RwTx,
 	blockReader blockReader,
 	txNumsReader rawdbv3.TxNumsReader,
@@ -410,7 +408,6 @@ func SyncSnapshots(
 
 		// build all download requests
 		for _, p := range preverifiedBlockSnapshots.Items {
-			log.Warn("[dbg2] preverified item1", "name", p.Name)
 			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
 				continue
 			}
@@ -440,7 +437,6 @@ func SyncSnapshots(
 			}
 
 			if _, ok := blackListForPruning[p.Name]; ok {
-				log.Warn("[dbg2] blacklist1", "name", p.Name)
 				continue
 			}
 			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
@@ -450,7 +446,6 @@ func SyncSnapshots(
 			if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
 				continue
 			}
-			log.Warn("[dbg2] preverified item2", "name", p.Name)
 
 			downloadRequest = append(downloadRequest, DownloadRequest{
 				Path:        p.Name,
@@ -494,26 +489,6 @@ func SyncSnapshots(
 		interval = min(interval*2, 20*time.Second)
 	}
 	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
-
-	if !headerchain {
-		if err := agg.ReloadSalt(); err != nil {
-			return err
-		}
-	}
-
-	if err := snapshots.OpenFolder(); err != nil {
-		return err
-	}
-
-	if cc.Bor != nil {
-		if err := borSnapshots.OpenFolder(); err != nil {
-			return err
-		}
-	}
-
-	if err := agg.OpenFolder(); err != nil {
-		return err
-	}
 
 	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
 		return err
