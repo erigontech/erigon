@@ -196,17 +196,19 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
 	if lastSegment == nil {
 		return 0, nil
 	}
-	lastSpanID, ok, err := s.EntityStore.EntityIdFromBlockNum(context.Background(), lastSegment.To())
-	if err != nil {
+
+	idx := lastSegment.Src().Index()
+	offset := idx.OrdinalLookup(idx.KeyCount() - 1) // check for the last element in this last seg file
+	gg := lastSegment.Src().MakeGetter()
+	gg.Reset(offset)
+	result, _ := gg.Next(nil)
+
+	var span Span
+	if err := json.Unmarshal(result, &span); err != nil {
 		return 0, err
 	}
-	if !ok {
-		return 0, fmt.Errorf("could not get spanId for blockNum=%d", lastSegment.To())
-	}
-	if lastSpanID > 0 {
-		lastSpanID--
-	}
-	return lastSpanID, nil
+
+	return uint64(span.Id), nil
 }
 
 func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
