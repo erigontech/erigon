@@ -919,37 +919,41 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil, err
 	}
 	startTime := time.Now()
-	if iit.ii.iiCfg.standalone || valsCount > 0 {
-		fmt.Println("pruning", "idx", iit.name.String(), "valsCount", valsCount)
-		idxDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
-		if err != nil {
-			return nil, err
-		}
-		defer idxDelCursor.Close()
-		err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if fn != nil {
-				if err = fn(key, txnm); err != nil {
-					return fmt.Errorf("fn error: %w", err)
-				}
-			}
-			if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
-				return err
-			}
-			mxPruneSizeIndex.Inc()
-			stat.PruneCountValues++
 
-			select {
-			case <-logEvery.C:
-				txNum := binary.BigEndian.Uint64(txnm)
-				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
-					"pruned values", stat.PruneCountValues,
-					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
-			default:
-			}
-			return nil
-		}, etl.TransformArgs{Quit: ctx.Done()})
-		fmt.Printf("[iitiming] pruning iiValues entity: %s time: %d\n", iit.name.String(), time.Since(startTime)/1000_000)
+	idxDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
+	if err != nil {
+		return nil, err
 	}
+	defer idxDelCursor.Close()
+	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if fn != nil {
+			if err = fn(key, txnm); err != nil {
+				return fmt.Errorf("fn error: %w", err)
+			}
+		}
+
+		if !iit.ii.iiCfg.standalone && valsCount == 0 {
+			return nil
+		}
+
+		if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
+			return err
+		}
+
+		mxPruneSizeIndex.Inc()
+		stat.PruneCountValues++
+
+		select {
+		case <-logEvery.C:
+			txNum := binary.BigEndian.Uint64(txnm)
+			ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
+				"pruned values", stat.PruneCountValues,
+				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
+		default:
+		}
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()})
+	fmt.Printf("[iitiming] pruning iiValues entity: %s time: %d\n", iit.name.String(), time.Since(startTime)/1000_000)
 
 	if stat.MinTxNum != math.MaxUint64 {
 		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
