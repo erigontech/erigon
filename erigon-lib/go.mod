@@ -18,7 +18,7 @@ require (
 	github.com/FastFilter/xorfilter v0.2.1
 	github.com/RoaringBitmap/roaring/v2 v2.9.0
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.58.2-0.20250812132736-231b02a64d10
+	github.com/anacrolix/torrent v1.58.2-0.20250805162008-f4dc49bf8c3c
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/consensys/gnark-crypto v0.17.0

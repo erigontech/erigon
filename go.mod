@@ -7,11 +7,6 @@ replace (
 	github.com/erigontech/erigon-lib => ./erigon-lib
 )
 
-require (
-	github.com/erigontech/erigon-db v0.0.0-00010101000000-000000000000
-	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
-)
-
 replace (
 	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
