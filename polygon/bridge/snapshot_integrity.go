@@ -91,17 +91,12 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader bloc
 					return err
 				}
 
-				polygonSyncProgress, err := stages.GetStageProgress(tx, stages.PolygonSync)
-				if err != nil {
-					return err
-				}
-
 				bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
 				if err != nil {
 					return err
 				}
 
-				log.Info("[integrity] LAST Event", "event", lastEventId, "bor-progress", polygonSyncProgress, "body-progress", bodyProgress)
+				log.Info("[integrity] LAST Event", "event", lastEventId, "body-progress", bodyProgress)
 			}
 
 			return nil
