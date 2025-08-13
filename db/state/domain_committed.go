@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -96,7 +96,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // Requires separate function because commitment values have references inside and we need to properly dereference them using
 // replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
 // Values from domain files with ranges > 2 steps are referenced.
-func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint64, error) {
+func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, kv.Step, error) {
 	v, step, fromRam, err := sd.latestCommitment(prefix, tx)
 	if err != nil {
 		return v, step, err
@@ -109,7 +109,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint
 	return v, step, nil
 }
 
-func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, step uint64, fromRam bool, err error) {
+func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, step kv.Step, fromRam bool, err error) {
 	aggTx := AggTx(tx)
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
@@ -132,7 +132,7 @@ func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, st
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		return v, endTx / sd.StepSize(), false, nil
+		return v, kv.Step(endTx / sd.StepSize()), false, nil
 	}
 
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
@@ -140,7 +140,7 @@ func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, st
 	if err != nil {
 		return nil, 0, false, err
 	}
-	return rv, endTx / sd.StepSize(), false, nil
+	return rv, kv.Step(endTx / sd.StepSize()), false, nil
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
@@ -307,7 +307,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 }
 
 // rawLookupFileByRange searches for a file that contains the given range of tx numbers.
-// Given range should exactly match the range of some file, so expected to be multiple of aggregationStep.
+// Given range should exactly match the range of some file, so expected to be multiple of stepSize.
 // At first it checks range among visible files, then among dirty files.
 // If file is not found anywhere, returns nil
 func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesItem, error) {
@@ -319,7 +319,7 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesIt
 	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
 		return dirty, nil
 	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.filenameBase, txFrom/dt.d.aggregationStep, txTo/dt.d.aggregationStep)
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.filenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
 }
 
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
@@ -339,10 +339,10 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *Fil
 	if item == nil || item.bindex == nil {
 		fileStepsss := "" + dt.d.name.String() + ": "
 		for _, item := range dt.d.dirtyFiles.Items() {
-			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
+			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.stepSize, item.endTxNum/dt.d.stepSize)
 		}
 		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
-			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
+			"stepFrom", txFrom/dt.d.stepSize, "stepTo", txTo/dt.d.stepSize,
 			"files", fileStepsss, "filesCount", dt.d.dirtyFiles.Len())
 
 		if item != nil && item.bindex == nil {
@@ -426,10 +426,10 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 	ms := storage.dataReader(mergedStorage.decompressor)
 	ma := accounts.dataReader(mergedAccount.decompressor)
-	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.aggregationStep), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
+	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0 {
+		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.stepSize)%2 != 0 {
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {
@@ -439,7 +439,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		if !ok {
 			dirty := storage.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
 			if dirty == nil {
-				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
+				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize)
 			}
 			sig = storage.dataReader(dirty.decompressor)
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
@@ -452,7 +452,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		if !ok {
 			dirty := accounts.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
 			if dirty == nil {
-				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
+				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize)
 			}
 			aig = accounts.dataReader(dirty.decompressor)
 			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
@@ -471,7 +471,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
 							"shortened", hex.EncodeToString(key),
-							"merging", rng.String("", dt.d.aggregationStep),
+							"merging", rng.String("", dt.d.stepSize),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 						)
 						return nil, fmt.Errorf("lookup lost storage full key %x", key)
@@ -485,7 +485,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					}
 					// if shortened key lost, we can't continue
 					dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
-						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep),
+						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
 						"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
 
 					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
@@ -501,7 +501,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",
 						"shortened", hex.EncodeToString(key),
-						"merging", rng.String("", dt.d.aggregationStep),
+						"merging", rng.String("", dt.d.stepSize),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 					)
 					return nil, fmt.Errorf("lookup account full key: %x", key)
@@ -514,7 +514,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					return auxBuf, nil // if plain key is lost, we can save original fullkey
 				}
 				dt.d.logger.Crit("valTransform: replacement for full account key was not found",
-					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep),
+					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
 					"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
 				return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
 			}

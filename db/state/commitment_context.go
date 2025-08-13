@@ -15,10 +15,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -397,11 +397,11 @@ type TrieContext struct {
 	trace              bool
 }
 
-func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
+func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
-func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
 	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
 		return nil
 	}
@@ -419,7 +419,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
 // Step returned only when reading from domain files, otherwise it is always 0.
 // Step is used in Trie for memo stats and file depth access statistics.
-func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step uint64, err error) {
+func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()

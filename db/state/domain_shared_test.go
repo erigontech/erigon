@@ -29,10 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -235,7 +235,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	iterCount := func(domains *SharedDomains) int {
 		var list [][]byte
-		require.NoError(domains.IterateStoragePrefix(nil, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {
+		require.NoError(domains.IterateStoragePrefix(nil, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
 			list = append(list, k)
 			return true, nil
 		}))
@@ -500,14 +500,14 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 
 		existed := make(map[string]struct{})
-		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {
+		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
 			existed[string(k)] = struct{}{}
 			return true, nil
 		})
 		require.NoError(t, err)
 
 		missed := 0
-		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {
+		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
 			if _, been := existed[string(k)]; !been {
 				missed++
 			}
@@ -520,7 +520,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 
 		notRemoved := 0
-		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {
+		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
 			notRemoved++
 			if _, been := existed[string(k)]; !been {
 				missed++

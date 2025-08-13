@@ -45,21 +45,21 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/bitmapdb"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 type Aggregator struct {
-	db              kv.RoDB
-	d               [kv.DomainLen]*Domain
-	iis             []*InvertedIndex
-	dirs            datadir.Dirs
-	aggregationStep uint64
+	db       kv.RoDB
+	d        [kv.DomainLen]*Domain
+	iis      []*InvertedIndex
+	dirs     datadir.Dirs
+	stepSize uint64
 
 	dirtyFilesLock           sync.Mutex
 	visibleFilesLock         sync.RWMutex
@@ -98,14 +98,14 @@ type Aggregator struct {
 const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		aggregationStep:        aggregationStep,
+		stepSize:               stepSize,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
@@ -177,7 +177,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
-	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
+	a.d[name], err = NewDomain(cfg, a.stepSize, logger)
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 		return fmt.Errorf("inverted index %s already registered", idx)
 	}
 
-	ii, err := NewInvertedIndex(idxCfg, a.aggregationStep, logger)
+	ii, err := NewInvertedIndex(idxCfg, a.stepSize, logger)
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) StepSize() uint64                 { return a.aggregationStep }
+func (a *Aggregator) StepSize() uint64                 { return a.stepSize }
 func (a *Aggregator) OnFilesChange(f kv.OnFilesChange) { a.onFilesChange = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
@@ -601,7 +601,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 }
 
-func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
+func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
@@ -749,7 +749,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -1186,11 +1186,12 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 		limit = uint64(math.MaxUint64)
 	}
 
-	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
+	var txFrom uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
+	var step kv.Step
 	txTo := at.a.visibleFilesMinimaxTxNum.Load()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
-		step = (txTo - 1) / at.StepSize()
+		step = kv.Step((txTo - 1) / at.StepSize())
 	}
 
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
@@ -1203,7 +1204,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	}
 	//at.a.logger.Info("aggregator prune", "step", step,
 	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
-	//	/*"stepsLimit", limit/at.a.aggregationStep,*/ "stepsRangeInDB", at.a.stepsRangeInDBAsStr(tx))
+	//	/*"stepsLimit", limit/at.a.stepSize,*/ "stepsRangeInDB", at.a.stepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
 		var err error
@@ -1253,18 +1254,18 @@ func (a *Aggregator) FilesAmount() (res []int) {
 	return res
 }
 
-func firstTxNumOfStep(step, size uint64) uint64 {
-	return step * size
+func firstTxNumOfStep(step kv.Step, stepSize uint64) uint64 {
+	return uint64(step) * stepSize
 }
 
-func lastTxNumOfStep(step, size uint64) uint64 {
-	return firstTxNumOfStep(step+1, size) - 1
+func lastTxNumOfStep(step kv.Step, stepSize uint64) uint64 {
+	return firstTxNumOfStep(step+1, stepSize) - 1
 }
 
 // firstTxNumOfStep returns txStepBeginning of given step.
 // Step 0 is a range [0, stepSize).
 // To prune step needed to fully Prune range [txStepBeginning, txNextStepBeginning)
-func (a *Aggregator) FirstTxNumOfStep(step uint64) uint64 { // could have some smaller steps to prune// could have some smaller steps to prune
+func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some smaller steps to prune// could have some smaller steps to prune
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
@@ -1375,7 +1376,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
-	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/at.a.aggregationStep, maxSpan/at.a.aggregationStep, r))
+	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/at.a.stepSize, maxSpan/at.a.stepSize, r))
 	return r
 }
 
@@ -1516,7 +1517,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 
 // KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
 // Affects only domains with dontProduceHistoryFiles=true.
-// Usually equal to one a.aggregationStep, but could be set to step/2 or step/4 to reduce size of history tables.
+// Usually equal to one a.stepSize, but could be set to step/2 or step/4 to reduce size of history tables.
 // when we exec blocks from snapshots we can set it to 0, because no re-org on those blocks are possible
 func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64) *Aggregator {
 	for _, d := range a.d {
@@ -1545,7 +1546,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
+	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.stepSize {
 		close(fin)
 		return fin
 	}
@@ -1555,7 +1556,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
+	step := kv.Step(a.visibleFilesMinimaxTxNum.Load() / a.StepSize())
 
 	a.wg.Add(1)
 	go func() {
@@ -1722,7 +1723,7 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 		// this is not accurate, okay for reporting...
 		// if historyDisabled, there's no way to get progress in
 		// terms of exact txNum
-		return at.d[name].d.maxStepInDBNoHistory(tx) * at.a.aggregationStep
+		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize)
 	}
 	return at.d[name].HistoryProgress(tx)
 }
@@ -1743,10 +1744,10 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return at.d[name].GetAsOf(k, ts, tx)
 }
 
-func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
+func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
 	return at.d[domain].GetLatest(k, tx)
 }
-func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, uint64, bool, error) {
+func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {
 	return at.d[domain].getLatestFromDb(key, tx)
 }
 func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
@@ -1870,7 +1871,7 @@ func (at *AggregatorRoTx) Close() {
 }
 
 // Inverted index tables only
-func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
+func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		lstInDb = domain.maxStepInDB(tx)
 		return nil
@@ -1880,7 +1881,7 @@ func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	return lstInDb
 }
 
-func lastIdInDBNoHistory(db kv.RoDB, domain *Domain) (lstInDb uint64) {
+func lastIdInDBNoHistory(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		//lstInDb = domain.maxStepInDB(tx)
 		lstInDb = domain.maxStepInDBNoHistory(tx)
