@@ -897,9 +897,6 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	}); err != nil {
 		return err
 	}
-	if sum != maxTo {
-		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
-	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
 	}
@@ -920,6 +917,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
 		return fmt.Errorf("failed to check transactions-to-block idx: %w", err)
+	}
+	if sum != maxTo {
+		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
 	// Iterate over all fies in snapDir
 	return nil
