@@ -562,12 +562,15 @@ func sequencingBatchStep(
 					if errors.Is(err, core.ErrNonceTooLow) {
 						log.Info(fmt.Sprintf("[%s] nonce too low detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
 						sendersToTriggerStatechanges[txSender] = struct{}{}
+						batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
+						yielder.Discard(txHash)
 						continue
 					}
 
 					if errors.Is(err, core.ErrNonceTooHigh) {
 						log.Info(fmt.Sprintf("[%s] nonce too high detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
 						nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
+						yielder.Discard(txHash)
 						continue
 					}
 
