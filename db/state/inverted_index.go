@@ -92,7 +92,8 @@ type iiCfg struct {
 	Compression   seg.FileCompression // compression type for inverted index keys and values
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
-	Accessors Accessors
+	Accessors  Accessors
+	standalone bool
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -363,6 +364,7 @@ type InvertedIndexBufferedWriter struct {
 	aggregationStep uint64
 	txNumBytes      [8]byte
 	name            kv.InvertedIdx
+	standalone      bool
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -385,9 +387,10 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
-		return err
+	if w.standalone {
+		return w.index.Collect(indexKey, w.txNumBytes[:])
 	}
+
 	return nil
 }
 
@@ -396,8 +399,10 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 		return nil
 	}
 
-	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.standalone {
+		if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
@@ -433,11 +438,14 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 		indexTable:     iit.ii.valuesTable,
 
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
+		indexKeys:  etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
+		standalone: iit.ii.standalone,
+	}
+	if w.standalone {
+		w.index = etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace)
+		w.index.SortAndFlushInBackground(true)
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
-	w.index.SortAndFlushInBackground(true)
 	return w
 }
 
@@ -861,11 +869,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
-	idxDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
-	if err != nil {
-		return nil, err
-	}
-	defer idxDelCursor.Close()
 
 	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger)
 	defer collector.Close()
@@ -908,28 +911,39 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if fn != nil {
-			if err = fn(key, txnm); err != nil {
-				return fmt.Errorf("fn error: %w", err)
+	valsCount, err := rwTx.Count(iit.ii.valuesTable)
+	if err != nil {
+		return nil, err
+	}
+	if iit.ii.iiCfg.standalone || valsCount > 0 {
+		idxDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
+		if err != nil {
+			return nil, err
+		}
+		defer idxDelCursor.Close()
+		err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if fn != nil {
+				if err = fn(key, txnm); err != nil {
+					return fmt.Errorf("fn error: %w", err)
+				}
 			}
-		}
-		if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
-			return err
-		}
-		mxPruneSizeIndex.Inc()
-		stat.PruneCountValues++
+			if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
+				return err
+			}
+			mxPruneSizeIndex.Inc()
+			stat.PruneCountValues++
 
-		select {
-		case <-logEvery.C:
-			txNum := binary.BigEndian.Uint64(txnm)
-			ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
-		default:
-		}
-		return nil
-	}, etl.TransformArgs{Quit: ctx.Done()})
+			select {
+			case <-logEvery.C:
+				txNum := binary.BigEndian.Uint64(txnm)
+				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
+					"pruned values", stat.PruneCountValues,
+					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
+			default:
+			}
+			return nil
+		}, etl.TransformArgs{Quit: ctx.Done()})
+	}
 
 	if stat.MinTxNum != math.MaxUint64 {
 		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
