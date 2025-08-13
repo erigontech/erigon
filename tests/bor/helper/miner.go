@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -25,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -68,10 +68,10 @@ func NewEthConfig() *ethconfig.Config {
 func NewNodeConfig() *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit := params.GitCommit; commit != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit)
+	if commit := version.GitCommit; commit != "" {
+		nodeConfig.Version = version.VersionWithCommit(commit)
 	} else {
-		nodeConfig.Version = params.Version
+		nodeConfig.Version = version.VersionNoMeta
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
@@ -91,7 +91,7 @@ func InitMiner(
 
 	nodeCfg := &nodecfg.Config{
 		Name:    "erigon",
-		Version: params.Version,
+		Version: version.VersionNoMeta,
 		Dirs:    datadir.New(dirName),
 		P2P: p2p.Config{
 			ListenAddr:      ":0",

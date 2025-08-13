@@ -1,7 +1,4 @@
-// Copyright 2016 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,50 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package params
+package rawdb
 
 import (
-	"fmt"
-
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 )
-
-var (
-	// Following vars are injected through the build flags (see Makefile)
-	GitCommit string
-	GitBranch string
-	GitTag    string
-)
-
-const (
-	VersionKeyCreated  = "ErigonVersionCreated"
-	VersionKeyFinished = "ErigonVersionFinished"
-	ClientName         = "erigon"
-	ClientCode         = "EG"
-)
-
-// Version holds the textual version string.
-var Version = func() string {
-	return fmt.Sprintf("%d.%d.%d", version.Major, version.Minor, version.Micro)
-}()
-
-// VersionWithMeta holds the textual version string including the metadata.
-var VersionWithMeta = func() string {
-	v := Version
-	if version.Modifier != "" {
-		v += "-" + version.Modifier
-	}
-	return v
-}()
-
-func VersionWithCommit(gitCommit string) string {
-	vsn := VersionWithMeta
-	if len(gitCommit) >= 8 {
-		vsn += "-" + gitCommit[:8]
-	}
-	return vsn
-}
 
 func SetErigonVersion(tx kv.RwTx, versionKey string) error {
 	versionKeyByte := []byte(versionKey)
@@ -72,7 +31,7 @@ func SetErigonVersion(tx kv.RwTx, versionKey string) error {
 		return nil
 	}
 	// Save version if it does not exist
-	if err := tx.Put(kv.DatabaseInfo, versionKeyByte, []byte(Version)); err != nil {
+	if err := tx.Put(kv.DatabaseInfo, versionKeyByte, []byte(version.VersionNoMeta)); err != nil {
 		return err
 	}
 	return nil
