@@ -32,7 +32,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {

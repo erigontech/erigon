@@ -22,11 +22,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var ( // Compile time interface checks

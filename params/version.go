@@ -22,8 +22,8 @@ package params
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var (
