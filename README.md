@@ -465,6 +465,7 @@ go mod tidy
 | sentry    | 30304 | TCP & UDP | eth/67 peering              | Public        |
 | sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
 | rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| shutter   | 23102 | TCP       | Peering                     | Public        |
 
 Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
