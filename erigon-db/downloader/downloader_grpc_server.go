@@ -122,8 +122,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 	for _, name := range request.Paths {
 		if name == "" {
 			err = errors.Join(err, errors.New("field 'path' is required"))
-			// Retain existing behaviour.
-			break
+			continue
 		}
 		err = errors.Join(err, s.d.Delete(name))
 	}

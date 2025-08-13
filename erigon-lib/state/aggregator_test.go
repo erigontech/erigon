@@ -134,8 +134,30 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
+	onChangeCalls, onDelCalls := 0, 0
+	var firstCreated string
+	var firstDeleted string
+	agg.OnFilesChange(func(newFiles []string) {
+		if len(newFiles) > 0 {
+			onChangeCalls++
+			if firstCreated == "" {
+				firstCreated = newFiles[0]
+			}
+		}
+	}, func(deletedFiles []string) {
+		if len(deletedFiles) > 0 {
+			onChangeCalls++
+			if firstDeleted == "" {
+				firstDeleted = deletedFiles[0]
+			}
+		}
+	})
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
+	require.Equal(t, 26, onChangeCalls)
+	require.Equal(t, 0, onDelCalls)
+	require.Equal(t, "v1.1-accounts.0-2.kv", firstCreated) //TODO: it's not perfect, but we plan to drop files
+	require.Equal(t, "domain/v1.1-code.0-1.kv", firstDeleted)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())
@@ -151,8 +173,12 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 	}
+
+	onChangeCalls, onDelCalls = 0, 0
 	err = agg.MergeLoop(context.Background())
 	require.NoError(t, err)
+	require.Equal(t, 0, onChangeCalls)
+	require.Equal(t, 0, onDelCalls)
 
 	// Check the history
 	roTx, err := db.BeginTemporalRo(context.Background())

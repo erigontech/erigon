@@ -903,31 +903,34 @@ func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
 	}
 }
 
-func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) {
+func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) (outs []*FilesItem) {
 	dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
-	outs := dt.garbage(mergedDomain)
+	outs = dt.garbage(mergedDomain)
 	deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
+	return outs
 }
 
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) {
+func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (outs []*FilesItem) {
 	ht.iit.cleanAfterMerge(mergedIdx)
 	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
-	outs := ht.garbage(merged)
+	outs = ht.garbage(merged)
 	deleteMergeFile(ht.h.dirtyFiles, outs, ht.h.filenameBase, ht.h.logger)
+	return outs
 }
 
 // cleanAfterMerge - mark all small files before `f` as `canDelete=true`
-func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) {
+func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) (outs []*FilesItem) {
 	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
-	outs := iit.garbage(merged)
+	outs = iit.garbage(merged)
 	deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.filenameBase, iit.ii.logger)
+	return outs
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file

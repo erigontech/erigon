@@ -83,6 +83,7 @@ type Aggregator struct {
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFilesChange kv.OnFilesChange
+	onFilesDelete kv.OnFilesChange
 
 	ps *background.ProgressSet
 
@@ -104,6 +105,7 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
+		onFilesDelete:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		aggregationStep:        aggregationStep,
 		db:                     db,
@@ -202,8 +204,12 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) StepSize() uint64                 { return a.aggregationStep }
-func (a *Aggregator) OnFilesChange(f kv.OnFilesChange) { a.onFilesChange = f }
+func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
+	a.onFilesChange = onChange
+	a.onFilesDelete = onDel
+}
+
+func (a *Aggregator) StepSize() uint64 { return a.aggregationStep }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
@@ -1486,6 +1492,16 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
+	var outs []*FilesItem
+	defer func() {
+		var namesWithDirs []string
+		for _, out := range outs {
+			namesWithDirs = append(namesWithDirs, out.FilePaths(a.dirs.Snap)...)
+		}
+
+		a.onFilesDelete(namesWithDirs)
+	}()
+
 	at := a.BeginFilesRo()
 	defer at.Close()
 
@@ -1497,9 +1513,11 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			d.cleanAfterMerge(nil, nil, nil)
+			newOuts := d.cleanAfterMerge(nil, nil, nil)
+			outs = append(outs, newOuts...)
 		} else {
-			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+			newOuts := d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+			outs = append(outs, newOuts...)
 		}
 	}
 	for id, ii := range at.iis {
@@ -1507,9 +1525,11 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			ii.cleanAfterMerge(nil)
+			newOuts := ii.cleanAfterMerge(nil)
+			outs = append(outs, newOuts...)
 		} else {
-			ii.cleanAfterMerge(in.iis[id])
+			newOuts := ii.cleanAfterMerge(in.iis[id])
+			outs = append(outs, newOuts...)
 		}
 	}
 }

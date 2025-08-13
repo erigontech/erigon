@@ -1474,19 +1474,7 @@ func (s *Downloader) Delete(name string) (err error) {
 	if !ok {
 		return
 	}
-	t.Drop()
-	err = dir.RemoveFile(s.filePathForName(name))
-	if err != nil {
-		level := log.LvlError
-		if errors.Is(err, fs.ErrNotExist) {
-			level = log.LvlInfo
-		}
-		s.logger.Log(level, "error removing snapshot file data", "name", name, "err", err)
-	}
-	err = s.torrentFS.Delete(name)
-	if err != nil {
-		s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)
-	}
+	t.Drop() // Stop seeding. Erigon will remove file and .torrent by self
 	g.MustDelete(s.torrentsByName, name)
 	// I wonder if it's an issue if this occurs before initial sync has completed.
 	delete(s.requiredTorrents, t)

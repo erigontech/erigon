@@ -683,5 +683,5 @@ type Closer interface {
 
 type OnFilesChange func(frozenFileNames []string)
 type SnapshotNotifier interface {
-	OnFilesChange(f OnFilesChange)
+	OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
 }
