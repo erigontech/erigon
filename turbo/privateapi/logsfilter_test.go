@@ -104,8 +104,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	srv := newTestServer(ctx)
 
 	req1 := &remote.LogsFilterRequest{
@@ -138,8 +137,7 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	srv := newTestServer(ctx)
 
 	req1 := &remote.LogsFilterRequest{
@@ -185,8 +183,7 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	srv := newTestServer(ctx)
 
 	req1 := &remote.LogsFilterRequest{
@@ -225,8 +222,7 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	srv := newTestServer(ctx)
 
 	req1 := &remote.LogsFilterRequest{

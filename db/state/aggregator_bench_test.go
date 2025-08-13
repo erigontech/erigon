@@ -54,8 +54,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	longKeys := queueKeys(ctx, 64, length.Addr+length.Hash)
 	vals := queueKeys(ctx, 53, length.Hash)
