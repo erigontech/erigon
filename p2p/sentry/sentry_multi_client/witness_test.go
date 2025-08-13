@@ -614,8 +614,8 @@ func TestWitnessExactPageSize(t *testing.T) {
 			pageResp := response.WitnessPacketResponse[0]
 			require.Equal(t, testBlockHash, pageResp.Hash)
 			require.Equal(t, uint64(0), pageResp.Page)
-			require.Equal(t, uint64(1), pageResp.TotalPages)    // Should be exactly 1 page
-			require.Equal(t, int(pageSize), len(pageResp.Data)) // Full page size
+			require.Equal(t, uint64(1), pageResp.TotalPages) // Should be exactly 1 page
+			require.Equal(t, pageSize, len(pageResp.Data))   // Full page size
 			require.Equal(t, exactPageSizeData, pageResp.Data)
 
 			return &proto_sentry.SentPeers{}, nil
