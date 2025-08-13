@@ -224,9 +224,7 @@ func (h *History) openDirtyFiles() error {
 					continue
 				}
 				if !fileVer.Eq(h.version.DataV.Current) {
-					if !fileVer.Less(h.version.DataV.MinSupported) {
-						h.version.DataV.Current = fileVer
-					} else {
+					if fileVer.Less(h.version.DataV.MinSupported) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, h.version.DataV)
 					}
@@ -269,9 +267,7 @@ func (h *History) openDirtyFiles() error {
 				}
 				if ok {
 					if !fileVer.Eq(h.version.AccessorVI.Current) {
-						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
-							h.version.AccessorVI.Current = fileVer
-						} else {
+						if fileVer.Less(h.version.AccessorVI.MinSupported) {
 							_, fName := filepath.Split(fPath)
 							versionTooLowPanic(fName, h.version.AccessorVI)
 						}

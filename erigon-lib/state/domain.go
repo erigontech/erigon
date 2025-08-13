@@ -362,9 +362,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 
 				if !fileVer.Eq(d.version.DataKV.Current) {
-					if !fileVer.Less(d.version.DataKV.MinSupported) {
-						d.version.DataKV.Current = fileVer
-					} else {
+					if fileVer.Less(d.version.DataKV.MinSupported) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.version.DataKV)
 					}
@@ -394,9 +392,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 				if ok {
 					if !fileVer.Eq(d.version.AccessorKVI.Current) {
-						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
-							d.version.AccessorKVI.Current = fileVer
-						} else {
+						if fileVer.Less(d.version.AccessorKVI.MinSupported) {
 							_, fName := filepath.Split(fPath)
 							versionTooLowPanic(fName, d.version.AccessorKVI)
 						}
@@ -417,9 +413,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 				if ok {
 					if !fileVer.Eq(d.version.AccessorBT.Current) {
-						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
-							d.version.AccessorBT.Current = fileVer
-						} else {
+						if fileVer.Less(d.version.AccessorBT.MinSupported) {
 							_, fName := filepath.Split(fPath)
 							versionTooLowPanic(fName, d.version.AccessorBT)
 						}
@@ -440,9 +434,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 				if ok {
 					if !fileVer.Eq(d.version.AccessorKVEI.Current) {
-						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
-							d.version.AccessorKVEI.Current = fileVer
-						} else {
+						if fileVer.Less(d.version.AccessorKVEI.MinSupported) {
 							_, fName := filepath.Split(fPath)
 							versionTooLowPanic(fName, d.version.AccessorKVEI)
 						}

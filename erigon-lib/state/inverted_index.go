@@ -337,9 +337,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 				}
 
 				if !fileVer.Eq(ii.version.DataEF.Current) {
-					if !fileVer.Less(ii.version.DataEF.MinSupported) {
-						ii.version.DataEF.Current = fileVer
-					} else {
+					if fileVer.Less(ii.version.DataEF.MinSupported) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, ii.version.DataEF)
 					}
@@ -370,9 +368,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 				}
 				if ok {
 					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
-						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
-							ii.version.AccessorEFI.Current = fileVer
-						} else {
+						if fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							_, fName := filepath.Split(fPath)
 							versionTooLowPanic(fName, ii.version.AccessorEFI)
 						}
