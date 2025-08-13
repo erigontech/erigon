@@ -794,10 +794,10 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	}
 
 	{ //assert
-		if txFrom%uint64(d.stepSize) != 0 {
+		if txFrom%d.stepSize != 0 {
 			panic(fmt.Errorf("assert: unexpected txFrom=%d", txFrom))
 		}
-		if txTo%uint64(d.stepSize) != 0 {
+		if txTo%d.stepSize != 0 {
 			panic(fmt.Errorf("assert: unexpected txTo=%d", txTo))
 		}
 	}

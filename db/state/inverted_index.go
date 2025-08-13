@@ -968,7 +968,7 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 // collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) (InvertedIndexCollation, error) {
 	stepTo := step + 1
-	txFrom, txTo := uint64(step)*uint64(ii.stepSize), uint64(stepTo)*uint64(ii.stepSize)
+	txFrom, txTo := uint64(step)*ii.stepSize, uint64(stepTo)*ii.stepSize
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
