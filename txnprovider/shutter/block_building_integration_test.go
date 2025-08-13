@@ -294,7 +294,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployerPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
-	shutterConfig := shuttercfg.ConfigByChainName(chainspec.ChiadoChainConfig.ChainName)
+	shutterConfig := shuttercfg.ConfigByChainName(chainspec.Chiado.Config.ChainName)
 	shutterConfig.Enabled = false // first we need to deploy the shutter smart contracts
 	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 	shutterConfig.PrivateKey = nodeKey
@@ -333,7 +333,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanNode(ethNode))
 
 	var chainConfig chain.Config
-	err = copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	err = copier.Copy(&chainConfig, chainspec.Chiado.Config)
 	require.NoError(t, err)
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId

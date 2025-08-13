@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -415,7 +416,10 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
 		require.NoError(t, err)
-		require.Equal(t, chainspec.TestGenesisStateRoot, common.BytesToHash(rh))
+
+		s, err := chainspec.ChainSpecByName(networkname.Test)
+		require.NoError(t, err)
+		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 

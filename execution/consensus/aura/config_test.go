@@ -27,7 +27,7 @@ import (
 )
 
 func TestGnosisBlockRewardContractTransitions(t *testing.T) {
-	spec := chainspec.GnosisChainConfig.Aura
+	spec := chainspec.Gnosis.Config.Aura
 
 	param, err := FromJson(spec)
 	require.NoError(t, err)
@@ -40,7 +40,7 @@ func TestGnosisBlockRewardContractTransitions(t *testing.T) {
 }
 
 func TestInvalidBlockRewardContractTransition(t *testing.T) {
-	spec := *(chainspec.GnosisChainConfig.Aura)
+	spec := *(chainspec.Gnosis.Config.Aura)
 
 	// blockRewardContractTransition should be smaller than any block number in blockRewardContractTransitions
 	invalidTransition := uint64(10_000_000)

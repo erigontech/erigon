@@ -61,11 +61,12 @@ type GenesisMismatchError struct {
 }
 
 func (e *GenesisMismatchError) Error() string {
-	config := chainspec.ChainConfigByGenesisHash(e.Stored)
-	if config == nil {
-		return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
+	var advice string
+	spec, err := chainspec.ChainSpecByGenesisHash(e.Stored)
+	if err == nil {
+		advice = fmt.Sprintf(" (try with flag --chain=%s)", spec.Name)
 	}
-	return fmt.Sprintf("database contains incompatible genesis (try with --chain=%s)", config.ChainName)
+	return fmt.Sprintf("database contains genesis (have %x, new %x)", e.Stored, e.New) + advice
 }
 
 // CommitGenesisBlock writes or updates the genesis block in db.
@@ -106,13 +107,11 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 	if g != nil {
 		return g.Config
 	}
-
-	config := chainspec.ChainConfigByGenesisHash(genesisHash)
-	if config != nil {
-		return config
-	} else {
+	spec, err := chainspec.ChainSpecByGenesisHash(genesisHash)
+	if err != nil {
 		return chain.AllProtocolChanges
 	}
+	return spec.Config
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
@@ -194,9 +193,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	// Special case: don't change the existing config of a private chain if no new
 	// config is supplied. This is useful, for example, to preserve DB config created by erigon init.
 	// In that case, only apply the overrides.
-	if genesis == nil && chainspec.ChainConfigByGenesisHash(storedHash) == nil {
-		newCfg = storedCfg
-		applyOverrides(newCfg)
+	if genesis == nil {
+		if _, err := chainspec.ChainSpecByGenesisHash(storedHash); err != nil {
+			newCfg = storedCfg
+			applyOverrides(newCfg)
+		}
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
