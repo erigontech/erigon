@@ -185,12 +185,22 @@ func (worker *L1InfoWorker) Start() {
 	for task := range worker.taskChan {
 		res := task.Do()
 		if res.err != nil {
+			log.Info("Retrying L1 info task", "logKey", res.logKey, "error", res.err)
 			// assume a transient error and try again
 			time.Sleep(1 * time.Second)
-			go func() {
-				worker.taskChan <- task // requeue the task if there was an error
-			}()
+			time.AfterFunc(1*time.Second, func() {
+				select {
+				case worker.taskChan <- task:
+					// successfully requeued the task
+				case <-time.After(5 * time.Second):
+					log.Warn("Failed to requeue L1 info task: timeout", "logKey", res.logKey)
+				}
+			})
 			continue
+		}
+
+		if res.l1InfoTreeUpdate == nil {
+			continue // Wrong log, no update
 		}
 		worker.taskResChan <- res
 	}
@@ -222,16 +232,18 @@ func NewL1InfoTask(log types.Log, syncer Syncer) *L1InfoTask {
 func (t *L1InfoTask) Do() *L1InfoTaskResult {
 	header, err := t.syncer.GetHeader(t.Log.BlockNumber)
 	if err != nil {
-		log.Error("Failed to get header for L1InfoTask", "blockNumber", t.Log.BlockNumber, "error", err)
-		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("header not found for block number %d", t.Log.BlockNumber)}
+		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("header not found for block number %d, %w", t.Log.BlockNumber, err)}
 	}
 
-	update, err := createL1InfoTreeUpdateWithLeafHash(t.Log, header)
-	if err != nil {
-		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("createL1InfoTreeUpdateWithLeafHash: %w", err)}
+	if len(t.Log.Topics) == 3 {
+		update, err := createL1InfoTreeUpdateWithLeafHash(t.Log, header)
+		if err != nil {
+			return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("createL1InfoTreeUpdateWithLeafHash: %w", err)}
+		}
+		return &L1InfoTaskResult{l1InfoTreeUpdate: update, logKey: NewLogKey(t.Log), err: nil}
 	}
 
-	return &L1InfoTaskResult{l1InfoTreeUpdate: update, logKey: NewLogKey(t.Log), err: nil}
+	return &L1InfoTaskResult{nil, NewLogKey(t.Log), nil}
 }
 
 func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (processed uint64, err error) {
@@ -330,8 +342,7 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 			// calculate and store the info tree leaf / index
 			update, ok := indexUpdateMap[NewLogKey(l)]
 			if !ok {
-				log.Error(fmt.Sprintf("[%s] Could not find L1 info tree update for log: %v", logPrefix, l))
-				panic(fmt.Sprintf("Could not find L1 info tree update for log: %v", l))
+				return 0, fmt.Errorf("could not find L1 info tree update for log: %v %w", l, err)
 			}
 			if err := u.HandleL1InfoTreeUpdate(hermezDb, tree, update); err != nil {
 				return 0, fmt.Errorf("HandleL1InfoTreeUpdate: %w", err)
@@ -373,7 +384,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 				return processed, nil
 			}
 			processed++
-			log.Info(fmt.Sprintf("[%s] Processed L1 info tree v2 update", logPrefix), "processed", processed)
 		default:
 			log.Warn("received unexpected topic from l1 info tree stage", "topic", l.Topics[0])
 		}
@@ -604,21 +614,6 @@ LOOP:
 	return infoTrees, nil
 }
 
-func chunkLogs(slice []types.Log, chunkSize int) [][]types.Log {
-	var chunks [][]types.Log
-	for i := 0; i < len(slice); i += chunkSize {
-		end := i + chunkSize
-
-		// If end is greater than the length of the slice, reassign it to the length of the slice
-		if end > len(slice) {
-			end = len(slice)
-		}
-
-		chunks = append(chunks, slice[i:end])
-	}
-	return chunks
-}
-
 func InitialiseL1InfoTree(hermezDb *hermez_db.HermezDb) (*L1InfoTree, error) {
 	leaves, err := hermezDb.GetAllL1InfoTreeLeaves()
 	if err != nil {
@@ -664,10 +659,6 @@ func createL1InfoTreeUpdate(l types.Log, header *types.Header) (*zkTypes.L1InfoT
 }
 
 func createL1InfoTreeUpdateWithLeafHash(l types.Log, header *types.Header) (*zkTypes.L1InfoTreeUpdateWithLeafHash, error) {
-	if header == nil {
-		return nil, fmt.Errorf("header not found for block number %d", l.BlockNumber)
-	}
-
 	update, err := createL1InfoTreeUpdate(l, header)
 	if err != nil {
 		return nil, err

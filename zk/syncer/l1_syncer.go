@@ -210,7 +210,6 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 
 func (s *L1Syncer) GetHeader(number uint64) (*ethTypes.Header, error) {
 	if header, ok := s.headersCache.Load(number); ok {
-		log.Info("Cache hit for header", "number", number)
 		return header.(*ethTypes.Header), nil
 	}
 
