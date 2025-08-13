@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -17,7 +17,7 @@ import (
 
 func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader blockReader, snapshots *heimdall.RoSnapshots, from, to uint64, failFast bool) (err error) {
 	defer func() {
-		log.Info("[integrity] ValidateBorEvents: done", "err", err)
+		log.Info("[integrity] BorEvents: done", "err", err)
 	}()
 
 	var cc *chain.Config

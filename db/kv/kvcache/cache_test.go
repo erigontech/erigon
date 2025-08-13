@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -244,7 +244,7 @@ func TestAPI(t *testing.T) {
 				return err
 			}
 			defer d.Close()
-			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, d.TxNum(), prevVals[string(k)], uint64(counter.Load())); err != nil {
+			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, d.TxNum(), prevVals[string(k)], kv.Step(counter.Load())); err != nil {
 				return err
 			}
 			prevVals[string(k)] = v
