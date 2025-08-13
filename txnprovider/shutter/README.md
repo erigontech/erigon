@@ -17,7 +17,7 @@ There are three main parts that are needed to have a Shutter encrypted transacti
 Currently, the Shutter encrypted transaction pool is available on Gnosis with aspirations of this one day becoming
 available on Ethereum too.
 
-As a result, Erigon has committed to adding support for running Shutterized Validators.
+As a result, Erigon has committed to adding support for running as a Shutterized Validator on Gnosis.
 
 This means that you can now run Erigon as a validator which can build blocks that can include transactions from the
 Shutter encrypted transaction pool using just-in-time decryption.
