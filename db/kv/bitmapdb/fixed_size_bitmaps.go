@@ -20,12 +20,13 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"reflect"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/c2h5oh/datasize"
 	mmap2 "github.com/edsrzf/mmap-go"
