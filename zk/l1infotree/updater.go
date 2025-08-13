@@ -128,12 +128,12 @@ type L1InfoWorkerPool struct {
 func NewL1InfoWorkerPool(numWorkers int, syncer Syncer, l2Syncer L2Syncer) *L1InfoWorkerPool {
 	pool := &L1InfoWorkerPool{
 		workers:     make([]*L1InfoWorker, numWorkers),
-		taskChan:    make(chan *L1InfoTask, numWorkers),
+		taskChan:    make(chan *L1InfoTask, numWorkers*10),
 		taskResChan: make(chan *L1InfoTaskResult, numWorkers*10),
 	}
 
 	for i := 0; i < numWorkers; i++ {
-		worker := NewL1InfoWorker(i, syncer, l2Syncer, pool.taskChan, pool.taskResChan)
+		worker := NewL1InfoWorker(i, syncer, pool.taskChan, pool.taskResChan)
 		pool.workers[i] = worker
 	}
 
@@ -163,18 +163,15 @@ func (pool *L1InfoWorkerPool) GetTaskResChannel() chan *L1InfoTaskResult {
 }
 
 type L1InfoWorker struct {
-	id          int
 	syncer      Syncer
-	l2Syncer    L2Syncer
 	taskChan    chan *L1InfoTask
 	taskResChan chan *L1InfoTaskResult
 	waitGroup   sync.WaitGroup
 }
 
-func NewL1InfoWorker(id int, syncer Syncer, l2Syncer L2Syncer, taskChan chan *L1InfoTask, taskResChan chan *L1InfoTaskResult) *L1InfoWorker {
+func NewL1InfoWorker(id int, syncer Syncer, taskChan chan *L1InfoTask, taskResChan chan *L1InfoTaskResult) *L1InfoWorker {
 	return &L1InfoWorker{
 		syncer:      syncer,
-		l2Syncer:    l2Syncer,
 		taskChan:    taskChan,
 		taskResChan: taskResChan,
 		waitGroup:   sync.WaitGroup{},
@@ -186,7 +183,16 @@ func (worker *L1InfoWorker) Start() {
 	defer worker.waitGroup.Done()
 
 	for task := range worker.taskChan {
-		worker.taskResChan <- task.Do()
+		res := task.Do()
+		if res.err != nil {
+			// assume a transient error and try again
+			time.Sleep(1 * time.Second)
+			go func() {
+				worker.taskChan <- task // requeue the task if there was an error
+			}()
+			continue
+		}
+		worker.taskResChan <- res
 	}
 }
 
