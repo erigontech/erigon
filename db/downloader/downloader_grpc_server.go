@@ -122,6 +122,10 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 			continue
 		}
 		err = errors.Join(err, s.d.Delete(name))
+		if len(s.d.torrentsByName) != len(s.d.torrentClient.Torrents()) {
+			assertErr := fmt.Sprintf("assert: len(s.d.torrentsByName) != len(s.d.torrentClient.Torrents()): %d != %d", len(s.d.torrentsByName), len(s.d.torrentClient.Torrents()))
+			panic(assertErr)
+		}
 	}
 	if err == nil {
 		return &emptypb.Empty{}, nil
