@@ -243,10 +243,11 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 
 	if canRunCycleInOneTransaction && !externalTx {
-		txc.Tx, err = db.BeginRwNosync(ctx)
+		tx, err := db.BeginRwNosync(ctx)
 		if err != nil {
 			return false, err
 		}
+		txc.SetTx(tx)
 		defer txc.Tx.Rollback()
 	}
 
