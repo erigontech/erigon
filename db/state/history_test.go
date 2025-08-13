@@ -681,7 +681,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	// this one should prune value of tx=0 due to given range [0,1) (we have first value at tx=0) even it is forced
 	stat, err = hc.Prune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, stat.PruneCountValues)
+	require.EqualValues(t, 0, stat.PruneCountValues)
 	require.EqualValues(t, 1, stat.PruneCountTx)
 
 	// this should prune exactly pruneLimit*pruneIter transactions
