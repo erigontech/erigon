@@ -28,7 +28,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 

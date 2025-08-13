@@ -2,16 +2,15 @@ package state
 
 import (
 	"fmt"
-
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
-
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestFileItemWithMissedAccessor(t *testing.T) {

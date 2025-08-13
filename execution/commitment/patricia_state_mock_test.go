@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
