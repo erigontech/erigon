@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -239,13 +240,15 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	metricsEnabled := ctx.Bool(metricsEnabledFlag.Name)
 	metricsAddr := ctx.String(metricsAddrFlag.Name)
 
-	var metricsMux *http.ServeMux
+	var metricsMux, pprofMux *http.ServeMux
 	var metricsAddress string
+	var torrentClientStatusAddr string
 
 	if metricsEnabled {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		metricsMux = metrics.Setup(metricsAddress, logger)
+		torrentClientStatusAddr = metricsAddress
 	}
 
 	if pprofEnabled {
@@ -255,19 +258,25 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 		if (address == metricsAddress) && metricsEnabled {
 			metricsMux = StartPProf(address, metricsMux)
 		} else {
-			pprofMux := StartPProf(address, nil)
-			return logger, tracer, metricsMux, pprofMux, nil
+			pprofMux = StartPProf(address, nil)
+		}
+		if !metricsEnabled {
+			torrentClientStatusAddr = address
 		}
 	}
 
-	return logger, tracer, metricsMux, nil, nil
+	if metricsEnabled || pprofEnabled {
+		torrentMsg := fmt.Sprintf("curl -s http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
+		log.Info("To get torrent client status", "command", torrentMsg)
+	}
+
+	return logger, tracer, metricsMux, pprofMux, nil
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
-	torrentMsg := fmt.Sprintf("curl -s http://%s/downloader/torrentClientStatus > torrentStatus.txt", address)
-	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg, "torrent", torrentMsg)
+	log.Info("Starting pprof server", "cpu", cpuMsg, "heap", heapMsg)
 
 	if metricsMux == nil {
 		pprofMux := http.NewServeMux()
