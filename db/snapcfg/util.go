@@ -511,12 +511,12 @@ func webseedsParse(in []byte) (res []string) {
 func LoadRemotePreverified(ctx context.Context) (err error) {
 	// Can't log in erigon-snapshot repo due to erigon-lib module import path.
 	log.Info("Loading remote snapshot hashes")
-	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 	if err != nil {
 		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
 
 		// Fallback to GitHub if R2 fails
-		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
+		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
 		if err != nil {
 			return err
 		}

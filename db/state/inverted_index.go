@@ -365,9 +365,6 @@ type InvertedIndexBufferedWriter struct {
 	txNumBytes      [8]byte
 	name            kv.InvertedIdx
 	standalone      bool
-
-	keysAddTIme, valuesAddTime     uint64
-	keysFlushTime, valuesFlushTime uint64
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -918,8 +915,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if err != nil {
 		return nil, err
 	}
-	startTime := time.Now()
-
 	idxDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
 	if err != nil {
 		return nil, err
@@ -953,7 +948,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
-	fmt.Printf("[iitiming] pruning iiValues entity: %s time: %d\n", iit.name.String(), time.Since(startTime)/1000_000)
 
 	if stat.MinTxNum != math.MaxUint64 {
 		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
