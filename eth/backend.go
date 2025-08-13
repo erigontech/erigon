@@ -1456,6 +1456,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
+		log.Warn("[dbg] notify downloader", "frozenFileNames", len(frozenFileNames), "s.downloaderClient != nil", s.downloaderClient != nil)
 		if s.downloaderClient != nil && len(frozenFileNames) > 0 {
 			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
 			for _, fName := range frozenFileNames {
@@ -1464,6 +1465,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 				})
 			}
 			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
+				log.Warn("[dbg] notify downloader", "frozenFileNames", len(frozenFileNames), "s.downloaderClient != nil", s.downloaderClient != nil)
 				s.logger.Warn("[snapshots] notify downloader", "err", err)
 			}
 		}
