@@ -329,6 +329,10 @@ func filterIds(in []sentryproto.MessageId, protocol sentryproto.Protocol) (filte
 	for _, id := range in {
 		if _, ok := libsentry.ProtoIds[protocol][id]; ok {
 			filtered = append(filtered, id)
+		} else if _, ok := libsentry.ProtoIds[sentryproto.Protocol_WIT0][id]; ok {
+			// Allow witness messages through ETH protocol clients
+			filtered = append(filtered, id)
+		} else {
 		}
 	}
 	return filtered

@@ -589,7 +589,7 @@ func runWitPeer(
 ) *p2p.PeerError {
 	protocol := uint(wit.WIT1)
 	pubkey := peerInfo.peer.Pubkey()
-	logger.Info("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
+	logger.Debug("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
 	for {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
@@ -609,7 +609,7 @@ func runWitPeer(
 		}
 
 		switch msg.Code {
-		case wit.GetWitnessMsg:
+		case wit.GetWitnessMsg | wit.WitnessMsg:
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -618,19 +618,6 @@ func runWitPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
-			send(wit.ToProto[protocol][msg.Code], peerID, b)
-		case wit.WitnessMsg:
-			log.Info("got witness response")
-			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
-				logger.Info("got witness response, no subscribers :(")
-				continue
-			}
-
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
-			}
-			log.Info("sending msg", "id", wit.ToProto[protocol][msg.Code])
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessMsg:
 			// add hashes to peer
@@ -700,7 +687,7 @@ func runWitPeer(
 				}); err != nil {
 					logger.Debug("sending GetWitnessMsg request", "err", err, "hash", hash)
 				} else {
-					logger.Info("sent GetWitnessMsg request", "hash", hash, "page", 0, "peer", hex.EncodeToString(peerID[:]))
+					logger.Debug("sent GetWitnessMsg request", "hash", hash, "page", 0, "peer", hex.EncodeToString(peerID[:]))
 				}
 			}
 		default:

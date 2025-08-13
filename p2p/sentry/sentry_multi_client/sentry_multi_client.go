@@ -85,8 +85,6 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
 		wit.ToProto[direct.WIT0][wit.GetWitnessMsg],
-		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
-		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -120,6 +118,7 @@ func (cs *MultiClient) RecvMessageLoop(
 		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
+		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
 		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
@@ -752,7 +751,6 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentr
 
 // addBlockWitnesses processes response to our getBlockWitnesses request
 func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
-	log.Info("adding block witnesses")
 	var query wit.WitnessPacketRLPPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding addBlockWitnesses: %w, data: %x", err, inreq.Data)
@@ -778,12 +776,9 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentr
 
 	// reconstruct witnesses
 	for witnessHash, pages := range witnessPages {
-		cs.logger.Info("adding witness page", "hash", witnessHash)
 		totalPages := witnessTotalPages[witnessHash]
 
 		if uint64(len(pages)) != totalPages {
-			cs.logger.Info("incomplete witness received, requesting remaining pages", "hash", witnessHash, "received_pages", len(pages), "total_pages", totalPages)
-
 			// identify missing pages
 			var missingPages []uint64
 			for page := uint64(0); page < totalPages; page++ {
@@ -880,8 +875,6 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentr
 			if err := tx.Put(kv.BorWitnessSizes, key, dbutils.EncodeBlockNumber(witnessLen)); err != nil {
 				return fmt.Errorf("error writing witness size for hash %x: %w", witnessHash, err)
 			}
-
-			cs.logger.Info("stored complete witness", "hash", witnessHash, "block", header.Number.Uint64(), "size", witnessLen)
 		}
 	}
 
@@ -950,7 +943,6 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 }
 
 func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
-	log.Info("got inbound message", "Id", inreq.Id)
 	switch inreq.Id {
 	// ========= eth 66 ==========
 
