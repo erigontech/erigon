@@ -178,9 +178,11 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	p.prevActivations = activations
 
 	var readRatio float64
+	var execRatio float64
 	var avgTaskGasPerSec int64
 	var avgTaskDur time.Duration
 	var avgReadDur time.Duration
+	var avgExecDur time.Duration
 	var avgAccountReadDur time.Duration
 	var avgStorageReadDur time.Duration
 	var avgCodeReadDur time.Duration
@@ -188,6 +190,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	if curActivations > 0 {
 		avgTaskDur = curTaskDur / time.Duration(curActivations)
 		avgReadDur = curTaskReadDur / time.Duration(curActivations)
+		avgExecDur = avgTaskDur - avgReadDur
 		avgAccountReadDur = curAccountReadDur / time.Duration(curActivations)
 		avgStorageReadDur = curStorageReadDur / time.Duration(curActivations)
 		avgCodeReadDur = curCodeReadDur / time.Duration(curActivations)
@@ -199,6 +202,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
+			execRatio = 100.0 * float64(avgExecDur) / float64(avgTaskDur)
 		}
 
 		avgTaskGas := curTaskGas / curActivations
@@ -264,7 +268,8 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"tsrdur", fmt.Sprintf("%dµs(%.2f%%),a=%dµs,s=%dµs,c=%dµs", avgReadDur.Microseconds(), readRatio, avgAccountReadDur.Microseconds(), avgStorageReadDur.Microseconds(), avgCodeReadDur.Microseconds()),
+			"exec", fmt.Sprintf("%dµs(%.2f%%)", avgExecDur.Microseconds(), execRatio),
+			"read", fmt.Sprintf("%dµs(%.2f%%),a=%dµs,s=%dµs,c=%dµs", avgReadDur.Microseconds(), readRatio, avgAccountReadDur.Microseconds(), avgStorageReadDur.Microseconds(), avgCodeReadDur.Microseconds()),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", common.PrettyCounter(curReadCount),
 			"wrt", common.PrettyCounter(curReadCount),
