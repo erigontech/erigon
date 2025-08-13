@@ -21,6 +21,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -52,6 +54,19 @@ var (
 	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
 	ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
+
+	// Need to fix this already.
+	allPreverified = []*Preverified{
+		&Mainnet,
+		&Holesky,
+		&Sepolia,
+		&Amoy,
+		&BorMainnet,
+		&Gnosis,
+		&Chiado,
+		&Hoodi,
+		&ArbSepolia,
+	}
 )
 
 func fromEmbeddedToml(in []byte) Preverified {
@@ -512,6 +527,16 @@ func webseedsParse(in []byte) (res []string) {
 }
 
 func LoadRemotePreverified(ctx context.Context) (err error) {
+	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+		b, err := os.ReadFile(s)
+		if err != nil {
+			return fmt.Errorf("reading remote preverified override file: %w", err)
+		}
+		for _, p := range allPreverified {
+			*p = fromEmbeddedToml(b)
+		}
+		return nil
+	}
 	// Can't log in erigon-snapshot repo due to erigon-lib module import path.
 	log.Info("Loading remote snapshot hashes")
 	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
