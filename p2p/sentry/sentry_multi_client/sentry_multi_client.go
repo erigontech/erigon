@@ -738,7 +738,7 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentr
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0,
+			Id:   proto_sentry.MessageId_BLOCK_WITNESS_W0,
 			Data: b,
 		},
 	}
@@ -814,7 +814,7 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentr
 				request := &proto_sentry.SendMessageByIdRequest{
 					PeerId: inreq.PeerId,
 					Data: &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+						Id:   proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 						Data: data,
 					},
 				}
@@ -826,7 +826,7 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentr
 
 					fallbackRequest := &proto_sentry.SendMessageToRandomPeersRequest{
 						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+							Id:   proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 							Data: data,
 						},
 						MaxPeers: 1,
@@ -964,9 +964,9 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.getReceipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_NEW_WITNESS_W0:
 		return cs.newWitness(ctx, inreq, sentry)
-	case proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0:
+	case proto_sentry.MessageId_BLOCK_WITNESS_W0:
 		return cs.addBlockWitnesses(ctx, inreq, sentry)
-	case proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0:
+	case proto_sentry.MessageId_GET_BLOCK_WITNESS_W0:
 		return cs.getBlockWitnesses(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)

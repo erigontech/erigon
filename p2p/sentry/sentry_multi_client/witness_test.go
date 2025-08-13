@@ -93,7 +93,7 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 
 	t.Run("Invalid RLP", func(t *testing.T) {
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   []byte{0xFF, 0xFF, 0xFF}, // Invalid RLP
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -123,14 +123,14 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
 
 		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-				require.Equal(t, proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0, request.Data.Id)
+				require.Equal(t, proto_sentry.MessageId_BLOCK_WITNESS_W0, request.Data.Id)
 
 				var response wit.WitnessPacketRLPPacket
 				err := rlp.DecodeBytes(request.Data.Data, &response)
@@ -242,7 +242,7 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -325,7 +325,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -371,7 +371,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -414,7 +414,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -461,7 +461,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -512,7 +512,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -571,7 +571,7 @@ func TestWitnessExactPageSize(t *testing.T) {
 	require.NoError(t, err)
 
 	inboundMsg := &proto_sentry.InboundMessage{
-		Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+		Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
 		Data:   reqData,
 		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x99, 0x99, 0x99}),
 	}

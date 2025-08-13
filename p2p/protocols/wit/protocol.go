@@ -125,16 +125,16 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 	direct.WIT0: {
 		NewWitnessMsg:       proto_sentry.MessageId_NEW_WITNESS_W0,
 		NewWitnessHashesMsg: proto_sentry.MessageId_NEW_WITNESS_HASHES_W0,
-		GetWitnessMsg:       proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
-		WitnessMsg:          proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0,
+		GetWitnessMsg:       proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		WitnessMsg:          proto_sentry.MessageId_BLOCK_WITNESS_W0,
 	},
 }
 
 var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 	direct.WIT0: {
-		proto_sentry.MessageId_NEW_WITNESS_W0:              NewWitnessMsg,
-		proto_sentry.MessageId_NEW_WITNESS_HASHES_W0:       NewWitnessHashesMsg,
-		proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0: GetWitnessMsg,
-		proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0:     WitnessMsg,
+		proto_sentry.MessageId_NEW_WITNESS_W0:        NewWitnessMsg,
+		proto_sentry.MessageId_NEW_WITNESS_HASHES_W0: NewWitnessHashesMsg,
+		proto_sentry.MessageId_GET_BLOCK_WITNESS_W0:  GetWitnessMsg,
+		proto_sentry.MessageId_BLOCK_WITNESS_W0:      WitnessMsg,
 	},
 }
