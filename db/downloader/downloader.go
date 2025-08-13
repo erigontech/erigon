@@ -1439,12 +1439,15 @@ func (d *Downloader) updateVerificationOccurring() {
 
 // Delete - stop seeding, remove file, remove .torrent.
 func (s *Downloader) Delete(name string) (err error) {
+	log.Warn("[dbg] Delete1", "name", name)
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	t, ok := s.torrentsByName[name]
 	if !ok {
+		log.Warn("[dbg] Delete2", "name", name)
 		return
 	}
+	log.Warn("[dbg] Delete3", "name", name)
 	t.Drop()
 	err = dir.RemoveFile(s.filePathForName(name))
 	if err != nil {
@@ -1461,6 +1464,17 @@ func (s *Downloader) Delete(name string) (err error) {
 	g.MustDelete(s.torrentsByName, name)
 	// I wonder if it's an issue if this occurs before initial sync has completed.
 	delete(s.requiredTorrents, t)
+	log.Warn("[dbg] Delete4", "name", name)
+	for i := 0; i < 10; i++ {
+		if exists, _ := dir.FileExist(s.filePathForName(name)); exists {
+			panic("assert: revive of file " + name)
+		}
+		if exists, _ := dir.FileExist(s.filePathForName(name) + ".torrent"); exists {
+			panic("assert: revive of file " + name)
+		}
+		time.Sleep(time.Second)
+	}
+
 	return nil
 }
 
