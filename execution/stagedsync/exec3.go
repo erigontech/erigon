@@ -1453,13 +1453,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		if err != nil {
 			return false, times, err
 		}
-		v, _, _, err := applyTx.(*temporal.RwTx).Debug().GetLatestFromDB(kv.CommitmentDomain, []byte("state"))
-		if err == nil && len(v) > 16 {
-			txNum, blockNum := binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
-			fmt.Printf("POST FLUSH  %p %d %d\n", applyTx, blockNum, txNum)
-		} else {
-			fmt.Printf("POST FLUSH  %p (%d) %s\n", applyTx, len(v), err)
-		}
 	}
 	return true, times, nil
 
