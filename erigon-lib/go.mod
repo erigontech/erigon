@@ -7,7 +7,6 @@ replace github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844
 require github.com/erigontech/secp256k1 v1.2.0
 
 require (
-	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/consensys/gnark-crypto v0.17.0
@@ -16,12 +15,10 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/go-stack/stack v1.8.1
-	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/json-iterator/go v1.1.12
-	github.com/klauspost/compress v1.18.0
 	github.com/mattn/go-colorable v0.1.13
 	github.com/mattn/go-isatty v0.0.20
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
@@ -52,6 +49,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
+	github.com/frankban/quicktest v1.14.6 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
