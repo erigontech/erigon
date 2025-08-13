@@ -25,24 +25,45 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte) error {
+func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte, blockNumber uint64) error {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// Store witness data
-	err = tx.Put(kv.BorWitnesses, hash[:], witnessData)
+	header := &types.Header{
+		Number: big.NewInt(int64(blockNumber)),
+	}
+
+	headerBytes, err := rlp.EncodeToBytes(header)
 	if err != nil {
 		return err
 	}
 
-	// Store witness size
+	blockNumberBytes := dbutils.EncodeBlockNumber(blockNumber)
+	err = tx.Put(kv.HeaderNumber, hash.Bytes(), blockNumberBytes)
+	if err != nil {
+		return err
+	}
+
+	headerKey := dbutils.HeaderKey(blockNumber, hash)
+	err = tx.Put(kv.Headers, headerKey, headerBytes)
+	if err != nil {
+		return err
+	}
+
+	witnessKey := dbutils.HeaderKey(blockNumber, hash)
+	err = tx.Put(kv.BorWitnesses, witnessKey, witnessData)
+	if err != nil {
+		return err
+	}
+
 	sizeBytes := dbutils.EncodeBlockNumber(uint64(len(witnessData)))
-	err = tx.Put(kv.BorWitnessSizes, hash[:], sizeBytes)
+	err = tx.Put(kv.BorWitnessSizes, witnessKey, sizeBytes)
 	if err != nil {
 		return err
 	}
@@ -80,8 +101,9 @@ func createTestMultiClient(t *testing.T) (*MultiClient, kv.TemporalRwDB) {
 	require.NoError(t, err)
 
 	return &MultiClient{
-		db:     tdb,
-		logger: logger,
+		db:          tdb,
+		logger:      logger,
+		blockReader: freezeblocks.NewBlockReader(nil, nil),
 	}, tdb
 }
 
@@ -106,7 +128,8 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 	t.Run("Valid RLP with Database Data Returns Correct Response", func(t *testing.T) {
 		testBlockHash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 		testWitnessData := []byte("test_witness")
-		err := addTestWitnessData(testDB, testBlockHash, testWitnessData)
+		blockNumber := uint64(100)
+		err := addTestWitnessData(testDB, testBlockHash, testWitnessData, blockNumber)
 		require.NoError(t, err)
 
 		req := wit.GetWitnessPacket{
@@ -200,11 +223,13 @@ func TestNewWitnessFunction(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		storedWitnessData, err := tx.GetOne(kv.BorWitnesses, expectedBlockHash[:])
+		// Use the correct HeaderKey format (block number + hash) to retrieve data
+		expectedKey := dbutils.HeaderKey(200, expectedBlockHash)
+		storedWitnessData, err := tx.GetOne(kv.BorWitnesses, expectedKey)
 		require.NoError(t, err)
 		require.NotEmpty(t, storedWitnessData, "Witness data should be stored in database")
 
-		storedWitnessSize, err := tx.GetOne(kv.BorWitnessSizes, expectedBlockHash[:])
+		storedWitnessSize, err := tx.GetOne(kv.BorWitnessSizes, expectedKey)
 		require.NoError(t, err)
 		require.NotEmpty(t, storedWitnessSize, "Witness size should be stored in database")
 
@@ -225,7 +250,7 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 		testBlockHash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 		testWitnessData := []byte("test witness data for message handler test")
 
-		err := addTestWitnessData(testDB, testBlockHash, testWitnessData)
+		err := addTestWitnessData(testDB, testBlockHash, testWitnessData, 100)
 		require.NoError(t, err)
 
 		req := wit.GetWitnessPacket{
@@ -282,7 +307,8 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 		defer tx.Rollback()
 
 		expectedBlockHash := testHeader.Hash()
-		storedWitnessData, err := tx.GetOne(kv.BorWitnesses, expectedBlockHash[:])
+		expectedKey := dbutils.HeaderKey(200, expectedBlockHash)
+		storedWitnessData, err := tx.GetOne(kv.BorWitnesses, expectedKey)
 		require.NoError(t, err)
 		require.NotEmpty(t, storedWitnessData, "Witness data should be stored in database")
 	})
@@ -307,7 +333,7 @@ func TestWitnessPagination(t *testing.T) {
 		largeWitnessData[i] = byte(i % 256)
 	}
 
-	err := addTestWitnessData(testDB, testBlockHash, largeWitnessData)
+	err := addTestWitnessData(testDB, testBlockHash, largeWitnessData, 100)
 	require.NoError(t, err)
 
 	t.Run("Request Page 0 - First Page", func(t *testing.T) {
@@ -554,7 +580,7 @@ func TestWitnessExactPageSize(t *testing.T) {
 		exactPageSizeData[i] = byte(i % 256)
 	}
 
-	err := addTestWitnessData(testDB, testBlockHash, exactPageSizeData)
+	err := addTestWitnessData(testDB, testBlockHash, exactPageSizeData, 100)
 	require.NoError(t, err)
 
 	req := wit.GetWitnessPacket{

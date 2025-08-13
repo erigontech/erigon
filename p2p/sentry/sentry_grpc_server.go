@@ -753,9 +753,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			peerID := peer.Pubkey()
 			printablePeerID := hex.EncodeToString(peerID[:])
 			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
-
-			// Get or create shared PeerInfo (thread-safe)
-			peerInfo := ss.getOrCreatePeer(peer, rw)
+			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			if err != nil {
+				return err
+			}
 			peerInfo.protocol = protocol
 			defer peerInfo.Close()
 
@@ -817,8 +818,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			DialCandidates: nil,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 				peerID := peer.Pubkey()
-				// Get or create shared PeerInfo (thread-safe)
-				peerInfo := ss.getOrCreatePeer(peer, rw)
+				peerInfo, err := ss.getOrCreatePeer(peer, rw, wit.ProtocolName)
+				if err != nil {
+					return err
+				}
 				peerInfo.witProtocol = wit.ProtocolVersions[0]
 
 				return runWitPeer(
@@ -965,28 +968,41 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 	return nil
 }
 
-// getOrCreatePeer safely gets or creates PeerInfo, ensuring only one is created per peer
-func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
+// getOrCreatePeer gets or creates PeerInfo
+func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, protocolName string) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()
 
-	// First, try to get existing PeerInfo without locking
-	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		return peerInfo
-	}
-
-	// If not found, use mutex to ensure only one PeerInfo is created
 	ss.peerCreationMutex.Lock()
 	defer ss.peerCreationMutex.Unlock()
 
-	// Double-check after acquiring lock (another goroutine might have created it)
-	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		return peerInfo
+	existingPeerInfo := ss.getPeer(peerID)
+
+	if existingPeerInfo == nil {
+		peerInfo := NewPeerInfo(peer, rw)
+		ss.GoodPeers.Store(peerID, peerInfo)
+		return peerInfo, nil
 	}
 
-	// Create new PeerInfo and store it
-	peerInfo := NewPeerInfo(peer, rw)
-	ss.GoodPeers.Store(peerID, peerInfo)
-	return peerInfo
+	// allow one connection per protocol
+	if protocolName == eth.ProtocolName {
+		existingVersion := existingPeerInfo.protocol
+		if existingVersion != 0 {
+			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
+		}
+
+		return existingPeerInfo, nil
+	}
+
+	if protocolName == wit.ProtocolName {
+		existingVersion := existingPeerInfo.witProtocol
+		if existingVersion != 0 {
+			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
+		}
+
+		return existingPeerInfo, nil
+	}
+
+	return existingPeerInfo, nil
 }
 
 func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
