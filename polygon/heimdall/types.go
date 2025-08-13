@@ -259,23 +259,34 @@ var (
 		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
-				tx, err := db.BeginRo(ctx)
-				if err != nil {
-					return 0, err
-				}
+				var spanFrom, spanTo uint64
+				err := db.View(ctx, func(tx kv.Tx) (err error) {
+					rangeIndex := NewTxSpanRangeIndex(db, kv.BorSpansIndex, tx)
 
-				spanFrom, err := SpanIdAtNew(tx, blockFrom)
-				if err != nil {
-					return 0, err
-				}
-				spanTo, err := SpanIdAtNew(tx, blockTo)
+					spanIds, ok, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
+					if err != nil {
+						return err
+					}
+
+					if !ok {
+						return ErrHeimdallDataIsNotReady
+					}
+
+					if len(spanIds) > 0 {
+						spanFrom = spanIds[0]
+						spanTo = spanIds[len(spanIds)-1]
+					}
+
+					return nil
+				})
+
 				if err != nil {
 					return 0, err
 				}
 
 				logger.Debug("Extracting spans to snapshots", "blockFrom", blockFrom, "blockTo", blockTo, "spanFrom", spanFrom, "spanTo", spanTo)
 
-				return extractValueRange(ctx, kv.BorSpans, uint64(spanFrom), uint64(spanTo), db, collect, workers, lvl, logger)
+				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{Indexes.BorSpanId},
 		snaptype.IndexBuilderFunc(

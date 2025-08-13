@@ -41,19 +41,8 @@ func NewMdbxStore(logger log.Logger, dataDir string, accede bool, roTxLimit int6
 }
 
 func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
-	spanIndex := RangeIndexFunc(
-		func(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-			tx, err := db.BeginRo(ctx)
-			if err != nil {
-				return 0, false, err
-			}
-			defer tx.Rollback()
-			spanId, err := SpanIdAtNew(tx, blockNum)
-			if err != nil {
-				return 0, false, err
-			}
-			return uint64(spanId), true, nil
-		})
+	spanIndex := NewSpanRangeIndex(db, kv.BorSpansIndex)
+	producerSelectionIndex := NewSpanRangeIndex(db, kv.BorSpans)
 
 	return &MdbxStore{
 		db: db,
@@ -66,7 +55,7 @@ func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 		spans: newMdbxEntityStore(
 			db, kv.BorSpans, Spans, generics.New[Span], spanIndex),
 		spanBlockProducerSelections: newMdbxEntityStore(
-			db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
+			db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], producerSelectionIndex),
 	}
 }
 

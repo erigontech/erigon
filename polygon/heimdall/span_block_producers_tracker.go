@@ -76,20 +76,7 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			// update spans index: span.StartBlock => span.Id
-			tx, err := t.db.BeginRw(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-			err = UpdateSpansIndex(tx, *newSpan)
-			if err != nil {
-				return err
-			}
-			err = tx.Commit()
-			if err != nil {
-				return err
-			}
+
 			t.queued.Add(-1)
 			if t.queued.Load() == 0 {
 				select {
@@ -222,12 +209,18 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
-	spanId := SpanIdAt(blockNum)
+	spanId, ok, err := t.store.EntityIdFromBlockNum(ctx, blockNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		return nil, 0, fmt.Errorf("could not get spanId from blockNum=%d", blockNum)
+	}
 	var prevSprintNum uint64
 	if currentSprintNum > 0 {
 		prevSprintNum = currentSprintNum - 1
 	}
-	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && spanId == selection.SpanId {
+	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && SpanId(spanId) == selection.SpanId {
 		producersCopy := selection.Producers.Copy()
 		producersCopy.IncrementProposerPriority(1)
 		selectionCopy := selection

@@ -1,0 +1,188 @@
+package heimdall
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
+)
+
+type spanRangeIndex struct {
+	db    *polygoncommon.Database
+	table string
+}
+
+func NewSpanRangeIndex(db *polygoncommon.Database, table string) *spanRangeIndex {
+	return &spanRangeIndex{db, table}
+}
+
+func (i *spanRangeIndex) WithTx(tx kv.Tx) RangeIndexer {
+	return &txSpanRangeIndex{i, tx}
+}
+
+// Put a mapping from a range to an id.
+func (i *spanRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+	tx, err := i.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := i.WithTx(tx).Put(ctx, r, id); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// Lookup an id of a span given by blockNum within that range.
+func (i *spanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	var id uint64
+	var ok bool
+
+	err := i.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		id, ok, err = i.WithTx(tx).Lookup(ctx, blockNum)
+		return err
+	})
+	return id, ok, err
+}
+
+// Lookup ids for the given range [blockFrom, blockTo). Return boolean which checks if the result is reliable to use, because
+// heimdall data can be not published yet for [blockFrom, blockTo), in that case boolean OK will be false
+func (i *spanRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, bool, error) {
+	var ids []uint64
+	var ok bool
+
+	err := i.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		ids, ok, err = i.WithTx(tx).GetIDsBetween(ctx, blockFrom, blockTo)
+		return err
+	})
+	return ids, ok, err
+}
+
+type txSpanRangeIndex struct {
+	*spanRangeIndex
+	tx kv.Tx
+}
+
+func NewTxSpanRangeIndex(db kv.RoDB, table string, tx kv.Tx) *txSpanRangeIndex {
+	return &txSpanRangeIndex{&spanRangeIndex{db: polygoncommon.AsDatabase(db.(kv.RwDB)), table: table}, tx}
+}
+
+func (i *txSpanRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
+	key := rangeIndexKey(r.Start) // use span.StartBlock as key
+	tx, ok := i.tx.(kv.RwTx)
+
+	if !ok {
+		return errors.New("tx not writable")
+	}
+	valuePair := writeSpanIdEndBlockPair(id, r.End) // write (spanId, EndBlock) pair to buf
+	return tx.Put(kv.BorSpansIndex, key[:], valuePair[:])
+}
+
+func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
+	cursor, err := i.tx.Cursor(kv.BorSpansIndex)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+
+	key := rangeIndexKey(blockNum)
+	startBlockRaw, valuePair, err := cursor.Seek(key[:])
+	if err != nil {
+		return 0, false, err
+	}
+	// seek not found, we check the last entry
+	if valuePair == nil {
+		// get latest then
+		lastStartBlockRaw, lastValuePair, err := cursor.Last()
+		if err != nil {
+			return 0, false, err
+		}
+		if lastValuePair == nil {
+			return 0, false, fmt.Errorf("SpanIndexLookup(%d) error %w", blockNum, ErrSpanNotFound)
+		}
+		lastStartBlock := rangeIndexKeyParse(lastStartBlockRaw)
+		lastSpanId, lastEndBlock := rangeIndexValuePairParse(lastValuePair)
+		// sanity check
+		isInRange := blockNumInRange(blockNum, lastStartBlock, lastEndBlock)
+		if !isInRange {
+			return 0, false, fmt.Errorf("SpanIndexLookup(%d) return Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, lastSpanId, lastStartBlock, lastEndBlock, blockNum)
+		}
+		// happy case
+		return lastSpanId, true, nil
+
+	}
+
+	currStartBlock := rangeIndexKeyParse(startBlockRaw)
+	// If currStartBlock == blockNum, then this span contains blockNum, and no need to do the .Prev() below
+	if currStartBlock == blockNum {
+		currSpanId, currEndBlock := rangeIndexValuePairParse(valuePair)
+		// sanityCheck
+		isInRange := blockNumInRange(blockNum, currStartBlock, currEndBlock)
+		if !isInRange {
+			return 0, false, fmt.Errorf("SpanIndexLookup(%d) return Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, currSpanId, currStartBlock, currEndBlock, blockNum)
+		}
+		// happy case
+		return currSpanId, true, nil
+	}
+
+	// Prev should contain the appropriate span containing blockNum
+	prevStartBlockRaw, prevValuePair, err := cursor.Prev()
+	if err != nil {
+		return 0, false, err
+	}
+	prevStartBlock := rangeIndexKeyParse(prevStartBlockRaw)
+	spanId, endBlock := rangeIndexValuePairParse(prevValuePair)
+	// sanity check
+	isInRange := blockNumInRange(blockNum, prevStartBlock, endBlock)
+	if !isInRange {
+		return 0, false, fmt.Errorf("SpanIndexLookup(%d) return Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, spanId, prevStartBlock, endBlock, blockNum)
+	}
+	// happy case
+	return spanId, true, nil
+}
+
+func (i *txSpanRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, bool, error) {
+	startId, ok, err := i.Lookup(ctx, blockFrom)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+
+	endId, ok, err := i.Lookup(ctx, blockTo)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+
+	return []uint64{startId, endId}, true, nil
+}
+
+func blockNumInRange(blockNum, startBlock, endBlock uint64) bool {
+	return startBlock <= blockNum && blockNum <= endBlock
+}
+
+// Write (spanId, endBlock) to buffer
+func writeSpanIdEndBlockPair(spanId uint64, spanEndBlock uint64) [16]byte {
+	result := [16]byte{}
+	binary.BigEndian.PutUint64(result[:], spanId)
+	binary.BigEndian.PutUint64(result[8:], spanEndBlock)
+	return result
+}
+
+// Parse to pair (uint64,uint64)
+func rangeIndexValuePairParse(valuePair []byte) (uint64, uint64) {
+	first := binary.BigEndian.Uint64(valuePair[:8])
+	second := binary.BigEndian.Uint64(valuePair[8:])
+	return first, second
+}
