@@ -247,8 +247,8 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		if err != nil {
 			return false, err
 		}
+		defer tx.Rollback()
 		txc.SetTx(tx)
-		defer txc.Tx.Rollback()
 	}
 
 	if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
