@@ -909,6 +909,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
 	require.Equal(t, 5, int(latestStepInDB))
 
+	latestStepInDBNoHist := agg.d[kv.AccountsDomain].maxStepInDBNoHistory(tx)
+	require.Equal(t, 2, int(latestStepInDBNoHist))
+
 	err = tx.Commit()
 	require.NoError(t, err)
 

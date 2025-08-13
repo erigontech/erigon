@@ -65,7 +65,7 @@ jobs:
           docker buildx prune --verbose -f -a
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## v5.0.0
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
@@ -223,7 +223,7 @@ jobs:
           python-version: '3.12'
 
       - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
           path: .
@@ -236,7 +236,7 @@ jobs:
           ls -lR
 
       - name: Fast checkout git repository erigontech/erigon-qa
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## 4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## 5.0.0
         with:
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
@@ -307,7 +307,7 @@ jobs:
     steps:
 
     - name: Fast checkout just ${{ env.DOCKERFILE_PATH }} from git repository ${{ env.APP_REPO }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## v4.2.2
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## v5.0.0
       with:
         repository: ${{ env.APP_REPO }}
         sparse-checkout: ${{ env.DOCKERFILE_PATH }}
@@ -315,17 +315,17 @@ jobs:
         ref: ${{ needs.build-release.outputs.commit-id }}
 
     - name: Download arm64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
     - name: Download amd64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
 
     - name: Download amd64v2 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
 
@@ -360,31 +360,31 @@ jobs:
 
     steps:
     - name: Download linux/arm64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
         path: dist/
 
     - name: Download linux/amd64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
         path: dist/
 
     - name: Download linux/amd64v2 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
         path: dist/
 
     - name: Download arm64 debian package
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
         path: dist/
 
     - name: Download amd64 debian package
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
         path: dist/
@@ -418,7 +418,7 @@ jobs:
 
     steps:
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## 4.2.2 release
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 ## 4.2.2 release
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0

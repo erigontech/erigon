@@ -1381,10 +1381,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
-	branchData, fileEndTxNum, err := hph.ctx.Branch(key)
+	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
 		return false, err
 	}
+	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest

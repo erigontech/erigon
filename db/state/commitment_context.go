@@ -397,7 +397,7 @@ type TrieContext struct {
 	trace              bool
 }
 
-func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
+func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
@@ -436,7 +436,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 	return v, step, nil
 }
 
-func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
 	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
 		return nil
 	}
