@@ -27,8 +27,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 var ErrorUnsupportedPlatform = errors.New("unsupported platform")
@@ -85,7 +85,7 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 			l := v.Fields()
 			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
-			diagnostics.Send(diagnostics.MemoryStats{
+			diaglib.Send(diaglib.MemoryStats{
 				Alloc:       m.Alloc,
 				Sys:         m.Sys,
 				OtherFields: v.Fields(),

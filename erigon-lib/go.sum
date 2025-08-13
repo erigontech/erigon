@@ -58,8 +58,6 @@ github.com/erigontech/mdbx-go v0.39.9 h1:lu3iycXllChqnxn9oqfzSdfoHRahp3R2ClxmjMT
 github.com/erigontech/mdbx-go v0.39.9/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
 github.com/erigontech/secp256k1 v1.2.0 h1:Q/HCBMdYYT0sh1xPZ9ZYEnU30oNyb/vt715cJhj7n7A=
 github.com/erigontech/secp256k1 v1.2.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
-github.com/erigontech/speedtest v0.0.2 h1:W9Cvky/8AMUtUONwkLA/dZjeQ2XfkBdYfJzvhMZUO+U=
-github.com/erigontech/speedtest v0.0.2/go.mod h1:vulsRNiM51BmSTbVtch4FWxKxx53pS2D35lZTtao0bw=
 github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHkI4W8=
 github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
 github.com/go-kit/log v0.1.0/go.mod h1:zbhenjAZHb184qTLMA9ZjW7ThYL0H2mk7Q6pNt4vbaY=
@@ -95,8 +93,6 @@ github.com/google/gofuzz v1.0.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/
 github.com/google/subcommands v1.2.0/go.mod h1:ZjhPrFU+Olkh9WazFPsl27BQ4UPiG37m3yTrtFlrHVk=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
-github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 h1:UH//fgunKIs4JdUbpDl1VZCDaL56wXCB/5+wF6uHfaI=
 github.com/grpc-ecosystem/go-grpc-middleware v1.4.0/go.mod h1:g5qyo/la0ALbONm6Vbp88Yd8NsDy6rZz+RcrMPxvld8=
 github.com/holiman/uint256 v1.3.2 h1:a9EgMPSC1AAaj1SZL5zIQD3WbwTuHrMGOerLjGmM/TA=
