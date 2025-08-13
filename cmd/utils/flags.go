@@ -682,7 +682,7 @@ var (
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,
-		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
+		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name: "torrent.download.rate",
@@ -2062,9 +2062,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 		version := "erigon: " + params2.VersionWithCommit(params2.GitCommit)
-		webseedsList := common.CliString2Array(ctx.String(WebSeedsFlag.Name))
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			webseedsList = append(webseedsList, known...)
+		var webseedsList []string
+		if ctx.IsSet(WebSeedsFlag.Name) {
+			// Unfortunately we don't take webseed URL here in the native format.
+			webseedsList = common.CliString2Array(ctx.String(WebSeedsFlag.Name))
+		} else {
+			if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+				webseedsList = append(webseedsList, known...)
+			}
 		}
 		cfg.Downloader, err = downloadercfg.New(
 			ctx.Context,
@@ -2094,14 +2099,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 // Convenience type for optional flag value representing a rate limit that should print nicely for
 // humans too.
 type RateLimitFlagValue g.Option[rate.Limit]
-
-// Human-readable representation of the rate limit value, or "Inf" if the value is not set.
-func (me RateLimitFlagValue) String() string {
-	if !me.Ok {
-		return "Inf"
-	}
-	return datasize.ByteSize(me.Value).String()
-}
 
 // Converts the parsed rate limit to the type expected by the Downloader torrent configuration.
 func (me RateLimitFlagValue) TorrentRateLimit() g.Option[rate.Limit] {
