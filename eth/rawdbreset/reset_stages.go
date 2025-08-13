@@ -106,55 +106,6 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 
 	return nil
 }
-func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-	if err := tx.ClearTable(kv.BorEventNums); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorEvents); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorSpans); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		return tx.Commit()
-	}
-	return nil
-}
-
-func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
-	tables := []string{
-		kv.BorEventNums,
-		kv.BorEvents,
-		kv.BorSpans,
-		kv.BorEventTimes,
-		kv.BorEventProcessedBlocks,
-		kv.BorMilestones,
-		kv.BorCheckpoints,
-		kv.BorProducerSelections,
-	}
-
-	for _, table := range tables {
-		if err := tx.ClearTable(table); err != nil {
-			return err
-		}
-	}
-
-	if err := ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
-		return err
-	}
-
-	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
-}
 
 func ResetSenders(ctx context.Context, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {

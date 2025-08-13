@@ -52,7 +52,6 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion5,
 		ProhibitNewDownloadsLock,
 		ProhibitNewDownloadsLock2,
-		ClearBorTables,
 		ResetStageTxnLookup,
 	},
 	kv.TxPoolDB: {},
