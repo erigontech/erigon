@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // MockHeaderReader is a mock implementation of HeaderReader for testing.
