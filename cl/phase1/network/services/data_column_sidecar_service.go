@@ -123,13 +123,11 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	// [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. validate that block_header.slot <= current_slot (a client MAY queue future sidecars for processing at the appropriate slot).
 	if blockHeader.Slot > s.ethClock.GetCurrentSlot() && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(blockHeader.Slot) {
-		fmt.Println("not current slot")
 		return ErrIgnore
 	}
 
 	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
 	if blockHeader.Slot <= s.forkChoice.FinalizedSlot() {
-		fmt.Println("not greater than finalized slot")
 		return ErrIgnore
 	}
 
