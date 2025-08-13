@@ -2,18 +2,19 @@ package state
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 func TestOpenFolder(t *testing.T) {
