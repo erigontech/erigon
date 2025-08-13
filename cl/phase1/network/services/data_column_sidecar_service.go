@@ -17,8 +17,13 @@ import (
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+)
+
+var (
+	verifyDataColumnSidecarInclusionProof = das.VerifyDataColumnSidecarInclusionProof
+	verifyDataColumnSidecarKZGProofs      = das.VerifyDataColumnSidecarKZGProofs
+	verifyDataColumnSidecar               = das.VerifyDataColumnSidecar
 )
 
 type dataColumnSidecarService struct {
@@ -193,7 +198,7 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 		if err != nil {
 			return fmt.Errorf("unable to compute signing root: %v", err)
 		}
-		valid, err = bls.Verify(signedBlockHeader.Signature[:], signingRoot[:], pk[:])
+		valid, err = blsVerify(signedBlockHeader.Signature[:], signingRoot[:], pk[:])
 		if err != nil {
 			return fmt.Errorf("unable to verify signature: %v", err)
 		}

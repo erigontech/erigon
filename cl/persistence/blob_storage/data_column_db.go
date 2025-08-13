@@ -19,11 +19,6 @@ import (
 	"github.com/spf13/afero"
 )
 
-const (
-	// subdivisionSlot = 10_000
-	mutexSize = 64
-)
-
 //go:generate mockgen -typed=true -destination=./mock_services/data_column_storage_mock.go -package=mock_services . DataColumnStorage
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
