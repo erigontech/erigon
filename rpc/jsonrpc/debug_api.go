@@ -121,6 +121,9 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 
 	var blockNumber uint64
 
+	//if incompletes == false {
+	//	return state.IteratorDump{}, fmt.Errorf("incompletes == false not supported")
+	//}
 	if number, ok := blockNrOrHash.Number(); ok {
 		if number == rpc.PendingBlockNumber {
 			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
@@ -161,6 +164,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	}
 
 	dumper := state.NewDumper(tx, api._blockReader.TxnumReader(ctx), blockNumber)
+	fmt.Println ("address: ", common.BytesToAddress(startKey))
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
