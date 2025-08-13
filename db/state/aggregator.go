@@ -903,7 +903,7 @@ func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
 	if txNumInFiles > 0 {
 		txNumInFiles--
 	}
-	return txNumInFiles / uint64(at.StepSize())
+	return txNumInFiles / at.StepSize()
 }
 
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
@@ -1191,7 +1191,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	txTo := at.a.visibleFilesMinimaxTxNum.Load()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
-		step = kv.Step((txTo - 1) / uint64(at.StepSize()))
+		step = kv.Step((txTo - 1) / at.StepSize())
 	}
 
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
@@ -1323,7 +1323,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
 			// ensure that we do not make further merge progress until ranges are not equal
 			maxEndTxNum = min(maxEndTxNum, max(lmrAcc.to, lmrSto.to, lmrCom.to))
-			at.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/uint64(at.StepSize()),
+			at.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/at.StepSize(),
 				"acc", lmrAcc.String("", at.StepSize()), "sto", lmrSto.String("", at.StepSize()), "com", lmrCom.String("", at.StepSize()))
 		}
 	}
