@@ -26,9 +26,10 @@ import (
 	"syscall"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
+	"github.com/gofrs/flock"
+
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/gofrs/flock"
 )
 
 // Dirs is the file system folder the node should use for any data storage
