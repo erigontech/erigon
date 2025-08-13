@@ -97,7 +97,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			}
 			accessor := item.index
 			if accessor == nil {
-				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.aggStep, item.endTxNum/dt.aggStep)
+				fPath := dt.d.efAccessorFilePath(kv.Step(item.startTxNum/dt.stepSize), kv.Step(item.endTxNum/dt.stepSize))
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -142,7 +142,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 }
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
-	fromTxNum := fromStep * iit.ii.aggregationStep
+	fromTxNum := fromStep * iit.ii.stepSize
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 

@@ -725,7 +725,7 @@ func (m *MemoryMutation) AggTx() any {
 	return m.db.(hasAggCtx).AggTx()
 }
 
-func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	// panic("not supported")
 	return m.db.(kv.TemporalTx).GetLatest(name, k)
 }

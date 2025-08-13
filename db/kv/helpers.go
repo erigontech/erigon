@@ -284,15 +284,15 @@ func (d *DomainDiff) Copy() *DomainDiff {
 }
 
 // RecordDelta records a state change.
-func (d *DomainDiff) DomainUpdate(k []byte, step uint64, prevValue []byte, prevStep uint64) {
+func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte, prevStep Step) {
 	if d.keys == nil {
 		d.keys = make(map[string][]byte, 16)
 		d.prevValues = make(map[string][]byte, 16)
 		d.prevStepBuf = make([]byte, 8)
 		d.currentStepBuf = make([]byte, 8)
 	}
-	binary.BigEndian.PutUint64(d.prevStepBuf, ^prevStep)
-	binary.BigEndian.PutUint64(d.currentStepBuf, ^step)
+	binary.BigEndian.PutUint64(d.prevStepBuf, ^uint64(prevStep))
+	binary.BigEndian.PutUint64(d.currentStepBuf, ^uint64(step))
 
 	d.keyBuf = append(append(d.keyBuf[:0], k...), d.currentStepBuf...)
 	key := toStringZeroCopy(d.keyBuf[:len(k)])

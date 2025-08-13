@@ -54,9 +54,9 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 }
 
 // SaveExecV3PrunableProgress saves latest pruned key in given table to the database.
-func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step uint64) error {
+func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step kv.Step) error {
 	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, step)
+	binary.BigEndian.PutUint64(v, uint64(step))
 	if err := db.Delete(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...)); err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step uint64) error {
 }
 
 // GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
-func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error) {
+func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step kv.Step, err error) {
 	v, err := db.GetOne(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...))
 	if err != nil {
 		return 0, err
@@ -72,5 +72,5 @@ func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error
 	if len(v) == 0 {
 		return 0, nil
 	}
-	return binary.BigEndian.Uint64(v), nil
+	return kv.Step(binary.BigEndian.Uint64(v)), nil
 }

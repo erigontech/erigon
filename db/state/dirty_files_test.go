@@ -2,13 +2,15 @@ package state
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestFileItemWithMissedAccessor(t *testing.T) {
@@ -34,7 +36,7 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	btree.Set(f2)
 	btree.Set(f3)
 
-	accessorFor := func(fromStep, toStep uint64) []string {
+	accessorFor := func(fromStep, toStep kv.Step) []string {
 		return []string{
 			filepath.Join(tmp, fmt.Sprintf("testacc_%d_%d.bin", fromStep, toStep)),
 			filepath.Join(tmp, fmt.Sprintf("testacc2_%d_%d.bin", fromStep, toStep)),
@@ -42,12 +44,12 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	}
 
 	// create accesssor files for f1, f2
-	for _, fname := range accessorFor(f1.startTxNum/aggStep, f1.endTxNum/aggStep) {
+	for _, fname := range accessorFor(kv.Step(f1.startTxNum/aggStep), kv.Step(f1.endTxNum/aggStep)) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer dir.RemoveFile(fname)
 	}
 
-	for _, fname := range accessorFor(f2.startTxNum/aggStep, f2.endTxNum/aggStep) {
+	for _, fname := range accessorFor(kv.Step(f2.startTxNum/aggStep), kv.Step(f2.endTxNum/aggStep)) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer dir.RemoveFile(fname)
 	}
