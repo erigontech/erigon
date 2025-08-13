@@ -72,6 +72,8 @@ import (
 
 var debugWebseed = false
 
+const TorrentClientStatusPath = "/downloader/torrentClientStatus"
+
 func init() {
 	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
 	webseed.PrintDebug = debugWebseed
@@ -1416,12 +1418,12 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d.torrentClient.WriteStatus(w)
 	})
-	p := "/downloader/torrentClientStatus"
+
 	// This is for gopprof.
 	defaultMux := http.DefaultServeMux
-	defaultMux.Handle(p, h)
+	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
-		debugMux.Handle(p, h)
+		debugMux.Handle(TorrentClientStatusPath, h)
 	}
 }
 
