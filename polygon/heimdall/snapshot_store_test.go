@@ -3,6 +3,7 @@ package heimdall
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -29,9 +30,9 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, Enums.Spans, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	createTestBorEventSegmentFile(t, 0, 5_000, 132, dir, logger)
+	createTestSegmentFile(t, 0, 5_000, Enums.Spans, dir, version.V1_0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -39,9 +40,11 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	err = heimdallStore.Prepare(t.Context())
+	require.NoError(t, err)
 	lastFrozenSpanId, err := heimdallStore.spans.LastFrozenEntityId()
 	require.NoError(t, err)
-	require.Equal(t, uint64(78), lastFrozenSpanId)
+	require.Equal(t, uint64(4), lastFrozenSpanId)
 }
 
 func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) {
@@ -130,14 +133,25 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver version.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	segFileName := filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name))
+	c, err := seg.NewCompressor(context.Background(), "test", segFileName, dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
-	err = c.AddWord([]byte{1})
-	require.NoError(t, err)
+	// use from and to to determine which spans go inside this .seg file from the spansForTesting
+	// it is not a requirement, but a handy convention for testing purposes
+	for i := from / 1000; i <= to/1000; i++ {
+		span := spanDataForTesting[i]
+		buf, err := json.Marshal(span)
+		require.NoError(t, err)
+		err = c.AddWord(buf)
+		require.NoError(t, err)
+	}
 	err = c.Compress()
 	require.NoError(t, err)
+	d, err := seg.NewDecompressor(segFileName)
+	require.NoError(t, err)
+	_ = d
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   c.Count(),
 		Enums:      c.Count() > 0,
@@ -150,8 +164,17 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	require.NoError(t, err)
 	defer idx.Close()
 	idx.DisableFsync()
-	err = idx.AddKey([]byte{1}, 0)
-	require.NoError(t, err)
+	getter := d.MakeGetter()
+	var i, offset, nextPos uint64
+	var key [8]byte
+	for getter.HasNext() {
+		nextPos, _ = getter.Skip()
+		binary.BigEndian.PutUint64(key[:], i)
+		i++
+		err = idx.AddKey(key[:], offset)
+		require.NoError(t, err)
+		offset = nextPos
+	}
 	err = idx.Build(context.Background())
 	require.NoError(t, err)
 	if name == snaptype2.Transactions.Enum() {
@@ -209,4 +232,57 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 	require.NoError(t, err)
 	err = idx.Build(context.Background())
 	require.NoError(t, err)
+}
+
+var spanDataForTesting = []Span{
+	Span{
+		Id:         0,
+		StartBlock: 0,
+		EndBlock:   999,
+	},
+	Span{
+		Id:         1,
+		StartBlock: 1000,
+		EndBlock:   1999,
+	},
+	Span{
+		Id:         2,
+		StartBlock: 2000,
+		EndBlock:   2999,
+	},
+	Span{
+		Id:         3,
+		StartBlock: 3000,
+		EndBlock:   3999,
+	},
+	Span{
+		Id:         4,
+		StartBlock: 4000,
+		EndBlock:   4999,
+	},
+	Span{
+		Id:         5,
+		StartBlock: 5000,
+		EndBlock:   5999,
+	},
+	Span{
+		Id:         6,
+		StartBlock: 6000,
+		EndBlock:   6999,
+	},
+	Span{
+		Id:         7,
+		StartBlock: 7000,
+		EndBlock:   7999,
+	},
+	Span{
+		Id:         8,
+		StartBlock: 8000,
+		EndBlock:   8999,
+	},
+	Span{
+		Id:         9,
+		StartBlock: 9000,
+		EndBlock:   9999,
+	},
 }

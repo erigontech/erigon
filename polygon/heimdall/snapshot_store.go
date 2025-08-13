@@ -105,9 +105,9 @@ func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 		}
 		err = rangeIndexer.Put(ctx, span.BlockNumRange(), uint64(span.Id))
 		if err != nil {
-			return false, nil // happy case, we can continue updating
+			return true, nil // happy case, we can continue updating
 		} else {
-			return true, err // we need to stop if we encounter an error, so that the function doesn't get called again
+			return false, err // we need to stop if we encounter an error, so that the function doesn't get called again
 		}
 	}
 	// fill the index walking backwards from
