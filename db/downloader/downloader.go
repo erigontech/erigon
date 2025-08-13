@@ -1465,15 +1465,20 @@ func (s *Downloader) Delete(name string) (err error) {
 	// I wonder if it's an issue if this occurs before initial sync has completed.
 	delete(s.requiredTorrents, t)
 	log.Warn("[dbg] Delete4", "name", name)
-	for i := 0; i < 10; i++ {
-		if exists, _ := dir.FileExist(s.filePathForName(name)); exists {
-			panic("assert: revive of file " + name)
+	go func() {
+		for i := 0; i < 10; i++ {
+			if exists, _ := dir.FileExist(s.filePathForName(name)); exists {
+				panic("assert: revive1 of file " + name)
+			}
+			if exists, _ := dir.FileExist(s.filePathForName(name) + ".torrent"); exists {
+				panic("assert: revive2 of file " + name)
+			}
+			if exists, _ := dir.FileExist(filepath.Join(s.SnapDir(), name)); exists {
+				panic("assert: revive3 of file " + name)
+			}
+			time.Sleep(time.Second)
 		}
-		if exists, _ := dir.FileExist(s.filePathForName(name) + ".torrent"); exists {
-			panic("assert: revive of file " + name)
-		}
-		time.Sleep(time.Second)
-	}
+	}()
 
 	return nil
 }
