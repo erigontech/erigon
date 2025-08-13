@@ -47,83 +47,9 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
-// cleanupWitnessesForUnwind removes witness data for blocks that are being unwound
-func cleanupWitnessesForUnwind(tx kv.RwTx, fromBlock uint64) error {
-	cursor, err := tx.RwCursor(kv.BorWitnesses)
-	if err != nil {
-		return fmt.Errorf("failed to create BorWitnesses cursor: %w", err)
-	}
-	defer cursor.Close()
-
-	deletedCount := 0
-	for k, _, err := cursor.Seek(hexutil.EncodeTs(fromBlock)); k != nil; k, _, err = cursor.Next() {
-		if err != nil {
-			return fmt.Errorf("error iterating BorWitnesses: %w", err)
-		}
-		if err := cursor.DeleteCurrent(); err != nil {
-			return fmt.Errorf("failed to delete witness during unwind: %w", err)
-		}
-		if err := tx.Delete(kv.BorWitnessSizes, k); err != nil {
-			return fmt.Errorf("failed to delete witness size during unwind: %w", err)
-		}
-		deletedCount++
-	}
-
-	if deletedCount > 0 {
-		log.Debug("Cleaned up witnesses during unwind", "deleted_count", deletedCount, "from_block", fromBlock)
-	}
-
-	return nil
-}
-
-// cleanupOldWitnesses removes witness data older than WitnessRetentionBlocks
-func cleanupOldWitnesses(tx kv.RwTx, currentBlockNum uint64, logger log.Logger) error {
-	if currentBlockNum <= WitnessRetentionBlocks {
-		return nil
-	}
-
-	cutoffBlockNum := currentBlockNum - WitnessRetentionBlocks
-	logger.Debug("Cleaning up old witness data", "current_block", currentBlockNum, "cutoff_block", cutoffBlockNum)
-
-	cursor, err := tx.RwCursor(kv.BorWitnesses)
-	if err != nil {
-		return fmt.Errorf("failed to create BorWitnesses cursor: %w", err)
-	}
-	defer cursor.Close()
-
-	deletedCount := 0
-	for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
-		if err != nil {
-			return fmt.Errorf("error iterating BorWitnesses: %w", err)
-		}
-
-		blockNum := binary.BigEndian.Uint64(k[:8])
-		if blockNum < cutoffBlockNum {
-			if err := cursor.DeleteCurrent(); err != nil {
-				return fmt.Errorf("failed to delete witness: %w", err)
-			}
-			if err := tx.Delete(kv.BorWitnessSizes, k); err != nil {
-				return fmt.Errorf("failed to delete witness size: %w", err)
-			}
-			deletedCount++
-		} else {
-			break
-		}
-	}
-
-	if deletedCount > 0 {
-		logger.Debug("Cleaned up old witness data", "deleted_count", deletedCount, "cutoff_block", cutoffBlockNum)
-	}
-
-	return nil
-}
-
 // The number of blocks we should be able to re-org sub-second on commodity hardware.
 // See https://hackmd.io/TdJtNs0dS56q-In8h-ShSg
 const ShortPoSReorgThresholdBlocks = 10
-
-// WitnessRetentionBlocks defines how many recent blocks to keep witness data for
-const WitnessRetentionBlocks = 10000
 
 type HeadersCfg struct {
 	db                kv.RwDB
@@ -414,10 +340,6 @@ Loop:
 		if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
 			return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
 		}
-
-		if err := cleanupOldWitnesses(tx, headerInserter.GetHighest(), logger); err != nil {
-			logger.Warn("Failed to cleanup old witnesses", "err", err, "highest_block", headerInserter.GetHighest())
-		}
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -534,11 +456,6 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 	}
 	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock); err != nil {
 		return err
-	}
-
-	if err := cleanupWitnessesForUnwind(tx, u.UnwindPoint+1); err != nil {
-		// don't fail if witness cleanup fails
-		log.Warn("Failed to cleanup witnesses during unwind", "err", err, "unwind_point", u.UnwindPoint)
 	}
 
 	if unwindBlock {

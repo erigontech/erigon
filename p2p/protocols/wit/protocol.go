@@ -38,6 +38,9 @@ const (
 	PageSize                       = 15 * 1024 * 1024  // 15 MB
 	MaximumCachedWitnessOnARequest = 200 * 1024 * 1024 // 200 MB, the maximum amount of memory a request can demand while getting witness
 	MaximumResponseSize            = 16 * 1024 * 1024  // 16 MB, helps to fast fail check
+
+	// RetentionBlocks defines how many recent blocks to keep witness data for
+	RetentionBlocks = 10000
 )
 
 const (

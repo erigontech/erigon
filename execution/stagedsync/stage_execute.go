@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
@@ -47,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -58,6 +61,77 @@ const (
 	// stateStreamLimit - don't accumulate state changes if jump is bigger than this amount of blocks
 	stateStreamLimit uint64 = 1_000
 )
+
+// cleanupWitnessesForUnwind removes witness data for blocks that are being unwound
+func cleanupWitnessesForUnwind(tx kv.RwTx, fromBlock uint64) error {
+	cursor, err := tx.RwCursor(kv.BorWitnesses)
+	if err != nil {
+		return fmt.Errorf("failed to create BorWitnesses cursor: %w", err)
+	}
+	defer cursor.Close()
+
+	deletedCount := 0
+	for k, _, err := cursor.Seek(hexutil.EncodeTs(fromBlock)); k != nil; k, _, err = cursor.Next() {
+		if err != nil {
+			return fmt.Errorf("error iterating BorWitnesses: %w", err)
+		}
+		if err := cursor.DeleteCurrent(); err != nil {
+			return fmt.Errorf("failed to delete witness during unwind: %w", err)
+		}
+		if err := tx.Delete(kv.BorWitnessSizes, k); err != nil {
+			return fmt.Errorf("failed to delete witness size during unwind: %w", err)
+		}
+		deletedCount++
+	}
+
+	if deletedCount > 0 {
+		log.Debug("Cleaned up witnesses during unwind", "deleted_count", deletedCount, "from_block", fromBlock)
+	}
+
+	return nil
+}
+
+// cleanupOldWitnesses removes witness data older than WitnessRetentionBlocks
+func cleanupOldWitnesses(tx kv.RwTx, currentBlockNum uint64, logger log.Logger) error {
+	if currentBlockNum <= wit.RetentionBlocks {
+		return nil
+	}
+
+	cutoffBlockNum := currentBlockNum - wit.RetentionBlocks
+	logger.Debug("Cleaning up old witness data", "current_block", currentBlockNum, "cutoff_block", cutoffBlockNum)
+
+	cursor, err := tx.RwCursor(kv.BorWitnesses)
+	if err != nil {
+		return fmt.Errorf("failed to create BorWitnesses cursor: %w", err)
+	}
+	defer cursor.Close()
+
+	deletedCount := 0
+	for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
+		if err != nil {
+			return fmt.Errorf("error iterating BorWitnesses: %w", err)
+		}
+
+		blockNum := binary.BigEndian.Uint64(k[:8])
+		if blockNum < cutoffBlockNum {
+			if err := cursor.DeleteCurrent(); err != nil {
+				return fmt.Errorf("failed to delete witness: %w", err)
+			}
+			if err := tx.Delete(kv.BorWitnessSizes, k); err != nil {
+				return fmt.Errorf("failed to delete witness size: %w", err)
+			}
+			deletedCount++
+		} else {
+			break
+		}
+	}
+
+	if deletedCount > 0 {
+		logger.Debug("Cleaned up old witness data", "deleted_count", deletedCount, "cutoff_block", cutoffBlockNum)
+	}
+
+	return nil
+}
 
 type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
@@ -373,6 +447,15 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
 		return err
 	}
+
+	// Clean up witness data for unwound blocks
+	if txc.Tx != nil {
+		if err := cleanupWitnessesForUnwind(txc.Tx, u.UnwindPoint+1); err != nil {
+			// don't fail if witness cleanup fails
+			logger.Warn("Failed to cleanup witnesses during unwind", "err", err, "unwind_point", u.UnwindPoint)
+		}
+	}
+
 	if err = u.Done(txc.Tx); err != nil {
 		return err
 	}
