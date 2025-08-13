@@ -583,7 +583,7 @@ func runWitPeer(
 ) *p2p.PeerError {
 	protocol := uint(wit.WIT1)
 	pubkey := peerInfo.peer.Pubkey()
-	logger.Info("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
+	logger.Debug("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
 	for {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
@@ -596,7 +596,6 @@ func runWitPeer(
 		if err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
 		}
-		logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", msg.Code, "size", msg.Size)
 
 		if msg.Size > wit.MaxMessageSize {
 			msg.Discard()
@@ -604,19 +603,7 @@ func runWitPeer(
 		}
 
 		switch msg.Code {
-		case wit.GetMsgWitness:
-			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "GetMsgWitness", "size", msg.Size)
-			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
-				continue
-			}
-
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
-			}
-			send(wit.ToProto[protocol][msg.Code], peerID, b)
-		case wit.MsgWitness:
-			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "MsgWitness", "size", msg.Size)
+		case wit.GetMsgWitness | wit.MsgWitness:
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -628,7 +615,6 @@ func runWitPeer(
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessMsg:
 			// add hashes to peer
-			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "NewWitnessMsg", "size", msg.Size)
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
@@ -648,7 +634,6 @@ func runWitPeer(
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessHashesMsg:
 			// add hashes to peer
-			logger.Info("[wit] wit message received", "peer", hex.EncodeToString(pubkey[:]), "msg", "NewWitnessHashesMsg", "size", msg.Size)
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
@@ -660,7 +645,6 @@ func runWitPeer(
 			}
 
 			for _, hash := range query.Hashes {
-				log.Info("adding known witness hash", "hash", hex.EncodeToString(hash[:]))
 				peerInfo.AddKnownWitness(hash)
 			}
 		default:
@@ -745,7 +729,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			}
 
 			// handshake is successful
-			logger.Info("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
+			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
 
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
@@ -781,7 +765,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 	// Add WIT protocol if enabled
 	if cfg.EnableWitProtocol {
-		log.Info("[wit] running wit protocol")
+		log.Debug("[wit] running wit protocol")
 		ss.Protocols = append(ss.Protocols, p2p.Protocol{
 			Name:           wit.ProtocolName,
 			Version:        wit.ProtocolVersions[0],
