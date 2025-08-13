@@ -889,10 +889,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	valsCount, err := rwTx.Count(iit.ii.valuesTable)
-	if err != nil {
-		return nil, err
-	}
 	idxDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
 	if err != nil {
 		return nil, err
@@ -903,10 +899,6 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			if err = fn(key, txnm); err != nil {
 				return fmt.Errorf("fn error: %w", err)
 			}
-		}
-
-		if !iit.ii.iiCfg.standalone && valsCount == 0 {
-			return nil
 		}
 
 		if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
