@@ -507,10 +507,9 @@ func (d *Downloader) allTorrentsComplete() (ret bool) {
 	return
 }
 
-// Basic checks and fixes for a snapshot torrent claiming it's complete from experiments. If passed
-// is false, come back later and check again. You could ask why this isn't in the torrent lib. This
-// is an extra level of pedantry due to some file modification I saw from outside the torrent lib.
-// It may go away with only writing torrent files and preverified after completion. TODO: Revisit
+// Basic checks and fixes for a snapshot torrent claiming it's complete. If passed is false, come
+// back later and check again. You could ask why this isn't in the torrent lib. This is an extra
+// level of pedantry due to some file modification I saw from outside the torrent lib. TODO: Revisit
 // this now partial files support is stable. Should be sufficient to tell the Client to reverify
 // data.
 func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool) {
@@ -524,25 +523,15 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			if fi.Size() == f.Length() {
 				continue
 			}
-			d.logger.Crit(
+			d.logger.Warn(
 				"snapshot file has wrong size",
 				"name", f.Path(),
 				"expected", f.Length(),
 				"actual", fi.Size(),
 			)
-			if fi.Size() > f.Length() {
-				// This isn't concurrent-safe?
-				os.Chmod(fp, 0o644)
-				//err = os.Truncate(fp, f.Length())
-				//if err != nil {
-				//	d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
-				//}
-				os.Chmod(fp, 0o444)
-				// End not concurrent safe
-			}
-		} else {
+		} else if passed {
 			// In Erigon 3.1, .torrent files are only written when the data is complete.
-			d.logger.Crit("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
+			d.logger.Warn("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
 		}
 		passed = false
 		d.verifyFile(f)
