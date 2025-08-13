@@ -326,23 +326,19 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	return hasMore, nil
 }
 
-func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, polygonSync, fin uint64, gasUsed uint64, err error) {
+func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, gasUsed uint64, err error) {
 	if tx != nil {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return head, polygonSync, fin, gasUsed, err
+			return head, fin, gasUsed, err
 		}
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return head, polygonSync, fin, gasUsed, err
+			return head, fin, gasUsed, err
 		}
-		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
-			return head, polygonSync, fin, gasUsed, err
-		}
-
 		h := rawdb.ReadHeaderByNumber(tx, head)
 		if h != nil {
 			gasUsed = h.GasUsed
 		}
-		return head, polygonSync, fin, gasUsed, nil
+		return head, fin, gasUsed, nil
 	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
@@ -351,19 +347,15 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, polygonSync, fin uint64
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
-		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
-			return err
-		}
 		h := rawdb.ReadHeaderByNumber(tx, head)
 		if h != nil {
 			gasUsed = h.GasUsed
 		}
-		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
 		return nil
 	}); err != nil {
-		return head, polygonSync, fin, gasUsed, err
+		return head, fin, gasUsed, err
 	}
-	return head, polygonSync, fin, gasUsed, nil
+	return head, fin, gasUsed, nil
 }
 
 type Hook struct {
