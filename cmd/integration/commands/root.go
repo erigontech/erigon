@@ -27,10 +27,10 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/kv"
+	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/turbo/debug"

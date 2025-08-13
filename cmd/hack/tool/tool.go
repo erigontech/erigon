@@ -19,8 +19,8 @@ package tool
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 )
