@@ -47,7 +47,6 @@ type EntityStore[TEntity Entity] interface {
 	Close()
 
 	LastEntityId(ctx context.Context) (uint64, bool, error)
-	LastFrozenEntityId() uint64
 	LastEntity(ctx context.Context) (TEntity, bool, error)
 	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
@@ -56,6 +55,8 @@ type EntityStore[TEntity Entity] interface {
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 	DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error)
 	DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error)
+
+	RangeIndex() RangeIndex
 
 	SnapType() snaptype.Type
 }
@@ -73,7 +74,7 @@ func (NoopEntityStore[TEntity]) Close() {}
 func (NoopEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	return 0, false, errors.New("noop")
 }
-func (NoopEntityStore[TEntity]) LastFrozenEntityId() uint64 { return 0 }
+func (NoopEntityStore[TEntity]) LastFrozenEntityId() (uint64, error) { return 0, nil }
 func (NoopEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
 	var res TEntity
 	return res, false, errors.New("noop")
@@ -141,6 +142,10 @@ func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 
 func (s *mdbxEntityStore[TEntity]) WithTx(tx kv.Tx) EntityStore[TEntity] {
 	return txEntityStore[TEntity]{s, tx}
+}
+
+func (s *mdbxEntityStore[TEntity]) RangeIndex() RangeIndex {
+	return s.blockNumToIdIndex
 }
 
 func (s *mdbxEntityStore[TEntity]) Close() {

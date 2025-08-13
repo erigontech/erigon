@@ -31,9 +31,9 @@ func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 
 type SnapshotStore struct {
 	Store
-	checkpoints                 EntityStore[*Checkpoint]
+	checkpoints                 *CheckpointSnapshotStore
 	milestones                  EntityStore[*Milestone]
-	spans                       EntityStore[*Span]
+	spans                       *SpanSnapshotStore
 	spanBlockProducerSelections EntityStore[*SpanBlockProducerSelection]
 }
 
@@ -76,7 +76,86 @@ func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 		return err
 	}
 
+	rangeIndex := s.RangeIndex()
+	rangeIndexer, ok := rangeIndex.(RangeIndexer)
+	if !ok {
+		return errors.New("could not cast RangeIndex to RangeIndexer")
+	}
+	lastBlockNumInIndex, ok, err := rangeIndexer.Last(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok { // index table is empty
+		lastBlockNumInIndex = 0
+	}
+
+	lastSpanIdInIndex, ok, err := rangeIndex.Lookup(ctx, lastBlockNumInIndex)
+	if err != nil {
+		return nil
+	}
+
+	if !ok { // index table is empty
+		lastSpanIdInIndex = 0
+	}
+
+	updateSpanIndexFunc := func(span Span) (stop bool, err error) {
+		// this is already written to index
+		if span.Id <= SpanId(lastSpanIdInIndex) {
+			return true, nil // we can stop because all subsequent span ids will already be in the SpanIndex
+		}
+		err = rangeIndexer.Put(ctx, span.BlockNumRange(), uint64(span.Id))
+		if err != nil {
+			return false, nil // happy case, we can continue updating
+		} else {
+			return true, err // we need to stop if we encounter an error, so that the function doesn't get called again
+		}
+	}
+	// fill the index walking backwards from
+	err = s.snapshotsReverseForEach(updateSpanIndexFunc)
+	if err != nil {
+		return err
+	}
 	return <-s.snapshots.Ready(ctx)
+}
+
+// Walk each span in the snapshots from last to first and apply function f as long as no error or stop condition is encountered
+func (s *SpanSnapshotStore) snapshotsReverseForEach(f func(span Span) (stop bool, err error)) error {
+	if s.snapshots == nil {
+		return nil
+	}
+
+	tx := s.snapshots.ViewType(s.SnapType())
+	defer tx.Close()
+	segments := tx.Segments
+	// walk the segment files backwards
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		idx := sn.Src().Index()
+		if idx == nil || idx.KeyCount() == 0 {
+			continue
+		}
+		keyCount := idx.KeyCount()
+		// walk the segment file backwards
+		for j := int(keyCount - 1); j >= 0; j-- {
+			offset := idx.OrdinalLookup(uint64(j))
+			gg := sn.Src().MakeGetter()
+			gg.Reset(offset)
+			result, _ := gg.Next(nil)
+			var span Span
+			err := json.Unmarshal(result, &span)
+			if err != nil {
+				return err
+			}
+			stop, err := f(span)
+			if err != nil {
+				return err
+			}
+			if stop {
+				return nil
+			}
+		}
+	}
+	return nil
 }
 
 func (s *SpanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
@@ -91,9 +170,9 @@ func (s *SpanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (s *SpanSnapshotStore) LastFrozenEntityId() uint64 {
+func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
 	if s.snapshots == nil {
-		return 0
+		return 0, nil
 	}
 
 	tx := s.snapshots.ViewType(s.SnapType())
@@ -101,7 +180,7 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() uint64 {
 	segments := tx.Segments
 
 	if len(segments) == 0 {
-		return 0
+		return 0, nil
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
@@ -115,14 +194,19 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() uint64 {
 		}
 	}
 	if lastSegment == nil {
-		return 0
+		return 0, nil
 	}
-
-	lastSpanID := SpanIdAt(lastSegment.To())
+	lastSpanID, ok, err := s.EntityStore.EntityIdFromBlockNum(context.Background(), lastSegment.To())
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("could not get spanId for blockNum=%d", lastSegment.To())
+	}
 	if lastSpanID > 0 {
 		lastSpanID--
 	}
-	return uint64(lastSpanID)
+	return lastSpanID, nil
 }
 
 func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
@@ -180,7 +264,10 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
-	snapshotLastId := s.LastFrozenEntityId()
+	snapshotLastId, err2 := s.LastFrozenEntityId()
+	if err2 != nil {
+		return 0, false, err2
+	}
 	if snapshotLastId > lastId {
 		return snapshotLastId, true, nil
 	}

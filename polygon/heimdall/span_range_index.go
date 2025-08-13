@@ -51,6 +51,18 @@ func (i *spanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, b
 	return id, ok, err
 }
 
+func (i *spanRangeIndex) Last(ctx context.Context) (uint64, bool, error) {
+	var lastKey uint64
+	var ok bool
+
+	err := i.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		lastKey, ok, err = i.WithTx(tx).Last(ctx)
+		return err
+	})
+	return lastKey, ok, err
+}
+
 // Lookup ids for the given range [blockFrom, blockTo). Return boolean which checks if the result is reliable to use, because
 // heimdall data can be not published yet for [blockFrom, blockTo), in that case boolean OK will be false
 func (i *spanRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, bool, error) {
@@ -105,7 +117,7 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 			return 0, false, err
 		}
 		if lastValuePair == nil {
-			return 0, false, fmt.Errorf("SpanIndexLookup(%d) error %w", blockNum, ErrSpanNotFound)
+			return 0, false, nil
 		}
 		lastStartBlock := rangeIndexKeyParse(lastStartBlockRaw)
 		lastSpanId, lastEndBlock := rangeIndexValuePairParse(lastValuePair)
@@ -146,6 +158,25 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 	}
 	// happy case
 	return spanId, true, nil
+}
+
+// last key in the index
+func (i *txSpanRangeIndex) Last(ctx context.Context) (uint64, bool, error) {
+	cursor, err := i.tx.Cursor(i.table)
+	if err != nil {
+		return 0, false, err
+	}
+	key, value, err := cursor.Last()
+	if err != nil {
+		return 0, false, err
+	}
+
+	if value == nil || key == nil { // table is empty
+		return 0, false, nil
+	}
+
+	lastKey := rangeIndexKeyParse(key)
+	return lastKey, true, nil
 }
 
 func (i *txSpanRangeIndex) GetIDsBetween(ctx context.Context, blockFrom, blockTo uint64) ([]uint64, bool, error) {

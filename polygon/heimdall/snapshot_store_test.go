@@ -39,7 +39,9 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
-	require.Equal(t, uint64(78), heimdallStore.spans.LastFrozenEntityId())
+	lastFrozenSpanId, err := heimdallStore.spans.LastFrozenEntityId()
+	require.NoError(t, err)
+	require.Equal(t, uint64(78), lastFrozenSpanId)
 }
 
 func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) {
@@ -56,7 +58,9 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
-	require.Equal(t, uint64(0), heimdallStore.spans.LastFrozenEntityId())
+	lastFrozenSpanId, err := heimdallStore.spans.LastFrozenEntityId()
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), lastFrozenSpanId)
 }
 func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	t.Parallel()
@@ -81,7 +85,11 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
-	require.Equal(t, uint64(156), heimdallStore.spans.LastFrozenEntityId())
+	err = heimdallStore.Prepare(t.Context())
+	require.NoError(t, err)
+	lastFrozenSpanid, err := heimdallStore.spans.LastFrozenEntityId()
+	require.NoError(t, err)
+	require.Equal(t, uint64(156), lastFrozenSpanid)
 }
 
 func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *testing.T) {
@@ -114,7 +122,9 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
-	require.Equal(t, uint64(0), heimdallStore.spans.LastFrozenEntityId())
+	lastFrozenSpanId, err := heimdallStore.spans.LastFrozenEntityId()
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), lastFrozenSpanId)
 }
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver version.Version, logger log.Logger) {
@@ -129,11 +139,13 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	err = c.Compress()
 	require.NoError(t, err)
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   1,
-		BucketSize: 10,
+		KeyCount:   c.Count(),
+		Enums:      c.Count() > 0,
+		BucketSize: recsplit.DefaultBucketSize,
 		TmpDir:     dir,
+		BaseDataID: 0,
 		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String())),
-		LeafSize:   8,
+		LeafSize:   recsplit.DefaultLeafSize,
 	}, logger)
 	require.NoError(t, err)
 	defer idx.Close()
