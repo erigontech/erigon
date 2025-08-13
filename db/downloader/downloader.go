@@ -1368,6 +1368,11 @@ func (d *Downloader) logStats() {
 		)
 	}
 
+	if len(d.torrentsByName) != len(d.torrentClient.Torrents()) {
+		assertErr := fmt.Sprintf("assert: len(s.d.torrentsByName) != len(s.d.torrentClient.Torrents()): %d != %d", len(d.torrentsByName), len(d.torrentClient.Torrents()))
+		panic(assertErr)
+	}
+
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 
