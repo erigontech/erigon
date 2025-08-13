@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -51,12 +52,12 @@ func NewTransactor(rpcApiClient requests.RequestGenerator, chainId *big.Int) Tra
 func (t Transactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to common.Address, amount *big.Int) (types.Transaction, error) {
 	signedTxn, err := t.createSimpleTransfer(from, to, amount)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create a simple transfer: %w", err)
 	}
 
 	_, err = t.rpcApiClient.SendTransaction(signedTxn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to send a transaction: %w", err)
 	}
 
 	return signedTxn, nil
@@ -71,12 +72,12 @@ func (t Transactor) createSimpleTransfer(
 	fromAddr := crypto.PubkeyToAddress(from.PublicKey)
 	txnCount, err := t.rpcApiClient.GetTransactionCount(fromAddr, rpc.PendingBlock)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get transaction count: %w", err)
 	}
 
 	gasPrice, err := t.rpcApiClient.GasPrice()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get gas price: %w", err)
 	}
 
 	gasPriceU256, _ := uint256.FromBig(gasPrice)
@@ -92,7 +93,12 @@ func (t Transactor) createSimpleTransfer(
 	}
 
 	signer := types.LatestSignerForChainID(t.chainId)
-	return types.SignTx(txn, *signer, from)
+	signedTxn, err := types.SignTx(txn, *signer, from)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign a transaction: %w", err)
+	}
+
+	return signedTxn, nil
 }
 
 type EncryptedTransactor struct {

@@ -120,9 +120,6 @@ make erigon
 ./build/bin/erigon
 ```
 
-Increase download speed by `--torrent.download.rate=20mb`. <code>🔬
-See [Downloader docs](./cmd/downloader/readme.md)</code>
-
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
@@ -134,14 +131,12 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Upgrading from 3.0 to 3.1
 
-* Erigon3.1 has 2 upgrade options (backup recommended in both):
-    * Just upgrade Erigon binary - it will work on old files
-    * Upgrade binary and data:
-        * upgrade Erigon version
-        * run `./build/bin/erigon snapshots reset --datadir /your-datadir --chain your-chain` . After this command: at
-        next start of Erigon - will download latest files (but re-use unchanged files)
-        * start Erigon - it will download changed files
-        * it will take many hours (can increase speed by `--torrent.download.rate=1g`)
+1. Backup your datadir.
+2. Upgrade your Erigon binary.
+3. OPTIONAL: Upgrade snapshot files.
+   1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
+   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See [Resetting snapshots](#Resetting-snapshots) for more details.
+4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset your datadir, Erigon will sync to the latest remote snapshots.
 
 ### Datadir structure
 
@@ -159,6 +154,8 @@ datadir
    
 # There is 4 domains: account, storage, code, commitment 
 ```
+
+See the [lib](erigon-db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
 
 ### History on cheap disk
 
@@ -240,6 +237,7 @@ _Flags:_
 - `log.dir.prefix`
 - `log.dir.verbosity`
 - `log.dir.json`
+- `torrent.verbosity`
 
 In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an
 int value specifying the highest output log level:
@@ -261,6 +259,14 @@ debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
 Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk
 output `--log.dir.json`.
+
+#### Torrent client logging
+
+The torrent client in the Downloader logs to `logs/torrent.log` at the level specified by `torrent.verbosity` or WARN, whichever is lower. Logs at `torrent.verbosity` or higher are also passed through to the top level Erigon dir and console loggers (which must have their own levels set low enough to log the messages in their respective handlers).
+
+### Resetting snapshots
+
+Erigon 3.1 adds the command `erigon snapshots reset`. This modifies your datadir so that Erigon will sync to the latest remote snapshots on next run. You must pass `--datadir`. If the chain cannot be inferred from the chaindata, you must pass `--chain`. `--local=false` will prevent locally generated snapshots from also being removed. Pass `--dry-run` and/or `--verbosity=5` for more information.
 
 ### Modularity
 
@@ -459,6 +465,7 @@ go mod tidy
 | sentry    | 30304 | TCP & UDP | eth/67 peering              | Public        |
 | sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
 | rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| shutter   | 23102 | TCP       | Peering                     | Public        |
 
 Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).

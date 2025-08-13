@@ -58,6 +58,10 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
+	if len(request.Items) == 0 {
+		// Avoid logging initializing 0 torrents.
+		return nil, nil
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer s.d.ResetLogInterval()
@@ -95,7 +99,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
-			continue
 		} else {
 			// There's no circuit breaker in Downloader.RequestSnapshot.
 			if ctx.Err() != nil {

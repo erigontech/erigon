@@ -27,7 +27,7 @@ import (
 var (
 	removeLocalFlag = cli.BoolFlag{
 		Name:     "local",
-		Usage:    "RemoveFile files not described in snapshot set (probably generated locally).",
+		Usage:    "Remove files not described in snapshot set (probably generated locally).",
 		Value:    true,
 		Aliases:  []string{"l"},
 		Category: "Reset",
@@ -117,8 +117,18 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	logger.Info("Files removed from snapshots directory",
 		"torrents", reset.stats.removed.torrentFiles,
 		"data", reset.stats.removed.dataFiles)
-	// RemoveFile chaindata last, so that the config is available if there's an error.
+	// Remove chaindata last, so that the config is available if there's an error.
 	if removeLocal {
+		for _, extraDir := range []string{
+			kv.HeimdallDB,
+			kv.PolygonBridgeDB,
+		} {
+			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
+			err = os.RemoveAll(extraFullPath)
+			if err != nil {
+				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
+			}
+		}
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
 			err = dir.RemoveAll(dirs.Chaindata)
