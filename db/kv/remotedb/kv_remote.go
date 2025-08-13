@@ -249,7 +249,7 @@ func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint6
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
 func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }
-func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
@@ -696,7 +696,7 @@ func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, e
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true})
 	if err != nil {
 		return nil, 0, err
