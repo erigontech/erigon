@@ -507,15 +507,15 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
-	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k, tx)
-	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
 	v, step, err = tx.(kv.TemporalTx).GetLatest(domain, k)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+	if domain == kv.CommitmentDomain {
+		sd.put(kv.CommitmentDomain, toStringZeroCopy(k), v, sd.txNum)
 	}
 	return v, step, nil
 }

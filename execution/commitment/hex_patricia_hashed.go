@@ -2070,9 +2070,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	hph.memoizationOff, hph.trace = true, false
-	//defer func() {
-	//	hph.memoizationOff, hph.trace = false, false
-	//}()
+	// defer func() {
+	// 	hph.memoizationOff, hph.trace = false, false
+	// }()
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
@@ -2088,9 +2088,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 
 		var tr *trie.Trie
-		//if hph.trace {
-		fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		//}
+		if hph.trace {
+			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		}
 
 		var update *Update
 		if len(plainKey) == hph.accountKeyLen { // account
