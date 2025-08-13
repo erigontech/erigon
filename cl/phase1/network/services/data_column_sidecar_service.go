@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -24,6 +23,7 @@ var (
 	verifyDataColumnSidecarInclusionProof = das.VerifyDataColumnSidecarInclusionProof
 	verifyDataColumnSidecarKZGProofs      = das.VerifyDataColumnSidecarKZGProofs
 	verifyDataColumnSidecar               = das.VerifyDataColumnSidecar
+	computeSubnetForDataColumnSidecar     = das.ComputeSubnetForDataColumnSidecar
 )
 
 type dataColumnSidecarService struct {
@@ -105,28 +105,31 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			// not my custody column
+			fmt.Println("not my custody column")
 			return ErrIgnore
 		}
 	}
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
-	if !das.VerifyDataColumnSidecar(msg) {
+	if !verifyDataColumnSidecar(msg) {
 		return errors.New("invalid data column sidecar")
 	}
 
 	// [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
-	if subnet != nil && *subnet != das.ComputeSubnetForDataColumnSidecar(msg.Index) {
+	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
 		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
 	// [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. validate that block_header.slot <= current_slot (a client MAY queue future sidecars for processing at the appropriate slot).
 	if blockHeader.Slot > s.ethClock.GetCurrentSlot() && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(blockHeader.Slot) {
+		fmt.Println("not current slot")
 		return ErrIgnore
 	}
 
 	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
 	if blockHeader.Slot <= s.forkChoice.FinalizedSlot() {
+		fmt.Println("not greater than finalized slot")
 		return ErrIgnore
 	}
 
@@ -159,12 +162,12 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	}
 
 	// [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
-	if !das.VerifyDataColumnSidecarInclusionProof(msg) {
+	if !verifyDataColumnSidecarInclusionProof(msg) {
 		return errors.New("invalid inclusion proof for data column sidecar")
 	}
 
 	// [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-	if !das.VerifyDataColumnSidecarKZGProofs(msg) {
+	if !verifyDataColumnSidecarKZGProofs(msg) {
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
@@ -181,7 +184,11 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 }
 
 func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64, signedBlockHeader *cltypes.SignedBeaconBlockHeader) (bool, error) {
-	var valid bool
+	var (
+		valid       bool
+		pk          common.Bytes48
+		signingRoot common.Hash
+	)
 	err := s.syncDataManager.ViewHeadState(func(state *st.CachingBeaconState) error {
 		proposer, err := state.ValidatorForValidatorIndex(int(proposerIndex))
 		if err != nil {
@@ -193,19 +200,19 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
-		pk := proposer.PublicKey()
-		signingRoot, err := fork.ComputeSigningRoot(signedBlockHeader.Header, domain)
+		pk = proposer.PublicKey()
+		signingRoot, err = computeSigningRoot(signedBlockHeader.Header, domain)
 		if err != nil {
 			return fmt.Errorf("unable to compute signing root: %v", err)
-		}
-		valid, err = blsVerify(signedBlockHeader.Signature[:], signingRoot[:], pk[:])
-		if err != nil {
-			return fmt.Errorf("unable to verify signature: %v", err)
 		}
 		return nil
 	})
 	if err != nil {
 		return false, err
+	}
+	valid, err = blsVerify(signedBlockHeader.Signature[:], signingRoot[:], pk[:])
+	if err != nil {
+		return false, fmt.Errorf("unable to verify signature: %v", err)
 	}
 	return valid, nil
 }
