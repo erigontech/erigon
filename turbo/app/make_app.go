@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	enode "github.com/erigontech/erigon/turbo/node"
+	shuttercmd "github.com/erigontech/erigon/txnprovider/shutter/cmd"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
@@ -82,6 +83,7 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&supportCommand,
 		//&backupCommand,
 	}
+	shuttercmd.RegisterCmds(app)
 	return app
 }
 
