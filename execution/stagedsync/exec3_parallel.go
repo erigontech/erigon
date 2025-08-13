@@ -753,7 +753,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation)
 				}
 			}
-
+			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
+				fmt.Println(be.blockNum, "err", execErr)
+			}
 			be.blockIO.RecordReads(res.Version(), res.TxIn)
 			var addedDependencies bool
 			if execErr.DependencyTxIndex >= 0 {
@@ -799,7 +801,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.txIncarnations[tx]++
 			be.cntAbort++
 		} else {
-			return nil, fmt.Errorf("unexptected exec error: %w", err)
+			return nil, fmt.Errorf("unexptected exec error: %w", res.Err)
 		}
 	} else {
 		txVersion := res.Version()
@@ -916,6 +918,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
 					fmt.Println("Gas Limit Reached", be.blockNum, txVersion.TxIndex, txResult.ExecutionResult.GasUsed)
+					for _, result := range be.results {
+						if result != nil {
+							fmt.Println(be.blockNum, fmt.Sprintf("%d.%d", result.Version().TxIndex, result.Version().Incarnation),
+								"gas", result.ExecutionResult.GasUsed)
+						}
+					}
 					return nil, err
 				}
 

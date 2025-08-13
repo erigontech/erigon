@@ -90,11 +90,6 @@ type stateObject struct {
 	createdContract bool // true if this object represents a newly created contract
 }
 
-// empty returns whether the account is considered empty.
-func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.CodeHash)
-}
-
 func (s *stateObject) deepCopy(db *IntraBlockState) *stateObject {
 	stateObject := &stateObject{db: db, address: s.address}
 	stateObject.data.Copy(&s.data)
@@ -142,17 +137,6 @@ func (so *stateObject) EncodeRLP(w io.Writer) error {
 
 func (so *stateObject) markSelfdestructed() {
 	so.selfdestructed = true
-}
-
-func (so *stateObject) touch() {
-	so.db.journal.append(touchChange{
-		account: so.address,
-	})
-	if so.address == ripemd {
-		// Explicitly put it in the dirty-cache, which is otherwise generated from
-		// flattened journals.
-		so.db.journal.dirty(so.address)
-	}
 }
 
 // GetState returns a value from account storage.
@@ -230,7 +214,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	var commited bool
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
+	prev, _, _, _ = versionedRead(so.db, so.address, StatePath, key, false, *u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
 		},

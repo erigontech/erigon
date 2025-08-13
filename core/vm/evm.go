@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon/core/state"
 
@@ -345,6 +346,17 @@ func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas 
 
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress common.Address, leftOverGas uint64, err error) {
+	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Address())) {
+		defer func() {
+			version := evm.intraBlockState.Version()
+			if err != nil {
+				fmt.Printf("%d (%d.%d) Create Contract: %x, err=%s\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, err)
+			} else {
+				fmt.Printf("%d (%d.%d) Create Contract: %x, gas=%d\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, leftOverGas)
+			}
+		}()
+	}
+
 	depth := evm.interpreter.Depth()
 
 	if evm.Config().Tracer != nil {

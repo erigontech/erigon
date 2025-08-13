@@ -333,12 +333,11 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: BalancePath}]; ok {
+				if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: NoncePath}]; ok {
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, *ch.account, v.Val, ch.prev)
 				}
 			}
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: NoncePath})
-			s.versionedReads.Delete(*ch.account, AccountKey{Path: NoncePath})
 		} else {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: NoncePath}]; ok {
 				if trace {
@@ -368,7 +367,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
 		_, cs := printCode(obj.code)
 		_, ps := printCode(ch.prevcode)
-		fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %d, origHash: %d, prevCode: %d, commited: %v\n", tracePrefix,
+		fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %d, origHash: %d, prevCode: %s, commited: %v\n", tracePrefix,
 			*ch.account, obj.data.CodeHash, cs, ch.prevhash, &obj.original.CodeHash, ps, ch.wasCommited)
 	}
 	obj.setCode(ch.prevhash, ch.prevcode)
@@ -431,7 +430,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 			if trace {
 				if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 					val := v.Val.(uint256.Int)
-					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, *ch.account, &val, &ch.prevalue)
+					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, *ch.account, ch.key, &val, &ch.prevalue)
 				}
 			}
 			s.versionedWrites.Delete(*ch.account, AccountKey{Path: StatePath, Key: ch.key})
@@ -439,7 +438,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 			if v, ok := s.versionedWrites[*ch.account][AccountKey{Path: StatePath, Key: ch.key}]; ok {
 				if trace {
 					val := v.Val.(uint256.Int)
-					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, *ch.account, &val, &ch.prevalue)
+					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, *ch.account, ch.key, &val, &ch.prevalue)
 				}
 				v.Val = ch.prevalue
 			}

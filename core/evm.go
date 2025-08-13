@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
@@ -188,8 +189,17 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (bool, error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (can bool, err error) {
 	balance, err := db.GetBalance(addr)
+
+	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr) {
+		defer func() {
+			if !can {
+				fmt.Printf("%d (%d.%d) Can't transfer %d from %x: %d\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount, addr, &balance)
+			}
+		}()
+	}
+
 	if err != nil {
 		return false, err
 	}

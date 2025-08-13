@@ -451,9 +451,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	firstCycle := false
 	for {
 		hasMore, err := e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle)
-		doms, _ := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
-		fmt.Println("EXEC DONE", "has more", hasMore, "block in domains", doms.BlockNum())
-
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
@@ -471,8 +468,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 
-		doms, _ = state.NewSharedDomains(tx, log.New())
-		fmt.Println("PRE COMMIT", "block in domains", doms.BlockNum())
 		err = tx.Commit()
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
@@ -481,8 +476,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		tx, err = e.db.BeginTemporalRw(ctx)
-		doms, _ = state.NewSharedDomains(tx, log.New())
-		fmt.Println("NEW TX", "block in domains", doms.BlockNum())
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: begin tx after has more %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)

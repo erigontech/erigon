@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/types"
@@ -64,7 +63,7 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
+func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *dbstate.SharedDomains, rules *chain.Rules) error {
 
 	if stateUpdates.BTreeG != nil {
 		var err error
@@ -177,7 +176,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates
 	return nil
 }
 
-func (rs *StateV3) Domains() *state.SharedDomains {
+func (rs *StateV3) Domains() *dbstate.SharedDomains {
 	return rs.domains
 }
 
@@ -225,7 +224,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(tx kv.Tx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
+func (rs *StateV3) ApplyLogsAndTraces4(tx kv.Tx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *dbstate.SharedDomains) error {
 	for addr := range traceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txNum); err != nil {
 			return err
@@ -271,7 +270,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 	return r
 }
 
-func (rs *StateV3) ReadsValid(readLists map[string]*state.KvList) bool {
+func (rs *StateV3) ReadsValid(readLists map[string]*dbstate.KvList) bool {
 	return rs.domains.ReadsValid(readLists)
 }
 
@@ -387,7 +386,7 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	return bufferedState
 }
 
-func (s *StateV3Buffered) WithDomains(domains *state.SharedDomains) *StateV3Buffered {
+func (s *StateV3Buffered) WithDomains(domains *dbstate.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
 		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
 		accounts:      s.accounts,
@@ -593,7 +592,7 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 
 func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
 
-func (w *Writer) WriteSet() map[string]*state.KvList {
+func (w *Writer) WriteSet() map[string]*dbstate.KvList {
 	return nil
 }
 
@@ -979,7 +978,7 @@ func (r *bufferedReader) DiscardReadList() {
 	r.reader.DiscardReadList()
 }
 
-type ReadLists map[string]*state.KvList
+type ReadLists map[string]*dbstate.KvList
 
 func (v ReadLists) Return() {
 	returnReadList(v)
@@ -990,7 +989,7 @@ var readListPool = sync.Pool{
 		return ReadLists{
 			kv.AccountsDomain.String(): {},
 			kv.CodeDomain.String():     {},
-			state.CodeSizeTableFake:    {},
+			dbstate.CodeSizeTableFake:  {},
 			kv.StorageDomain.String():  {},
 		}
 	},
