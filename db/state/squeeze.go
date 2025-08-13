@@ -17,10 +17,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 )
@@ -197,7 +197,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		cf.decompressor.MadvNormal()
 
 		err = func() error {
-			steps := cf.endTxNum/at.a.aggregationStep - cf.startTxNum/at.a.aggregationStep
+			steps := cf.endTxNum/at.a.stepSize - cf.startTxNum/at.a.stepSize
 			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
@@ -385,15 +385,15 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		totalKeys := acRo.KeyCountInFiles(kv.AccountsDomain, fromTxNumRange, txnRangeTo) +
 			acRo.KeyCountInFiles(kv.StorageDomain, txnRangeFrom, txnRangeTo)
 
-		shardFrom, shardTo := fromTxNumRange/a.StepSize(), toTxNumRange/a.StepSize()
-		batchSize := totalKeys / (shardTo - shardFrom)
+		shardFrom, shardTo := kv.Step(fromTxNumRange/a.StepSize()), kv.Step(toTxNumRange/a.StepSize())
+		batchSize := totalKeys / uint64(shardTo-shardFrom)
 		lastShard := shardTo
 
-		shardSize := min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 128)
-		shardTo = shardFrom + shardSize
-		toTxNumRange = shardTo * a.StepSize()
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(totalKeys/batchSize)))), 128))
+		shardTo = shardFrom + shardStepsSize
+		toTxNumRange = uint64(shardTo) * a.StepSize()
 
-		logger.Info("[commitment_rebuild] starting", "range", r.String("", a.StepSize()), "shardSize", shardSize, "batch", batchSize)
+		logger.Info("[commitment_rebuild] starting", "range", r.String("", a.StepSize()), "shardStepsSize", shardStepsSize, "batch", batchSize)
 
 		var rebuiltCommit *rebuiltCommitment
 		var processed uint64
@@ -412,7 +412,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 					panic(err)
 				}
 				processed++
-				if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
+				if processed%(batchSize*uint64(shardStepsSize)) == 0 && shardTo != lastShard {
 					return false, k
 				}
 				return true, k
@@ -453,13 +453,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
-			if shardTo+shardSize > lastShard && shardSize > 1 {
-				shardSize /= 2
+			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
+				shardStepsSize /= 2
 			}
 			shardFrom = shardTo
-			shardTo += shardSize
+			shardTo += shardStepsSize
 			fromTxNumRange = toTxNumRange
-			toTxNumRange += shardSize * a.StepSize()
+			toTxNumRange += uint64(shardStepsSize) * a.StepSize()
 		}
 
 		roTx.Rollback()
@@ -571,8 +571,8 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, tx
 
 type rebuiltCommitment struct {
 	RootHash []byte
-	StepFrom uint64
-	StepTo   uint64
+	StepFrom kv.Step
+	StepTo   kv.Step
 	TxnFrom  uint64
 	TxnTo    uint64
 	Keys     uint64
