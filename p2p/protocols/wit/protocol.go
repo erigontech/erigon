@@ -46,8 +46,8 @@ const (
 const (
 	NewWitnessMsg       = 0x00 // sends witness hash
 	NewWitnessHashesMsg = 0x01 // announces witness availability
-	GetMsgWitness       = 0x02 // witness request
-	MsgWitness          = 0x03 // witness response
+	GetWitnessMsg       = 0x02 // witness request
+	WitnessMsg          = 0x03 // witness response
 )
 
 var (
@@ -110,10 +110,10 @@ type NewWitnessHashesPacket struct {
 }
 
 func (w *GetWitnessRequest) Name() string { return "GetWitness" }
-func (w *GetWitnessRequest) Kind() byte   { return GetMsgWitness }
+func (w *GetWitnessRequest) Kind() byte   { return GetWitnessMsg }
 
 func (*WitnessPacketRLPPacket) Name() string { return "Witness" }
-func (*WitnessPacketRLPPacket) Kind() byte   { return MsgWitness }
+func (*WitnessPacketRLPPacket) Kind() byte   { return WitnessMsg }
 
 func (w *NewWitnessPacket) Name() string { return "NewWitness" }
 func (w *NewWitnessPacket) Kind() byte   { return NewWitnessMsg }
@@ -125,8 +125,8 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 	direct.WIT0: {
 		NewWitnessMsg:       proto_sentry.MessageId_NEW_WITNESS_W0,
 		NewWitnessHashesMsg: proto_sentry.MessageId_NEW_WITNESS_HASHES_W0,
-		GetMsgWitness:       proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
-		MsgWitness:          proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0,
+		GetWitnessMsg:       proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+		WitnessMsg:          proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0,
 	},
 }
 
@@ -134,7 +134,7 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 	direct.WIT0: {
 		proto_sentry.MessageId_NEW_WITNESS_W0:              NewWitnessMsg,
 		proto_sentry.MessageId_NEW_WITNESS_HASHES_W0:       NewWitnessHashesMsg,
-		proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0: GetMsgWitness,
-		proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0:     MsgWitness,
+		proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0: GetWitnessMsg,
+		proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0:     WitnessMsg,
 	},
 }

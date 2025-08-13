@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -83,8 +84,9 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	ids := []proto_sentry.MessageId{
 		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
-		wit.ToProto[direct.WIT0][wit.GetMsgWitness],
+		wit.ToProto[direct.WIT0][wit.GetWitnessMsg],
 		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
+		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -118,6 +120,7 @@ func (cs *MultiClient) RecvMessageLoop(
 		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
+		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -624,7 +627,6 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		}
 		return fmt.Errorf("send receipts response: %w", err)
 	}
-	//println(fmt.Sprintf("[%s] GetReceipts responseLen %d", sentry.ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -748,10 +750,148 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentr
 	return nil
 }
 
+// addBlockWitnesses processes response to our getBlockWitnesses request
+func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	log.Info("adding block witnesses")
+	var query wit.WitnessPacketRLPPacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding addBlockWitnesses: %w, data: %x", err, inreq.Data)
+	}
+
+	tx, err := cs.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// group witness pages by hash to reconstruct complete witnesses
+	witnessPages := make(map[common.Hash]map[uint64][]byte)
+	witnessTotalPages := make(map[common.Hash]uint64)
+
+	for _, pageResponse := range query.WitnessPacketResponse {
+		if witnessPages[pageResponse.Hash] == nil {
+			witnessPages[pageResponse.Hash] = make(map[uint64][]byte)
+		}
+		witnessPages[pageResponse.Hash][pageResponse.Page] = pageResponse.Data
+		witnessTotalPages[pageResponse.Hash] = pageResponse.TotalPages
+	}
+
+	// reconstruct witnesses
+	for witnessHash, pages := range witnessPages {
+		cs.logger.Info("adding witness page", "hash", witnessHash)
+		totalPages := witnessTotalPages[witnessHash]
+
+		if uint64(len(pages)) != totalPages {
+			cs.logger.Info("incomplete witness received, requesting remaining pages", "hash", witnessHash, "received_pages", len(pages), "total_pages", totalPages)
+
+			// identify missing pages
+			var missingPages []uint64
+			for page := uint64(0); page < totalPages; page++ {
+				if _, exists := pages[page]; !exists {
+					missingPages = append(missingPages, page)
+				}
+			}
+
+			// request missing pages
+			if len(missingPages) > 0 {
+				witnessPageRequests := make([]wit.WitnessPageRequest, len(missingPages))
+				for i, page := range missingPages {
+					witnessPageRequests[i] = wit.WitnessPageRequest{
+						Hash: witnessHash,
+						Page: page,
+					}
+				}
+
+				getWitnessReq := wit.GetWitnessPacket{
+					RequestId: rand.Uint64(),
+					GetWitnessRequest: &wit.GetWitnessRequest{
+						WitnessPages: witnessPageRequests,
+					},
+				}
+
+				data, err := rlp.EncodeToBytes(getWitnessReq)
+				if err != nil {
+					cs.logger.Warn("failed to encode GetWitnessMsg for missing pages", "err", err, "hash", witnessHash)
+					continue
+				}
+
+				// send request for missing pages to the same peer
+				request := &proto_sentry.SendMessageByIdRequest{
+					PeerId: inreq.PeerId,
+					Data: &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+						Data: data,
+					},
+				}
+
+				if _, err := sentryClient.SendMessageById(ctx, request); err != nil {
+					// if sending to the specific peer fails, try random peers as fallback
+					// TODO: instead of sending to random peers, add new function to send to peers known to have witness
+					cs.logger.Info("failed to send GetWitnessMsg to original peer, trying random peers", "err", err, "hash", witnessHash)
+
+					fallbackRequest := &proto_sentry.SendMessageToRandomPeersRequest{
+						Data: &proto_sentry.OutboundMessageData{
+							Id:   proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0,
+							Data: data,
+						},
+						MaxPeers: 1,
+					}
+
+					if _, err := sentryClient.SendMessageToRandomPeers(ctx, fallbackRequest); err != nil {
+						cs.logger.Warn("failed to send GetWitnessMsg for missing pages to any peer", "err", err, "hash", witnessHash)
+					} else {
+						cs.logger.Info("requested missing witness pages via random peer", "hash", witnessHash, "missing_pages", missingPages)
+					}
+				} else {
+					cs.logger.Info("requested missing witness pages from original peer", "hash", witnessHash, "missing_pages", missingPages, "peer", hex.EncodeToString(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+				}
+			}
+			continue
+		}
+
+		header, err := cs.blockReader.HeaderByHash(ctx, tx, witnessHash)
+		if err != nil {
+			return fmt.Errorf("reading header for witness hash %x: %w", witnessHash, err)
+		}
+		if header == nil {
+			cs.logger.Debug("header not found for witness", "hash", witnessHash)
+			continue
+		}
+
+		// reconstruct complete witness data by concatenating pages in order
+		var completeWitness []byte
+		for page := uint64(0); page < totalPages; page++ {
+			pageData, exists := pages[page]
+			if !exists {
+				cs.logger.Debug("missing page in witness", "hash", witnessHash, "page", page)
+				break
+			}
+			completeWitness = append(completeWitness, pageData...)
+		}
+
+		if uint64(len(pages)) == totalPages {
+			key := dbutils.HeaderKey(header.Number.Uint64(), witnessHash)
+			witnessLen := uint64(len(completeWitness))
+
+			if err := tx.Put(kv.BorWitnesses, key, completeWitness); err != nil {
+				return fmt.Errorf("error writing witness for hash %x: %w", witnessHash, err)
+			}
+
+			if err := tx.Put(kv.BorWitnessSizes, key, dbutils.EncodeBlockNumber(witnessLen)); err != nil {
+				return fmt.Errorf("error writing witness size for hash %x: %w", witnessHash, err)
+			}
+
+			cs.logger.Info("stored complete witness", "hash", witnessHash, "block", header.Number.Uint64(), "size", witnessLen)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
 	var query wit.NewWitnessPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockBodies66: %w, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding newWitness: %w, data: %x", err, inreq.Data)
 	}
 
 	tx, err := cs.db.BeginRw(ctx)
@@ -810,6 +950,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 }
 
 func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
+	log.Info("got inbound message", "Id", inreq.Id)
 	switch inreq.Id {
 	// ========= eth 66 ==========
 
@@ -831,6 +972,8 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.getReceipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_NEW_WITNESS_W0:
 		return cs.newWitness(ctx, inreq, sentry)
+	case proto_sentry.MessageId_BLOCK_WITNESS_HASHES_W0:
+		return cs.addBlockWitnesses(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_BLOCK_WITNESS_HASHES_W0:
 		return cs.getBlockWitnesses(ctx, inreq, sentry)
 	default:

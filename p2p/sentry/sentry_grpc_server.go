@@ -101,6 +101,11 @@ type PeerRef struct {
 	height uint64
 }
 
+// WitnessRequest tracks when a witness request was initiated (for deduplication and cleanup)
+type WitnessRequest struct {
+	RequestedAt time.Time
+}
+
 // PeersByMinBlock is the priority queue of peers. Used to select certain number of peers considered to be "best available"
 type PeersByMinBlock []PeerRef
 
@@ -579,11 +584,12 @@ func runWitPeer(
 	peerInfo *PeerInfo,
 	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
+	getWitnessRequest func(hash common.Hash, peerID [64]byte) bool,
 	logger log.Logger,
 ) *p2p.PeerError {
 	protocol := uint(wit.WIT1)
 	pubkey := peerInfo.peer.Pubkey()
-	logger.Debug("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
+	logger.Info("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
 	for {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
@@ -603,7 +609,7 @@ func runWitPeer(
 		}
 
 		switch msg.Code {
-		case wit.GetMsgWitness | wit.MsgWitness:
+		case wit.GetWitnessMsg:
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -612,6 +618,19 @@ func runWitPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
+			send(wit.ToProto[protocol][msg.Code], peerID, b)
+		case wit.WitnessMsg:
+			log.Info("got witness response")
+			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
+				logger.Info("got witness response, no subscribers :(")
+				continue
+			}
+
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			log.Info("sending msg", "id", wit.ToProto[protocol][msg.Code])
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessMsg:
 			// add hashes to peer
@@ -622,7 +641,7 @@ func runWitPeer(
 
 			var query wit.NewWitnessPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+				logger.Error("decoding NewWitnessMsg: %w, data: %x", err, b)
 			}
 
 			peerInfo.AddKnownWitness(query.Witness.Header().Hash())
@@ -646,6 +665,43 @@ func runWitPeer(
 
 			for _, hash := range query.Hashes {
 				peerInfo.AddKnownWitness(hash)
+			}
+
+			// process each announced block hash with deduplication
+			for _, hash := range query.Hashes {
+				shouldRequest := getWitnessRequest(hash, peerID)
+				if !shouldRequest {
+					continue // already being requested by another peer
+				}
+
+				// send GetWitnessMsg request starting from page 0
+				getWitnessReq := wit.GetWitnessPacket{
+					RequestId: rand.Uint64(),
+					GetWitnessRequest: &wit.GetWitnessRequest{
+						WitnessPages: []wit.WitnessPageRequest{
+							{
+								Hash: hash,
+								Page: 0,
+							},
+						},
+					},
+				}
+
+				reqData, err := rlp.EncodeToBytes(&getWitnessReq)
+				if err != nil {
+					logger.Error("encoding GetWitnessMsg request", "err", err, "hash", hash)
+					continue
+				}
+
+				if err := rw.WriteMsg(p2p.Msg{
+					Code:    wit.GetWitnessMsg,
+					Size:    uint32(len(reqData)),
+					Payload: bytes.NewReader(reqData),
+				}); err != nil {
+					logger.Debug("sending GetWitnessMsg request", "err", err, "hash", hash)
+				} else {
+					logger.Info("sent GetWitnessMsg request", "hash", hash, "page", 0, "peer", hex.EncodeToString(peerID[:]))
+				}
 			}
 		default:
 			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(pubkey[:]), msg.Code))
@@ -687,10 +743,11 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 
 func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger) *GrpcServer {
 	ss := &GrpcServer{
-		ctx:          ctx,
-		p2p:          cfg,
-		peersStreams: NewPeersStreams(),
-		logger:       logger,
+		ctx:                   ctx,
+		p2p:                   cfg,
+		peersStreams:          NewPeersStreams(),
+		logger:                logger,
+		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
 	}
 
 	var disc enode.Iterator
@@ -784,6 +841,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					peerInfo,
 					ss.send,
 					ss.hasSubscribers,
+					ss.getWitnessRequest,
 					logger,
 				)
 			},
@@ -797,6 +855,21 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			ToProto:   wit.ToProto[wit.ProtocolVersions[0]],
 		})
 	}
+
+	// start cleanup routine for stale witness requests
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				ss.cleanupOldWitnessRequests()
+			}
+		}
+	}()
 
 	return ss
 }
@@ -844,6 +917,44 @@ type GrpcServer struct {
 	logger               log.Logger
 	// Mutex to synchronize PeerInfo creation between protocols
 	peerCreationMutex sync.Mutex
+
+	// witness request tracking
+	activeWitnessRequests map[common.Hash]*WitnessRequest
+	witnessRequestMutex   sync.RWMutex
+}
+
+// cleanupOldWitnessRequests removes witness requests that have been active for too long
+func (ss *GrpcServer) cleanupOldWitnessRequests() {
+	ss.witnessRequestMutex.Lock()
+	defer ss.witnessRequestMutex.Unlock()
+
+	timeout := 1 * time.Minute
+	now := time.Now()
+
+	for hash, req := range ss.activeWitnessRequests {
+		if now.Sub(req.RequestedAt) > timeout {
+			ss.logger.Debug("cleaning up stale witness request", "hash", hash, "age", now.Sub(req.RequestedAt))
+			delete(ss.activeWitnessRequests, hash)
+		}
+	}
+}
+
+// getWitnessRequest checks if we should request a witness
+func (ss *GrpcServer) getWitnessRequest(hash common.Hash, peerID [64]byte) bool {
+	ss.witnessRequestMutex.Lock()
+	defer ss.witnessRequestMutex.Unlock()
+
+	if _, exists := ss.activeWitnessRequests[hash]; exists {
+		return false
+	}
+
+	witnessReq := &WitnessRequest{
+		RequestedAt: time.Now(),
+	}
+	ss.activeWitnessRequests[hash] = witnessReq
+
+	ss.logger.Debug("initiating new witness request", "hash", hash, "peer", hex.EncodeToString(peerID[:]))
+	return true
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
