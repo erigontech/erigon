@@ -15,7 +15,7 @@ import (
 
 	common "github.com/erigontech/erigon-lib/common"
 	remoteproto "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	kv "github.com/erigontech/erigon-lib/kv"
+	kv "github.com/erigontech/erigon/db/kv"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 	gomock "go.uber.org/mock/gomock"
 )

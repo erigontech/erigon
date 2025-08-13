@@ -409,7 +409,6 @@ type bigModExp struct {
 }
 
 var (
-	big1      = big.NewInt(1)
 	big3      = big.NewInt(3)
 	big7      = big.NewInt(7)
 	big20     = big.NewInt(20)
@@ -521,7 +520,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 		}
 	}
 	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
-	adjExpLen = math.BigMax(adjExpLen, big1)
+	adjExpLen = math.BigMax(adjExpLen, common.Big1)
 
 	// Calculate the gas cost of the operation
 	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
@@ -566,11 +565,12 @@ var (
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
+	// TODO: This can be done without any allocation.
 	header := getData(input, 0, 3*32)
 	var (
-		baseLen = new(big.Int).SetBytes(header[0:32]).Uint64()
-		expLen  = new(big.Int).SetBytes(header[32:64]).Uint64()
-		modLen  = new(big.Int).SetBytes(header[64:96]).Uint64()
+		baseLen = binary.BigEndian.Uint64(header[32-8 : 32])
+		expLen  = binary.BigEndian.Uint64(header[64-8 : 64])
+		modLen  = binary.BigEndian.Uint64(header[96-8 : 96])
 
 		// 32 - 8 bytes are truncated in the Uint64 conversion above
 		baseLenHighBitsAreZero = allZero(header[0 : 32-8])
@@ -612,17 +612,12 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		v    []byte
 	)
 	switch {
-	case mod.BitLen() == 0:
-		// Modulo 0 is undefined, return zero
-		return common.LeftPadBytes([]byte{}, int(modLen)), nil
+	case mod.Cmp(common.Big1) <= 0:
+		// Leave the result as zero for mod 0 (undefined) and 1
 	case base.Cmp(common.Big1) == 0:
-		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
-		v = base.Mod(base, mod).Bytes()
-	//case mod.Bit(0) == 0:
-	//	// Modulo is even
-	//	v = math.FastExp(base, exp, mod).Bytes()
+		// If base == 1 (and mod > 1), then the result is 1
+		v = common.Big1.Bytes()
 	default:
-		// Modulo is odd
 		v = base.Exp(base, exp, mod).Bytes()
 	}
 	return common.LeftPadBytes(v, int(modLen)), nil
@@ -1383,7 +1378,7 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 	// Verify the secp256r1 signature
 	if secp256r1.Verify(hash, r, s, x, y) {
 		// Signature is valid
-		return common.LeftPadBytes(big1.Bytes(), 32), nil
+		return common.LeftPadBytes(common.Big1.Bytes(), 32), nil
 	} else {
 		// Signature is invalid
 		return nil, nil
