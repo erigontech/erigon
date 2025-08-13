@@ -386,7 +386,7 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 // IsFrozen - can't be merged to bigger files
 func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
-	return info.To-info.From == mergeLimit
+	return info.To-info.From >= mergeLimit
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
