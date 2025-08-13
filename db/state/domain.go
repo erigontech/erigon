@@ -197,21 +197,21 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 // maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
 // Does not use history table to find the latest step
 func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
-	firstKeys, err := kv.FirstKey(tx, d.valuesTable)
+	firstKey, err := kv.FirstKey(tx, d.valuesTable)
 	if err != nil {
-		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", firstKeys, "err", err)
+		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
 	}
-	if len(firstKeys) == 0 {
+	if len(firstKey) == 0 {
 		return 0
 	}
 	if d.largeValues {
-		stepBytes := firstKeys[len(firstKeys)-8:]
+		stepBytes := firstKey[len(firstKey)-8:]
 		return kv.Step(^binary.BigEndian.Uint64(stepBytes))
 	}
-	firstVal, err := tx.GetOne(d.valuesTable, firstKeys)
+	firstVal, err := tx.GetOne(d.valuesTable, firstKey)
 	if err != nil {
-		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", firstKeys, "err", err)
+		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
 	}
 
