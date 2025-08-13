@@ -17,11 +17,6 @@ import (
 	"github.com/spf13/afero"
 )
 
-const (
-	// subdivisionSlot = 10_000
-	mutexSize = 64
-)
-
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error
