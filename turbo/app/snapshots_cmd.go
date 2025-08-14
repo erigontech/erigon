@@ -804,7 +804,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	blockReader, _ := blockRetire.IO()
-	heimdallStore, bridgeStore := blockRetire.BorStore()
+	heimdallStore, _ := blockRetire.BorStore()
 	found := false
 	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
