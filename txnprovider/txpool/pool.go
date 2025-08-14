@@ -817,7 +817,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		mt := best.ms[i]
 
-		if yielded.Contains(mt.TxnSlot.IDHash) {
+		if yielded != nil && yielded.Contains(mt.TxnSlot.IDHash) {
 			continue
 		}
 
@@ -874,7 +874,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		txns.Txns[count] = rlpTxn
 		copy(txns.Senders.At(count), sender.Bytes())
 		txns.IsLocal[count] = isLocal
-		yielded.Add(mt.TxnSlot.IDHash)
+		if yielded != nil {
+			yielded.Add(mt.TxnSlot.IDHash)
+		}
 		count++
 	}
 
