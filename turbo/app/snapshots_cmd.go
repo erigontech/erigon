@@ -417,6 +417,13 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
+
+	// Step 1: Collect and parse all candidate state files
+	candidateFiles := make([]struct {
+		fileInfo snaptype.FileInfo
+		dirPath  string
+		filePath string
+	}, 0)
 	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
@@ -443,100 +450,98 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					}
 				}
 			}
+			candidateFiles = append(candidateFiles, struct {
+				fileInfo snaptype.FileInfo
+				dirPath  string
+				filePath string
+			}{res, dirPath, filePath})
+		}
+	}
 
-			// check that commitment file has state in it
-			// When domains are "compacted", we want to keep latest commitment file with state key in it
-			if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
-				const trieStateKey = "state"
+	// Step 2: Process each candidate file (already parsed)
+	for _, candidate := range candidateFiles {
+		res := candidate.fileInfo
+		fName := filepath.Base(candidate.filePath)
 
-				skipped := false
+		// check that commitment file has state in it
+		// When domains are "compacted", we want to keep latest commitment file with state key in it
+		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+			const trieStateKey = "state"
 
-				derivedKvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
-				fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+			derivedKvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
+			fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+			if err != nil {
+				return err
+			}
+			kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+			if err != nil {
+				return err
+			}
+
+			checkedByHashMapAccessor := false
+			if ok {
+				idx, err := recsplit.OpenIndex(kvi)
 				if err != nil {
 					return err
 				}
-				kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil {
-					return err
-				}
-				if ok {
-					_, err := os.Stat(kvi)
-					if err != nil {
-						return err
-					}
-					idx, err := recsplit.OpenIndex(kvi)
-					if err != nil {
-						return err
-					}
 
-					rd := idx.GetReaderFromPool()
-					oft, found := rd.Lookup([]byte(trieStateKey))
-					if found {
-						fmt.Printf("found state key with kvi %s\n", res.Path)
-						commitmentFilesWithState = append(commitmentFilesWithState, res)
-					} else {
-						fmt.Printf("skipping file because it doesn't have state key %s\n", fName)
-					}
-					skipped = true
-					_ = oft
-					rd.Close()
-					idx.Close()
+				rd := idx.GetReaderFromPool()
+				oft, found := rd.Lookup([]byte(trieStateKey))
+				if found {
+					fmt.Printf("found state key with kvi %s\n", res.Path)
+					commitmentFilesWithState = append(commitmentFilesWithState, res)
 				} else {
-					log.Warn("[dbg] not found files for", "pattern", fPathMask)
+					fmt.Printf("skipping file because it doesn't have state key %s\n", fName)
 				}
-
-				if !skipped { // try to lookup in bt index
-					derivedBt := strings.Replace(res.Path, ".kv", ".bt", 1)
-					fPathMask, err := version.ReplaceVersionWithMask(derivedBt)
-					if err != nil {
-						return err
-					}
-					bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return fmt.Errorf("can't find accessor for %s", res.Path)
-					}
-					_, err = os.Stat(bt)
-					if err != nil {
-						return err
-					}
-
-					rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
-					if err != nil {
-						return err
-					}
-
-					getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
-					//for getter.HasNext() {
-					//	k, _ := getter.Next(nil)
-					//	if bytes.Equal(k, []byte(trieStateKey)) {
-					//		fmt.Printf("found state key without bt in %s\n", res.Path)
-					//		commitmentFilesWithState = append(commitmentFilesWithState, res)
-					//		break
-					//	}
-					//	getter.Skip()
-					//}
-					c, err := btindex.Seek(getter, []byte(trieStateKey))
-					if err != nil {
-						return err
-					}
-					if bytes.Equal(c.Key(), []byte(trieStateKey)) {
-						fmt.Printf("found state key using bt %s\n", res.Path)
-						commitmentFilesWithState = append(commitmentFilesWithState, res)
-					}
-					c.Close()
-					btindex.Close()
-					rd.Close()
-				}
+				checkedByHashMapAccessor = true
+				_ = oft
+				rd.Close()
+				idx.Close()
+			} else {
+				log.Warn("[dbg] not found files for", "pattern", fPathMask)
 			}
 
-			files = append(files, res)
-			if removeLatest {
-				_maxFrom = max(_maxFrom, res.From)
+			if !checkedByHashMapAccessor { // try to lookup in bt accessor
+				derivedBt := strings.Replace(res.Path, ".kv", ".bt", 1)
+				fPathMask, err := version.ReplaceVersionWithMask(derivedBt)
+				if err != nil {
+					return err
+				}
+				bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("can't find accessor for %s", res.Path)
+				}
+				_, err = os.Stat(bt)
+				if err != nil {
+					return err
+				}
+
+				rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
+				if err != nil {
+					return err
+				}
+
+				getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
+				c, err := btindex.Seek(getter, []byte(trieStateKey))
+				if err != nil {
+					return err
+				}
+				if bytes.Equal(c.Key(), []byte(trieStateKey)) {
+					fmt.Printf("found state key using bt %s\n", res.Path)
+					commitmentFilesWithState = append(commitmentFilesWithState, res)
+				}
+				c.Close()
+				btindex.Close()
+				rd.Close()
 			}
+		}
+
+		files = append(files, res)
+		if removeLatest {
+			_maxFrom = max(_maxFrom, res.From)
 		}
 	}
 
@@ -1164,11 +1169,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapHistory, fileName), err)
 			}
 		}
-
 	}
 
-	if maxStepII != accFiles[len(accFiles)-1].To {
-		return fmt.Errorf("accounts idx max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepII)
+	if maxStepDomain != accFiles[len(accFiles)-1].To {
+		return fmt.Errorf("accounts domain max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepDomain)
 	}
 	return nil
 }
