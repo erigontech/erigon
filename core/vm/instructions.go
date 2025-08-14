@@ -757,7 +757,7 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 func stSload(_ uint64, scope *ScopeContext) string {
 	loc := scope.Stack.peek()
-	return fmt.Sprintf("%s %d", SLOAD, loc)
+	return fmt.Sprintf("%s %x", SLOAD, loc)
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -771,7 +771,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 func stSstore(_ uint64, scope *ScopeContext) string {
 	loc, val := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
-	return fmt.Sprintf("%s %d %d", SSTORE, &loc, &val)
+	return fmt.Sprintf("%s %x %d", SSTORE, &loc, &val)
 }
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {

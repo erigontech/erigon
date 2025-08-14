@@ -532,6 +532,7 @@ func ExecV3(ctx context.Context,
 	defer func() {
 		if totalGasUsed > 0 {
 			mxExecMgas.Set((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds())
+			mxExecGas.Add(float64(totalGasUsed))
 		}
 	}()
 
