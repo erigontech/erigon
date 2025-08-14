@@ -21,9 +21,8 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
 )
 

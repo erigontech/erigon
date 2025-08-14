@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 const (
@@ -70,7 +70,7 @@ func (l *LightClientHeader) Version() clparams.StateVersion {
 }
 
 func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, l.getSchema()...)
+	return ssz.MarshalSSZ(buf, l.getSchema()...)
 }
 
 func (l *LightClientHeader) DecodeSSZ(buf []byte, version int) error {
@@ -80,7 +80,7 @@ func (l *LightClientHeader) DecodeSSZ(buf []byte, version int) error {
 		l.ExecutionPayloadHeader = NewEth1Header(l.version)
 		l.ExecutionBranch = solid.NewHashVector(ExecutionBranchSize)
 	}
-	return ssz2.UnmarshalSSZ(buf, version, l.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, version, l.getSchema()...)
 }
 
 func (l *LightClientHeader) EncodingSizeSSZ() int {
@@ -136,7 +136,7 @@ func NewLightClientUpdate(version clparams.StateVersion) *LightClientUpdate {
 }
 
 func (l *LightClientUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, l.AttestedHeader, l.NextSyncCommittee, l.NextSyncCommitteeBranch, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
+	return ssz.MarshalSSZ(buf, l.AttestedHeader, l.NextSyncCommittee, l.NextSyncCommitteeBranch, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
 }
 
 func (l *LightClientUpdate) DecodeSSZ(buf []byte, version int) error {
@@ -146,7 +146,7 @@ func (l *LightClientUpdate) DecodeSSZ(buf []byte, version int) error {
 	l.FinalizedHeader = NewLightClientHeader(clparams.StateVersion(version))
 	l.FinalityBranch = solid.NewHashVector(getFinalizedBranchSize(clparams.StateVersion(version)))
 	l.SyncAggregate = &SyncAggregate{}
-	return ssz2.UnmarshalSSZ(buf, version, l.AttestedHeader, l.NextSyncCommittee, l.NextSyncCommitteeBranch, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
+	return ssz.UnmarshalSSZ(buf, version, l.AttestedHeader, l.NextSyncCommittee, l.NextSyncCommitteeBranch, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
 }
 
 func (l *LightClientUpdate) EncodingSizeSSZ() int {
@@ -193,14 +193,14 @@ func NewLightClientBootstrap(version clparams.StateVersion) *LightClientBootstra
 }
 
 func (l *LightClientBootstrap) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, l.Header, l.CurrentSyncCommittee, l.CurrentSyncCommitteeBranch)
+	return ssz.MarshalSSZ(buf, l.Header, l.CurrentSyncCommittee, l.CurrentSyncCommitteeBranch)
 }
 
 func (l *LightClientBootstrap) DecodeSSZ(buf []byte, version int) error {
 	l.Header = NewLightClientHeader(clparams.StateVersion(version))
 	l.CurrentSyncCommittee = &solid.SyncCommittee{}
 	l.CurrentSyncCommitteeBranch = solid.NewHashVector(getCurrentSyncCommitteeBranchSize(clparams.StateVersion(version)))
-	return ssz2.UnmarshalSSZ(buf, version, l.Header, l.CurrentSyncCommittee, l.CurrentSyncCommitteeBranch)
+	return ssz.UnmarshalSSZ(buf, version, l.Header, l.CurrentSyncCommittee, l.CurrentSyncCommitteeBranch)
 }
 
 func (l *LightClientBootstrap) EncodingSizeSSZ() int {
@@ -243,7 +243,7 @@ func NewLightClientFinalityUpdate(version clparams.StateVersion) *LightClientFin
 }
 
 func (l *LightClientFinalityUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, l.AttestedHeader, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
+	return ssz.MarshalSSZ(buf, l.AttestedHeader, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
 }
 
 func (l *LightClientFinalityUpdate) DecodeSSZ(buf []byte, version int) error {
@@ -251,7 +251,7 @@ func (l *LightClientFinalityUpdate) DecodeSSZ(buf []byte, version int) error {
 	l.FinalizedHeader = NewLightClientHeader(clparams.StateVersion(version))
 	l.FinalityBranch = solid.NewHashVector(getFinalizedBranchSize(clparams.StateVersion(version)))
 	l.SyncAggregate = &SyncAggregate{}
-	return ssz2.UnmarshalSSZ(buf, version, l.AttestedHeader, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
+	return ssz.UnmarshalSSZ(buf, version, l.AttestedHeader, l.FinalizedHeader, l.FinalityBranch, l.SyncAggregate, &l.SignatureSlot)
 }
 
 func (l *LightClientFinalityUpdate) EncodingSizeSSZ() int {
@@ -295,13 +295,13 @@ func NewLightClientOptimisticUpdate(version clparams.StateVersion) *LightClientO
 }
 
 func (l *LightClientOptimisticUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, l.AttestedHeader, l.SyncAggregate, &l.SignatureSlot)
+	return ssz.MarshalSSZ(buf, l.AttestedHeader, l.SyncAggregate, &l.SignatureSlot)
 }
 
 func (l *LightClientOptimisticUpdate) DecodeSSZ(buf []byte, version int) error {
 	l.AttestedHeader = NewLightClientHeader(clparams.StateVersion(version))
 	l.SyncAggregate = &SyncAggregate{}
-	return ssz2.UnmarshalSSZ(buf, version, l.AttestedHeader, l.SyncAggregate, &l.SignatureSlot)
+	return ssz.UnmarshalSSZ(buf, version, l.AttestedHeader, l.SyncAggregate, &l.SignatureSlot)
 }
 
 func (l *LightClientOptimisticUpdate) EncodingSizeSSZ() int {

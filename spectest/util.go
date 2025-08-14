@@ -5,14 +5,13 @@ import (
 	"io/fs"
 	"os"
 
+	"gopkg.in/yaml.v3"
+
 	clparams2 "github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
-
-	"gopkg.in/yaml.v3"
-
-	"github.com/erigontech/erigon-lib/types/ssz"
 )
 
 func ReadMeta(root fs.FS, name string, obj any) error {

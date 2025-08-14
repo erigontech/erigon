@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/types"
@@ -280,12 +280,12 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.Transactions = &solid.TransactionsSSZ{}
 	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	b.version = clparams.StateVersion(version)
-	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
 
 // EncodeSSZ encodes the block in SSZ format.
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, b.getSchema()...)
+	return ssz.MarshalSSZ(dst, b.getSchema()...)
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.

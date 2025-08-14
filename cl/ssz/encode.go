@@ -14,14 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package ssz2
+package ssz
 
 import (
 	"encoding/binary"
 	"fmt"
 	"runtime/debug"
-
-	"github.com/erigontech/erigon-lib/types/ssz"
 )
 
 type Sized interface {
@@ -29,8 +27,8 @@ type Sized interface {
 }
 
 type ObjectSSZ interface {
-	ssz.EncodableSSZ
-	ssz.Marshaler
+	EncodableSSZ
+	Marshaler
 }
 
 type SizedObjectSSZ interface {
@@ -86,11 +84,11 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 		switch obj := element.(type) {
 		case uint64:
 			// If the element is a uint64, encode it using SSZ and append it to the dst
-			dst = append(dst, ssz.Uint64SSZ(obj)...)
+			dst = append(dst, Uint64SSZ(obj)...)
 			currentOffset += 8
 		case *uint64:
 			// If the element is a pointer to uint64, dereference it, encode it using SSZ, and append it to the dst
-			dst = append(dst, ssz.Uint64SSZ(*obj)...)
+			dst = append(dst, Uint64SSZ(*obj)...)
 			currentOffset += 8
 		case []byte:
 			// If the element is a byte slice, append it to the dst

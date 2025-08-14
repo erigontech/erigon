@@ -19,7 +19,7 @@ package cltypes
 import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 // SyncAggregatorSelectionData data, contains if we were on bellatrix/alteir/phase0 and transition epoch.
@@ -40,11 +40,11 @@ func (f *SyncAggregatorSelectionData) Copy() *SyncAggregatorSelectionData {
 }
 
 func (f *SyncAggregatorSelectionData) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, f.Slot, f.SubcommitteeIndex)
+	return ssz.MarshalSSZ(dst, f.Slot, f.SubcommitteeIndex)
 }
 
 func (f *SyncAggregatorSelectionData) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &f.Slot, &f.SubcommitteeIndex)
+	return ssz.UnmarshalSSZ(buf, 0, &f.Slot, &f.SubcommitteeIndex)
 
 }
 

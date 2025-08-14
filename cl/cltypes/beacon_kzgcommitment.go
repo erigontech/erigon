@@ -21,18 +21,19 @@ import (
 	"reflect"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
 	blobT = reflect.TypeOf(Blob{})
 
-	_ ssz2.SizedObjectSSZ = (*Blob)(nil)
-	_ ssz2.SizedObjectSSZ = (*KZGProof)(nil)
+	_ ssz.SizedObjectSSZ = (*Blob)(nil)
+	_ ssz.SizedObjectSSZ = (*KZGProof)(nil)
 )
 
 type Blob gokzg4844.Blob
@@ -66,7 +67,7 @@ func (b *KZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *KZGCommitment) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, b[:])
+	return ssz.UnmarshalSSZ(buf, version, b[:])
 }
 
 func (b *KZGCommitment) EncodingSizeSSZ() int {
@@ -119,7 +120,7 @@ func (b *KZGProof) UnmarshalJSON(data []byte) error {
 }
 
 func (b *KZGProof) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, b[:])
+	return ssz.UnmarshalSSZ(buf, version, b[:])
 }
 
 func (b *KZGProof) EncodeSSZ(buf []byte) ([]byte, error) {

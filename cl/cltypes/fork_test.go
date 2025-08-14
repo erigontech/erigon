@@ -19,10 +19,11 @@ package cltypes_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 func TestForkStatic(t *testing.T) {
@@ -62,7 +63,7 @@ func TestForkEncodeSSZ(t *testing.T) {
 	encoded, err := fork.EncodeSSZ([]byte{})
 	require.NoError(err, "Error encoding Fork")
 
-	expected, err := ssz2.MarshalSSZ([]byte{}, fork.PreviousVersion[:], fork.CurrentVersion[:], fork.Epoch)
+	expected, err := ssz.MarshalSSZ([]byte{}, fork.PreviousVersion[:], fork.CurrentVersion[:], fork.Epoch)
 	require.NoError(err, "Error calculating expected encoded value")
 
 	require.Equal(expected, encoded, "Fork EncodeSSZ did not produce the expected result")

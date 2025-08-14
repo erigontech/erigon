@@ -19,14 +19,11 @@ package raw
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
-
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 // BlockRoot computes the block root for the state.
@@ -67,7 +64,7 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 }
 
 func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.getSchema()...)
+	return ssz.MarshalSSZ(buf, b.getSchema()...)
 }
 
 // getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
@@ -113,7 +110,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if version >= int(clparams.FuluVersion) {
 		b.proposerLookahead = solid.NewUint64VectorSSZ(int((b.beaconConfig.MinSeedLookahead + 1) * b.beaconConfig.SlotsPerEpoch))
 	}
-	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
+	if err := ssz.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
 	}
 	// Capella

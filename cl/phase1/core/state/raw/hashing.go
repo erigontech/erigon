@@ -21,9 +21,9 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {

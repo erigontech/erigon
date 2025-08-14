@@ -22,11 +22,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
-var _ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
-var _ ssz2.SizedObjectSSZ = (*Contribution)(nil)
+var _ ssz.SizedObjectSSZ = (*ContributionAndProof)(nil)
+var _ ssz.SizedObjectSSZ = (*Contribution)(nil)
 
 /*
  * ContributionAndProof contains the index of the aggregator, the attestation
@@ -39,7 +39,7 @@ type ContributionAndProof struct {
 }
 
 func (a *ContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
+	return ssz.MarshalSSZ(dst, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
 func (a *ContributionAndProof) Static() bool {
@@ -48,7 +48,7 @@ func (a *ContributionAndProof) Static() bool {
 
 func (a *ContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Contribution = new(Contribution)
-	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
+	return ssz.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
 func (a *ContributionAndProof) EncodingSizeSSZ() int {
@@ -65,13 +65,13 @@ type SignedContributionAndProof struct {
 }
 
 func (a *SignedContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, a.Message, a.Signature[:])
+	return ssz.MarshalSSZ(dst, a.Message, a.Signature[:])
 }
 
 func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Message = new(ContributionAndProof)
 	a.Message.Contribution = new(Contribution)
-	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 
 func (a *SignedContributionAndProof) EncodingSizeSSZ() int {
@@ -103,7 +103,7 @@ func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(a.AggregationBits) == 0 {
 		a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
 	}
-	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
+	return ssz.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
 func (a *Contribution) Static() bool {
@@ -118,7 +118,7 @@ func (a *Contribution) Copy() *Contribution {
 
 func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
 	a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
-	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
 func (a *Contribution) EncodingSizeSSZ() int {
@@ -167,7 +167,7 @@ func (*SyncContribution) Static() bool {
 }
 
 func (agg *SyncContribution) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
+	return ssz.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (agg *SyncContribution) EncodingSizeSSZ() int {
@@ -187,11 +187,11 @@ type SyncCommitteeMessage struct {
 }
 
 func (a *SyncCommitteeMessage) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+	return ssz.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
 }
 
 func (a *SyncCommitteeMessage) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
 }
 
 func (a *SyncCommitteeMessage) EncodingSizeSSZ() int {

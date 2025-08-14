@@ -6,15 +6,15 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
 	_ EncodableHashableSSZ = (*DepositRequest)(nil)
-	_ ssz2.SizedObjectSSZ  = (*DepositRequest)(nil)
+	_ ssz.SizedObjectSSZ   = (*DepositRequest)(nil)
 
 	_ EncodableHashableSSZ = (*PendingDeposit)(nil)
-	_ ssz2.SizedObjectSSZ  = (*PendingDeposit)(nil)
+	_ ssz.SizedObjectSSZ   = (*PendingDeposit)(nil)
 )
 
 const (
@@ -35,11 +35,11 @@ func (p *DepositRequest) EncodingSizeSSZ() int {
 }
 
 func (p *DepositRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Index)
+	return ssz.MarshalSSZ(buf, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Index)
 }
 
 func (p *DepositRequest) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Index)
+	return ssz.UnmarshalSSZ(buf, version, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Index)
 }
 
 func (p *DepositRequest) Clone() clonable.Clonable {
@@ -67,11 +67,11 @@ func (p *PendingDeposit) EncodingSizeSSZ() int {
 }
 
 func (p *PendingDeposit) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
+	return ssz.MarshalSSZ(buf, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
 }
 
 func (p *PendingDeposit) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
+	return ssz.UnmarshalSSZ(buf, version, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
 }
 
 func (p *PendingDeposit) Clone() clonable.Clonable {

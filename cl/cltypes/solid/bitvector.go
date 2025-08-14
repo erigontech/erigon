@@ -7,16 +7,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
-	_ ssz2.SizedObjectSSZ = (*BitVector)(nil)
-	_ ssz.HashableSSZ     = (*BitVector)(nil)
-	_ json.Marshaler      = (*BitVector)(nil)
-	_ json.Unmarshaler    = (*BitVector)(nil)
+	_ ssz.SizedObjectSSZ = (*BitVector)(nil)
+	_ ssz.HashableSSZ    = (*BitVector)(nil)
+	_ json.Marshaler     = (*BitVector)(nil)
+	_ json.Unmarshaler   = (*BitVector)(nil)
 )
 
 type BitVector struct {

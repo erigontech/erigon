@@ -23,10 +23,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 type Metadata struct {
@@ -48,7 +46,7 @@ func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
 		schema = append(schema, m.CustodyGroupCount)
 	}
 
-	return ssz2.MarshalSSZ(buf, schema...)
+	return ssz.MarshalSSZ(buf, schema...)
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
@@ -141,11 +139,11 @@ type LightClientUpdatesByRangeRequest struct {
 }
 
 func (l *LightClientUpdatesByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &l.StartPeriod, &l.Count)
+	return ssz.MarshalSSZ(buf, &l.StartPeriod, &l.Count)
 }
 
 func (l *LightClientUpdatesByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &l.StartPeriod, &l.Count)
+	return ssz.UnmarshalSSZ(buf, 0, &l.StartPeriod, &l.Count)
 }
 
 func (l *LightClientUpdatesByRangeRequest) EncodingSizeSSZ() int {
@@ -162,11 +160,11 @@ type BeaconBlocksByRangeRequest struct {
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.StartSlot, b.Count, b.Step)
+	return ssz.MarshalSSZ(buf, b.StartSlot, b.Count, b.Step)
 }
 
 func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte, v int) error {
-	return ssz2.UnmarshalSSZ(buf, v, &b.StartSlot, &b.Count, &b.Step)
+	return ssz.UnmarshalSSZ(buf, v, &b.StartSlot, &b.Count, &b.Step)
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodingSizeSSZ() int {
@@ -191,7 +189,7 @@ type Status struct {
 }
 
 func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.schema()...)
+	return ssz.MarshalSSZ(buf, s.schema()...)
 }
 
 func (s *Status) DecodeSSZ(buf []byte, version int) error {
@@ -208,7 +206,7 @@ func (s *Status) DecodeSSZ(buf []byte, version int) error {
 		}
 		schema = append(schema, s.EarliestAvailableSlot)
 	}
-	return ssz2.UnmarshalSSZ(buf, version, schema...)
+	return ssz.UnmarshalSSZ(buf, version, schema...)
 }
 
 func (s *Status) schema() []interface{} {
@@ -239,11 +237,11 @@ type BlobsByRangeRequest struct {
 }
 
 func (l *BlobsByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &l.StartSlot, &l.Count)
+	return ssz.MarshalSSZ(buf, &l.StartSlot, &l.Count)
 }
 
 func (l *BlobsByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &l.StartSlot, &l.Count)
+	return ssz.UnmarshalSSZ(buf, 0, &l.StartSlot, &l.Count)
 }
 
 func (l *BlobsByRangeRequest) EncodingSizeSSZ() int {

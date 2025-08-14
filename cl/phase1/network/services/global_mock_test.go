@@ -17,8 +17,9 @@
 package services
 
 import (
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 type mockFuncs struct {

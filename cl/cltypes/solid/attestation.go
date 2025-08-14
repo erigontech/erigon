@@ -24,10 +24,9 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 const (
@@ -92,7 +91,7 @@ func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 		a.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
 		a.Data = &AttestationData{}
 		a.CommitteeBits = NewBitVector(maxCommitteesPerSlot)
-		return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
+		return ssz.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
 	}
 
 	// Deneb case
@@ -101,16 +100,16 @@ func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 	}
 	a.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
 	a.Data = &AttestationData{}
-	return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:])
 }
 
 // EncodeSSZ encodes the Attestation instance into the provided buffer.
 func (a *Attestation) EncodeSSZ(dst []byte) ([]byte, error) {
 	if a.CommitteeBits != nil {
 		// Electra case
-		return ssz2.MarshalSSZ(dst, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
+		return ssz.MarshalSSZ(dst, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
 	}
-	return ssz2.MarshalSSZ(dst, a.AggregationBits, a.Data, a.Signature[:])
+	return ssz.MarshalSSZ(dst, a.AggregationBits, a.Data, a.Signature[:])
 }
 
 // HashSSZ hashes the Attestation instance using SSZ.
@@ -180,12 +179,12 @@ type SingleAttestation struct {
 }
 
 func (s *SingleAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+	return ssz.MarshalSSZ(dst, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
 }
 
 func (s *SingleAttestation) DecodeSSZ(buf []byte, version int) error {
 	s.Data = &AttestationData{}
-	return ssz2.UnmarshalSSZ(buf, version, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
 }
 
 func (s *SingleAttestation) EncodingSizeSSZ() (size int) {
