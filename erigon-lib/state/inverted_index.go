@@ -319,6 +319,11 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+
+				if ii.filenameBase == kv.ReceiptDomain.String() {
+					log.Warn("[dbg] II.openDirtyFiles1", "fPathPattern", fPathPattern, "fPath", fPath, "ok", ok, "fileVer", fileVer, "err", err)
+				}
+
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
@@ -360,6 +365,9 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			if item.index == nil {
 				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if ii.filenameBase == kv.ReceiptDomain.String() {
+					log.Warn("[dbg] II.openDirtyFiles2", "fPathPattern", fPathPattern, "fPath", fPath, "ok", ok, "fileVer", fileVer, "err", err)
+				}
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
