@@ -354,11 +354,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 	log.Warn("[dbg] BuildMissedIndicesIfNeed! done")
 
+	log.Warn("[dbg] BuildMissedAccessors!", "f", agg.Files())
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
+	log.Warn("[dbg] BuildMissedAccessors! done")
 
 	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
