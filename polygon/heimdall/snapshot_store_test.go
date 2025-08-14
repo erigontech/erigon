@@ -95,6 +95,37 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	require.Equal(t, uint64(9), lastFrozenSpanid)
 }
 
+func TestHeimdallStoreEntityById(t *testing.T) {
+	t.Parallel()
+
+	logger := testlog.Logger(t, log.LvlInfo)
+	dir := t.TempDir()
+	createTestSegmentFile(t, 0, 2_000, Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 2_000, 4_000, Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, dir, version.V1_0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	defer borRoSnapshots.Close()
+	err := borRoSnapshots.OpenFolder()
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	err = heimdallStore.Prepare(t.Context())
+	require.NoError(t, err)
+	for i := 0; i < len(spanDataForTesting); i++ {
+		expectedSpan := spanDataForTesting[i]
+		actualSpan, ok, err := heimdallStore.spans.Entity(t.Context(), expectedSpan.RawId())
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, actualSpan.Id, expectedSpan.Id)
+		require.Equal(t, actualSpan.StartBlock, expectedSpan.StartBlock)
+		require.Equal(t, actualSpan.EndBlock, expectedSpan.EndBlock)
+	}
+}
+
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver version.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
@@ -116,14 +147,14 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	require.NoError(t, err)
 	d, err := seg.NewDecompressor(segFileName)
 	require.NoError(t, err)
-	_ = d
+	indexFileName := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String()))
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   c.Count(),
 		Enums:      c.Count() > 0,
 		BucketSize: recsplit.DefaultBucketSize,
 		TmpDir:     dir,
-		BaseDataID: 0,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String())),
+		BaseDataID: from / 1000,
+		IndexFile:  indexFileName,
 		LeafSize:   recsplit.DefaultLeafSize,
 	}, logger)
 	require.NoError(t, err)
@@ -143,6 +174,11 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	}
 	err = idx.Build(context.Background())
 	require.NoError(t, err)
+	index, err := recsplit.OpenIndex(indexFileName)
+	require.NoError(t, err)
+	baseId := index.BaseDataID()
+	_ = baseId
+	require.Equal(t, baseId, uint64(from/1000))
 	if name == snaptype2.Transactions.Enum() {
 		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   1,
