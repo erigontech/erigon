@@ -340,11 +340,6 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-
-				if ii.filenameBase == kv.ReceiptDomain.String() {
-					log.Warn("[dbg] II.openDirtyFiles1", "fPathPattern", fPathPattern, "fPath", fPath, "ok", ok, "fileVer", fileVer, "err", err)
-				}
-
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
