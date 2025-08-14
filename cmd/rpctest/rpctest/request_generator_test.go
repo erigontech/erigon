@@ -425,21 +425,21 @@ func TestRequestGenerator_accountRange(t *testing.T) {
 			4756370,
 			common.HexToHash("0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca").Bytes(),
 			1,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "b540wAgSqA+offJiCLvmlBHjbWqfALNURO9BgfbEg8o=", 1, false, false, false], "id":1}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "b540wAgSqA+offJiCLvmlBHjbWqfALNURO9BgfbEg8o=", 1, false, false], "id":1}`,
 		},
 		{
 			2,
 			0,
 			common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de").Bytes(),
 			2,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "HP586VoWlNiWk2XLRyzkoNPu2BLFQP13CLvmlB40xN4=", 2, false, false, false], "id":2}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "HP586VoWlNiWk2XLRyzkoNPu2BLFQP13CLvmlB40xN4=", 2, false, false], "id":2}`,
 		},
 		{
 			3,
 			1234567,
 			common.HexToHash("0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c27664463fb5978b97f8b2d1b").Bytes(),
 			3,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "HNc8et9bMfPPlMZ7niUeaZVZ2RwnZkRj+1l4uX+LLRs=", 3, false, false, false], "id":3}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "HNc8et9bMfPPlMZ7niUeaZVZ2RwnZkRj+1l4uX+LLRs=", 3, false, false], "id":3}`,
 		},
 	}
 
