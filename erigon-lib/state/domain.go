@@ -1268,7 +1268,15 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{d.kvBtAccessorFilePath(fromStep, toStep), d.kvExistenceIdxFilePath(fromStep, toStep)}
+		exF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvExistenceIdxFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		btF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvBtAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return []string{btF, exF}
 	})
 }
 
@@ -1281,7 +1289,11 @@ func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{d.kviAccessorFilePath(fromStep, toStep)}
+		fPath, _, _, err := version.FindFilesWithVersionsByPattern(d.kviAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return []string{fPath}
 	})
 	//return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
 	//	var files []string

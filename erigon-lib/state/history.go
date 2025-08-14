@@ -337,9 +337,11 @@ func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
-		return []string{
-			h.vAccessorFilePath(fromStep, toStep),
+		fPath, _, _, err := version.FindFilesWithVersionsByPattern(h.vAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
 		}
+		return []string{fPath}
 	})
 }
 
