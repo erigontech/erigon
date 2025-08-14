@@ -311,13 +311,13 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench9(erigonURL, gethURL, needCompare)
+			err := rpctest.Bench9(erigonURL, gethURL, needCompare, latest)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 		},
 	}
-	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
+	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare, withLatest)
 
 	var benchTraceCallCmd = &cobra.Command{
 		Use:   "benchTraceCall",
