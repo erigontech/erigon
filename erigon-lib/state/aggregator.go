@@ -1494,10 +1494,7 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	var outs []string
-	defer func() {
-		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", outs, "in", in.FilePaths(a.dirs.Snap), "stack", dbg.Stack())
-		a.onFilesDelete(outs)
-	}()
+	defer a.onFilesDelete(outs)
 
 	at := a.BeginFilesRo()
 	defer at.Close()
