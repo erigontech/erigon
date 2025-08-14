@@ -284,16 +284,11 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 	if !ii.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
-	if ii.filenameBase == kv.ReceiptDomain.String() {
-		var fL []string
-		for _, file := range source {
-			fL = append(fL, file.FilePaths(ii.dirs.Snap)...)
-		}
-		log.Warn("[dbg] missedMapAccessors", "source", fL)
-	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
+		fPathMask, _ := version.ReplaceVersionWithMask(ii.efAccessorFilePath(fromStep, toStep))
+		fPath, _, _, _ := version.FindFilesWithVersionsByPattern(fPathMask)
 		return []string{
-			ii.efAccessorFilePath(fromStep, toStep),
+			fPath,
 		}
 	})
 }
