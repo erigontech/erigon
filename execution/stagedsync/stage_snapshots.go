@@ -370,7 +370,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			ll2 = append(ll2, l)
 		}
 	}
-	log.Warn("[dbg] BuildMissedAccessors!", "dirr_rr", ll2, "see", agg.Files())
+	log.Warn("[dbg] BuildMissedAccessors!")
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
