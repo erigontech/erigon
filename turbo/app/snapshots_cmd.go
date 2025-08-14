@@ -439,7 +439,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 			return true, false, nil
 		} else {
 			fmt.Printf("skipping file because it doesn't have state key %s\n", fileName)
-			return true, false, nil
+			return false, false, nil
 		}
 	} else {
 		log.Warn("[dbg] not found files for", "pattern", fPathMask)
