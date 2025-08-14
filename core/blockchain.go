@@ -263,7 +263,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 	return h
 }
 
-func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+func newBlockContext(header *types.Header, engine consensus.EngineReader, chainConfig *chain.Config) evmtypes.BlockContext {
 	isBor := chainConfig.Bor != nil
 	var author *common.Address
 	if isBor {
@@ -271,7 +271,11 @@ func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Co
 	} else {
 		author = &state.SystemAddress
 	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
+	return NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
+}
+
+func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	blockContext := newBlockContext(header, engine, chainConfig)
 	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
@@ -369,7 +373,8 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	if err := ibs.CommitBlock(evmtypes.Rules(cc, header.Number.Uint64(), header.Time), stateWriter); err != nil {
+	blockContext := newBlockContext(header, engine, cc)
+	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
@@ -386,7 +391,8 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-	ibs.FinalizeTx(evmtypes.Rules(cc, header.Number.Uint64(), header.Time), stateWriter)
+	blockContext := newBlockContext(header, engine, cc)
+	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 	return nil
 }
 

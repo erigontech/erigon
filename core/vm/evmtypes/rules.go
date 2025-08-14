@@ -23,7 +23,7 @@ import (
 )
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
-func Rules(c *chain.Config, num uint64, time uint64) *chain.Rules {
+func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -31,21 +31,21 @@ func Rules(c *chain.Config, num uint64, time uint64) *chain.Rules {
 
 	return &chain.Rules{
 		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(num),
-		IsTangerineWhistle: c.IsTangerineWhistle(num),
-		IsSpuriousDragon:   c.IsSpuriousDragon(num),
-		IsByzantium:        c.IsByzantium(num),
-		IsConstantinople:   c.IsConstantinople(num),
-		IsPetersburg:       c.IsPetersburg(num),
-		IsIstanbul:         c.IsIstanbul(num),
-		IsBerlin:           c.IsBerlin(num),
-		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
-		IsCancun:           c.IsCancun(time),
-		IsNapoli:           c.IsNapoli(num),
-		IsBhilai:           c.IsBhilai(num),
-		IsPrague:           c.IsPrague(time) || c.IsBhilai(num),
-		IsOsaka:            c.IsOsaka(time),
+		IsHomestead:        c.IsHomestead(bc.BlockNumber),
+		IsTangerineWhistle: c.IsTangerineWhistle(bc.BlockNumber),
+		IsSpuriousDragon:   c.IsSpuriousDragon(bc.BlockNumber),
+		IsByzantium:        c.IsByzantium(bc.BlockNumber),
+		IsConstantinople:   c.IsConstantinople(bc.BlockNumber),
+		IsPetersburg:       c.IsPetersburg(bc.BlockNumber),
+		IsIstanbul:         c.IsIstanbul(bc.BlockNumber),
+		IsBerlin:           c.IsBerlin(bc.BlockNumber),
+		IsLondon:           c.IsLondon(bc.BlockNumber),
+		IsShanghai:         c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
+		IsCancun:           c.IsCancun(bc.Time),
+		IsNapoli:           c.IsNapoli(bc.BlockNumber),
+		IsBhilai:           c.IsBhilai(bc.BlockNumber),
+		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
+		IsOsaka:            c.IsOsaka(bc.Time),
 		IsAura:             c.Aura != nil,
 	}
 }

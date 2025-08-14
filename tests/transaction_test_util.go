@@ -130,7 +130,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		{"Berlin", types.LatestSignerForChainID(chainID), tt.Forks.Berlin, testutil.Forks["Berlin"]},
 		{"London", types.LatestSignerForChainID(chainID), tt.Forks.London, testutil.Forks["London"]},
 	} {
-		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, evmtypes.Rules(testcase.config, 0, 0))
+		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, (&evmtypes.BlockContext{}).Rules(testcase.config))
 
 		if testcase.fork.Exception != "" {
 			if err == nil {

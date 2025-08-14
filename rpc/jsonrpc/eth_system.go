@@ -326,7 +326,11 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime)
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
 	forkConfig.ForkId = forkId[:]
-	precompiles := vm.Precompiles(evmtypes.Rules(chainConfig, math.MaxUint64, activationTime))
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: math.MaxUint64,
+		Time:        activationTime,
+	}
+	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
 		forkConfig.Precompiles[precompile.Name()] = addr

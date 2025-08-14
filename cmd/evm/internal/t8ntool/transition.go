@@ -314,7 +314,7 @@ func Main(ctx *cli.Context) error {
 	blockNum, txNum := uint64(0), uint64(0)
 	sd.SetTxNum(txNum)
 	sd.SetBlockNum(blockNum)
-	reader, writer := MakePreState(evmtypes.Rules(chainConfig, 0, 0), tx, sd, prestate.Pre, blockNum, txNum)
+	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
 	blockNum, txNum = uint64(1), uint64(2)
 	sd.SetTxNum(txNum)
 	sd.SetBlockNum(blockNum)

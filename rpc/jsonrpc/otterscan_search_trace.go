@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/chain"
@@ -98,7 +97,8 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, err
 	}
 	header := block.Header()
-	rules := evmtypes.Rules(chainConfig, block.NumberU64(), header.Time)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
+	rules := blockContext.Rules(chainConfig)
 	found := false
 	for idx, txn := range block.Transactions() {
 		select {
@@ -112,10 +112,9 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 
 		tracer := NewTouchTracer(searchAddr)
 		ibs.SetHooks(tracer.TracingHooks())
-		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
-		TxContext := core.NewEVMTxContext(msg)
+		txContext := core.NewEVMTxContext(msg)
 
-		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Tracer: tracer.TracingHooks()})
+		vmenv := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{Tracer: tracer.TracingHooks()})
 		// FIXME (tracing): Geth has a new method ApplyEVMMessage or something like this that does the OnTxStart/OnTxEnd wrapping, let's port it too
 		if tracer != nil && tracer.TracingHooks().OnTxStart != nil {
 			tracer.TracingHooks().OnTxStart(vmenv.GetVMContext(), txn, msg.From())

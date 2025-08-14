@@ -239,7 +239,7 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 		if err != nil {
 			return nil, common.Hash{}, 0, err
 		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, evmtypes.Rules(config, 0, 0))
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, (&evmtypes.BlockContext{}).Rules(config))
 		if err != nil {
 			return nil, common.Hash{}, 0, err
 		}
