@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -94,6 +95,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
 	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)
+	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
 	blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
 		{
 			Index:                    0,
@@ -164,7 +166,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil,
+		}, nil, blobStorage, columnStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil,
 		syncCommitteeMessagesService,
 		syncContributionService,
 		aggregateAndProofsService,
