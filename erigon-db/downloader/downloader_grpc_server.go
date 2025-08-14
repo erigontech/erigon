@@ -71,7 +71,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		for _, name := range request.Items {
 			names = append(names, name.Path)
 		}
-		log.Warn("[dbg] GrpcServer.Add", "names", names)
+		log.Debug("[downloader] Add", "names", names)
 	}
 
 	var progress atomic.Int32
@@ -132,7 +132,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 		for _, name := range request.Paths {
 			names = append(names, name)
 		}
-		log.Warn("[dbg] GrpcServer.Delete", "names", names)
+		log.Debug("[downloader] Delete", "names", names)
 	}
 
 	for _, name := range request.Paths {
