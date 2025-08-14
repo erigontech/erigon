@@ -71,8 +71,8 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -430,7 +430,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			syncedDataManager,
 			statesReader,
 			sentinel,
-			params.GitTag,
+			version.GitTag,
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,

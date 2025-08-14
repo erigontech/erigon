@@ -58,10 +58,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
@@ -201,7 +201,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if cmd.Name() != "torrent_cat" {
 			logger = debug.SetupCobra(cmd, "downloader")
-			logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
@@ -248,7 +248,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"webseed", webseeds,
 	)
 
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
+	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(webseeds)
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
