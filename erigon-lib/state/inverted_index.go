@@ -386,9 +386,6 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			if item.index == nil {
 				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				if ii.filenameBase == kv.ReceiptDomain.String() {
-					log.Warn("[dbg] II.openDirtyFiles2", "fPathPattern", fPathPattern, "fPath", fPath, "ok", ok, "fileVer", fileVer, "err", err)
-				}
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
@@ -404,18 +401,12 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
-				} else {
-					log.Warn("[dbg] whaaaaat????", "fPathPattern", fPathPattern, "ok", ok, "fileVer", fileVer, "fPath", fPath)
 				}
 			}
 		}
 
 		return true
 	})
-
-	if ii.filenameBase == kv.ReceiptDomain.String() {
-		log.Warn("[dbg] II.openDirtyFiles3", "invalidFileItems", invalidFileItems)
-	}
 
 	for _, item := range invalidFileItems {
 		item.closeFiles()
