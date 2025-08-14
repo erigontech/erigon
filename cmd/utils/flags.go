@@ -117,6 +117,10 @@ var (
 		Name:  "override.prague",
 		Usage: "Manually specify the Prague fork time, overriding the bundled setting",
 	}
+	OverrideCancunFlag = flags.BigFlag{
+		Name:  "override.cancun",
+		Usage: "Manually specify the Cancun fork time, overriding the bundled setting",
+	}
 	OverrideNormalcyBlockFlag = flags.BigFlag{
 		Name:  "override.normalcyblock",
 		Usage: "Manually specify the NormalcyBlock fork block, overriding the bundled setting",
@@ -2570,6 +2574,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(OverridePragueFlag.Name) {
 		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
 		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
+	}
+	if ctx.IsSet(OverrideCancunFlag.Name) {
+		cfg.OverrideCancunTime = flags.GlobalBig(ctx, OverrideCancunFlag.Name)
 	}
 	if ctx.IsSet(OverrideNormalcyBlockFlag.Name) {
 		cfg.OverrideNormalcyBlock = flags.GlobalBig(ctx, OverrideNormalcyBlockFlag.Name)
