@@ -213,32 +213,32 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 	defer tx.Rollback()
 
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		http.Error(w, err.Error(), httpStatus)
+		beaconhttp.NewEndpointError(httpStatus, err).WriteTo(w)
 		return
 	}
 
 	queryFilters, err := beaconhttp.StringListFromQueryParams(r, "status")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
 	validatorIds, err := beaconhttp.StringListFromQueryParams(r, "id")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
@@ -255,26 +255,26 @@ func (a *ApiHandler) PostEthV1BeaconStatesValidators(w http.ResponseWriter, r *h
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 	defer tx.Rollback()
 
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		http.Error(w, err.Error(), httpStatus)
+		beaconhttp.NewEndpointError(httpStatus, err).WriteTo(w)
 		return
 	}
 
 	var req validatorsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
@@ -293,13 +293,13 @@ func (a *ApiHandler) writeValidatorsResponse(
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	filterIndicies, err := parseQueryValidatorIndicies(a.syncedData, validatorIds)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	// Check the filters' validity
 	statusFilters, err := parseStatuses(queryFilters)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
@@ -308,18 +308,18 @@ func (a *ApiHandler) writeValidatorsResponse(
 			responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
 			return nil
 		}); err != nil {
-			http.Error(w, errors.New("node is not synced").Error(), http.StatusServiceUnavailable)
+			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced")).WriteTo(w)
 		}
 		return
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 
 	if slot == nil {
-		http.Error(w, "state not found", http.StatusNotFound)
+		beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found")).WriteTo(w)
 		return
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
@@ -332,15 +332,15 @@ func (a *ApiHandler) writeValidatorsResponse(
 	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
 		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, getter, *slot)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		} else if validatorSet == nil {
-			http.Error(w, fmt.Errorf("state not found for slot %v", *slot).Error(), http.StatusNotFound)
+			beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found for slot %v", *slot)).WriteTo(w)
 			return
 		}
 		balances, err := a.stateReader.ReadValidatorsBalances(tx, getter, *slot)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
 		responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validatorSet, true, isOptimistic)
@@ -348,20 +348,20 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 	if balances == nil {
-		http.Error(w, "balances not found", http.StatusNotFound)
+		beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("balances not found")).WriteTo(w)
 		return
 	}
 	validators, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 	if validators == nil {
-		http.Error(w, "validators not found", http.StatusNotFound)
+		beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found")).WriteTo(w)
 		return
 	}
 	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
@@ -586,8 +586,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
 		if balances == nil {
-
-			http.Error(w, "validators not found, node may node be running in archivial node", http.StatusNotFound)
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found, node may node be running in archivial node"))
 		}
 		return responseValidatorsBalances(w, filterIndicies, balances, true, isOptimistic), nil
 	}
@@ -618,7 +617,7 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		isOptimistic = "true"
 	}
 	if _, err := b.WriteString("{\"execution_optimistic\":" + isOptimistic + ",\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":"); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 	b.WriteString("[")
@@ -659,7 +658,7 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		return true
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 	_, err = b.WriteString("]}\n")
