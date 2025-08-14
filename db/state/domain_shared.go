@@ -632,8 +632,14 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 	return nil
 }
 
-func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
-func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+func toStringZeroCopy(v []byte) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return unsafe.String(&v[0], len(v))
+}
+
+func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func AggTx(tx kv.Tx) *AggregatorRoTx {
 	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {

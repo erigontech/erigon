@@ -1758,12 +1758,13 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 		return v, step, true, nil
 	}
 
-	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, math.MaxUint64)
-	if found {
-		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-		return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
+	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
+	if !found {
+		return nil, kv.Step(0), false, err
 	}
-	return nil, kv.Step(0), false, err
+
+	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {
