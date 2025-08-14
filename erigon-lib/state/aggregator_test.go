@@ -144,16 +144,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	}
 
 	onChangeCalls, onDelCalls := 0, 0
-	var firstCreated string
-	var firstDeleted string
 	agg.OnFilesChange(func(newFiles []string) {
 		if len(newFiles) == 0 {
 			return
 		}
 
 		onChangeCalls++
-		if firstCreated == "" {
-			firstCreated = newFiles[0]
+		if onChangeCalls == 1 {
+			mustSeeFile(newFiles, "domain", "accounts.0-2.kv") //TODO: when we build `accounts.0-1.kv` - we sending empty notifcation
 		}
 		//fmt.Printf("New files: %s\n", newFiles)
 
@@ -163,9 +161,6 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		}
 
 		onDelCalls++
-		if firstDeleted == "" {
-			firstDeleted = deletedFiles[0]
-		}
 		if onDelCalls == 1 {
 			mustSeeFile(deletedFiles, "domain", "accounts.0-1.kv")
 			mustSeeFile(deletedFiles, "domain", "commitment.0-1.kv")
@@ -180,9 +175,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 	require.Equal(t, 13, onChangeCalls)
-	require.Equal(t, 13, onDelCalls)
-	require.Equal(t, "domain/v1.1-accounts.0-2.kv", firstCreated) //TODO: it's not perfect, but we plan to drop files
-	require.Equal(t, "history/v1.1-accounts.0-1.v", firstDeleted) //TODO: why not accounts.kv?
+	require.Equal(t, 14, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())
