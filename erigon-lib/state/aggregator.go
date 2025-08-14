@@ -1493,15 +1493,10 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
-	var outs []*FilesItem
+	var outs []string
 	defer func() {
-		var namesWithDirs []string
-		for _, out := range outs {
-			namesWithDirs = append(namesWithDirs, out.FilePaths(a.dirs.Snap)...)
-		}
-
-		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", namesWithDirs, "in", in.FilePaths(a.dirs.Snap), "stack", dbg.Stack())
-		a.onFilesDelete(namesWithDirs)
+		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", outs, "in", in.FilePaths(a.dirs.Snap), "stack", dbg.Stack())
+		a.onFilesDelete(outs)
 	}()
 
 	at := a.BeginFilesRo()
@@ -1515,7 +1510,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			outs = append(outs, d.garbage()...)
+			outs = append(outs, d.cleanAfterMerge(nil, nil, nil)...)
 		} else {
 			outs = append(outs, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
 		}
