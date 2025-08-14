@@ -27,7 +27,6 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -66,6 +65,14 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer s.d.ResetLogInterval()
+
+	{
+		var names []string
+		for _, name := range request.Items {
+			names = append(names, name.Path)
+		}
+		s.d.logger.Debug("[downloader] Add", "files", names)
+	}
 
 	var progress atomic.Int32
 
@@ -125,7 +132,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 		for _, name := range request.Paths {
 			names = append(names, name)
 		}
-		log.Warn("[dbg] GrpcServer.Delete", "names", names, "m", len(s.d.torrentsByName), "stack", dbg.Stack())
+		s.d.logger.Debug("[downloader] Delete", "files", names)
 	}
 
 	for _, name := range request.Paths {
