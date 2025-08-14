@@ -171,17 +171,17 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			//require.Contains(t, deletedFiles, "domain/v1.1-accounts.0-1.kv")
 		}
 		if slices.Contains(deletedFiles, "domain/v1.1-accounts.0-1.kv") {
-			fmt.Printf("Deleted files111: %s, onDelCalls=%d\n", deletedFiles, onDelCalls)
+			fmt.Printf("Deleted files111:  onDelCalls=%d\n", onDelCalls)
 		}
-		fmt.Printf("Deleted files: %s\n", deletedFiles)
+		//fmt.Printf("Deleted files: %s\n", deletedFiles)
 	})
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
-	require.Equal(t, 26, onChangeCalls)
-	require.Equal(t, 1, onDelCalls)
+	require.Equal(t, 13, onChangeCalls)
+	require.Equal(t, 13, onDelCalls)
 	require.Equal(t, "domain/v1.1-accounts.0-2.kv", firstCreated) //TODO: it's not perfect, but we plan to drop files
-	require.Equal(t, "domain/v1.1-code.0-1.kv", firstDeleted)
+	require.Equal(t, "history/v1.1-accounts.0-1.v", firstDeleted) //TODO: why not accounts.kv?
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())

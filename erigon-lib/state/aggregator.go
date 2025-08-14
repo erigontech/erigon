@@ -1515,11 +1515,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			newOuts := d.cleanAfterMerge(nil, nil, nil)
-			outs = append(outs, newOuts...)
+			outs = append(outs, d.garbage()...)
 		} else {
-			newOuts := d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
-			outs = append(outs, newOuts...)
+			outs = append(outs, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
 		}
 	}
 	for id, ii := range at.iis {
@@ -1527,11 +1525,29 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			newOuts := ii.cleanAfterMerge(nil)
-			outs = append(outs, newOuts...)
+			outs = append(outs, ii.cleanAfterMerge(nil)...)
 		} else {
-			newOuts := ii.cleanAfterMerge(in.iis[id])
-			outs = append(outs, newOuts...)
+			outs = append(outs, ii.cleanAfterMerge(in.iis[id])...)
+		}
+	}
+	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
+		if in == nil {
+			outs = append(outs, d.cleanAfterMerge(nil, nil, nil)...)
+		} else {
+			outs = append(outs, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
+		}
+	}
+	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
+		if in == nil {
+			outs = append(outs, ii.cleanAfterMerge(nil)...)
+		} else {
+			outs = append(outs, ii.cleanAfterMerge(in.iis[id])...)
 		}
 	}
 }
