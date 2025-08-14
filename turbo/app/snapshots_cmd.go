@@ -804,6 +804,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	blockReader, _ := blockRetire.IO()
+	heimdallStore, bridgeStore := blockRetire.BorStore()
 	found := false
 	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
@@ -845,7 +846,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorSpans skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
@@ -853,7 +854,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorCheckpoints skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
