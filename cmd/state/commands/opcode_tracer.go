@@ -738,7 +738,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	var receipts types.Receipts
 	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()
-	blockContext := core.NewBlockContext(header, engine, chainConfig)
+	blockContext := core.NewEVMBlockContextHelper(header, engine, chainConfig)
 	rules := blockContext.Rules(chainConfig)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
