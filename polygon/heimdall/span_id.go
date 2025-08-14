@@ -36,7 +36,7 @@ var (
 	ErrSpanNotFound = errors.New("span not found")
 )
 
-// SpanIdAt returns the corresponding span id for the given block number.
+// DEPRECATED: SpanIdAt returns the corresponding span id for the given block number.
 func SpanIdAt(blockNum uint64) SpanId {
 	if blockNum > zerothSpanEnd {
 		return SpanId(1 + (blockNum-zerothSpanEnd-1)/spanLength)
@@ -44,7 +44,7 @@ func SpanIdAt(blockNum uint64) SpanId {
 	return 0
 }
 
-// SpanEndBlockNum returns the number of the last block in the given span.
+// DEPRECATED: SpanEndBlockNum returns the number of the last block in the given span.
 func SpanEndBlockNum(spanId SpanId) uint64 {
 	if spanId > 0 {
 		return uint64(spanId)*spanLength + zerothSpanEnd
@@ -52,7 +52,7 @@ func SpanEndBlockNum(spanId SpanId) uint64 {
 	return zerothSpanEnd
 }
 
-// IsBlockInLastSprintOfSpan returns true if a block num is within the last sprint of a span and false otherwise.
+// DEPRECATED: IsBlockInLastSprintOfSpan returns true if a block num is within the last sprint of a span and false otherwise.
 func IsBlockInLastSprintOfSpan(blockNum uint64, config *borcfg.BorConfig) bool {
 	spanNum := SpanIdAt(blockNum)
 	endBlockNum := SpanEndBlockNum(spanNum)

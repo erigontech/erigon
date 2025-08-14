@@ -130,6 +130,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	defer idx.Close()
 	idx.DisableFsync()
 	getter := d.MakeGetter()
+	//
 	var i, offset, nextPos uint64
 	var key [8]byte
 	for getter.HasNext() {

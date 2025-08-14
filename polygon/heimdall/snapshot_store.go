@@ -212,18 +212,21 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
 }
 
 func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
-	var endBlock uint64
-	if id > 0 {
-		endBlock = SpanEndBlockNum(SpanId(id))
-	}
-
 	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(s.SnapType().Enum())
-	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
+	if maxBlockNumInFiles == 0 {
 		return s.EntityStore.Entity(ctx, id)
 	}
+	lastSpanIdInSnapshots, ok, err := s.EntityIdFromBlockNum(ctx, maxBlockNumInFiles)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, errors.New("could not load last span id in snapshots")
+	}
 
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], id)
+	if id > lastSpanIdInSnapshots { // the span with this id is in MDBX and not in snapshots
+		return s.EntityStore.Entity(ctx, id)
+	}
 
 	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
@@ -233,22 +236,24 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 		sn := segments[i]
 		idx := sn.Src().Index()
 
-		if idx == nil {
+		if idx == nil || idx.KeyCount() == 0 {
 			continue
 		}
-		spanFrom := uint64(SpanIdAt(sn.From()))
-		if id < spanFrom {
-			continue
-		}
-		spanTo := uint64(SpanIdAt(sn.To()))
-		if id >= spanTo {
-			continue
-		}
-		if idx.KeyCount() == 0 {
-			continue
-		}
-		offset := idx.OrdinalLookup(id - idx.BaseDataID())
+
 		gg := sn.Src().MakeGetter()
+		firstOffset := idx.OrdinalLookup(0)
+		gg.Reset(firstOffset)
+		firstSpanRaw, _ := gg.Next(nil)
+		var firstSpanInSeg Span
+		if err := json.Unmarshal(firstSpanRaw, &firstSpanInSeg); err != nil {
+			return nil, false, err
+		}
+		// skip : we need to look in an earlier .seg file
+		if id < uint64(firstSpanInSeg.Id) {
+			continue
+		}
+
+		offset := idx.OrdinalLookup(id - idx.BaseDataID())
 		gg.Reset(offset)
 		result, _ := gg.Next(nil)
 
