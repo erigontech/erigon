@@ -347,10 +347,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
+	log.Warn("[dbg] BuildMissedIndicesIfNeed!")
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 		return err
 	}
+	log.Warn("[dbg] BuildMissedIndicesIfNeed! done")
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
