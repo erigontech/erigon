@@ -138,26 +138,38 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	var firstCreated string
 	var firstDeleted string
 	agg.OnFilesChange(func(newFiles []string) {
-		if len(newFiles) > 0 {
-			onChangeCalls++
-			if firstCreated == "" {
-				firstCreated = newFiles[0]
-			}
-			fmt.Printf("New files: %s\n", newFiles)
+		if len(newFiles) == 0 {
+			return
+		}
 
+		onChangeCalls++
+		if firstCreated == "" {
+			firstCreated = newFiles[0]
 		}
+		fmt.Printf("New files: %s\n", newFiles)
+
 	}, func(deletedFiles []string) {
-		if len(deletedFiles) > 0 {
-			onChangeCalls++
-			if firstDeleted == "" {
-				firstDeleted = deletedFiles[0]
-				require.Contains(t, deletedFiles, "domain/v1.1-accounts.0-1.kv")
-				require.Contains(t, deletedFiles, "domain/v1.1-commitment.0-1.kv")
-				require.Contains(t, deletedFiles, "history/v1.1-accounts.0-1.v")
-				require.Contains(t, deletedFiles, "accessor/v1.1-accounts.0-1.vi")
-			}
-			fmt.Printf("Deleted files: %s\n", deletedFiles)
+		if len(deletedFiles) == 0 {
+			return
 		}
+
+		onChangeCalls++
+		if firstDeleted == "" {
+			firstDeleted = deletedFiles[0]
+		}
+		if onChangeCalls == 1 {
+			//require.Contains(t, deletedFiles, "domain/v1.1-accounts.0-1.kv")
+			require.Contains(t, deletedFiles, "domain/v1.1-commitment.0-1.kv")
+			require.Contains(t, deletedFiles, "history/v1.1-accounts.0-1.v")
+			require.Contains(t, deletedFiles, "accessor/v1.1-accounts.0-1.vi")
+		}
+		if onChangeCalls == 2 {
+			require.Contains(t, deletedFiles, "domain/v1.1-accounts.0-1.kv")
+			require.Contains(t, deletedFiles, "domain/v1.1-commitment.0-1.kv")
+			require.Contains(t, deletedFiles, "history/v1.1-accounts.0-1.v")
+			require.Contains(t, deletedFiles, "accessor/v1.1-accounts.0-1.vi")
+		}
+		fmt.Printf("Deleted files: %s\n", deletedFiles)
 	})
 
 	err = agg.BuildFiles(txs)

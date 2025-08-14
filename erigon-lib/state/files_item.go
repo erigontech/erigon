@@ -269,7 +269,7 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*FilesItem], outs []*FilesItem, f
 			panic("must not happen: " + filenameBase)
 		}
 		dirtyFiles.Delete(out)
-		if strings.Contains(out.decompressor.FileName(), "accounts.0-1") {
+		if strings.Contains(out.decompressor.FileName(), "accounts.0-1.kv") {
 			fmt.Printf("[dbg] a: %s\n", out.decompressor.FileName())
 		}
 
