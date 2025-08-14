@@ -17,13 +17,13 @@
 package dbg
 
 import (
-	"github.com/go-stack/stack"
+	stack2 "github.com/go-stack/stack"
 )
 
 // Stack returns stack-trace in logger-friendly compact formatting
 func Stack() string {
-	return stack.Trace().TrimRuntime().String()
+	return stack2.Trace().TrimBelow(stack2.Caller(1)).String()
 }
 func StackSkip(skip int) string {
-	return stack.Trace().TrimRuntime().TrimBelow(stack.Caller(skip)).String()
+	return stack2.Trace().TrimBelow(stack2.Caller(skip)).String()
 }
