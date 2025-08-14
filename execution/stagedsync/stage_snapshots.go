@@ -313,6 +313,17 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	{
+		ll, _ := dir.ListFiles(cfg.dirs.SnapAccessors)
+		var ll2 []string
+		for _, l := range ll {
+			if strings.Contains(l, "receipt") {
+				ll2 = append(ll2, l)
+			}
+		}
+		log.Warn("[dbg] BeforeOpen!", "dirr_rr", ll2)
+	}
+
 	{ // Now can open all files
 		if err := agg.ReloadSalt(); err != nil {
 			return err
@@ -355,7 +366,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	log.Warn("[dbg] BuildMissedIndicesIfNeed! done")
 
 	ll, _ := dir.ListFiles(cfg.dirs.SnapAccessors)
-	log.Warn("[dbg] BuildMissedAccessors!", "see", agg.Files(), "dirr_rr", ll)
+	var ll2 []string
+	for _, l := range ll {
+		if strings.Contains(l, "receipt") {
+			ll2 = append(ll2, l)
+		}
+	}
+	log.Warn("[dbg] BuildMissedAccessors!", "dirr_rr", ll2, "see", agg.Files())
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
