@@ -134,7 +134,7 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	if err != nil {
 		return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
 	}
-	if strings.Contains(pattern, "receipt") {
+	if strings.Contains(pattern, "receipt") && strings.Contains(pattern, "ef") {
 		log.Warn("[dbg] FindFilesWithVersionsByPattern????", "matches", matches)
 	}
 
