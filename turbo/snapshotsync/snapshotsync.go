@@ -459,6 +459,9 @@ func SyncSnapshots(
 			break
 		}
 	}
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
+		return nil
+	}
 
 	// Check for completion immediately, then growing intervals.
 	interval := time.Second
