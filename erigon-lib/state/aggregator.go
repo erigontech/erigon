@@ -1493,8 +1493,8 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
-	var outs []string
-	defer a.onFilesDelete(outs)
+	var deleted []string
+	defer a.onFilesDelete(deleted)
 
 	at := a.BeginFilesRo()
 	defer at.Close()
@@ -1507,9 +1507,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			outs = append(outs, d.cleanAfterMerge(nil, nil, nil)...)
+			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil)...)
 		} else {
-			outs = append(outs, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
+			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
 		}
 	}
 	for id, ii := range at.iis {
@@ -1517,9 +1517,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			outs = append(outs, ii.cleanAfterMerge(nil)...)
+			deleted = append(deleted, ii.cleanAfterMerge(nil)...)
 		} else {
-			outs = append(outs, ii.cleanAfterMerge(in.iis[id])...)
+			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id])...)
 		}
 	}
 	for id, d := range at.d {
@@ -1527,9 +1527,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			outs = append(outs, d.cleanAfterMerge(nil, nil, nil)...)
+			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil)...)
 		} else {
-			outs = append(outs, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
+			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
 		}
 	}
 	for id, ii := range at.iis {
@@ -1537,9 +1537,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			outs = append(outs, ii.cleanAfterMerge(nil)...)
+			deleted = append(deleted, ii.cleanAfterMerge(nil)...)
 		} else {
-			outs = append(outs, ii.cleanAfterMerge(in.iis[id])...)
+			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id])...)
 		}
 	}
 }
