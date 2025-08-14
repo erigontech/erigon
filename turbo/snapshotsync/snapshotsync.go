@@ -363,13 +363,6 @@ func SyncSnapshots(
 		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
-
-		// Find minimum block to download.
-		if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-
-			return nil
-		}
-
 		//Corner cases:
 		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
