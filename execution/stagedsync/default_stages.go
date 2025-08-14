@@ -178,6 +178,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				logger.Info("[p] download headers forward")
 				if badBlockUnwind {
 					return nil
 				}
@@ -187,6 +188,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return nil
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				logger.Info("[p] download headers prune")
 				return SnapshotsPrune(p, snapshots, ctx, tx, logger)
 			},
 		},
