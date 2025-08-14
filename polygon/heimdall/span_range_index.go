@@ -94,11 +94,11 @@ func (i *txSpanRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) er
 		return errors.New("tx not writable")
 	}
 	valuePair := writeSpanIdEndBlockPair(id, r.End) // write (spanId, EndBlock) pair to buf
-	return tx.Put(kv.BorSpansIndex, key[:], valuePair[:])
+	return tx.Put(i.table, key[:], valuePair[:])
 }
 
 func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	cursor, err := i.tx.Cursor(kv.BorSpansIndex)
+	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
 		return 0, false, err
 	}
