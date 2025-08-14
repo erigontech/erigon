@@ -391,6 +391,11 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 
 		return true
 	})
+
+	if ii.filenameBase == kv.ReceiptDomain.String() {
+		log.Warn("[dbg] II.openDirtyFiles3", "invalidFileItems", invalidFileItems)
+	}
+
 	for _, item := range invalidFileItems {
 		item.closeFiles()
 		ii.dirtyFiles.Delete(item)
