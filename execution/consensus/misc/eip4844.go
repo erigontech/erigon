@@ -56,7 +56,7 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	if config.IsOsaka(currentHeaderTime) {
 		// EIP-7918: Blob base fee bounded by execution cost
 		max := config.GetMaxBlobsPerBlock(currentHeaderTime)
-		parentBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, parent.Time)
+		parentBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, currentHeaderTime)
 		if err != nil {
 			panic(err) // should never happen assuming the parent is valid
 		}
