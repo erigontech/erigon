@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -453,9 +452,6 @@ func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint6
 		fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
 		for _, fName := range accessorsFor(fromStep, toStep) {
 			exists, err := dir.FileExist(fName)
-			if strings.Contains(fName, kv.ReceiptDomain.String()) {
-				log.Warn("[dbg] fileItemsWithMissedAccessors", "fname", fName, "exists", exists)
-			}
 			if err != nil {
 				panic(err)
 			}
