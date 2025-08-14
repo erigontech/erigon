@@ -346,6 +346,9 @@ func SyncSnapshots(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
+		return nil
+	}
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
