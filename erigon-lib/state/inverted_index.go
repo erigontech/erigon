@@ -289,10 +289,6 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 		if err != nil {
 			panic(err)
 		}
-		if ii.filenameBase == kv.ReceiptDomain.String() {
-			log.Warn("[dbg] missedMapAccessors2", "fPath", fPath)
-		}
-
 		return []string{
 			fPath,
 		}
