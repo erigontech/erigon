@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type Version struct {
@@ -134,10 +132,6 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	if err != nil {
 		return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
 	}
-	if strings.Contains(pattern, "receipt") && strings.Contains(pattern, "ef") {
-		log.Warn("[dbg] FindFilesWithVersionsByPattern????", "matches", matches)
-	}
-
 	if len(matches) == 0 {
 		return "", Version{}, false, nil
 	}
