@@ -44,12 +44,14 @@ func DefaultStages(ctx context.Context,
 				if badBlockUnwind {
 					return nil
 				}
+				logger.Info("download snapshots forward")
 				return SpawnStageSnapshots(s, ctx, txc.Tx, snapshots, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return nil
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				logger.Info("download snapshots prune")
 				return SnapshotsPrune(p, snapshots, ctx, tx, logger)
 			},
 		},
@@ -60,6 +62,7 @@ func DefaultStages(ctx context.Context,
 				if badBlockUnwind {
 					return nil
 				}
+				logger.Info("download headers forward")
 				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {

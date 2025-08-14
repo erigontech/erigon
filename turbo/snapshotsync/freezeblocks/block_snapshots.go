@@ -349,6 +349,10 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return deleted, nil
 	}
+	if dbg.NoPrune() {
+		br.logger.Info("skipping pruning ancient blocks")
+		return
+	}
 	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
 	if err != nil {
 		return deleted, err
