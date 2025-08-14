@@ -1,19 +1,3 @@
-// Copyright 2024 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
 package services
 
 import (
@@ -30,10 +14,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	das_state_mock "github.com/erigontech/erigon/cl/das/state/mock_services"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
@@ -96,6 +82,12 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 
 func (t *dataColumnSidecarTestSuite) TearDownTest() {
 	t.gomockCtrl.Finish()
+	// reset mock functions
+	verifyDataColumnSidecar = das.VerifyDataColumnSidecar
+	verifyDataColumnSidecarInclusionProof = das.VerifyDataColumnSidecarInclusionProof
+	verifyDataColumnSidecarKZGProofs = das.VerifyDataColumnSidecarKZGProofs
+	blsVerify = bls.Verify
+	computeSubnetForDataColumnSidecar = das.ComputeSubnetForDataColumnSidecar
 }
 
 func createMockDataColumnSidecar(slot uint64, index uint64) *cltypes.DataColumnSidecar {
@@ -178,15 +170,10 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
 		return nil
 	}).Return(nil).Times(1)
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
 
 	// Mock storage for first call
-	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-
-	// mock s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
-	t.mockPeerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
-	t.mockPeerDas.EXPECT().StateReader().Return(t.mockPeerDasStateReader).AnyTimes()
-	t.mockPeerDasStateReader.EXPECT().GetMyCustodyColumns().Return(map[uint64]bool{0: true, 1: true, 2: true, 3: true}, nil).AnyTimes()
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 
 	// First call should succeed
@@ -233,13 +220,13 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_Retu
 
 	// Mock fork choice methods to avoid panic
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		Slot: testSlot - 1,
+		//Slot: testSlot - 1,
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		Epoch: (testSlot - 100) / 32,
-		Root:  [32]byte{1},
+		//Epoch: (testSlot - 100) / 32,
+		//Root:  [32]byte{1},
 	}
-	t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
 	// Mock ViewHeadState to avoid panic
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
@@ -289,15 +276,15 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotTooOld_ReturnsEr
 
 	// Mock GetHeader to return a valid parent header
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		Slot: testSlot - 1,
+		//Slot: testSlot - 1,
 	}
 
 	// Mock FinalizedCheckpoint and Ancestor methods
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		Epoch: (testSlot + 100) / 32,
-		Root:  [32]byte{1},
+		//Epoch: (testSlot + 100) / 32,
+		//Root:  [32]byte{1},
 	}
-	t.mockForkChoice.Ancestors[(testSlot+100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot+100)/32*32] = [32]byte{1}
 
 	// Execute
 	sidecar := createMockDataColumnSidecar(testSlot, 0)
@@ -312,22 +299,24 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 	// Setup mock functions
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
 	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
+	blsVerify = t.mockFuncs.BlsVerify
 
 	// Setup
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(false).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
 	// Mock fork choice methods to avoid panic
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		Slot: testSlot - 1,
+		//Slot: testSlot - 1,
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		Epoch: (testSlot - 100) / 32,
-		Root:  [32]byte{1},
+		//Epoch: (testSlot - 100) / 32,
+		//Root:  [32]byte{1},
 	}
-	t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
 	// Mock ViewHeadState to avoid panic
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
@@ -349,6 +338,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidKZGProofs_Ret
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
 	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
 	verifyDataColumnSidecarKZGProofs = t.mockFuncs.VerifyDataColumnSidecarKZGProofs
+	blsVerify = t.mockFuncs.BlsVerify
 
 	// Setup
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
@@ -356,16 +346,17 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidKZGProofs_Ret
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofs", gomock.Any()).Return(false).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
 	// Mock fork choice methods to avoid panic
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		Slot: testSlot - 1,
+		//Slot: testSlot - 1,
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		Epoch: (testSlot - 100) / 32,
-		Root:  [32]byte{1},
+		//Epoch: (testSlot - 100) / 32,
+		//Root:  [32]byte{1},
 	}
-	t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
+	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
 	// Mock ViewHeadState to avoid panic
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
