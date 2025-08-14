@@ -781,7 +781,6 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 			if err := a.MergeLoop(ctx); err != nil {
 				panic(err)
 			}
-			a.onFilesChange(nil)
 		}()
 	}()
 	return nil
@@ -814,8 +813,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	}
 	a.IntegrateMergedDirtyFiles(outs, in)
 	a.cleanAfterMerge(in)
-
-	a.onFilesChange(in.FrozenList())
 	return true, nil
 }
 
@@ -853,6 +850,8 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+	defer a.onFilesChange(nil) //TODO: add relative file paths
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -1471,6 +1470,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 }
 
 func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *MergedFilesV3) {
+	defer a.onFilesChange(in.FrozenList())
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -1499,6 +1500,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			namesWithDirs = append(namesWithDirs, out.FilePaths(a.dirs.Snap)...)
 		}
 
+		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", namesWithDirs)
 		a.onFilesDelete(namesWithDirs)
 	}()
 
@@ -1631,7 +1633,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-			a.onFilesChange(nil)
 		}()
 	}()
 	return fin

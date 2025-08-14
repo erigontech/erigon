@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -256,7 +257,7 @@ func initSeparatedLogging(
 
 	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
 	logger.SetHandler(mux)
-	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
+	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson, "stack", dbg.Stack())
 }
 
 func tryGetLogLevel(s string) (log.Lvl, error) {

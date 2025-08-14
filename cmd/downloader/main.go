@@ -367,7 +367,7 @@ var createTorrent = &cobra.Command{
 		if err := checkChainName(cmd.Context(), dirs, chain); err != nil {
 			return err
 		}
-		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil, all)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil)
 		if err != nil {
 			return err
 		}
@@ -557,7 +557,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 
-	files, err := downloader.SeedableFiles(dirs, chain, all)
+	files, err := downloader.SeedableFiles(dirs, chain, true)
 	if err != nil {
 		return err
 	}
@@ -617,7 +617,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		createdAmount, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil, all)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil)
 		if err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}

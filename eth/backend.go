@@ -1464,7 +1464,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Config, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
 	var err error
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
-		s.logger.Warn("files changed...sending notification")
+		s.logger.Warn("files changed...sending notification", "l", frozenFileNames)
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {

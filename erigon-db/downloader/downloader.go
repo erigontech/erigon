@@ -893,19 +893,12 @@ func (d *Downloader) VerifyData(
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
+	log.Warn("[dbg] Downloader.AddNewSeedableFile", "name", name)
+
 	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
-		if isStateFile {
-			if !snaptype.E3Seedable(name) {
-				return nil
-			}
-		} else {
-			if ff.Type == nil {
-				return fmt.Errorf("nil ptr after parsing file: %s", name)
-			}
-			if !d.cfg.SnapshotConfig.Seedable(ff) {
-				return nil
-			}
+		if !isStateFile && ff.Type == nil {
+			return fmt.Errorf("nil ptr after parsing file: %s", name)
 		}
 	}
 
@@ -922,6 +915,8 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
 	}
+	log.Warn("[dbg] Downloader.AddNewSeedableFile done", "len(byNames)", len(d.torrentsByName), "len(c.Torrents())", len(d.torrentClient.Torrents()), "names", d.torrentsByName)
+
 	return nil
 }
 
@@ -1196,7 +1191,7 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 }
 
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.PreverifiedItems) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
+	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore)
 	return err
 }
 
@@ -1468,6 +1463,7 @@ func (d *Downloader) updateVerificationOccurring() {
 
 // Delete - stop seeding, remove file, remove .torrent.
 func (s *Downloader) Delete(name string) (err error) {
+	log.Warn("[dbg] Downloader.Delete", "name", name)
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	t, ok := s.torrentsByName[name]
