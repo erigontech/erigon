@@ -25,17 +25,16 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon/turbo/logging"
-	enode "github.com/erigontech/erigon/turbo/node"
-
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	cli2 "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
+	enode "github.com/erigontech/erigon/turbo/node"
+	shuttercmd "github.com/erigontech/erigon/txnprovider/shutter/cmd"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
@@ -84,6 +83,7 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&supportCommand,
 		//&backupCommand,
 	}
+	shuttercmd.RegisterCmds(app)
 	return app
 }
 

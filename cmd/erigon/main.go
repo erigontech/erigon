@@ -26,10 +26,10 @@ import (
 	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/params"
 	erigonapp "github.com/erigontech/erigon/turbo/app"

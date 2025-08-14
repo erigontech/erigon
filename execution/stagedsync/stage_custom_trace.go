@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
@@ -247,11 +247,11 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	var fromStep, toStep uint64
+	var fromStep, toStep kv.Step
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
 		if lastTxNum/agg.StepSize() > 0 {
-			toStep = lastTxNum / agg.StepSize()
+			toStep = kv.Step(lastTxNum / agg.StepSize())
 		}
 		return nil
 	}); err != nil {
@@ -460,10 +460,10 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 	return txNum
 }
 
-func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
+func firstStepNotInFiles(tx kv.Tx, produce Produce) kv.Step {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	ac := dbstate.AggTx(tx)
-	fromStep := uint64(math.MaxUint64)
+	fromStep := kv.Step(math.MaxUint64)
 	if produce.ReceiptDomain {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
 	}

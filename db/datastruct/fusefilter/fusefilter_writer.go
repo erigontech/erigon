@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
