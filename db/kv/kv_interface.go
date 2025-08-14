@@ -28,9 +28,9 @@ import (
 	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/version"
 )
 
 /*
@@ -42,6 +42,7 @@ Naming:
  RoTx - Read-Only Database Transaction. RwTx - read-write
  k, v - key, value
  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber
+ step - amount of txNums in the smallest file
  Table - collection of key-value pairs. In LMDB - it's `dbi`. Analog of SQL's Table. Keys are sorted and unique
  DupSort - if table created `Sorted Duplicates` option: then 1 key can have multiple (sorted and unique) values
  Cursor - low-level mdbx-tide api to navigate over Table
@@ -374,6 +375,11 @@ type Putter interface {
 
 // ---- Temporal part
 
+// Step - amount of txNums in the smallest file
+type Step uint64
+
+func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
+
 type (
 	Domain      uint16
 	Appendable  uint16
@@ -382,7 +388,7 @@ type (
 )
 
 type TemporalGetter interface {
-	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
+	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 }
 type TemporalTx interface {
@@ -423,7 +429,7 @@ type TemporalTx interface {
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
 type TemporalDebugTx interface {
 	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
-	GetLatestFromDB(domain Domain, k []byte) (v []byte, step uint64, found bool, err error)
+	GetLatestFromDB(domain Domain, k []byte) (v []byte, step Step, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
 	DomainFiles(domain ...Domain) VisibleFiles
@@ -480,7 +486,7 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
-	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error
+	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep Step) error
 	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
@@ -488,7 +494,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error
+	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep Step) error
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 

@@ -27,9 +27,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -346,6 +346,9 @@ func SyncSnapshots(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
+		return nil
+	}
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
@@ -360,13 +363,6 @@ func SyncSnapshots(
 		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
-
-		// Find minimum block to download.
-		if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-
-			return nil
-		}
-
 		//Corner cases:
 		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)

@@ -39,7 +39,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/crypto"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
@@ -49,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state"
@@ -2065,9 +2065,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			panic(err)
 		}
 		version := "erigon: " + params2.VersionWithCommit(params2.GitCommit)
-		webseedsList := common.CliString2Array(ctx.String(WebSeedsFlag.Name))
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			webseedsList = append(webseedsList, known...)
+		var webseedsList []string
+		if ctx.IsSet(WebSeedsFlag.Name) {
+			// Unfortunately we don't take webseed URL here in the native format.
+			webseedsList = common.CliString2Array(ctx.String(WebSeedsFlag.Name))
+		} else {
+			if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+				webseedsList = append(webseedsList, known...)
+			}
 		}
 		cfg.Downloader, err = downloadercfg.New(
 			ctx.Context,

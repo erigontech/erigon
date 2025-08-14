@@ -58,10 +58,10 @@ import (
 	"github.com/anacrolix/torrent/webseed"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -71,6 +71,8 @@ import (
 )
 
 var debugWebseed = false
+
+const TorrentClientStatusPath = "/downloader/torrentClientStatus"
 
 func init() {
 	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
@@ -1416,12 +1418,12 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d.torrentClient.WriteStatus(w)
 	})
-	p := "/downloader/torrentClientStatus"
+
 	// This is for gopprof.
 	defaultMux := http.DefaultServeMux
-	defaultMux.Handle(p, h)
+	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
-		debugMux.Handle(p, h)
+		debugMux.Handle(TorrentClientStatusPath, h)
 	}
 }
 
