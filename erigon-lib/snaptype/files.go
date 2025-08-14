@@ -328,7 +328,11 @@ func parseStateFile(name string) (from, to uint64, ok bool) {
 }
 
 func E3Seedable(name string) bool {
-	return true
+	from, to, ok := parseStateFile(name)
+	if !ok {
+		return false
+		return true
+	}
 }
 
 func IsStateFile(name string) bool {
