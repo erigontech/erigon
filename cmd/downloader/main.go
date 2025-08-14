@@ -367,7 +367,7 @@ var createTorrent = &cobra.Command{
 		if err := checkChainName(cmd.Context(), dirs, chain); err != nil {
 			return err
 		}
-		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil, all)
 		if err != nil {
 			return err
 		}
