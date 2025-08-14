@@ -4,7 +4,13 @@ on:
   push:
     branches:
       - 'release/3.1'
-  workflow_dispatch:     # Run manually
+  workflow_dispatch: # Run manually
+    inputs:
+      explicit_upgrade:
+        description: 'If true, perform explicit upgrade steps (by default they happen automatically)'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -48,6 +54,7 @@ jobs:
     # Upgrade + tip-tracking test
 
     - name: Print datadir contents before upgrade (for debugging)
+      if: ${{ inputs.explicit_upgrade }}
       working-directory: ${{ github.workspace }}
       run: |
         find $ERIGON_TESTBED_DATA_DIR
@@ -55,11 +62,13 @@ jobs:
     # The following task runs the datadir upgrade procedure explicitly.
     # It is unnecessary and is executed automatically by erigon when it detects the old format.
     - name: Run the datadir upgrade procedure
+      if: ${{ inputs.explicit_upgrade }}
       working-directory: ${{ github.workspace }}
       run: |
         ./build/bin/erigon snapshots update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
 
     - name: Print datadir contents after upgrade (for debugging)
+      if: ${{ inputs.explicit_upgrade }}
       working-directory: ${{ github.workspace }}
       run: |
         find $ERIGON_TESTBED_DATA_DIR
