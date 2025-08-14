@@ -2,7 +2,7 @@ package snaptype
 
 import "testing"
 
-func TestE3Seedable(t *testing.T) {
+func TestStateSeedable(t *testing.T) {
 	tests := []struct {
 		name     string
 		filename string
@@ -14,9 +14,14 @@ func TestE3Seedable(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "non seedable due to wrong diff",
+			name:     "seedable: we allow seed files of any size",
 			filename: "v12.13-accounts.100-165.efi",
-			expected: false,
+			expected: true,
+		},
+		{
+			name:     "seedable: we allow seed files of any size",
+			filename: "v12.13-accounts.100-101.efi",
+			expected: true,
 		},
 		{
 			name:     "invalid file name - regex not matching",
@@ -24,22 +29,27 @@ func TestE3Seedable(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "file with path prefix",
+			name:     "file with relative path prefix",
 			filename: "history/v12.13-accounts.100-164.efi",
 			expected: true,
 		},
 		{
-			name:     "invalid branch name",
+			name:     "invalid file name - capital letters not allowed",
 			filename: "v12.13-ACCC.100-164.efi",
+			expected: false,
+		},
+		{
+			name:     "block files are not state files",
+			filename: "v1.2-headers.seg",
 			expected: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := E3Seedable(tc.filename)
+			result := IsStateFileSeedable(tc.filename)
 			if result != tc.expected {
-				t.Errorf("E3Seedable(%q) = %v; want %v", tc.filename, result, tc.expected)
+				t.Errorf("IsStateFileSeedable(%q) = %v; want %v", tc.filename, result, tc.expected)
 			}
 		})
 	}

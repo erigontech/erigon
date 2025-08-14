@@ -903,31 +903,50 @@ func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
 	}
 }
 
-func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) {
-	dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
+func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem, dryRun bool) (deleted []string) {
+	deleted = append(deleted, dt.ht.cleanAfterMerge(mergedHist, mergedIdx, dryRun)...)
 	outs := dt.garbage(mergedDomain)
-	deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
+	for _, out := range outs { // collect file names before files descriptors closed
+		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
+	}
+	if !dryRun {
+		deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
+	}
+	return deleted
 }
 
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) {
-	ht.iit.cleanAfterMerge(mergedIdx)
+func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem, dryRun bool) (deleted []string) {
+	deleted = append(deleted, ht.iit.cleanAfterMerge(mergedIdx, dryRun)...)
 	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
 	outs := ht.garbage(merged)
-	deleteMergeFile(ht.h.dirtyFiles, outs, ht.h.filenameBase, ht.h.logger)
+	for _, out := range outs { // collect file names before files descriptors closed
+		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
+	}
+
+	if !dryRun {
+		deleteMergeFile(ht.h.dirtyFiles, outs, ht.h.filenameBase, ht.h.logger)
+	}
+	return deleted
 }
 
 // cleanAfterMerge - mark all small files before `f` as `canDelete=true`
-func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) {
+func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem, dryRun bool) (deleted []string) {
 	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
 	outs := iit.garbage(merged)
-	deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.filenameBase, iit.ii.logger)
+	for _, out := range outs { // collect file names before files descriptors closed
+		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
+	}
+	if !dryRun {
+		deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.filenameBase, iit.ii.logger)
+	}
+	return deleted
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file

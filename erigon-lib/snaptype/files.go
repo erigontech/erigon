@@ -327,12 +327,8 @@ func parseStateFile(name string) (from, to uint64, ok bool) {
 	return from, to, true
 }
 
-func E3Seedable(name string) bool {
-	from, to, ok := parseStateFile(name)
-	if !ok {
-		return false
-	}
-	return (to-from)%Erigon3SeedableSteps == 0
+func IsStateFileSeedable(name string) bool {
+	return IsStateFile(name) // all state files are seedable (in the past we seeded only big files)
 }
 
 func IsStateFile(name string) bool {
