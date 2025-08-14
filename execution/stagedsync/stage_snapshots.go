@@ -518,7 +518,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				for _, req := range l {
 					a = append(a, req)
 				}
-				log.Warn("[dbg] blockRetire.onDek", "files", l)
+				log.Warn("[dbg] blockRetire.onDel", "files", l)
 			}
 
 			_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
