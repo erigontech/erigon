@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"math"
 	"os"
 	"path"
@@ -33,6 +32,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/snaptype"
 
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -145,13 +146,13 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 	return &ii, nil
 }
 
-func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
+func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep uint64) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.version.AccessorEFI.String(), ii.filenameBase, fromStep, toStep))
 }
-func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
+func (ii *InvertedIndex) efNewFilePath(fromStep, toStep uint64) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
@@ -263,8 +264,12 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
+		fPath, _, _, err := version.FindFilesWithVersionsByPattern(ii.efAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
 		return []string{
-			ii.efAccessorFilePath(fromStep, toStep),
+			fPath,
 		}
 	})
 }
@@ -1107,7 +1112,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 
 	var (
 		coll = InvertedIndexCollation{
-			iiPath: ii.efFilePath(step, stepTo),
+			iiPath: ii.efNewFilePath(step, stepTo),
 		}
 		closeComp bool
 	)
@@ -1258,7 +1263,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 	if ii.Accessors.Has(AccessorHashMap) {
-		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
+		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}
 	}
@@ -1268,7 +1273,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 }
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
-	idxPath := ii.efAccessorFilePath(fromStep, toStep)
+	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
 	if !ii.version.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
 		versionOfRs = 1
