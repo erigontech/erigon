@@ -65,7 +65,6 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
@@ -860,17 +859,8 @@ func (d *Downloader) VerifyData(
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
 	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
-		if isStateFile {
-			if !snaptype.E3Seedable(name) {
-				return nil
-			}
-		} else {
-			if ff.Type == nil {
-				return fmt.Errorf("nil ptr after parsing file: %s", name)
-			}
-			if !d.cfg.SnapshotConfig.Seedable(ff) {
-				return nil
-			}
+		if !isStateFile && ff.Type == nil {
+			return fmt.Errorf("nil ptr after parsing file: %s", name)
 		}
 	}
 
@@ -953,7 +943,7 @@ func (d *Downloader) addPreverifiedTorrent(
 ) (t *torrent.Torrent, err error) {
 	diskSpecOpt := d.loadSpecFromDisk(name)
 	if !diskSpecOpt.Ok && !infoHashHint.Ok {
-		err = errors.New("can't add torrent without infohash")
+		err = fmt.Errorf("can't add torrent without infohash. name=%s", name)
 		return
 	}
 	if diskSpecOpt.Ok && infoHashHint.Ok && diskSpecOpt.Value.InfoHash != infoHashHint.Value {
@@ -1166,11 +1156,6 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	}
 
 	return slices.Concat(files, l1, l2, l3, l4, l5), nil
-}
-
-func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.PreverifiedItems) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
-	return err
 }
 
 func (d *Downloader) Stats() AggStats {
@@ -1447,15 +1432,9 @@ func (s *Downloader) Delete(name string) (err error) {
 	if !ok {
 		return
 	}
+	// Stop seeding. Erigon will remove data-file and .torrent by self
+	// But we also can delete .torrent: earlier is better (`kill -9` may come at any time)
 	t.Drop()
-	err = dir.RemoveFile(s.filePathForName(name))
-	if err != nil {
-		level := log.LvlError
-		if errors.Is(err, fs.ErrNotExist) {
-			level = log.LvlInfo
-		}
-		s.logger.Log(level, "error removing snapshot file data", "name", name, "err", err)
-	}
 	err = s.torrentFS.Delete(name)
 	if err != nil {
 		s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)

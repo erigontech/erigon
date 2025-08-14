@@ -27,6 +27,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -115,11 +116,18 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (_ *emptypb.Empty, err error) {
+	{
+		var names []string
+		for _, name := range request.Paths {
+			names = append(names, name)
+		}
+		log.Warn("[dbg] GrpcServer.Delete", "names", names, "m", len(s.d.torrentsByName), "stack", dbg.Stack())
+	}
+
 	for _, name := range request.Paths {
 		if name == "" {
 			err = errors.Join(err, errors.New("field 'path' is required"))
-			// Retain existing behaviour.
-			break
+			continue
 		}
 		err = errors.Join(err, s.d.Delete(name))
 	}
