@@ -402,6 +402,81 @@ var (
 	}
 )
 
+// checkCommitmentFileHasRoot checks if a commitment file contains state root key
+func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err error) {
+	const stateKey = "state"
+	_, fileName := filepath.Split(filePath)
+
+	// First try with recsplit index (.kvi files)
+	derivedKvi := strings.Replace(filePath, ".kv", ".kvi", 1)
+	fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+	if err != nil {
+		return false, false, err
+	}
+	kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+	if err != nil {
+		return false, false, err
+	}
+	if ok {
+		idx, err := recsplit.OpenIndex(kvi)
+		if err != nil {
+			return false, false, err
+		}
+		defer idx.Close()
+
+		rd := idx.GetReaderFromPool()
+		defer rd.Close()
+		if rd.Empty() {
+			log.Warn("[dbg] allow files deletion because accessor broken", "accessor", idx.FileName())
+			return false, true, nil
+		}
+
+		_, found := rd.Lookup([]byte(stateKey))
+		if found {
+			fmt.Printf("found state key with kvi %s\n", filePath)
+			return true, false, nil
+		} else {
+			fmt.Printf("skipping file because it doesn't have state key %s\n", fileName)
+			return true, false, nil
+		}
+	} else {
+		log.Warn("[dbg] not found files for", "pattern", fPathMask)
+	}
+
+	// If recsplit index not found, try btree index (.bt files)
+	derivedBt := strings.Replace(filePath, ".kv", ".bt", 1)
+	fPathMask, err = version.ReplaceVersionWithMask(derivedBt)
+	if err != nil {
+		return true, false, nil
+	}
+	bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+	if err != nil {
+		return true, false, nil
+	}
+	if !ok {
+		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
+	}
+	rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, filePath, state.DefaultBtreeM, state.Schema.CommitmentDomain.Compression, false)
+	if err != nil {
+		return false, false, err
+	}
+	defer rd.Close()
+	defer btindex.Close()
+
+	getter := seg.NewReader(rd.MakeGetter(), state.Schema.CommitmentDomain.Compression)
+	c, err := btindex.Seek(getter, []byte(stateKey))
+	if err != nil {
+		return false, false, err
+	}
+	defer c.Close()
+
+	if bytes.Equal(c.Key(), []byte(stateKey)) {
+		fmt.Printf("found state key using bt %s\n", filePath)
+		return true, false, nil
+	}
+	return false, false, nil
+}
+
 func doRmStateSnapshots(cliCtx *cli.Context) error {
 	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
@@ -414,6 +489,13 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
+
+	// Step 1: Collect and parse all candidate state files
+	candidateFiles := make([]struct {
+		fileInfo snaptype.FileInfo
+		dirPath  string
+		filePath string
+	}, 0)
 	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
@@ -440,72 +522,36 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					}
 				}
 			}
+			candidateFiles = append(candidateFiles, struct {
+				fileInfo snaptype.FileInfo
+				dirPath  string
+				filePath string
+			}{res, dirPath, filePath})
+		}
+	}
 
-			// check that commitment file has state in it
-			// When domains are "compacted", we want to keep latest commitment file with state key in it
-			if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
-				const trieStateKey = "state"
+	// Step 2: Process each candidate file (already parsed)
+	for _, candidate := range candidateFiles {
+		res := candidate.fileInfo
 
-				skipped := false
-				kvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
-				_, ek := os.Stat(kvi)
-				if ek == nil {
-					idx, err := recsplit.OpenIndex(kvi)
-					if err != nil {
-						return err
-					}
-
-					rd := idx.GetReaderFromPool()
-					oft, found := rd.Lookup([]byte(trieStateKey))
-					if found {
-						fmt.Printf("found state key with kvi %s\n", res.Path)
-						commitmentFilesWithState = append(commitmentFilesWithState, res)
-					}
-					skipped = true
-					_ = oft
-					rd.Close()
-					idx.Close()
-				}
-
-				if !skipped { // try to lookup in bt index
-					bt := strings.Replace(res.Path, ".kv", ".bt", 1)
-					_, eb := os.Stat(bt)
-					if eb == nil {
-						rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, res.Path, state.DefaultBtreeM, state.Schema.CommitmentDomain.Compression, false)
-						if err != nil {
-							return err
-						}
-
-						getter := seg.NewReader(rd.MakeGetter(), state.Schema.CommitmentDomain.Compression)
-						//for getter.HasNext() {
-						//	k, _ := getter.Next(nil)
-						//	if bytes.Equal(k, []byte(trieStateKey)) {
-						//		fmt.Printf("found state key without bt in %s\n", res.Path)
-						//		commitmentFilesWithState = append(commitmentFilesWithState, res)
-						//		break
-						//	}
-						//	getter.Skip()
-						//}
-						c, err := btindex.Seek(getter, []byte(trieStateKey))
-						if err != nil {
-							return err
-						}
-						if bytes.Equal(c.Key(), []byte(trieStateKey)) {
-							fmt.Printf("found state key using bt %s\n", res.Path)
-							commitmentFilesWithState = append(commitmentFilesWithState, res)
-						}
-						c.Close()
-						btindex.Close()
-						rd.Close()
-					}
-
-				}
+		// check that commitment file has state in it
+		// When domains are "compacted", we want to keep latest commitment file with state key in it
+		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
+			if err != nil {
+				return err
 			}
-
-			files = append(files, res)
-			if removeLatest {
-				_maxFrom = max(_maxFrom, res.From)
+			if hasState {
+				commitmentFilesWithState = append(commitmentFilesWithState, res)
 			}
+			if broken {
+				commitmentFilesWithState = append(commitmentFilesWithState, res)
+			}
+		}
+
+		files = append(files, res)
+		if removeLatest {
+			_maxFrom = max(_maxFrom, res.From)
 		}
 	}
 
@@ -1131,11 +1177,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dirs.SnapHistory, vFileName))
 			}
 		}
-
 	}
 
-	if maxStepII != accFiles[len(accFiles)-1].To {
-		return fmt.Errorf("accounts idx max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepII)
+	if maxStepDomain != accFiles[len(accFiles)-1].To {
+		return fmt.Errorf("accounts domain max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepDomain)
 	}
 	return nil
 }
