@@ -91,7 +91,7 @@ jobs:
     if: always()
     steps:
       - name: cleaning up
-        uses: geekyeggo/delete-artifact@v2
+        uses: geekyeggo/delete-artifact@v5
         with:
           name: |
             dashboard-backup
