@@ -1494,7 +1494,6 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	var deleted []string
-	defer a.onFilesDelete(deleted)
 
 	at := a.BeginFilesRo()
 	defer at.Close()
@@ -1502,14 +1501,16 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	// Step 1: collect file names and do Blocking-Notification of downstream (like Downloader). Only then delete files (otherwise Downloader may re-create deleted file)
+	dryRun := true
 	for id, d := range at.d {
 		if d.d.disable {
 			continue
 		}
 		if in == nil {
-			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil)...)
+			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil, dryRun)...)
 		} else {
-			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
+			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)...)
 		}
 	}
 	for id, ii := range at.iis {
@@ -1517,19 +1518,23 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			deleted = append(deleted, ii.cleanAfterMerge(nil)...)
+			deleted = append(deleted, ii.cleanAfterMerge(nil, dryRun)...)
 		} else {
-			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id])...)
+			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id], dryRun)...)
 		}
 	}
+	a.onFilesDelete(deleted)
+
+	// Step 2: delete
+	dryRun = false
 	for id, d := range at.d {
 		if d.d.disable {
 			continue
 		}
 		if in == nil {
-			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil)...)
+			d.cleanAfterMerge(nil, nil, nil, dryRun)
 		} else {
-			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])...)
+			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
 		}
 	}
 	for id, ii := range at.iis {
@@ -1537,9 +1542,9 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			deleted = append(deleted, ii.cleanAfterMerge(nil)...)
+			ii.cleanAfterMerge(nil, dryRun)
 		} else {
-			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id])...)
+			ii.cleanAfterMerge(in.iis[id], dryRun)
 		}
 	}
 }
