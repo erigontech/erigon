@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -91,7 +92,7 @@ func (t *fourByteTracer) store(id []byte, size int) {
 }
 
 func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
-	rules := env.ChainConfig.Rules(env.BlockNumber, env.Time)
+	rules := evmtypes.Rules(env.ChainConfig, env.BlockNumber, env.Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 

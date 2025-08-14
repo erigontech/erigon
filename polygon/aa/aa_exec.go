@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -53,7 +54,7 @@ func ValidateAATransaction(
 	}
 
 	vmConfig := evm.Config()
-	rules := chainConfig.Rules(header.Number.Uint64(), header.Time)
+	rules := evmtypes.Rules(chainConfig, header.Number.Uint64(), header.Time)
 	hasEIP3860 := vmConfig.HasEip3860(rules)
 
 	preTxCost, err := tx.PreTransactionGasCost(rules, hasEIP3860)

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -126,7 +127,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 
 	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
-	rules := chainConfig.Rules(blockNumber, timestamp)
+	rules := evmtypes.Rules(chainConfig, blockNumber, timestamp)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err

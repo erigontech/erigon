@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/chain"
@@ -97,7 +98,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, err
 	}
 	header := block.Header()
-	rules := chainConfig.Rules(block.NumberU64(), header.Time)
+	rules := evmtypes.Rules(chainConfig, block.NumberU64(), header.Time)
 	found := false
 	for idx, txn := range block.Transactions() {
 		select {

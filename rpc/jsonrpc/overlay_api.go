@@ -177,7 +177,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
-	rules := chainConfig.Rules(blockNum, blockCtx.Time)
+	rules := evmtypes.Rules(chainConfig, blockNum, blockCtx.Time)
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -455,7 +455,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
 
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
-	rules := chainConfig.Rules(blockNum, blockCtx.Time)
+	rules := evmtypes.Rules(chainConfig, blockNum, blockCtx.Time)
 
 	timeout := api.OverlayReplayBlockTimeout
 	// Setup context so it may be cancelled the call has completed

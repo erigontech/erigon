@@ -403,7 +403,7 @@ func TestOeTracer(t *testing.T) {
 			if test.Context.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
 			}
-			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+			rules := evmtypes.Rules(test.Genesis.Config, context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)

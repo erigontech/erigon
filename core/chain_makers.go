@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
@@ -374,7 +375,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
+			if err := ibs.CommitBlock(evmtypes.Rules(config, b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 

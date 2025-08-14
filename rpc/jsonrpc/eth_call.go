@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -826,7 +827,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
-	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
+	precompiles := vm.ActivePrecompiles(evmtypes.Rules(chainConfig, blockNumber, header.Time))
 	excl := make(map[common.Address]struct{})
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}

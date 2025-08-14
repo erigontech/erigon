@@ -61,7 +61,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	defer cancel()
 	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
 	tracer = NewBorStateSyncTxnTracer(tracer, stateReceiverContract)
-	rules := chainConfig.Rules(blockNum, blockTime)
+	rules := evmtypes.Rules(chainConfig, blockNum, blockTime)
 	stateWriter := state.NewNoopWriter()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), common.Address{})
@@ -97,7 +97,7 @@ func TraceBorStateSyncTxnTraceAPI(
 	}
 
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
-	rules := chainConfig.Rules(blockNum, blockTime)
+	rules := evmtypes.Rules(chainConfig, blockNum, blockTime)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, *vmConfig)
 
 	return traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, true)

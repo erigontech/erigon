@@ -623,7 +623,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
-				Rules:           chainConfig.Rules(blockNum, b.Time()),
+				Rules:           evmtypes.Rules(chainConfig, blockNum, b.Time()),
 				Txs:             txs,
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,

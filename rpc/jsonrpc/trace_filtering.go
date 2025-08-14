@@ -427,7 +427,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
-			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
+			lastRules = evmtypes.Rules(chainConfig, blockNum, lastHeader.Time)
 		}
 		if isFnalTxn {
 			// TODO(yperbasis) proper rewards for Gnosis
@@ -724,7 +724,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	rules := cfg.Rules(blockNumber, block.Time())
+	rules := evmtypes.Rules(cfg, blockNumber, block.Time())
 	header := block.Header()
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
@@ -835,7 +835,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	rules := cfg.Rules(blockNumber, header.Time)
+	rules := evmtypes.Rules(cfg, blockNumber, header.Time)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil

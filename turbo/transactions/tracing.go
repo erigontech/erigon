@@ -67,7 +67,7 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
-	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
+	rules := evmtypes.Rules(cfg, blockContext.BlockNumber, blockContext.Time)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)

@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -313,7 +314,7 @@ func Main(ctx *cli.Context) error {
 	blockNum, txNum := uint64(0), uint64(0)
 	sd.SetTxNum(txNum)
 	sd.SetBlockNum(blockNum)
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre, blockNum, txNum)
+	reader, writer := MakePreState(evmtypes.Rules(chainConfig, 0, 0), tx, sd, prestate.Pre, blockNum, txNum)
 	blockNum, txNum = uint64(1), uint64(2)
 	sd.SetTxNum(txNum)
 	sd.SetBlockNum(blockNum)
