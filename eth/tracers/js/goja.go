@@ -232,7 +232,11 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
-	rules := evmtypes.Rules(env.ChainConfig, env.BlockNumber, env.Time)
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: env.BlockNumber,
+		Time:        env.Time,
+	}
+	rules := blockContext.Rules(env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
 	t.ctx["gas"] = t.vm.ToValue(tx.GetGasLimit())
