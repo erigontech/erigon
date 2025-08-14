@@ -35,11 +35,11 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -113,13 +113,13 @@ func (mb *MiningBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
 }
 
 type MiningState struct {
-	MiningConfig    *params.MiningConfig
+	MiningConfig    *buildercfg.MiningConfig
 	PendingResultCh chan *types.Block
 	MiningResultCh  chan *types.BlockWithReceipts
 	MiningBlock     *MiningBlock
 }
 
-func NewMiningState(cfg *params.MiningConfig) MiningState {
+func NewMiningState(cfg *buildercfg.MiningConfig) MiningState {
 	return MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),

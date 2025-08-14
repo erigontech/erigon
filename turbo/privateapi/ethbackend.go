@@ -36,11 +36,11 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"
@@ -272,7 +272,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
+	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionNoMeta)}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {

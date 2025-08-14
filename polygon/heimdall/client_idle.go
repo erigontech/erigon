@@ -21,14 +21,14 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
 )
 
 type IdleClient struct {
-	cfg params.MiningConfig
+	cfg buildercfg.MiningConfig
 }
 
-func NewIdleClient(cfg params.MiningConfig) Client {
+func NewIdleClient(cfg buildercfg.MiningConfig) Client {
 	return &IdleClient{cfg: cfg}
 }
 

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
-	"github.com/erigontech/erigon/params"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -65,7 +64,7 @@ func runErigon(cliCtx *cli.Context) (err error) {
 
 	// initializing the node and providing the current git commit there
 
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 	if version.Major == 3 {
 		logger.Info(`
 	########b          oo                               d####b. 
@@ -78,7 +77,7 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	                       d####P                               
 		`)
 	}
-	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 
 	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)

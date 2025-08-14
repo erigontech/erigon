@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/params"
 )
 
 type LType int
@@ -204,7 +203,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 		return nil, err
 	}
 
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
+	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	cfg, err := downloadercfg.New(
 		ctx,

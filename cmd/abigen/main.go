@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/params"
 	cli2 "github.com/erigontech/erigon/turbo/cli"
 )
 
@@ -103,7 +103,7 @@ var (
 )
 
 func init() {
-	app = cli2.NewApp(params.GitCommit, "ethereum checkpoint helper tool")
+	app = cli2.NewApp(version.GitCommit, "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		&abiFlag,
 		&binFlag,
@@ -126,18 +126,6 @@ func abigen(c *cli.Context) error {
 	utils.CheckExclusive(c, &abiFlag, &jsonFlag, &solFlag, &vyFlag) // Only one source can be selected.
 	if c.String(pkgFlag.Name) == "" {
 		utils.Fatalf("No destination package specified (--pkg)")
-	}
-	var lang bind.Lang
-	switch c.String(langFlag.Name) {
-	case "go":
-		lang = bind.LangGo
-	case "java":
-		lang = bind.LangJava
-	case "objc":
-		lang = bind.LangObjC
-		utils.Fatalf("Objc binding generation is uncompleted")
-	default:
-		utils.Fatalf("Unsupported destination language \"%s\" (--lang)", c.String(langFlag.Name))
 	}
 	// If the entire solidity code was specified, build and bind based on that
 	var (
@@ -255,7 +243,7 @@ func abigen(c *cli.Context) error {
 		}
 	}
 	// Generate the contract binding
-	code, err := bind.Bind(types, abis, bins, sigs, c.String(pkgFlag.Name), lang, libs, aliases)
+	code, err := bind.Bind(types, abis, bins, sigs, c.String(pkgFlag.Name), libs, aliases)
 	if err != nil {
 		utils.Fatalf("Failed to generate ABI binding: %v", err)
 	}

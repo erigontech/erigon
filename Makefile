@@ -61,7 +61,7 @@ PACKAGE = github.com/erigontech/erigon
 # Add to user provided GO_FLAGS. Insert it after a bunch of other stuff to allow overrides, and before tags to maintain BUILD_TAGS (set that instead if you want to modify it).
 
 GO_RELEASE_FLAGS := -trimpath -buildvcs=false \
-	-ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+	-ldflags "-X ${PACKAGE}/db/version.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/db/version.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/db/version.GitTag=${GIT_TAG}"
 GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)"
 
 # Basic release build. Pass EXTRA_BUILD_TAGS if you want to modify the tags set.
