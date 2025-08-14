@@ -468,9 +468,39 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		wg := errgroup.Group{}
 		wg.SetLimit(1)
 		onNewSnapshot = func() {
-			return
-			// return because it might get data from another node on same machine by connection
-			// on remoteKvClient through default privateApiAddr
+			wg.Go(func() (err error) {
+				// don't block events processing by network communication
+				logger.Info("on new snapshots triggered...")
+				if err := allSnapshots.OpenFolder(); err != nil {
+					logger.Error("[snapshots] reopen", "err", err)
+				} else {
+					allSnapshots.LogStat("reopen")
+				}
+
+				if err := allBorSnapshots.OpenFolder(); err != nil {
+					logger.Error("[bor snapshots] reopen", "err", err)
+				} else {
+					allBorSnapshots.LogStat("bor:reopen")
+				}
+
+				if err = agg.ReloadSalt(); err != nil {
+					return fmt.Errorf("agg ReloadSalt: %w", err)
+				}
+				if err = agg.OpenFolder(); err != nil {
+					logger.Error("[snapshots] reopen", "err", err)
+				} else {
+					rawDB.View(context.Background(), func(tx kv.Tx) error {
+						ac := agg.BeginFilesRo()
+						defer ac.Close()
+						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+							return histBlockNumProgress, err
+						})
+						return nil
+					})
+				}
+				return nil
+			})
 		}
 		onNewSnapshot()
 
