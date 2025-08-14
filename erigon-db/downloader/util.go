@@ -182,15 +182,16 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 		return false, fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
 	info.Name = fName
+
 	return torrentFiles.CreateWithMetaInfo(info, nil)
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *AtomicTorrentFS, chain string, ignore snapcfg.PreverifiedItems) (int, error) {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *AtomicTorrentFS, chain string, ignore snapcfg.PreverifiedItems, all bool) (int, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := SeedableFiles(dirs, chain, true)
+	files, err := SeedableFiles(dirs, chain, all)
 	if err != nil {
 		return 0, err
 	}
@@ -329,8 +330,6 @@ func (d *Downloader) addTorrentSpec(
 	ts *torrent.TorrentSpec,
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
-	log.Warn("[dbg] Downloader.addTorrentSpec", "name", name)
-
 	ts.ChunkSize = downloadercfg.NetworkChunkSize
 	ts.Trackers = nil // to reduce mutex contention - see `afterAdd`
 	ts.Webseeds = nil

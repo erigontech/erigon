@@ -20,15 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/anacrolix/torrent/metainfo"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -127,9 +126,6 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 			names = append(names, name)
 		}
 		log.Warn("[dbg] GrpcServer.Delete", "names", names, "m", len(s.d.torrentsByName), "stack", dbg.Stack())
-		defer func() {
-			log.Warn("[dbg] GrpcServer.Delete end", "m", toArr(maps.Keys(s.d.torrentsByName)))
-		}()
 	}
 
 	for _, name := range request.Paths {

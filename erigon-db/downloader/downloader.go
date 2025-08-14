@@ -57,7 +57,6 @@ import (
 	"github.com/anacrolix/torrent/webseed"
 
 	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -915,12 +914,6 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 	return nil
 }
-func toArr[K any](it iter.Seq[K]) (res []K) {
-	for v := range it {
-		res = append(res, v)
-	}
-	return res
-}
 
 func (d *Downloader) alreadyHaveThisName(name string) bool {
 	return g.MapContains(d.torrentsByName, name)
@@ -1190,11 +1183,6 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	}
 
 	return slices.Concat(files, l1, l2, l3, l4, l5), nil
-}
-
-func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.PreverifiedItems) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore)
-	return err
 }
 
 func (d *Downloader) Stats() AggStats {
