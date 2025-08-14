@@ -330,7 +330,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		BadTxStoreValue:                        ctx.Uint64(utils.BadTxStoreValue.Name),
 		BadTxPurge:                             ctx.Bool(utils.BadTxPurge.Name),
 		L2InfoTreeUpdatesBatchSize:             ctx.Uint64(utils.L2InfoTreeUpdatesBatchSize.Name),
-		L2InfoTreeUpdatesEnabled:               ctx.Bool(utils.L2InfoTreeUpdatesEnabled.Name),
+		L2InfoTreeUpdatesURL:                   ctx.String(utils.L2InfoTreeUpdatesURL.Name),
 		Commitment:                             commitment,
 		HonourChainspec:                        ctx.Bool(utils.HonourChainspec.Name),
 		InjectGers:                             ctx.Bool(utils.InjectGers.Name),

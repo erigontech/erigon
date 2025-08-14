@@ -271,7 +271,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ShadowSequencer,
 	&utils.ZKGenesisConfigPathFlag,
 	&utils.L2InfoTreeUpdatesBatchSize,
-	&utils.L2InfoTreeUpdatesEnabled,
+	&utils.L2InfoTreeUpdatesURL,
 
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,

@@ -926,14 +926,13 @@ var (
 		Usage: "File path for the zk config containing allocs, chainspec, and other zk specific configurations.",
 	}
 	L2InfoTreeUpdatesBatchSize = cli.Uint64Flag{
-		Name:  "zkevm.l2-info-tree-updates-batch-size",
-		Usage: "Size of the batch of L2 info tree updates to retrieve at a time. L2 info tree updates must be enabled to use this.",
+		Name:  "zkevm.l1-info-tree-updates-batch-size",
+		Usage: "Size of the batch of L1 info tree updates to retrieve at a time from L2 RPC. l1-info-tree-updates-l2-url must be set.",
 		Value: 500,
 	}
-	L2InfoTreeUpdatesEnabled = cli.BoolFlag{
-		Name:  "zkevm.l2-info-tree-updates-enabled",
-		Usage: "When enabled a RPC node can use the L2 to build the InfoTree.",
-		Value: false,
+	L2InfoTreeUpdatesURL = cli.StringFlag{
+		Name:  "zkevm.l1-info-tree-updates-l2-url",
+		Usage: "L2 RPC node url to initialize the info tree.",
 	}
 	ZkevmLogExcludeFlags = cli.StringSliceFlag{
 		Name:  "zkevm.log-exclude-flags",

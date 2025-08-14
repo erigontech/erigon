@@ -68,6 +68,7 @@ type L1Syncer struct {
 	blockRange          uint64
 	queryDelay          uint64
 
+	firstL1Block  uint64
 	latestL1Block uint64
 
 	// atomic
@@ -84,7 +85,7 @@ type L1Syncer struct {
 	highestBlockType string // finalized, latest, safe
 }
 
-func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string) *L1Syncer {
+func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string, firstL1Block uint64) *L1Syncer {
 	return &L1Syncer{
 		ctx:                 ctx,
 		etherMans:           etherMans,
@@ -97,6 +98,7 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		logsChan:            make(chan []ethTypes.Log),
 		logsChanProgress:    make(chan string),
 		highestBlockType:    highestBlockType,
+		firstL1Block:        firstL1Block,
 	}
 }
 
@@ -244,7 +246,7 @@ func (s *L1Syncer) GetL1BlockTimeStampByTxHash(ctx context.Context, txHash commo
 		return 0, err
 	}
 
-	header, err := em.HeaderByNumber(context.Background(), r.BlockNumber)
+	header, err := em.HeaderByNumber(s.ctx, r.BlockNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -268,13 +270,12 @@ func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Hea
 	headersQueue := make(chan *ethTypes.Header, logsSize)
 
 	process := func(em IEtherman) {
-		ctx := context.Background()
 		for {
 			l, ok := <-logQueue
 			if !ok {
 				break
 			}
-			header, err := em.HeaderByNumber(ctx, new(big.Int).SetUint64(l.BlockNumber))
+			header, err := em.HeaderByNumber(s.ctx, new(big.Int).SetUint64(l.BlockNumber))
 			if err != nil {
 				log.Error("Error getting block", "err", err)
 				// assume a transient error and try again
@@ -319,7 +320,7 @@ func (s *L1Syncer) getLatestL1Block() (uint64, error) {
 		blockNumber = nil
 	}
 
-	latestBlock, err := em.BlockByNumber(context.Background(), blockNumber)
+	latestBlock, err := em.BlockByNumber(s.ctx, blockNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -444,7 +445,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 			retry := 0
 			for {
 				em := s.getNextEtherman()
-				logs, err = em.FilterLogs(context.Background(), query)
+				logs, err = em.FilterLogs(s.ctx, query)
 				if err != nil {
 					log.Debug("getSequencedLogs retry error", "err", err)
 					retry++
@@ -570,12 +571,12 @@ func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
 	for {
 		em := s.getNextEtherman()
 		query := ethereum.FilterQuery{
-			FromBlock: new(big.Int).SetUint64(0),
+			FromBlock: new(big.Int).SetUint64(s.firstL1Block),
 			ToBlock:   new(big.Int).SetUint64(to),
 			Addresses: s.l1ContractAddresses,
 			Topics:    s.topics,
 		}
-		logs, err = em.FilterLogs(context.Background(), query)
+		logs, err = em.FilterLogs(s.ctx, query)
 		if err != nil {
 			log.Debug("QueryForRootLog retry error", "err", err)
 			retry++

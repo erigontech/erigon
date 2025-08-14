@@ -1108,6 +1108,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
 			cfg.L1HighestBlockType,
+			cfg.Zk.L1FirstBlock,
 		)
 
 		backend.l1Syncer = syncer.NewL1Syncer(
@@ -1118,6 +1119,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
 			cfg.L1HighestBlockType,
+			cfg.Zk.L1FirstBlock,
 		)
 
 		log.Info("Rollup ID", "rollupId", cfg.L1RollupId)
@@ -1133,6 +1135,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
 			cfg.L1HighestBlockType,
+			cfg.Zk.L1FirstBlock,
 		)
 
 		l1InfoTreeUpdater := l1infotree.NewUpdater(cfg.Zk, l1InfoTreeSyncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, cfg.Zk))
@@ -1197,6 +1200,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
 				cfg.L1HighestBlockType,
+				cfg.L1FirstBlock,
 			)
 
 			decodedTxCache := expirable.NewLRU[libcommon.Hash, *types.Transaction](cfg.SequencerDecodedTxCacheSize, nil, cfg.SequencerDecodedTxCacheTTL)
