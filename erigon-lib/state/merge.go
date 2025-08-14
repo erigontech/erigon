@@ -611,7 +611,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	}
 	fromStep, toStep := startTxNum/iit.aggStep, endTxNum/iit.aggStep
 
-	datPath := iit.ii.efFilePath(fromStep, toStep)
+	datPath := iit.ii.efNewFilePath(fromStep, toStep)
 	if comp, err = seg.NewCompressor(ctx, iit.ii.filenameBase+".ii.merge", datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.filenameBase, err)
 	}
@@ -728,7 +728,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, iit.dataReader(outItem.decompressor), ps); err != nil {
 		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
-	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
+	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorNewFilePath(fromStep, toStep)); err != nil {
 		return nil, err
 	}
 
@@ -778,8 +778,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			}
 		}()
 		fromStep, toStep := r.history.from/ht.aggStep, r.history.to/ht.aggStep
-		datPath := ht.h.vFilePath(fromStep, toStep)
-		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
+		datPath := ht.h.vNewFilePath(fromStep, toStep)
+		idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}

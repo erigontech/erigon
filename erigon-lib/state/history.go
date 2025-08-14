@@ -142,10 +142,10 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 func (h *History) vFileName(fromStep, toStep uint64) string {
 	return fmt.Sprintf("%s-%s.%d-%d.v", h.version.DataV.String(), h.filenameBase, fromStep, toStep)
 }
-func (h *History) vFilePath(fromStep, toStep uint64) string {
+func (h *History) vNewFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
-func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
+func (h *History) vAccessorNewFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
 
@@ -237,7 +237,7 @@ func (h *History) openDirtyFiles() error {
 						//
 						// itemPaths := []string{
 						// 	fPath,
-						// 	h.vAccessorFilePath(fromStep, toStep),
+						// 	h.vAccessorNewFilePath(fromStep, toStep),
 						// }
 						// for _, fp := range itemPaths {
 						// 	err = dir.Remove(fp)
@@ -360,7 +360,7 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
 	}
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-	idxPath := h.vAccessorFilePath(fromStep, toStep)
+	idxPath := h.vAccessorNewFilePath(fromStep, toStep)
 
 	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
@@ -624,8 +624,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		txKey     [8]byte
 		err       error
 
-		historyPath   = h.vFilePath(step, step+1)
-		efHistoryPath = h.efFilePath(step, step+1)
+		historyPath   = h.vNewFilePath(step, step+1)
+		efHistoryPath = h.efNewFilePath(step, step+1)
 		startAt       = time.Now()
 		closeComp     = true
 	)
@@ -919,7 +919,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, h.InvertedIndex.dataReader(efHistoryDecomp), ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.filenameBase, err)
 		}
-		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
+		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
 			return HistoryFiles{}, err
 		}
 	}
@@ -929,7 +929,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("open %s v history decompressor: %w", h.filenameBase, err)
 	}
 
-	historyIdxPath := h.vAccessorFilePath(step, step+1)
+	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
 	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
