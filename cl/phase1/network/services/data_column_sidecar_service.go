@@ -105,7 +105,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			// not my custody column
-			fmt.Println("not my custody column")
+			log.Debug("not my custody column")
 			return ErrIgnore
 		}
 	}
