@@ -252,7 +252,28 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	trace := ii.filenameBase == kv.ReceiptDomain.String() //false
+
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, trace, toTxNum))
+
+	if ii.filenameBase == kv.ReceiptDomain.String() {
+		log.Warn("[dbg] reCalcVisibleFiles", "visible", ii._visible.files, "dirt", ii.dirtyFiles.Items())
+	}
+}
+
+func (ii *InvertedIndex) _dirtNames() (nanes []string) {
+	var name []string
+	for _, item := range ii.dirtyFiles.Items() {
+		name = append(name, item.FilePaths(ii.dirs.Snap)...)
+	}
+	return name
+}
+func (ii *InvertedIndex) _visNames() (nanes []string) {
+	var name []string
+	for _, item := range ii._visible.files {
+		name = append(name, item.src.FilePaths(ii.dirs.Snap)...)
+	}
+	return name
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
