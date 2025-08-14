@@ -347,7 +347,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	log.Warn("[dbg] BuildMissedIndicesIfNeed!")
+	log.Warn("[dbg] BuildMissedIndicesIfNeed!", "f", cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).Files())
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 		return err
