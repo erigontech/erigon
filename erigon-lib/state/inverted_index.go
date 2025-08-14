@@ -257,7 +257,7 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, trace, toTxNum))
 
 	if ii.filenameBase == kv.ReceiptDomain.String() {
-		log.Warn("[dbg] reCalcVisibleFiles", "visible", ii._visible.files, "dirt", ii.dirtyFiles.Items())
+		log.Warn("[dbg] reCalcVisibleFiles", "_dirtNames", ii._dirtNames(), "_visNames", ii._visNames())
 	}
 }
 
