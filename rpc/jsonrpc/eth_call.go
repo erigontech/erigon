@@ -440,7 +440,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if acc == nil {
 		for i, k := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   uint256.NewInt(0).SetBytes(k[:]).Hex(),
+				Key:   common.BytesToHash(k[:]).Hex(),
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -474,7 +474,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
-		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
+		proof.StorageProof[i].Key = common.BytesToHash(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
