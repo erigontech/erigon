@@ -285,8 +285,18 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
-		fPathMask, _ := version.ReplaceVersionWithMask(ii.efAccessorFilePath(fromStep, toStep))
-		fPath, _, _, _ := version.FindFilesWithVersionsByPattern(fPathMask)
+		fPathMask, err := version.ReplaceVersionWithMask(ii.efAccessorFilePath(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		fPath, _, _, err := version.FindFilesWithVersionsByPattern(fPathMask)
+		if err != nil {
+			panic(err)
+		}
+		if ii.filenameBase == kv.ReceiptDomain.String() {
+			log.Warn("[dbg] missedMapAccessors", "fPath", fPath)
+		}
+
 		return []string{
 			fPath,
 		}
