@@ -121,7 +121,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 				}
 			}
 
-			s.observers.NotifySync(entities) // NotifySync preserves order of events
+			s.observers.NotifySync(ctx, entities) // NotifySync preserves order of events
 
 			select {
 			case <-progressLogTicker.C:
@@ -144,7 +144,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) event.UnregisterFunc {
+func (s *Scraper[TEntity]) RegisterObserver(observer func(context.Context, []TEntity)) event.UnregisterFunc {
 	return s.observers.Register(observer)
 }
 

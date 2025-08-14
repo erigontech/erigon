@@ -104,9 +104,14 @@ func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {
 	}
 }
 
-func (t *spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
-	t.queued.Add(1)
-	t.newSpans <- span
+func (t *spanBlockProducersTracker) ObserveSpanAsync(ctx context.Context, span *Span) {
+	select {
+	case <-ctx.Done():
+		return
+	case t.newSpans <- span:
+		t.queued.Add(1)
+		return
+	}
 }
 
 func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {

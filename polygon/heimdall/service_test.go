@@ -189,13 +189,15 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		suite.observedMilestones = append(suite.observedMilestones, milestone)
 	})
 
-	suite.service.RegisterSpanObserver(func(span *Span) {
+	suite.service.RegisterSpanObserver(func(ctx context.Context, span *Span) {
 		suite.observedSpans = append(suite.observedSpans, span)
-		// suite.service.store.SpanBlockProducerSelections().PutEntity(context.Background(), span.Id, )
 	})
 
 	suite.eg.Go(func() error {
-		return suite.service.Run(suite.ctx)
+		defer suite.cancel()
+		err := suite.service.Run(suite.ctx)
+		require.ErrorIs(suite.T(), err, context.Canceled)
+		return err
 	})
 
 	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)

@@ -42,7 +42,7 @@ func NewMdbxStore(logger log.Logger, dataDir string, accede bool, roTxLimit int6
 
 func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 	spanIndex := NewSpanRangeIndex(db, kv.BorSpansIndex)
-	producerSelectionIndex := NewSpanRangeIndex(db, kv.BorSpans)
+	producerSelectionIndex := NewSpanRangeIndex(db, kv.BorProducerSelectionsIndex)
 
 	return &MdbxStore{
 		db: db,

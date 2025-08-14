@@ -964,7 +964,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
 				}
 
-				backend.minedBlockObservers.Notify(b)
+				backend.minedBlockObservers.Notify(ctx, b)
 
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
@@ -1403,7 +1403,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
-func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) event.UnregisterFunc {
+func (s *Ethereum) RegisterMinedBlockObserver(callback func(ctx context.Context, msg *types.Block)) event.UnregisterFunc {
 	return s.minedBlockObservers.Register(callback)
 }
 

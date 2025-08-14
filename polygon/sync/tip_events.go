@@ -116,7 +116,7 @@ type heimdallObserverRegistrar interface {
 }
 
 type MinedBlockObserverRegistrar interface {
-	RegisterMinedBlockObserver(callback func(*types.Block)) event.UnregisterFunc
+	RegisterMinedBlockObserver(callback func(context.Context, *types.Block)) event.UnregisterFunc
 }
 
 func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar, minedBlockReg MinedBlockObserverRegistrar) *TipEvents {
@@ -149,7 +149,7 @@ func (te *TipEvents) Events() <-chan Event {
 func (te *TipEvents) Run(ctx context.Context) error {
 	te.logger.Info(syncLogPrefix("running tip events component"))
 
-	newMinedBlockObserverCancel := te.minedBlockObserverRegistrar.RegisterMinedBlockObserver(func(msg *types.Block) {
+	newMinedBlockObserverCancel := te.minedBlockObserverRegistrar.RegisterMinedBlockObserver(func(ctx context.Context, msg *types.Block) {
 		te.logger.Trace(
 			"[tip-events] mined block event received from block producer",
 			"hash", msg.Hash(),
@@ -166,7 +166,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newMinedBlockObserverCancel()
 
-	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(ctx context.Context, message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		block := message.Decoded.Block
 
 		if te.blockEventsSpamGuard.Spam(message.PeerId, block.Hash(), block.NumberU64()) {
@@ -191,7 +191,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockObserverCancel()
 
-	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(ctx context.Context, message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		blockHashes := *message.Decoded
 
 		if te.blockEventsSpamGuard.Spam(message.PeerId, blockHashes[0].Hash, blockHashes[0].Number) {

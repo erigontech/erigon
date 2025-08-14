@@ -75,6 +75,11 @@ func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 		return err
 	}
 
+	err := <-s.snapshots.Ready(ctx)
+	if err != nil {
+		return err
+	}
+
 	rangeIndex := s.RangeIndex()
 	rangeIndexer, ok := rangeIndex.(RangeIndexer)
 	if !ok {
@@ -114,7 +119,7 @@ func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return <-s.snapshots.Ready(ctx)
+	return nil
 }
 
 // Walk each span in the snapshots from last to first and apply function f as long as no error or stop condition is encountered

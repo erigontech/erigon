@@ -32,13 +32,14 @@ import (
 )
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints:        {},
-	kv.BorCheckpointEnds:     {},
-	kv.BorMilestones:         {},
-	kv.BorMilestoneEnds:      {},
-	kv.BorSpans:              {},
-	kv.BorSpansIndex:         {},
-	kv.BorProducerSelections: {},
+	kv.BorCheckpoints:             {},
+	kv.BorCheckpointEnds:          {},
+	kv.BorMilestones:              {},
+	kv.BorMilestoneEnds:           {},
+	kv.BorSpans:                   {},
+	kv.BorSpansIndex:              {},
+	kv.BorProducerSelections:      {},
+	kv.BorProducerSelectionsIndex: {},
 }
 
 //go:generate mockgen -typed=true -source=./entity_store.go -destination=./entity_store_mock.go -package=heimdall
@@ -228,7 +229,7 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 	defer tx.Rollback()
 
 	if err = (txEntityStore[TEntity]{s, tx}).PutEntity(ctx, id, entity); err != nil {
-		return nil
+		return err
 	}
 
 	return tx.Commit()
