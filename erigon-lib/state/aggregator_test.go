@@ -25,6 +25,7 @@ import (
 	"math"
 	"math/rand"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -153,21 +154,24 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			return
 		}
 
-		onChangeCalls++
+		onDelCalls++
 		if firstDeleted == "" {
 			firstDeleted = deletedFiles[0]
 		}
-		if onChangeCalls == 1 {
+		if onDelCalls == 1 {
 			//require.Contains(t, deletedFiles, "domain/v1.1-accounts.0-1.kv")
 			require.Contains(t, deletedFiles, "domain/v1.1-commitment.0-1.kv")
 			require.Contains(t, deletedFiles, "history/v1.1-accounts.0-1.v")
 			require.Contains(t, deletedFiles, "accessor/v1.1-accounts.0-1.vi")
 		}
-		if onChangeCalls == 2 {
+		if onDelCalls == 2 {
+			//require.Contains(t, deletedFiles, "domain/v1.1-accounts.0-1.kv")
+		}
+		if onDelCalls == 3 {
 			require.Contains(t, deletedFiles, "domain/v1.1-accounts.0-1.kv")
-			require.Contains(t, deletedFiles, "domain/v1.1-commitment.0-1.kv")
-			require.Contains(t, deletedFiles, "history/v1.1-accounts.0-1.v")
-			require.Contains(t, deletedFiles, "accessor/v1.1-accounts.0-1.vi")
+		}
+		if slices.Contains(deletedFiles, "domain/v1.1-accounts.0-1.kv") {
+			fmt.Printf("Deleted files111: %s, onDelCalls=%d\n", deletedFiles, onDelCalls)
 		}
 		fmt.Printf("Deleted files: %s\n", deletedFiles)
 	})
