@@ -20,9 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -119,6 +121,11 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (_ *emptypb.Empty, err error) {
+	log.Warn("[dbg] GrpcServer.Delete", "paths", len(request.Paths), "stack", dbg.Stack())
+	defer func() {
+		log.Warn("[dbg] GrpcServer.Delete end", "m", maps.Keys(s.d.torrentsByName))
+	}()
+
 	for _, name := range request.Paths {
 		if name == "" {
 			err = errors.Join(err, errors.New("field 'path' is required"))

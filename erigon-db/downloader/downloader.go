@@ -979,7 +979,7 @@ func (d *Downloader) addPreverifiedTorrent(
 ) (t *torrent.Torrent, err error) {
 	diskSpecOpt := d.loadSpecFromDisk(name)
 	if !diskSpecOpt.Ok && !infoHashHint.Ok {
-		err = errors.New("can't add torrent without infohash")
+		err = fmt.Errorf("can't add torrent without infohash. name=%s", name)
 		return
 	}
 	if diskSpecOpt.Ok && infoHashHint.Ok && diskSpecOpt.Value.InfoHash != infoHashHint.Value {
@@ -1463,7 +1463,6 @@ func (d *Downloader) updateVerificationOccurring() {
 
 // Delete - stop seeding, remove file, remove .torrent.
 func (s *Downloader) Delete(name string) (err error) {
-	log.Warn("[dbg] Downloader.Delete", "name", name)
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	t, ok := s.torrentsByName[name]

@@ -1470,7 +1470,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 }
 
 func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *MergedFilesV3) {
-	defer a.onFilesChange(in.FrozenList())
+	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -1500,7 +1500,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			namesWithDirs = append(namesWithDirs, out.FilePaths(a.dirs.Snap)...)
 		}
 
-		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", namesWithDirs)
+		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", namesWithDirs, "stack", dbg.Stack())
 		a.onFilesDelete(namesWithDirs)
 	}()
 

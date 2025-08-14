@@ -156,7 +156,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 26, onChangeCalls)
 	require.Equal(t, 0, onDelCalls)
-	require.Equal(t, "v1.1-accounts.0-2.kv", firstCreated) //TODO: it's not perfect, but we plan to drop files
+	require.Equal(t, "domain/v1.1-accounts.0-2.kv", firstCreated) //TODO: it's not perfect, but we plan to drop files
 	require.Equal(t, "domain/v1.1-code.0-1.kv", firstDeleted)
 
 	{ //prune
