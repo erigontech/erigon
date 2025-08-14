@@ -1372,14 +1372,18 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
 		defer func() {
+			var creatingContract string
+			if contractCreation {
+				creatingContract = " (contract)"
+			}
 			if err != nil {
-				fmt.Printf("%d (%d.%d) Create Account: %x, err=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, err)
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, err)
 			} else {
 				var bal uint256.Int
 				if previous != nil {
 					bal = previous.data.Balance
 				}
-				fmt.Printf("%d (%d.%d) Create Account: %x, balance=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &bal)
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, &bal)
 			}
 		}()
 	}
@@ -1433,13 +1437,13 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		newObj.selfdestructed = false
 	}
 
-	data := newObj.data
-	// for newly created files these synthetic reads are used so that account
+	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
-	sdb.versionRead(addr, BalancePath, common.Hash{}, StorageRead, newObj.Balance())
-
-	sdb.versionWritten(addr, AddressPath, common.Hash{}, &data)
+	if previous == nil {
+		sdb.versionRead(addr, BalancePath, common.Hash{}, StorageRead, newObj.Balance())
+	}
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
+
 	return nil
 }
 
