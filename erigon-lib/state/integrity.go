@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/version"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -97,7 +98,11 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			}
 			accessor := item.index
 			if accessor == nil {
-				fPath := dt.d.efAccessorNewFilePath(item.startTxNum/dt.aggStep, item.endTxNum/dt.aggStep)
+				fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(item.startTxNum/dt.aggStep, item.endTxNum/dt.aggStep))
+				if err != nil {
+					panic(err)
+				}
+
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
