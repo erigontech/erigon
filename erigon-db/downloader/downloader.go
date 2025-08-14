@@ -1471,8 +1471,8 @@ func (s *Downloader) Delete(name string) (err error) {
 	if !ok {
 		return
 	}
-	// Stop seeding. Erigon will remove file and .torrent by self
-	// But we also can delete .torrent - for us - earlier is better (`kill -9` may come at any time)
+	// Stop seeding. Erigon will remove data-file and .torrent by self
+	// But we also can delete .torrent: earlier is better (`kill -9` may come at any time)
 	t.Drop()
 	err = s.torrentFS.Delete(name)
 	if err != nil {
