@@ -2,7 +2,6 @@ package heimdall
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -212,15 +211,9 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
 }
 
 func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
-	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(s.SnapType().Enum())
-	if maxBlockNumInFiles == 0 {
-		return s.EntityStore.Entity(ctx, id)
-	}
-	lastSpanIdInSnapshots, ok, err := s.EntityIdFromBlockNum(ctx, maxBlockNumInFiles)
+
+	lastSpanIdInSnapshots, err := s.LastFrozenEntityId()
 	if err != nil {
-		return nil, false, err
-	}
-	if !ok {
 		return nil, false, errors.New("could not load last span id in snapshots")
 	}
 
@@ -368,13 +361,9 @@ func (s *MilestoneSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool
 
 func (s *MilestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milestone, bool, error) {
 	entity, ok, err := s.EntityStore.Entity(ctx, id)
-
 	if ok {
 		return entity, ok, err
 	}
-
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], id)
 
 	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
