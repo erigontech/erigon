@@ -14,9 +14,14 @@ func TestE3Seedable(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "non seedable due to wrong diff",
+			name:     "seedable: we allow seed files of any size",
 			filename: "v12.13-accounts.100-165.efi",
-			expected: false,
+			expected: true,
+		},
+		{
+			name:     "seedable: we allow seed files of any size",
+			filename: "v12.13-accounts.100-101.efi",
+			expected: true,
 		},
 		{
 			name:     "invalid file name - regex not matching",
