@@ -404,6 +404,81 @@ var (
 	}
 )
 
+// checkCommitmentFileHasRoot checks if a commitment file contains state root key
+func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err error) {
+	const stateKey = "state"
+	_, fileName := filepath.Split(filePath)
+
+	// First try with recsplit index (.kvi files)
+	derivedKvi := strings.Replace(filePath, ".kv", ".kvi", 1)
+	fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+	if err != nil {
+		return false, false, err
+	}
+	kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+	if err != nil {
+		return false, false, err
+	}
+	if ok {
+		idx, err := recsplit.OpenIndex(kvi)
+		if err != nil {
+			return false, false, err
+		}
+		defer idx.Close()
+
+		rd := idx.GetReaderFromPool()
+		defer rd.Close()
+		if rd.Empty() {
+			log.Warn("[dbg] allow files deletion because accessor broken", "f", idx.FileName())
+			return false, true, nil
+		}
+
+		_, found := rd.Lookup([]byte(stateKey))
+		if found {
+			fmt.Printf("found state key with kvi %s\n", filePath)
+			return true, false, nil
+		} else {
+			fmt.Printf("skipping file because it doesn't have state key %s\n", fileName)
+			return true, false, nil
+		}
+	} else {
+		log.Warn("[dbg] not found files for", "pattern", fPathMask)
+	}
+
+	// If recsplit index not found, try btree index (.bt files)
+	derivedBt := strings.Replace(filePath, ".kv", ".bt", 1)
+	fPathMask, err = version.ReplaceVersionWithMask(derivedBt)
+	if err != nil {
+		return true, false, nil
+	}
+	bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+	if err != nil {
+		return true, false, nil
+	}
+	if !ok {
+		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
+	}
+	rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, filePath, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
+	if err != nil {
+		return false, false, err
+	}
+	defer rd.Close()
+	defer btindex.Close()
+
+	getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
+	c, err := btindex.Seek(getter, []byte(stateKey))
+	if err != nil {
+		return false, false, err
+	}
+	defer c.Close()
+
+	if bytes.Equal(c.Key(), []byte(stateKey)) {
+		fmt.Printf("found state key using bt %s\n", filePath)
+		return true, false, nil
+	}
+	return false, false, nil
+}
+
 func doRmStateSnapshots(cliCtx *cli.Context) error {
 	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
@@ -461,81 +536,19 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	// Step 2: Process each candidate file (already parsed)
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
-		fName := filepath.Base(candidate.filePath)
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
 		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
-			const trieStateKey = "state"
-
-			derivedKvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
-			fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
 			}
-			kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-			if err != nil {
-				return err
+			if hasState {
+				commitmentFilesWithState = append(commitmentFilesWithState, res)
 			}
-
-			checkedByHashMapAccessor := false
-			if ok {
-				idx, err := recsplit.OpenIndex(kvi)
-				if err != nil {
-					return err
-				}
-
-				rd := idx.GetReaderFromPool()
-				oft, found := rd.Lookup([]byte(trieStateKey))
-				if found {
-					fmt.Printf("found state key with kvi %s\n", res.Path)
-					commitmentFilesWithState = append(commitmentFilesWithState, res)
-				} else {
-					fmt.Printf("skipping file because it doesn't have state key %s\n", fName)
-				}
-				checkedByHashMapAccessor = true
-				_ = oft
-				rd.Close()
-				idx.Close()
-			} else {
-				log.Warn("[dbg] not found files for", "pattern", fPathMask)
-			}
-
-			if !checkedByHashMapAccessor { // try to lookup in bt accessor
-				derivedBt := strings.Replace(res.Path, ".kv", ".bt", 1)
-				fPathMask, err := version.ReplaceVersionWithMask(derivedBt)
-				if err != nil {
-					return err
-				}
-				bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return fmt.Errorf("can't find accessor for %s", res.Path)
-				}
-				_, err = os.Stat(bt)
-				if err != nil {
-					return err
-				}
-
-				rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
-				if err != nil {
-					return err
-				}
-
-				getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
-				c, err := btindex.Seek(getter, []byte(trieStateKey))
-				if err != nil {
-					return err
-				}
-				if bytes.Equal(c.Key(), []byte(trieStateKey)) {
-					fmt.Printf("found state key using bt %s\n", res.Path)
-					commitmentFilesWithState = append(commitmentFilesWithState, res)
-				}
-				c.Close()
-				btindex.Close()
-				rd.Close()
+			if broken {
+				commitmentFilesWithState = append(commitmentFilesWithState, res)
 			}
 		}
 
