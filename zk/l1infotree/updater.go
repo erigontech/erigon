@@ -47,6 +47,7 @@ type L2Syncer interface {
 }
 
 type Updater struct {
+	ctx          context.Context
 	cfg          *ethconfig.Zk
 	syncer       Syncer
 	progress     uint64
@@ -54,8 +55,9 @@ type Updater struct {
 	l2Syncer     L2Syncer
 }
 
-func NewUpdater(cfg *ethconfig.Zk, syncer Syncer, l2Syncer L2Syncer) *Updater {
+func NewUpdater(ctx context.Context, cfg *ethconfig.Zk, syncer Syncer, l2Syncer L2Syncer) *Updater {
 	return &Updater{
+		ctx:      ctx,
 		cfg:      cfg,
 		syncer:   syncer,
 		l2Syncer: l2Syncer,
@@ -120,20 +122,25 @@ func NewLogKey(l types.Log) LogKey {
 }
 
 type L1InfoWorkerPool struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
 	workers     []*L1InfoWorker
 	taskChan    chan *L1InfoTask
 	taskResChan chan *L1InfoTaskResult
 }
 
-func NewL1InfoWorkerPool(numWorkers int, syncer Syncer, l2Syncer L2Syncer) *L1InfoWorkerPool {
+func NewL1InfoWorkerPool(ctx context.Context, numWorkers int, syncer Syncer) *L1InfoWorkerPool {
+	ctx, cancel := context.WithCancel(ctx)
 	pool := &L1InfoWorkerPool{
+		ctx:         ctx,
+		cancel:      cancel,
 		workers:     make([]*L1InfoWorker, numWorkers),
 		taskChan:    make(chan *L1InfoTask, numWorkers*10),
 		taskResChan: make(chan *L1InfoTaskResult, numWorkers*10),
 	}
 
 	for i := 0; i < numWorkers; i++ {
-		worker := NewL1InfoWorker(i, syncer, pool.taskChan, pool.taskResChan)
+		worker := NewL1InfoWorker(ctx, syncer, pool.taskChan, pool.taskResChan)
 		pool.workers[i] = worker
 	}
 
@@ -145,7 +152,7 @@ func (pool *L1InfoWorkerPool) Start() {
 	}
 }
 func (pool *L1InfoWorkerPool) Stop() {
-	close(pool.taskChan)
+	pool.cancel()
 }
 
 func (pool *L1InfoWorkerPool) AddTask(task *L1InfoTask) {
@@ -163,14 +170,16 @@ func (pool *L1InfoWorkerPool) GetTaskResChannel() chan *L1InfoTaskResult {
 }
 
 type L1InfoWorker struct {
+	ctx         context.Context
 	syncer      Syncer
 	taskChan    chan *L1InfoTask
 	taskResChan chan *L1InfoTaskResult
 	waitGroup   sync.WaitGroup
 }
 
-func NewL1InfoWorker(id int, syncer Syncer, taskChan chan *L1InfoTask, taskResChan chan *L1InfoTaskResult) *L1InfoWorker {
+func NewL1InfoWorker(ctx context.Context, syncer Syncer, taskChan chan *L1InfoTask, taskResChan chan *L1InfoTaskResult) *L1InfoWorker {
 	return &L1InfoWorker{
+		ctx:         ctx,
 		syncer:      syncer,
 		taskChan:    taskChan,
 		taskResChan: taskResChan,
@@ -182,27 +191,35 @@ func (worker *L1InfoWorker) Start() {
 	worker.waitGroup.Add(1)
 	defer worker.waitGroup.Done()
 
-	for task := range worker.taskChan {
-		res := task.Do()
-		if res.err != nil {
-			log.Info("Retrying L1 info task", "logKey", res.logKey, "error", res.err)
-			// assume a transient error and try again
-			time.Sleep(1 * time.Second)
-			time.AfterFunc(1*time.Second, func() {
-				select {
-				case worker.taskChan <- task:
-					// successfully requeued the task
-				case <-time.After(5 * time.Second):
-					log.Warn("Failed to requeue L1 info task: timeout", "logKey", res.logKey)
-				}
-			})
-			continue
-		}
+	for {
+		select {
+		case <-worker.ctx.Done():
+			log.Info("L1InfoWorker stopped")
+			return
+		case task := <-worker.taskChan:
+			res := task.Run()
+			if res.err != nil {
+				log.Info("Retrying L1 info task", "logKey", res.logKey, "error", res.err)
+				// assume a transient error and try again
+				time.Sleep(1 * time.Second)
+				time.AfterFunc(1*time.Second, func() {
+					select {
+					case <-worker.ctx.Done():
+						return
+					case worker.taskChan <- task:
+						// successfully requeued the task
+					case <-time.After(5 * time.Second):
+						log.Warn("Failed to requeue L1 info task: timeout", "logKey", res.logKey)
+					}
+				})
+				continue
+			}
 
-		if res.l1InfoTreeUpdate == nil {
-			continue // Wrong log, no update
+			if res.l1InfoTreeUpdate == nil {
+				continue // Wrong log, no update
+			}
+			worker.taskResChan <- res
 		}
-		worker.taskResChan <- res
 	}
 }
 
@@ -229,25 +246,24 @@ func NewL1InfoTask(log types.Log, syncer Syncer) *L1InfoTask {
 	}
 }
 
-func (t *L1InfoTask) Do() *L1InfoTaskResult {
+func (t *L1InfoTask) Run() *L1InfoTaskResult {
 	header, err := t.syncer.GetHeader(t.Log.BlockNumber)
 	if err != nil {
 		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("header not found for block number %d, %w", t.Log.BlockNumber, err)}
 	}
 
-	if len(t.Log.Topics) == 3 {
-		update, err := createL1InfoTreeUpdateWithLeafHash(t.Log, header)
-		if err != nil {
-			return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("createL1InfoTreeUpdateWithLeafHash: %w", err)}
-		}
-		return &L1InfoTaskResult{l1InfoTreeUpdate: update, logKey: NewLogKey(t.Log), err: nil}
+	if len(t.Log.Topics) != 3 {
+		return &L1InfoTaskResult{nil, NewLogKey(t.Log), nil}
 	}
 
-	return &L1InfoTaskResult{nil, NewLogKey(t.Log), nil}
+	update, err := createL1InfoTreeUpdateWithLeafHash(t.Log, header)
+	if err != nil {
+		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("createL1InfoTreeUpdateWithLeafHash: %w", err)}
+	}
+	return &L1InfoTaskResult{l1InfoTreeUpdate: update, logKey: NewLogKey(t.Log), err: nil}
 }
 
 func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (processed uint64, err error) {
-	start := time.Now()
 	defer func() {
 		if err != nil {
 			u.syncer.StopQueryBlocks()
@@ -261,7 +277,7 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	logChan := u.syncer.GetLogsChan()
 	progressChan := u.syncer.GetProgressMessageChan()
 
-	workerPool := NewL1InfoWorkerPool(runtime.NumCPU(), u.syncer, u.l2Syncer)
+	workerPool := NewL1InfoWorkerPool(u.ctx, runtime.NumCPU(), u.syncer)
 	workerPool.Start()
 
 	taskResChan := workerPool.GetTaskResChannel()
@@ -292,12 +308,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 		}
 	}()
 
-	tree, err := InitialiseL1InfoTree(hermezDb)
-	if err != nil {
-		log.Error(fmt.Sprintf("[%s] Failed to initialise L1 info tree: %v", logPrefix, err))
-		return
-	}
-
 	for res := range taskResChan {
 		if res.err != nil {
 			log.Error(fmt.Sprintf("[%s] Failed to process log: %v", logPrefix, res.err))
@@ -306,8 +316,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 
 		indexUpdateMap[res.logKey] = res.l1InfoTreeUpdate
 	}
-
-	log.Info(fmt.Sprintf("[%s] Finished processing logs of size %d", logPrefix, len(allLogs)), "processed", len(indexUpdateMap))
 
 	// sort the logs by block number - it is important that we process them in order to get the index correct
 	// the v2 topic always appears after the v1 topic so we can rely on this ordering to process the logs correctly.
@@ -328,7 +336,14 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	defer ticker.Stop()
 	processed = 0
 
-	log.Info(fmt.Sprintf("[%s] Processing %d logs", logPrefix, len(allLogs)))
+	var tree *L1InfoTree
+	if len(allLogs) > 0 {
+		log.Info(fmt.Sprintf("[%s] Checking for L1 info tree updates, logs count:%v", logPrefix, len(allLogs)))
+		tree, err = InitialiseL1InfoTree(hermezDb)
+		if err != nil {
+			return 0, fmt.Errorf("InitialiseL1InfoTree: %w", err)
+		}
+	}
 
 	for _, l := range allLogs {
 		select {
@@ -342,10 +357,11 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 			// calculate and store the info tree leaf / index
 			update, ok := indexUpdateMap[NewLogKey(l)]
 			if !ok {
-				return 0, fmt.Errorf("could not find L1 info tree update for log: %v %w", l, err)
-			}
-			if err := u.HandleL1InfoTreeUpdate(hermezDb, tree, update); err != nil {
-				return 0, fmt.Errorf("HandleL1InfoTreeUpdate: %w", err)
+				log.Error(fmt.Sprintf("[%s] Could not find L1 info tree update for log", logPrefix), "log", l)
+			} else {
+				if err := u.HandleL1InfoTreeUpdate(hermezDb, tree, update); err != nil {
+					return 0, fmt.Errorf("HandleL1InfoTreeUpdate: %w", err)
+				}
 			}
 			processed++
 		case contracts.UpdateL1InfoTreeV2Topic:
@@ -398,9 +414,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, u.progress); err != nil {
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
 	}
-
-	root := tree.currentRoot
-	log.Info(fmt.Sprintf("[%s] L1 Info Tree root: %s", logPrefix, root.String()), "processed", processed, "progress", u.progress, "duration", time.Since(start).String())
 
 	return processed, nil
 }
@@ -458,6 +471,11 @@ func (u *Updater) RollbackL1InfoTree(hermezDb *hermez_db.HermezDb, tx kv.RwTx) e
 		if err != nil {
 			return fmt.Errorf("GetLatestL1InfoTreeUpdate: %w", err)
 		}
+
+		if latestUpdate == nil {
+			return errors.New("no L1 Info Tree updates found in the DB, cannot reset")
+		}
+
 		if latestUpdate.Index > 0 {
 			// oh dear
 			return errors.New("first fork12 info tree update v2 transaction shows our info tree cannot be verified")

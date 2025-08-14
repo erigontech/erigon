@@ -1137,7 +1137,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.Zk.L1FirstBlock,
 		)
 
-		l1InfoTreeUpdater := l1infotree.NewUpdater(cfg.Zk, l1InfoTreeSyncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, cfg.Zk))
+		l1InfoTreeUpdater := l1infotree.NewUpdater(ctx, cfg.Zk, l1InfoTreeSyncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, cfg.Zk))
 
 		var dataStreamServer server.DataStreamServer
 		if backend.streamServer != nil {
