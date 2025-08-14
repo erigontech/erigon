@@ -406,7 +406,7 @@ var (
 
 // checkCommitmentFileHasRoot checks if a commitment file contains state root key
 func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err error) {
-	const stateKey = "state"
+	const stateKey = "state" // by this key, trie stores root cell encoded along with latest state hash.
 	_, fileName := filepath.Split(filePath)
 
 	// First try with recsplit index (.kvi files)
@@ -439,7 +439,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 			return true, false, nil
 		} else {
 			fmt.Printf("skipping file because it doesn't have state key %s\n", fileName)
-			return true, false, nil
+			return false, false, nil
 		}
 	} else {
 		log.Warn("[dbg] not found files for", "pattern", fPathMask)
@@ -449,11 +449,11 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	derivedBt := strings.Replace(filePath, ".kv", ".bt", 1)
 	fPathMask, err = version.ReplaceVersionWithMask(derivedBt)
 	if err != nil {
-		return true, false, nil
+		return false, false, nil
 	}
 	bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 	if err != nil {
-		return true, false, nil
+		return false, false, nil
 	}
 	if !ok {
 		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
