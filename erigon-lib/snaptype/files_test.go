@@ -29,13 +29,18 @@ func TestE3Seedable(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "file with path prefix",
+			name:     "file with relative path prefix",
 			filename: "history/v12.13-accounts.100-164.efi",
 			expected: true,
 		},
 		{
-			name:     "invalid branch name",
+			name:     "invalid file name - capital letters not allowed",
 			filename: "v12.13-ACCC.100-164.efi",
+			expected: false,
+		},
+		{
+			name:     "block files are not state files",
+			filename: "v1.2-headers.seg",
 			expected: false,
 		},
 	}
