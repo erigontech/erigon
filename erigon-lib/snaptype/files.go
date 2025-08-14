@@ -327,12 +327,8 @@ func parseStateFile(name string) (from, to uint64, ok bool) {
 	return from, to, true
 }
 
-func E3Seedable(name string) bool {
-	_, _, ok := parseStateFile(name)
-	if !ok {
-		return false
-	}
-	return true
+func IsStateFileSeedable(name string) bool {
+	return IsStateFile(name) // all state files are seedable (in the past we did seed only big files)
 }
 
 func IsStateFile(name string) bool {

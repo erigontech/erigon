@@ -124,7 +124,7 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !skipSeedableCheck && !snaptype.E3Seedable(name) {
+		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))

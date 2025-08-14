@@ -2,7 +2,7 @@ package snaptype
 
 import "testing"
 
-func TestE3Seedable(t *testing.T) {
+func TestStateSeedable(t *testing.T) {
 	tests := []struct {
 		name     string
 		filename string
@@ -47,9 +47,9 @@ func TestE3Seedable(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := E3Seedable(tc.filename)
+			result := IsStateFileSeedable(tc.filename)
 			if result != tc.expected {
-				t.Errorf("E3Seedable(%q) = %v; want %v", tc.filename, result, tc.expected)
+				t.Errorf("IsStateFileSeedable(%q) = %v; want %v", tc.filename, result, tc.expected)
 			}
 		})
 	}
