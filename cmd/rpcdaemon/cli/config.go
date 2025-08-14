@@ -583,8 +583,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 			}
 
-			// NOTE: bor_* RPCs are not fully supported when using polygon.sync (https://github.com/erigontech/erigon/issues/11171)
-			// Skip the compatibility check, until we have a schema in erigon-lib
 			engine = bor.NewRo(cc, blockReader, logger)
 		} else if cc != nil && cc.Aura != nil {
 			consensusDB, err := kv2.New(kv.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)

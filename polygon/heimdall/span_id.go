@@ -62,7 +62,7 @@ func IsBlockInLastSprintOfSpan(blockNum uint64, config *borcfg.BorConfig) bool {
 }
 
 // Update span index table: span.StartBlock=> span.Id
-// This is needed for SprintIdAt(blockNum) lookups
+// This is needed for SpanIdAt(blockNum) lookups
 func UpdateSpansIndex(tx kv.RwTx, span Span) error {
 	kByte := make([]byte, 8)
 	vByte := make([]byte, 8)

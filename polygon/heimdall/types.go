@@ -297,8 +297,15 @@ var (
 					return err
 				}
 				defer d.Close()
-
-				baseSpanId := uint64(SpanIdAt(sn.From))
+				getter := d.MakeGetter()
+				getter.Reset(0)
+				firstSpanRaw, _ := getter.Next(nil) // first span in this .seg file
+				var firstSpan Span
+				err = json.Unmarshal(firstSpanRaw, &firstSpan)
+				if err != nil {
+					return err
+				}
+				baseSpanId := uint64(firstSpan.Id)
 
 				return buildValueIndex(ctx, sn, salt, d, baseSpanId, tmpDir, p, lvl, logger)
 			}),
