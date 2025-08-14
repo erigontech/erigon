@@ -31,7 +31,7 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 5_000, 132, dir, logger)
-	createTestSegmentFile(t, 0, 5_000, Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 5_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
@@ -73,9 +73,9 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	createTestBorEventSegmentFile(t, 0, 4_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 4_000, 6_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 6_000, 10_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 4_000, Enums.Spans, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 6_000, 10_000, Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 4_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 6_000, 10_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	// delete idx file for last bor span segment to simulate segment with missing idx file
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 0, 4_000, Spans.Name()))
 	err := dir2.RemoveFile(idxFileToDelete)
@@ -95,16 +95,16 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	require.Equal(t, uint64(9), lastFrozenSpanid)
 }
 
-func TestHeimdallStoreEntityById(t *testing.T) {
+func TestHeimdallStoreEntity(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	createTestSegmentFile(t, 0, 2_000, Enums.Spans, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 2_000, 4_000, Enums.Spans, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 2_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 2_000, 4_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
@@ -126,7 +126,63 @@ func TestHeimdallStoreEntityById(t *testing.T) {
 	}
 }
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver version.Version, logger log.Logger) {
+func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
+	t.Parallel()
+
+	logger := testlog.Logger(t, log.LvlInfo)
+	dir := t.TempDir()
+	createTestSegmentFile(t, 0, 2_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 2_000, 4_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	defer borRoSnapshots.Close()
+	err := borRoSnapshots.OpenFolder()
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	err = heimdallStore.Prepare(t.Context())
+	require.NoError(t, err)
+	lastFrozenId, err := heimdallStore.spans.LastFrozenEntityId()
+	require.NoError(t, err)
+	require.Equal(t, lastFrozenId, uint64(9))
+}
+
+func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
+	t.Parallel()
+
+	logger := testlog.Logger(t, log.LvlInfo)
+	dir := t.TempDir()
+	createTestSegmentFile(t, 0, 2_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 2_000, 4_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	defer borRoSnapshots.Close()
+	err := borRoSnapshots.OpenFolder()
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	err = heimdallStore.Prepare(t.Context())
+	require.NoError(t, err)
+	for i := 0; i < len(spanDataWithRotations); i++ {
+		expectedSpan := spanDataWithRotations[i]
+		actualSpan, ok, err := heimdallStore.spans.Entity(t.Context(), expectedSpan.RawId())
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, actualSpan.Id, expectedSpan.Id)
+		require.Equal(t, actualSpan.StartBlock, expectedSpan.StartBlock)
+		require.Equal(t, actualSpan.EndBlock, expectedSpan.EndBlock)
+	}
+}
+
+func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, spans []Span, dir string, ver version.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
 	segFileName := filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name))
@@ -137,7 +193,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	// use from and to to determine which spans go inside this .seg file from the spansForTesting
 	// it is not a requirement, but a handy convention for testing purposes
 	for i := from / 1000; i < to/1000; i++ {
-		span := spanDataForTesting[i]
+		span := spans[i]
 		buf, err := json.Marshal(span)
 		require.NoError(t, err)
 		err = c.AddWord(buf)
@@ -285,6 +341,60 @@ var spanDataForTesting = []Span{
 	Span{
 		Id:         9,
 		StartBlock: 9000,
+		EndBlock:   9999,
+	},
+}
+
+// span data that is irregular, containing possible span rotations
+var spanDataWithRotations = []Span{
+	Span{
+		Id:         0,
+		StartBlock: 0,
+		EndBlock:   999,
+	},
+	Span{
+		Id:         1,
+		StartBlock: 5,
+		EndBlock:   1999,
+	},
+	Span{
+		Id:         2,
+		StartBlock: 1988,
+		EndBlock:   2999,
+	},
+	Span{
+		Id:         3,
+		StartBlock: 3000,
+		EndBlock:   3999,
+	},
+	Span{
+		Id:         4,
+		StartBlock: 3500,
+		EndBlock:   4999,
+	},
+	Span{
+		Id:         5,
+		StartBlock: 5000,
+		EndBlock:   5999,
+	},
+	Span{
+		Id:         6,
+		StartBlock: 5500,
+		EndBlock:   6999,
+	},
+	Span{
+		Id:         7,
+		StartBlock: 7000,
+		EndBlock:   7999,
+	},
+	Span{
+		Id:         8,
+		StartBlock: 7001,
+		EndBlock:   8999,
+	},
+	Span{
+		Id:         9,
+		StartBlock: 7002,
 		EndBlock:   9999,
 	},
 }
