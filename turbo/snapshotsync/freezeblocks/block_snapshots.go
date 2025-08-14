@@ -295,11 +295,11 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
-	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots)
+	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots, onDelete)
 	return ok || merged, err
 }
 
-func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error) (merged bool, err error) {
+func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (merged bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
@@ -328,7 +328,7 @@ func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnap
 		}
 		return nil
 	}
-	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, nil); err != nil {
+	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete); err != nil {
 		return false, err
 	}
 
