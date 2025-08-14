@@ -285,11 +285,7 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
-		fPathMask, err := version.ReplaceVersionWithMask(ii.efAccessorFilePath(fromStep, toStep))
-		if err != nil {
-			panic(err)
-		}
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(fPathMask)
+		fPath, _, _, err := version.FindFilesWithVersionsByPattern(ii.efAccessorFilePathMask(fromStep, toStep))
 		if err != nil {
 			panic(err)
 		}
