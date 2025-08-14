@@ -1477,7 +1477,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 		req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
 		for _, fName := range frozenFileNames {
 			req.Items = append(req.Items, &protodownloader.AddItem{
-				Path: filepath.Join("history", fName),
+				Path: fName,
 			})
 		}
 		if _, err := s.downloaderClient.Add(ctx, req); err != nil {

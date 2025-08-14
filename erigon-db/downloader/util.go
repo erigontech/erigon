@@ -155,8 +155,6 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 		return false, ctx.Err()
 	default:
 	}
-	log.Warn("[dbg] BuildTorrentIfNeed1", "fName", fName)
-
 	fName, err = ensureCantLeaveDir(fName, root)
 	if err != nil {
 		return false, err
@@ -176,12 +174,9 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 		return false, err
 	}
 	if !exists {
-		log.Warn("[dbg] BuildTorrentIfNeed3", "fPath", fPath)
-
 		return false, nil
 	}
 
-	log.Warn("[dbg] BuildTorrentIfNeed2", "fName", fName)
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return false, fmt.Errorf("createTorrentFileFromSegment: %w", err)

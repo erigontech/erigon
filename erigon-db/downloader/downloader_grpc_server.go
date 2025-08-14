@@ -121,9 +121,13 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (_ *emptypb.Empty, err error) {
-	log.Warn("[dbg] GrpcServer.Delete", "paths", len(request.Paths), "stack", dbg.Stack())
+	var names []string
+	for _, name := range request.Paths {
+		names = append(names, name)
+	}
+	log.Warn("[dbg] GrpcServer.Delete", "names", names, "m", len(s.d.torrentsByName), "stack", dbg.Stack())
 	defer func() {
-		log.Warn("[dbg] GrpcServer.Delete end", "m", maps.Keys(s.d.torrentsByName))
+		log.Warn("[dbg] GrpcServer.Delete end", "m", toArr(maps.Keys(s.d.torrentsByName)))
 	}()
 
 	for _, name := range request.Paths {

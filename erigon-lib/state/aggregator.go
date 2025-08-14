@@ -1500,7 +1500,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			namesWithDirs = append(namesWithDirs, out.FilePaths(a.dirs.Snap)...)
 		}
 
-		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", namesWithDirs, "stack", dbg.Stack())
+		log.Warn("[dbg] Cleaner.cleanAfterMerge", "namesWithDirs", namesWithDirs, "in", in.FilePaths(a.dirs.Snap), "stack", dbg.Stack())
 		a.onFilesDelete(namesWithDirs)
 	}()
 

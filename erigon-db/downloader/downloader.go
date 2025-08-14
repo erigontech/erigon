@@ -893,8 +893,6 @@ func (d *Downloader) VerifyData(
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
-	log.Warn("[dbg] Downloader.AddNewSeedableFile", "name", name)
-
 	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
 		if !isStateFile && ff.Type == nil {
@@ -915,9 +913,13 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
 	}
-	log.Warn("[dbg] Downloader.AddNewSeedableFile done", "len(byNames)", len(d.torrentsByName), "len(c.Torrents())", len(d.torrentClient.Torrents()), "names", d.torrentsByName)
-
 	return nil
+}
+func toArr[K any](it iter.Seq[K]) (res []K) {
+	for v := range it {
+		res = append(res, v)
+	}
+	return res
 }
 
 func (d *Downloader) alreadyHaveThisName(name string) bool {
