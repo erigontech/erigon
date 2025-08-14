@@ -1461,8 +1461,12 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Config, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
-	var err error
+func (s *Ethereum) setUpSnapDownloader(
+	ctx context.Context,
+	nodeCfg *nodecfg.Config,
+	downloaderCfg *downloadercfg.Cfg,
+	cc *chain.Config,
+) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
@@ -1509,17 +1513,22 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
-		// start embedded Downloader
-		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) > 0 {
-			downloaderCfg.AddTorrentsFromDisk = false
-		}
+		// Always disable the asynchronous adder. We will do it here to support downloader.verify.
+		downloaderCfg.AddTorrentsFromDisk = false
 
 		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
 		if err != nil {
 			return err
 		}
-
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+
+		// start embedded Downloader
+		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) == 0 {
+			err = s.downloader.AddTorrentsFromDisk(ctx)
+			if err != nil {
+				return fmt.Errorf("adding torrents from disk: %w", err)
+			}
+		}
 
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {
