@@ -255,10 +255,6 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	trace := ii.filenameBase == kv.ReceiptDomain.String() //false
 
 	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, trace, toTxNum))
-
-	if ii.filenameBase == kv.ReceiptDomain.String() {
-		log.Warn("[dbg] reCalcVisibleFiles", "_dirtNames", ii._dirtNames(), "_visNames", ii._visNames())
-	}
 }
 
 func (ii *InvertedIndex) _dirtNames() (nanes []string) {
