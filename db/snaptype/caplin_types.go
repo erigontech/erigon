@@ -16,7 +16,7 @@
 
 package snaptype
 
-import "github.com/erigontech/erigon-lib/version"
+import "github.com/erigontech/erigon/db/version"
 
 var (
 	BeaconBlocks = snapType{

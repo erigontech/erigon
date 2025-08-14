@@ -14,13 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package version
+package cmd
 
-// see https://calver.org
-const (
-	Major                    = 3             // Major version component of the current release
-	Minor                    = 1             // Minor version component of the current release
-	Micro                    = 0             // Patch version component of the current release
-	Modifier                 = "dev"         // Modifier component of the current release
-	DefaultSnapshotGitBranch = "release/3.1" // Branch of erigontech/erigon-snapshot to use in OtterSync
+import (
+	"github.com/urfave/cli/v2"
 )
+
+func RegisterCmds(app *cli.App) {
+	registerValidatorRegCheckCmd(app)
+}

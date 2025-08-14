@@ -23,11 +23,12 @@ import (
 	"os"
 	"path/filepath"
 
+	bloomfilter "github.com/holiman/bloomfilter/v2"
+
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon-lib/log/v3"
-	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 )
 
 type Filter struct {

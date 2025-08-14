@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,14 +14,25 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package cryptozerocopy
+package rawdb
 
-import "hash"
+import (
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
+)
 
-// KeccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type KeccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
+func SetErigonVersion(tx kv.RwTx, versionKey string) error {
+	versionKeyByte := []byte(versionKey)
+	hasVersion, err := tx.Has(kv.DatabaseInfo, versionKeyByte)
+	if err != nil {
+		return err
+	}
+	if hasVersion {
+		return nil
+	}
+	// Save version if it does not exist
+	if err := tx.Put(kv.DatabaseInfo, versionKeyByte, []byte(version.VersionNoMeta)); err != nil {
+		return err
+	}
+	return nil
 }

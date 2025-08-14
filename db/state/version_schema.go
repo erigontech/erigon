@@ -1,8 +1,8 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func InitSchemas() {
