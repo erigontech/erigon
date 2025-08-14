@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"math"
 	"os"
 	"path"
@@ -33,6 +32,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/snaptype"
 
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -374,6 +375,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
+				} else {
+					log.Warn("[dbg] whaaaaat????", "fPathPattern", fPathPattern, "ok", ok, "fileVer", fileVer, "fPath", fPath)
 				}
 			}
 		}
