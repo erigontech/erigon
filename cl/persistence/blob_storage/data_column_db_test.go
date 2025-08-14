@@ -342,10 +342,6 @@ func TestPrune(t *testing.T) {
 	// Test pruning with keepSlotDistance = 10000
 	err := storage.Prune(10000)
 	require.NoError(t, err)
-
-	// Since subdivisionSlot is commented out in the source, the prune function may not work as expected
-	// Let's just verify that the function doesn't crash and returns no error
-	// The actual pruning behavior would need to be fixed in the source code
 }
 
 func TestPruneWithLargeKeepDistance(t *testing.T) {
