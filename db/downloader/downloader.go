@@ -1428,6 +1428,12 @@ func (d *Downloader) updateVerificationOccurring() {
 func (s *Downloader) Delete(name string) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	// This needs to occur first to prevent it being added again, and also even if it isn't actually
+	// in the Downloader right now.
+	err = s.torrentFS.Delete(name)
+	if err != nil {
+		s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)
+	}
 	t, ok := s.torrentsByName[name]
 	if !ok {
 		return
@@ -1435,10 +1441,6 @@ func (s *Downloader) Delete(name string) (err error) {
 	// Stop seeding. Erigon will remove data-file and .torrent by self
 	// But we also can delete .torrent: earlier is better (`kill -9` may come at any time)
 	t.Drop()
-	err = s.torrentFS.Delete(name)
-	if err != nil {
-		s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)
-	}
 	g.MustDelete(s.torrentsByName, name)
 	// I wonder if it's an issue if this occurs before initial sync has completed.
 	delete(s.requiredTorrents, t)
