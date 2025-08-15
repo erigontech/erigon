@@ -478,7 +478,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	return hasMore, nil
 }
 
-// Run pruning for stages as per the defined pruning order, if enabled for that stage
+// RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
