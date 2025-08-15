@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
@@ -189,12 +189,12 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			if len(toMerge[t.Enum()]) == 0 {
 				continue
 			}
-			toMergeFilePaths := make([]string, 0, len(toMerge[t.Enum()]))
+			toMergeFileNames := make([]string, 0, len(toMerge[t.Enum()]))
 			for _, f := range toMerge[t.Enum()] {
-				toMergeFilePaths = append(toMergeFilePaths, f.FilePath())
+				toMergeFileNames = append(toMergeFileNames, f.FileName())
 			}
 			if onDelete != nil {
-				if err := onDelete(toMergeFilePaths); err != nil {
+				if err := onDelete(toMergeFileNames); err != nil {
 					return err
 				}
 			}

@@ -35,7 +35,7 @@ import (
 type Sync struct {
 	cfg             ethconfig.Sync
 	unwindPoint     *uint64 // used to run stages
-	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
+	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
 	posTransition   *uint64
 
@@ -80,7 +80,7 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s, CurrentSyncCycleInfo{initialCycle, firstCycle}}
 }
 
-// Get the current prune status from the DB
+// PruneStageState Get the current prune status from the DB
 func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB, initialCycle bool) (*PruneState, error) {
 	var pruneProgress uint64
 	var err error
@@ -478,7 +478,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	return hasMore, nil
 }
 
-// Run pruning for stages as per the defined pruning order, if enabled for that stage
+// RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
@@ -500,7 +500,7 @@ func (s *Sync) PrintTimings() []interface{} {
 	var logCtx []interface{}
 	count := 0
 	for i := range s.timings {
-		if s.timings[i].took < 50*time.Millisecond {
+		if s.timings[i].took < 100*time.Millisecond {
 			continue
 		}
 		count++

@@ -461,9 +461,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 	return nil
 }
 
-/* ====== PRUNING ====== */
-// snapshots pruning sections works more as a retiring of blocks
-// retiring blocks means moving block data from db into snapshots
+// SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -490,25 +488,21 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
+		noDl := cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()
 		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []snapshotsync.DownloadRequest) error {
-			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
-					return err
-				}
+			if noDl {
+				return nil
 			}
-
-			return nil
-		}, func(l []string) error {
-			//if cfg.snapshotUploader != nil {
-			// TODO - we need to also remove files from the uploader (100k->500K transition)
-			//}
-
-			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+			if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
 				return err
 			}
-
 			return nil
+		}, func(l []string) error {
+			if noDl {
+				return nil
+			}
+			_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+			return err
 		}, func() error {
 			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
 			if filesDeleted && cfg.notifier != nil {
