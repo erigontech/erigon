@@ -842,7 +842,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 	ss.Protocols = append(ss.Protocols, p2p.Protocol{
 		Name:           eth.ProtocolName,
 		Version:        protocol,
-		Length:         17,
+		Length:         eth.ProtocolLengths[protocol],
 		DialCandidates: disc,
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 			peerID := peer.Pubkey()

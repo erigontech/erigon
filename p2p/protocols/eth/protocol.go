@@ -46,6 +46,8 @@ const ProtocolName = "eth"
 const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
 
+var ProtocolLengths = map[uint]uint64{direct.ETH67: 17, direct.ETH68: 17, direct.ETH69: 18}
+
 const (
 	// Protocol messages in eth/64
 	StatusMsg          = 0x00
