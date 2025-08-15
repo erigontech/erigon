@@ -1683,6 +1683,7 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 
 func TestReceiptFilesVersionAdjust(t *testing.T) {
 	touchFn := func(t *testing.T, dirs datadir.Dirs, file string) {
+		t.Helper()
 		fullpath := filepath.Join(dirs.SnapDomain, file)
 		ofile, err := os.Create(fullpath)
 		require.NoError(t, err)
