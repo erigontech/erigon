@@ -255,6 +255,7 @@ type Config struct {
 	SentinelPort                uint64
 
 	OverridePragueTime    *big.Int `toml:",omitempty"`
+	OverrideCancunTime    *big.Int `toml:",omitempty"`
 	OverrideNormalcyBlock *big.Int `toml:",omitempty"`
 	OverrideLondonBlock   *big.Int `toml:",omitempty"`
 	OverrideShanghaiTime  *big.Int `toml:",omitempty"`
