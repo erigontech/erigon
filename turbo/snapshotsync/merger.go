@@ -185,21 +185,15 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			}
 		}
 
-		for _, t := range snapTypes {
-			if len(toMerge[t.Enum()]) == 0 {
-				continue
+		toMergeFileNames := make([]string, 0, 16)
+		for _, segments := range toMerge {
+			for _, segment := range segments {
+				toMergeFileNames = append(toMergeFileNames, segment.FilePaths(snapDir)...)
 			}
-
-			fmt.Printf("[dbg] %s\n", t.IdxFileNames())
-
-			toMergeFileNames := make([]string, 0, len(toMerge[t.Enum()]))
-			for _, f := range toMerge[t.Enum()] {
-				toMergeFileNames = append(toMergeFileNames, f.FileName())
-			}
-			if onDelete != nil {
-				if err := onDelete(toMergeFileNames); err != nil {
-					return err
-				}
+		}
+		if onDelete != nil {
+			if err := onDelete(toMergeFileNames); err != nil {
+				return err
 			}
 		}
 	}
