@@ -104,7 +104,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	rules := chain.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
+	rules := context.Rules(chain.AllProtocolChanges)
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it

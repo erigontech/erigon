@@ -687,34 +687,6 @@ type Rules struct {
 	IsAura                                            bool
 }
 
-// Rules ensures c's ChainID is not nil and returns a new Rules instance
-func (c *Config) Rules(num uint64, time uint64) *Rules {
-	chainID := c.ChainID
-	if chainID == nil {
-		chainID = new(big.Int)
-	}
-
-	return &Rules{
-		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(num),
-		IsTangerineWhistle: c.IsTangerineWhistle(num),
-		IsSpuriousDragon:   c.IsSpuriousDragon(num),
-		IsByzantium:        c.IsByzantium(num),
-		IsConstantinople:   c.IsConstantinople(num),
-		IsPetersburg:       c.IsPetersburg(num),
-		IsIstanbul:         c.IsIstanbul(num),
-		IsBerlin:           c.IsBerlin(num),
-		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
-		IsCancun:           c.IsCancun(time),
-		IsNapoli:           c.IsNapoli(num),
-		IsBhilai:           c.IsBhilai(num),
-		IsPrague:           c.IsPrague(time) || c.IsBhilai(num),
-		IsOsaka:            c.IsOsaka(time),
-		IsAura:             c.Aura != nil,
-	}
-}
-
 // isForked returns whether a fork scheduled at block s is active at the given head block.
 func isForked(s *big.Int, head uint64) bool {
 	if s == nil {

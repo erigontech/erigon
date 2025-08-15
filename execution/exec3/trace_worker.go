@@ -95,7 +95,7 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
-	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
+	e.rules = blockCtx.Rules(e.chainConfig)
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
