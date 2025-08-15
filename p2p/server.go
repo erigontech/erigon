@@ -181,6 +181,9 @@ type Config struct {
 	MetricsEnabled bool
 
 	DiscoveryDNS []string
+
+	// Enable WIT protocol for stateless witness data exchange
+	EnableWitProtocol bool
 }
 
 func (config *Config) ListenPort() int {

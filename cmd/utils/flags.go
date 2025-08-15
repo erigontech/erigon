@@ -1119,6 +1119,10 @@ var (
 		Name:  "polygon.pos.ssf.block",
 		Usage: "Enabling Polygon PoS Single Slot Finality since block",
 	}
+	PolygonPosWitProtocolFlag = cli.BoolFlag{
+		Name:  "polygon.wit-protocol",
+		Usage: "Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains)",
+	}
 	ExperimentalConcurrentCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.concurrent-commitment",
 		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
@@ -1259,7 +1263,7 @@ func NewP2PConfig(
 	port uint,
 	protocol uint,
 	allowedPorts []uint,
-	metricsEnabled bool,
+	metricsEnabled, witProtocol bool,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -1277,17 +1281,18 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:      fmt.Sprintf(":%d", port),
-		MaxPeers:        maxPeers,
-		MaxPendingPeers: maxPendPeers,
-		NAT:             nat.Any(),
-		NoDiscovery:     nodiscover,
-		PrivateKey:      serverKey,
-		Name:            nodeName,
-		NodeDatabase:    enodeDBPath,
-		AllowedPorts:    allowedPorts,
-		TmpDir:          dirs.Tmp,
-		MetricsEnabled:  metricsEnabled,
+		ListenAddr:        fmt.Sprintf(":%d", port),
+		MaxPeers:          maxPeers,
+		MaxPendingPeers:   maxPendPeers,
+		NAT:               nat.Any(),
+		NoDiscovery:       nodiscover,
+		PrivateKey:        serverKey,
+		Name:              nodeName,
+		NodeDatabase:      enodeDBPath,
+		AllowedPorts:      allowedPorts,
+		TmpDir:            dirs.Tmp,
+		MetricsEnabled:    metricsEnabled,
+		EnableWitProtocol: witProtocol,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1442,6 +1447,10 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 
 	if ctx.IsSet(MetricsEnabledFlag.Name) {
 		cfg.MetricsEnabled = ctx.Bool(MetricsEnabledFlag.Name)
+	}
+
+	if ctx.IsSet(PolygonPosWitProtocolFlag.Name) {
+		cfg.EnableWitProtocol = ctx.Bool(PolygonPosWitProtocolFlag.Name)
 	}
 
 	logger.Info("Maximum peer count", "total", cfg.MaxPeers)
