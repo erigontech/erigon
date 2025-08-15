@@ -148,30 +148,27 @@ func (i *FilesItem) closeFiles() {
 	}
 }
 
-func (i *FilesItem) FilePaths(relative string) (paths []string) {
+func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 	if i.decompressor != nil {
-		paths = append(paths, i.decompressor.FilePath())
+		relativePaths = append(relativePaths, i.decompressor.FilePath())
 	}
 	if i.index != nil {
-		paths = append(paths, i.index.FilePath())
+		relativePaths = append(relativePaths, i.index.FilePath())
 	}
 	if i.bindex != nil {
-		paths = append(paths, i.bindex.FilePath())
+		relativePaths = append(relativePaths, i.bindex.FilePath())
 	}
 	if i.existence != nil {
-		paths = append(paths, i.existence.FilePath)
-	}
-	if len(relative) == 0 {
-		return paths
+		relativePaths = append(relativePaths, i.existence.FilePath)
 	}
 	var err error
-	for i := 0; i < len(paths); i++ {
-		paths[i], err = filepath.Rel(relative, paths[i])
+	for i := 0; i < len(relativePaths); i++ {
+		relativePaths[i], err = filepath.Rel(basePath, relativePaths[i])
 		if err != nil {
-			log.Warn("FilesItem.FilePaths: can't make relative path", "err", err, "relative", relative, "path", paths[i])
+			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
 		}
 	}
-	return paths
+	return relativePaths
 }
 
 func (i *FilesItem) closeFilesAndRemove() {
