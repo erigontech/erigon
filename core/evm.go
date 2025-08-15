@@ -27,7 +27,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -97,17 +96,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
 	}
 	return blockContext
-}
-
-func NewEVMBlockContextHelper(header *types.Header, engine consensus.EngineReader, chainConfig *chain.Config) evmtypes.BlockContext {
-	isBor := chainConfig.Bor != nil
-	var author *common.Address
-	if isBor {
-		author = &header.Coinbase
-	} else {
-		author = &state.SystemAddress
-	}
-	return NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.
