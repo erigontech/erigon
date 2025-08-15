@@ -291,13 +291,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					continue
 				}
 
-				if !fileVer.Eq(d.version.DataKV.Current) {
-					if !fileVer.Less(d.version.DataKV.MinSupported) {
-						d.version.DataKV.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.DataKV)
-					}
+				if fileVer.Less(d.version.DataKV.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, d.version.DataKV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -323,13 +319,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorKVI.Current) {
-						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
-							d.version.AccessorKVI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorKVI)
-						}
+					if fileVer.Less(d.version.AccessorKVI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.AccessorKVI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -346,13 +338,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorBT.Current) {
-						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
-							d.version.AccessorBT.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorBT)
-						}
+					if fileVer.Less(d.version.AccessorBT.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.AccessorBT)
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -369,13 +357,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorKVEI.Current) {
-						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
-							d.version.AccessorKVEI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorKVEI)
-						}
+					if fileVer.Less(d.version.AccessorKVEI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.AccessorKVEI)
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -421,13 +405,9 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if !fileVer.Eq(h.version.DataV.Current) {
-					if !fileVer.Less(h.version.DataV.MinSupported) {
-						h.version.DataV.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, h.version.DataV)
-					}
+				if fileVer.Less(h.version.DataV.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, h.version.DataV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -466,13 +446,9 @@ func (h *History) openDirtyFiles() error {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(h.version.AccessorVI.Current) {
-						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
-							h.version.AccessorVI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, h.version.AccessorVI)
-						}
+					if fileVer.Less(h.version.AccessorVI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, h.version.AccessorVI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -520,13 +496,9 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if !fileVer.Eq(ii.version.DataEF.Current) {
-					if !fileVer.Less(ii.version.DataEF.MinSupported) {
-						ii.version.DataEF.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, ii.version.DataEF)
-					}
+				if fileVer.Less(ii.version.DataEF.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, ii.version.DataEF)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -553,13 +525,9 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					// don't interrupt on error. other files may be good
 				}
 				if ok {
-					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
-						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
-							ii.version.AccessorEFI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, ii.version.AccessorEFI)
-						}
+					if fileVer.Less(ii.version.AccessorEFI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, ii.version.AccessorEFI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
