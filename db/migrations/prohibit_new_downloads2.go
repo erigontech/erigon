@@ -23,13 +23,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -61,11 +61,11 @@ var ProhibitNewDownloadsLock2 = Migration{
 		if len(content) == 0 { // old format, need to change to all snaptypes except blob sidecars
 			locked := []string{}
 
-			for _, t := range coresnaptype.BlockSnapshotTypes {
+			for _, t := range snaptype2.BlockSnapshotTypes {
 				locked = append(locked, t.Name())
 			}
 
-			for _, t := range coresnaptype.E3StateTypes {
+			for _, t := range snaptype2.E3StateTypes {
 				locked = append(locked, t.Name())
 			}
 

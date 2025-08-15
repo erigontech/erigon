@@ -27,9 +27,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 type CommonTx struct {
@@ -118,6 +118,10 @@ func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 
 func (tx *LegacyTx) GetAccessList() AccessList {
 	return AccessList{}
+}
+
+func (tx *LegacyTx) GetAuthorizations() []Authorization {
+	return nil
 }
 
 func (tx *LegacyTx) Protected() bool {

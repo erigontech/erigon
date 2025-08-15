@@ -24,16 +24,16 @@ import (
 	"math/big"
 	"sync"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
@@ -55,7 +55,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	}
 
 	var prevRandDao *common.Hash
-	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
+	if header.Difficulty != nil && header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = new(common.Hash)
 		*prevRandDao = header.MixDigest
@@ -80,13 +80,14 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		postApplyMessageFunc = nil
 	}
 
-	// assert if network is ARB0 to change pervrandao
+	// assert if network is ARB0 to change prevRandDao
 	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	if arbOsVersion > chain.ArbosVersion_0 {
 		difficultyHash := common.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
 	}
-	return evmtypes.BlockContext{
+
+	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
 		GetHash:          blockHashFunc,
@@ -94,7 +95,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
-		Difficulty:       new(big.Int).Set(header.Difficulty),
 		BaseFee:          &baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
@@ -102,6 +102,10 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		BaseFeeInBlock:   baseFee.Clone(),
 		ArbOSVersion:     arbOsVersion,
 	}
+	if header.Difficulty != nil {
+		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
+	}
+	return blockContext
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.

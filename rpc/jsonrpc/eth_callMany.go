@@ -176,12 +176,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
-
-	var arbosVersion uint64
-	if chainConfig.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-	rules := chainConfig.Rules(blockNum, blockCtx.Time, arbosVersion)
+	rules := evm.ChainRules()
 
 	timeoutMilliSeconds := int64(5000)
 
