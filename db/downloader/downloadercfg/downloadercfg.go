@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	"golang.org/x/time/rate"
 
 	g "github.com/anacrolix/generics"
@@ -37,9 +38,9 @@ import (
 	"github.com/anacrolix/torrent"
 	pp "github.com/anacrolix/torrent/peer_protocol"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapcfg"
 )
 
@@ -139,6 +140,12 @@ func New(
 	opts NewCfgOpts,
 ) (_ *Cfg, err error) {
 	torrentConfig := defaultTorrentClientConfig()
+
+	torrentConfig.MaxUnverifiedBytes = 0
+
+	torrentConfig.MetainfoSourcesMerger = func(t *torrent.Torrent, info *metainfo.MetaInfo) error {
+		return t.SetInfoBytes(info.InfoBytes)
+	}
 
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.

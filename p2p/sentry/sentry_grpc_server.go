@@ -41,10 +41,8 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -52,7 +50,9 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -548,9 +548,9 @@ func runPeer(
 }
 
 func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
+	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
-		stats := diagnostics.PeerStatisticMsgUpdate{
+		stats := diaglib.PeerStatisticMsgUpdate{
 			PeerName: peerName,
 			PeerID:   peerID,
 			Inbound:  inbound,
@@ -560,7 +560,7 @@ func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType s
 			PeerType: "Sentry",
 		}
 
-		diagnostics.Send(stats)
+		diaglib.Send(stats)
 	}
 }
 

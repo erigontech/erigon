@@ -25,25 +25,25 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -154,7 +154,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 
 		if hook != nil {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				finishProgressBefore, _, _, _, err := stagesHeadersAndFinish(db, tx)
+				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
 				if err != nil {
 					return err
 				}
@@ -216,7 +216,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 
 func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
 	externalTx := txc.Tx != nil
-	finishProgressBefore, borProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, txc.Tx)
+	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, txc.Tx)
 	if err != nil {
 		return false, err
 	}
@@ -224,9 +224,6 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	if blockReader.BorSnapshots() != nil {
-		isSynced = isSynced && borProgressBefore > blockReader.FrozenBorBlocks(false)
-	}
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {
 		canRunCycleInOneTransaction = true
@@ -246,11 +243,12 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 
 	if canRunCycleInOneTransaction && !externalTx {
-		txc.Tx, err = db.BeginRwNosync(ctx)
+		tx, err := db.BeginRwNosync(ctx)
 		if err != nil {
 			return false, err
 		}
-		defer txc.Tx.Rollback()
+		defer tx.Rollback()
+		txc.SetTx(tx)
 	}
 
 	if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
@@ -326,23 +324,19 @@ func stageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	return hasMore, nil
 }
 
-func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, polygonSync, fin uint64, gasUsed uint64, err error) {
+func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, gasUsed uint64, err error) {
 	if tx != nil {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return head, polygonSync, fin, gasUsed, err
+			return head, fin, gasUsed, err
 		}
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return head, polygonSync, fin, gasUsed, err
+			return head, fin, gasUsed, err
 		}
-		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
-			return head, polygonSync, fin, gasUsed, err
-		}
-
 		h := rawdb.ReadHeaderByNumber(tx, head)
 		if h != nil {
 			gasUsed = h.GasUsed
 		}
-		return head, polygonSync, fin, gasUsed, nil
+		return head, fin, gasUsed, nil
 	}
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
@@ -351,19 +345,15 @@ func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, polygonSync, fin uint64
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
-		if polygonSync, err = stages.GetStageProgress(tx, stages.PolygonSync); err != nil {
-			return err
-		}
 		h := rawdb.ReadHeaderByNumber(tx, head)
 		if h != nil {
 			gasUsed = h.GasUsed
 		}
-		// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
 		return nil
 	}); err != nil {
-		return head, polygonSync, fin, gasUsed, err
+		return head, fin, gasUsed, err
 	}
-	return head, polygonSync, fin, gasUsed, nil
+	return head, fin, gasUsed, nil
 }
 
 type Hook struct {

@@ -20,8 +20,8 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -504,14 +504,6 @@ var StateUnwindOrder = UnwindOrder{
 	stages.Headers,
 }
 
-var PolygonSyncUnwindOrder = UnwindOrder{
-	stages.Finish,
-	stages.TxLookup,
-	stages.Execution,
-	stages.Senders,
-	stages.PolygonSync,
-}
-
 var DefaultPruneOrder = PruneOrder{
 	stages.Finish,
 	stages.TxLookup,
@@ -533,15 +525,6 @@ var PipelinePruneOrder = PruneOrder{
 	stages.Senders,
 
 	stages.BlockHashes,
-	stages.Snapshots,
-}
-
-var PolygonSyncPruneOrder = PruneOrder{
-	stages.Finish,
-	stages.TxLookup,
-	stages.Execution,
-	stages.Senders,
-	stages.PolygonSync,
 	stages.Snapshots,
 }
 

@@ -21,6 +21,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -32,15 +34,14 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/version"
-	ver "github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/snaptype"
+	ver "github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
-var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)
+var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
 var (
 	Mainnet    = fromEmbeddedToml(snapshothashes.Mainnet)
@@ -51,6 +52,18 @@ var (
 	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
+
+	// Need to fix this already.
+	allPreverified = []*Preverified{
+		&Mainnet,
+		&Holesky,
+		&Sepolia,
+		&Amoy,
+		&BorMainnet,
+		&Gnosis,
+		&Chiado,
+		&Hoodi,
+	}
 )
 
 func fromEmbeddedToml(in []byte) Preverified {
@@ -372,7 +385,7 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 // IsFrozen - can't be merged to bigger files
 func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
-	return info.To-info.From == mergeLimit
+	return info.To-info.From >= mergeLimit
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
@@ -509,6 +522,16 @@ func webseedsParse(in []byte) (res []string) {
 }
 
 func LoadRemotePreverified(ctx context.Context) (err error) {
+	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+		b, err := os.ReadFile(s)
+		if err != nil {
+			return fmt.Errorf("reading remote preverified override file: %w", err)
+		}
+		for _, p := range allPreverified {
+			*p = fromEmbeddedToml(b)
+		}
+		return nil
+	}
 	// Can't log in erigon-snapshot repo due to erigon-lib module import path.
 	log.Info("Loading remote snapshot hashes")
 	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)

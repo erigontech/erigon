@@ -26,15 +26,16 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/db/kv"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -269,7 +270,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 	invalidFileItemsLock := sync.Mutex{}
 	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+			fromStep, toStep := kv.Step(item.startTxNum/d.stepSize), kv.Step(item.endTxNum/d.stepSize)
 			if item.decompressor == nil {
 				fPathMask := d.kvFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -400,7 +401,7 @@ func (h *History) openDirtyFiles() error {
 	invalidFileItems := make([]*FilesItem, 0)
 	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			fromStep, toStep := kv.Step(item.startTxNum/h.stepSize), kv.Step(item.endTxNum/h.stepSize)
 			if item.decompressor == nil {
 				fPathMask := h.vFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -497,7 +498,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			item := item
-			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+			fromStep, toStep := kv.Step(item.startTxNum/ii.stepSize), kv.Step(item.endTxNum/ii.stepSize)
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
@@ -739,9 +740,9 @@ func (files visibleFiles) VisibleFiles() []VisibleFile {
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*FilesItem) {
+func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep kv.Step) []string) (l []*FilesItem) {
 	for _, item := range dirtyFiles {
-		fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
+		fromStep, toStep := kv.Step(item.startTxNum/aggregationStep), kv.Step(item.endTxNum/aggregationStep)
 		for _, fName := range accessorsFor(fromStep, toStep) {
 			exists, err := dir.FileExist(fName)
 			if err != nil {

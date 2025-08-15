@@ -31,18 +31,18 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -102,7 +102,7 @@ var Defaults = Config{
 	},
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
-	Miner: params.MiningConfig{
+	Miner: buildercfg.MiningConfig{
 		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
@@ -212,7 +212,7 @@ type Config struct {
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
 	// Mining options
-	Miner params.MiningConfig
+	Miner buildercfg.MiningConfig
 
 	// Ethash options
 	Ethash ethashcfg.Config

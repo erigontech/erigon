@@ -27,22 +27,22 @@ import (
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/trie"
@@ -440,7 +440,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if acc == nil {
 		for i, k := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   uint256.NewInt(0).SetBytes(k[:]).Hex(),
+				Key:   common.BytesToHash(k[:]).Hex(),
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -474,7 +474,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
-		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
+		proof.StorageProof[i].Key = common.BytesToHash(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
@@ -826,7 +826,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
-	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
+	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}
@@ -866,7 +867,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, state)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
-		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 		txCtx := core.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)

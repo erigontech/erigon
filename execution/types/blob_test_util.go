@@ -23,10 +23,10 @@ import (
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types/testdata"
 )
 

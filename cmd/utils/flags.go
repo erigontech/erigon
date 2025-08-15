@@ -38,12 +38,8 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/time/rate"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/crypto"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/direct"
@@ -52,20 +48,25 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/chain/params"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -1644,7 +1645,7 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	}
 }
 
-func SetupMinerCobra(cmd *cobra.Command, cfg *params2.MiningConfig) {
+func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.MiningConfig) {
 	flags := cmd.Flags()
 	var err error
 	cfg.Enabled, err = flags.GetBool(MiningEnabledFlag.Name)
@@ -1728,7 +1729,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
 }
 
-func setMiner(ctx *cli.Context, cfg *params2.MiningConfig) {
+func setMiner(ctx *cli.Context, cfg *buildercfg.MiningConfig) {
 	cfg.Enabled = ctx.Bool(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
@@ -1740,8 +1741,8 @@ func setMiner(ctx *cli.Context, cfg *params2.MiningConfig) {
 	}
 	if ctx.IsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
-	} else if len(params2.GitCommit) > 0 {
-		cfg.ExtraData = []byte(ctx.App.Name + "-" + params2.VersionWithCommit(params2.GitCommit))
+	} else if len(version.GitCommit) > 0 {
+		cfg.ExtraData = []byte(ctx.App.Name + "-" + version.VersionWithCommit(version.GitCommit))
 	} else {
 		cfg.ExtraData = []byte(ctx.App.Name + "-" + ctx.App.Version)
 	}
@@ -2064,10 +2065,15 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err != nil {
 			panic(err)
 		}
-		version := "erigon: " + params2.VersionWithCommit(params2.GitCommit)
-		webseedsList := common.CliString2Array(ctx.String(WebSeedsFlag.Name))
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			webseedsList = append(webseedsList, known...)
+		version := "erigon: " + version.VersionWithCommit(version.GitCommit)
+		var webseedsList []string
+		if ctx.IsSet(WebSeedsFlag.Name) {
+			// Unfortunately we don't take webseed URL here in the native format.
+			webseedsList = common.CliString2Array(ctx.String(WebSeedsFlag.Name))
+		} else {
+			if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+				webseedsList = append(webseedsList, known...)
+			}
 		}
 		cfg.Downloader, err = downloadercfg.New(
 			ctx.Context,
