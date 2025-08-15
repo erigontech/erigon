@@ -240,22 +240,6 @@ func (cs *MultiClient) PeerEventsLoop(
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
 }
 
-// BlockRangeUpdateLoop sends current available block range to all peers
-func (cs *MultiClient) BlockRangeUpdateLoop(
-	ctx context.Context,
-	sentry proto_sentry.SentryClient,
-	wg *sync.WaitGroup,
-) {
-	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
-		return sentry.PeerEvents(streamCtx, &proto_sentry.PeerEventsRequest{}, grpc.WaitForReady(true))
-	}
-	messageFactory := func() *proto_sentry.PeerEvent {
-		return new(proto_sentry.PeerEvent)
-	}
-
-	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "BlockRangeUpdate", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
-}
-
 type StatusGetter interface {
 	GetStatusData(ctx context.Context) (*proto_sentry.StatusData, error)
 }
@@ -1042,13 +1026,20 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *proto_sentry.Inb
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
 	}
 
-	if _, err1 := sentryClient.SetPeerBlockRange(ctx, &proto_sentry.SetPeerBlockRangeRequest{
-		PeerId:            inreq.PeerId,
-		LatestBlockHeight: query.Latest,
-		MinBlockHeight:    query.Earliest,
-	}, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send latest block range for peer", "err", err1)
-	}
+	go func() {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		for _, s := range cs.sentries {
+			if _, err1 := s.SetPeerBlockRange(ctx, &proto_sentry.SetPeerBlockRangeRequest{
+				PeerId:            inreq.PeerId,
+				LatestBlockHeight: query.Latest,
+				MinBlockHeight:    query.Earliest,
+			}, &grpc.EmptyCallOption{}); err1 != nil {
+				cs.logger.Warn("Could not send latest block range for peer", "err", err1, "peer", inreq.PeerId.String())
+			}
+		}
+	}()
 
 	return nil
 }
@@ -1081,8 +1072,6 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 
 func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry proto_sentry.SentryClient) error {
 	switch inreq.Id {
-	// ========= eth 66 ==========
-
 	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:
 		return cs.newBlockHashes66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_BLOCK_HEADERS_66:

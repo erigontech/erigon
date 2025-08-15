@@ -633,7 +633,9 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockRangeUpdateMsg:
+			log.Info("server - got blockrangeupdate msg")
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				log.Info("server - got blockrangeupdate msg but no subscribers :(")
 				continue
 			}
 
@@ -1186,6 +1188,7 @@ func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *proto_sentry.S
 }
 
 func (ss *GrpcServer) SetPeerBlockRange(_ context.Context, req *proto_sentry.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
+	log.Info("setting peer block range on server", "peerID", req.PeerId)
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
 		peerInfo.SetNewMinBlock(req.MinBlockHeight)
