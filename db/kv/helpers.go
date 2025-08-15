@@ -329,4 +329,9 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	})
 	return d.prevValsSlice
 }
-func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toStringZeroCopy(v []byte) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return unsafe.String(&v[0], len(v))
+}
