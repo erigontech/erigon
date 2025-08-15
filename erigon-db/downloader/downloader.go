@@ -1471,9 +1471,9 @@ func (s *Downloader) Delete(name string) (err error) {
 	err = s.torrentFS.Delete(name)
 	if err != nil {
 		if !os.IsNotExist(err) {
+			err = nil
 			s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)
 		}
-		err = nil
 	}
 	t, ok := s.torrentsByName[name]
 	if !ok {
