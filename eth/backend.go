@@ -1082,7 +1082,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		// we need to initiate download before the heimdall services start rather than
 		// waiting for the stage loop to start
-		// TODO although this works we probably want to call engine.Start instead
 
 		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
 			panic("expect to have non-nil downloaderClient")
