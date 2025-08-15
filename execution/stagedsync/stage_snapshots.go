@@ -461,9 +461,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 	return nil
 }
 
-/* ====== PRUNING ====== */
-// snapshots pruning sections works more as a retiring of blocks
-// retiring blocks means moving block data from db into snapshots
+// SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
