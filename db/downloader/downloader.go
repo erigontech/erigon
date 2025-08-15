@@ -912,7 +912,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 	return slices.Values(d.cfg.WebSeedUrls)
 }
 
-// Add a torrent with a known info hash. Either someone else made it, or it was on disk.
+// RequestSnapshot Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
 	infoHash metainfo.Hash, // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
