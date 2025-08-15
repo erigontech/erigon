@@ -23,12 +23,8 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -36,8 +32,15 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/types"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -63,6 +66,16 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
 	return block, err
 }
+
+func (r *RemoteBlockReader) EarliestBlockNum(ctx context.Context) (uint64, error) {
+	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
+	if err != nil {
+		return 0, err
+	}
+
+	return reply.BlockNum, nil
+}
+
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
@@ -1329,6 +1342,10 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	}
 	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
+}
+
+func (r *BlockReader) EarliestBlockNum(ctx context.Context) (uint64, error) {
+	return r.sn.SegmentsMin(), nil
 }
 
 func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
