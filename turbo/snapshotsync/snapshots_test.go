@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -345,6 +346,14 @@ func TestRemoveOverlaps(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
+		for _, f := range files {
+			if strings.HasSuffix(f, fileNameWithoutVersion) {
+				return true
+			}
+		}
+		return false
+	}
 
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
@@ -392,8 +401,15 @@ func TestRemoveOverlaps(t *testing.T) {
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps(func(delList []string) error {
-		fmt.Printf("[dbg] %s\n", delList)
 		require.Len(delList, 69)
+		mustSeeFile(delList, "000000-000010-bodies.seg")
+		mustSeeFile(delList, "000000-000010-bodies.idx")
+		mustSeeFile(delList, "000000-000010-headers.seg")
+		mustSeeFile(delList, "000000-000010-transactions.seg")
+		mustSeeFile(delList, "000000-000010-transactions.seg")
+		mustSeeFile(delList, "000000-000010-transactions-to-block.idx")
+		mustSeeFile(delList, "000170-000180-transactions-to-block.idx")
+		fmt.Printf("delList: %v\n", delList)
 		return nil
 	}))
 

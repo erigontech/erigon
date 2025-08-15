@@ -134,7 +134,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	mustSeeFile := func(files []string, folderName, fileNameWithoutVersion string) bool {
+	mustSeeFile := func(files []string, folderName, fileNameWithoutVersion string) bool { //file-version agnostic
 		for _, f := range files {
 			if strings.HasPrefix(f, folderName) && strings.HasSuffix(f, fileNameWithoutVersion) {
 				return true
