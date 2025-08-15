@@ -147,7 +147,7 @@ func InitSchemasGen() {
 {{- $base := printf "Schema.%s" (goStruct $dom) }}
 {{- range $sec, $pairs := $body }}
 {{- range $k, $v := $pairs }}
-    {{ $base }}{{ pathPrefix $sec $dom }}.{{ field $sec $k }} = version.Versions{{{ vlit $v.Current }}, {{ vlit $v.Min }}}
+    {{ $base }}{{ pathPrefix $sec $dom }}.{{ field $sec $k }} = version.Versions{ {{ vlit $v.Current }}, {{ vlit $v.Min }} }
 {{- end }}{{ end }}
 
 {{- end }}
