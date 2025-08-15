@@ -20,6 +20,8 @@ package gorules
 
 // to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
 import (
+	"os"
+
 	"github.com/quasilyte/go-ruleguard/dsl"
 	//quasilyterules "github.com/quasilyte/ruleguard-rules-test"
 )
@@ -80,6 +82,18 @@ func cursorDeferClose(m dsl.Matcher) {
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		//At(m["rollback"]).
 		Report(`Add "defer $c.Close()" right after cursor creation error check`)
+}
+
+func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
+	if err != nil {
+		if os.IsNotExist(err) { //skip magically disappeared files
+			return nil
+		}
+		return err
+	}
+
+	//TODO: catch all filepath.Walk, filepath.WalkDir, fs.WalkDir. Provide our own walker which will skip os.IsNotExist errors
+	m.Match(`filepath.Walk($dir, $fn) {`).Report(`report("Use the project helper instead of filepath.Walk")}`)
 }
 
 func streamDeferClose(m dsl.Matcher) {
