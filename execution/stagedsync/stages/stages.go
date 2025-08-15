@@ -32,16 +32,18 @@ import (
 type SyncStage string
 
 var (
-	Snapshots   SyncStage = "OtterSync"   // Snapshots
-	Headers     SyncStage = "Headers"     // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	BlockHashes SyncStage = "BlockHashes" // Headers Number are written, fills blockHash => number bucket
-	Bodies      SyncStage = "Bodies"      // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders     SyncStage = "Senders"     // "From" recovered from signatures, bodies re-written
-	Execution   SyncStage = "Execution"   // Executing each block w/o building a trie
-	CustomTrace SyncStage = "CustomTrace" // Executing each block w/o building a trie
-	Translation SyncStage = "Translation" // Translation each marked for translation contract (from EVM to TEVM)
-	TxLookup    SyncStage = "TxLookup"    // Generating transactions lookup index
-	Finish      SyncStage = "Finish"      // Nominal stage after all other stages
+	Snapshots SyncStage = "OtterSync" // Snapshots
+	Headers   SyncStage = "Headers"   // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+
+	BlockHashes       SyncStage = "BlockHashes"       // Headers Number are written, fills blockHash => number bucket
+	Bodies            SyncStage = "Bodies"            // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders           SyncStage = "Senders"           // "From" recovered from signatures, bodies re-written
+	Execution         SyncStage = "Execution"         // Executing each block w/o building a trie
+	CustomTrace       SyncStage = "CustomTrace"       // Executing each block w/o building a trie
+	Translation       SyncStage = "Translation"       // Translation each marked for translation contract (from EVM to TEVM)
+	WitnessProcessing SyncStage = "WitnessProcessing" // Process buffered witness data for Polygon chains
+	TxLookup          SyncStage = "TxLookup"          // Generating transactions lookup index
+	Finish            SyncStage = "Finish"            // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningExecution   SyncStage = "MiningExecution"

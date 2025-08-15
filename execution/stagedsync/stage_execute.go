@@ -373,6 +373,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
 		return err
 	}
+
 	if err = u.Done(txc.Tx); err != nil {
 		return err
 	}
