@@ -42,8 +42,9 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
-	lastFrozenSpanId, err := heimdallStore.spans.LastFrozenEntityId()
+	lastFrozenSpanId, found, err := heimdallStore.spans.LastFrozenEntityId()
 	require.NoError(t, err)
+	require.True(t, found)
 	require.Equal(t, uint64(4), lastFrozenSpanId)
 }
 
@@ -61,8 +62,9 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
-	lastFrozenSpanId, err := heimdallStore.spans.LastFrozenEntityId()
+	lastFrozenSpanId, found, err := heimdallStore.spans.LastFrozenEntityId()
 	require.NoError(t, err)
+	require.False(t, found)
 	require.Equal(t, uint64(0), lastFrozenSpanId)
 }
 func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
@@ -90,8 +92,9 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
-	lastFrozenSpanid, err := heimdallStore.spans.LastFrozenEntityId()
+	lastFrozenSpanid, found, err := heimdallStore.spans.LastFrozenEntityId()
 	require.NoError(t, err)
+	require.True(t, found)
 	require.Equal(t, uint64(9), lastFrozenSpanid)
 }
 
@@ -146,8 +149,9 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
-	lastFrozenId, err := heimdallStore.spans.LastFrozenEntityId()
+	lastFrozenId, found, err := heimdallStore.spans.LastFrozenEntityId()
 	require.NoError(t, err)
+	require.True(t, found)
 	require.Equal(t, lastFrozenId, uint64(9))
 }
 

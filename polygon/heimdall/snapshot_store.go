@@ -174,9 +174,9 @@ func (s *SpanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
+func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, bool, error) {
 	if s.snapshots == nil {
-		return 0, nil
+		return 0, false, nil
 	}
 
 	tx := s.snapshots.ViewType(s.SnapType())
@@ -184,7 +184,7 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
 	segments := tx.Segments
 
 	if len(segments) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
@@ -198,7 +198,7 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
 		}
 	}
 	if lastSegment == nil {
-		return 0, nil
+		return 0, false, nil
 	}
 
 	idx := lastSegment.Src().Index()
@@ -209,20 +209,20 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, error) {
 
 	var span Span
 	if err := json.Unmarshal(result, &span); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
-	return uint64(span.Id), nil
+	return uint64(span.Id), true, nil
 }
 
 func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
 
-	lastSpanIdInSnapshots, err := s.LastFrozenEntityId()
+	lastSpanIdInSnapshots, found, err := s.LastFrozenEntityId()
 	if err != nil {
 		return nil, false, errors.New("could not load last span id in snapshots")
 	}
 
-	if id > lastSpanIdInSnapshots { // the span with this id is in MDBX and not in snapshots
+	if !found || id > lastSpanIdInSnapshots { // the span with this id is in MDBX and not in snapshots
 		return s.EntityStore.Entity(ctx, id)
 	}
 
@@ -269,11 +269,11 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
-	snapshotLastId, err2 := s.LastFrozenEntityId()
+	snapshotLastId, found, err2 := s.LastFrozenEntityId()
 	if err2 != nil {
 		return 0, false, err2
 	}
-	if snapshotLastId > lastId {
+	if found && snapshotLastId > lastId {
 		return snapshotLastId, true, nil
 	}
 
