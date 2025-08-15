@@ -17,14 +17,46 @@
 package dir
 
 import (
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
+
+var (
+	removedFilesChan chan string
+	removedFiles     []string
+)
+
+func init() {
+	if dbg.AssertEnabled {
+		removedFilesChan = make(chan string, 100)
+		go trackRemovedFiles()
+	}
+}
+
+func trackRemovedFiles() {
+	for {
+		select {
+		case path := <-removedFilesChan:
+			if len(removedFiles) > 10_000 {
+				removedFiles = make([]string, 0)
+			}
+			removedFiles = append(removedFiles, path)
+		case <-time.Tick(30 * time.Second):
+			for _, path := range removedFiles {
+				if exists, _ := FileExist(path); exists {
+					panic("Removed file unexpectedly exists: " + path)
+				}
+			}
+		}
+	}
+}
 
 func MustExist(path ...string) {
 	// user rwx, group rwx, other rx
@@ -167,7 +199,17 @@ func RemoveFile(path string) error {
 	if dbg.TraceDeletion {
 		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
 	}
-	return os.Remove(path)
+
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if dbg.AssertEnabled {
+		select {
+		case removedFilesChan <- path:
+		default:
+		}
+	}
+	return nil
 }
 
 func RemoveAll(path string) error {
