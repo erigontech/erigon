@@ -1462,11 +1462,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 
-		var arbosVersion uint64
-		if chainConfig.IsArbitrum() {
-			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-		}
-		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, arbosVersion)
+		chainRules := blockCtx.Rules(chainConfig)
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
@@ -1666,11 +1662,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	var arbosVersion uint64
-	if chainConfig.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, arbosVersion)
+	chainRules := blockCtx.Rules(chainConfig)
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)

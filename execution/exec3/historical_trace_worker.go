@@ -616,10 +616,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 		blockReceipts := make(types.Receipts, len(txs))
-		var arbosVersion uint64
-		if chainConfig.IsArbitrum() {
-			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-		}
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -627,7 +623,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
-				Rules:           chainConfig.Rules(blockNum, b.Time(), arbosVersion),
+				Rules:           blockContext.Rules(chainConfig),
 				Txs:             txs,
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,

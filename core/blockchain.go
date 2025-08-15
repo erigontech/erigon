@@ -374,12 +374,8 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	var arbosVersion int
-	if cc.IsArbitrum() {
-		arbosVersion = int(types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion)
-	}
-
-	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time, uint64(arbosVersion)), stateWriter); err != nil {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
@@ -396,12 +392,8 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-
-	var arbosVersion uint64
-	if cc.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time, arbosVersion), stateWriter)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 	return nil
 }
 

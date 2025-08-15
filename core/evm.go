@@ -55,7 +55,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	}
 
 	var prevRandDao *common.Hash
-	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
+	if header.Difficulty != nil && header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = new(common.Hash)
 		*prevRandDao = header.MixDigest
@@ -86,7 +86,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		difficultyHash := common.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
 	}
-	return evmtypes.BlockContext{
+	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
 		GetHash:          blockHashFunc,
@@ -94,7 +94,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
-		Difficulty:       new(big.Int).Set(header.Difficulty),
 		BaseFee:          &baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
@@ -102,6 +101,10 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		BaseFeeInBlock:   baseFee.Clone(),
 		ArbOSVersion:     arbOsVersion,
 	}
+	if header.Difficulty != nil {
+		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
+	}
+	return blockContext
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.

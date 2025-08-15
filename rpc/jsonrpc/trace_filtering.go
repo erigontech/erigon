@@ -427,12 +427,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
-
-			var arbosVersion uint64
-			if chainConfig.IsArbitrum() {
-				arbosVersion = types.DeserializeHeaderExtraInformation(lastHeader).ArbOSFormatVersion
-			}
-			lastRules = chainConfig.Rules(blockNum, lastHeader.Time, arbosVersion)
+			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+			lastRules = blockCtx.Rules(chainConfig)
 		}
 		if isFnalTxn {
 			// TODO(yperbasis) proper rewards for Gnosis
@@ -730,12 +726,9 @@ func (api *TraceAPIImpl) callBlock(
 
 	parentNo := rpc.BlockNumber(pNo)
 	header := block.Header()
-
-	var arbosVersion uint64
-	if cfg.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-	rules := cfg.Rules(blockNumber, block.Time(), arbosVersion)
+	engine := api.engine()
+	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	rules := blockCtx.Rules(cfg)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -775,7 +768,6 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
@@ -845,12 +837,9 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-
-	var arbosVersion uint64
-	if cfg.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-	rules := cfg.Rules(blockNumber, header.Time, arbosVersion)
+	engine := api.engine()
+	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	rules := blockCtx.Rules(cfg)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
@@ -893,7 +882,6 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
