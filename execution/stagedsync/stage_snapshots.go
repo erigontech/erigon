@@ -583,6 +583,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, nil
 	}
 
+	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 	filesDeleted := false
 	// Prune blocks snapshots if necessary
