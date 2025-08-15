@@ -16,7 +16,7 @@ replace (
 )
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250808200116-d251bf9cb503 // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250808200116-d251bf9cb503
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.9
 	github.com/erigontech/secp256k1 v1.2.0

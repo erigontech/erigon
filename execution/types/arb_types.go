@@ -8,14 +8,15 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // Returns true if nonce checks should be skipped based on inner's isFake()
