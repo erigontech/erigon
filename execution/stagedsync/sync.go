@@ -500,7 +500,7 @@ func (s *Sync) PrintTimings() []interface{} {
 	var logCtx []interface{}
 	count := 0
 	for i := range s.timings {
-		if s.timings[i].took < 50*time.Millisecond {
+		if s.timings[i].took < 100*time.Millisecond {
 			continue
 		}
 		count++
