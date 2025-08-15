@@ -2,7 +2,7 @@
 
 package state
 
-import "github.com/erigontech/erigon-lib/version"
+import "github.com/erigontech/erigon/db/version"
 
 func InitSchemasGen() {
 	Schema.AccountsDomain.version.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}

@@ -140,7 +140,7 @@ var tmpl = template.Must(template.New("schema").
 
 package state
 
-import "github.com/erigontech/erigon-lib/version"
+import "github.com/erigontech/erigon/db/version"
 
 func InitSchemasGen() {
 {{- range $dom, $body := . }}
