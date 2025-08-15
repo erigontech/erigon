@@ -35,7 +35,7 @@ import (
 type Sync struct {
 	cfg             ethconfig.Sync
 	unwindPoint     *uint64 // used to run stages
-	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
+	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
 	posTransition   *uint64
 
