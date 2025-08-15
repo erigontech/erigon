@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -66,10 +67,11 @@ func (m *Metrics) WriteToCSV() {
 }
 
 func (m *Metrics) LogMetrics(logger log.Logger, level log.Lvl, prefix string) {
-	logger.Log(level, prefix+" trie progress", "upd", m.updates.Load(), "akeys", m.addressKeys.Load(), "skeys", m.storageKeys.Load(),
-		"rdb", m.loadBranch.Load(), "rda", m.loadAccount.Load(), "rds", m.loadStorage.Load(), "wrb", m.updateBranch.Load(),
-		"fld", m.unfolds.Load(), "fdur", fmt.Sprintf("%dms", m.spentFolding.Milliseconds()),
-		"ufdur", fmt.Sprintf("%dms", m.spentUnfolding.Milliseconds()), "pdur", fmt.Sprintf("%dms", m.spentProcessing.Milliseconds()))
+	logger.Log(level, prefix+" trie progress", "upd", common.PrettyCounter(m.updates.Load()),
+		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
+		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()), 
+		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
+		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", m.spentFolding.String(), "ufdur", m.spentUnfolding.String())
 
 	//logger.Log(level, prefix+"sccount progress")
 }

@@ -2212,7 +2212,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
 				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-			hph.metrics.LogMetrics(log.Root(), log.LvlInfo, fmt.Sprintf("[%s][agg] ", logPrefix))
+			hph.metrics.LogMetrics(log.Root(), log.LvlInfo, fmt.Sprintf("[%s][agg]", logPrefix))
 
 		default:
 		}
