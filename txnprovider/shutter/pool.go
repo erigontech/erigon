@@ -285,7 +285,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	txns := make([]types.Transaction, 0, len(decryptedTxns.Transactions))
 	decryptedTxnsGas := uint64(0)
 	for _, txn := range decryptedTxns.Transactions {
-		if txnsIdFilter.Contains(txn.Hash()) {
+		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
 		if txn.GetGasLimit() > availableGas {
@@ -294,6 +294,9 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		availableGas -= txn.GetGasLimit()
 		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)
+		if txnsIdFilter != nil {
+			txnsIdFilter.Add(txn.Hash())
+		}
 	}
 
 	p.logger.Debug("providing decrypted txns", "count", len(txns), "gas", decryptedTxnsGas)
