@@ -141,6 +141,8 @@ func New(
 ) (_ *Cfg, err error) {
 	torrentConfig := defaultTorrentClientConfig()
 
+	torrentConfig.MaxUnverifiedBytes = 0
+
 	torrentConfig.MetainfoSourcesMerger = func(t *torrent.Torrent, info *metainfo.MetaInfo) error {
 		return t.SetInfoBytes(info.InfoBytes)
 	}
