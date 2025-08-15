@@ -20,7 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -32,7 +31,6 @@ import (
 var (
 	removedFilesChan chan string
 	removedFiles     []string
-	removedFilesMu   sync.Mutex
 )
 
 func init() {
@@ -46,18 +44,13 @@ func trackRemovedFiles() {
 	for {
 		select {
 		case path := <-removedFilesChan:
-			removedFilesMu.Lock()
 			removedFiles = append(removedFiles, path)
-			removedFilesMu.Unlock()
-
 		case <-time.Tick(30 * time.Second):
-			removedFilesMu.Lock()
 			for _, path := range removedFiles {
 				if exists, _ := FileExist(path); exists {
 					panic("Removed file unexpectedly exists: " + path)
 				}
 			}
-			removedFilesMu.Unlock()
 		}
 	}
 }
