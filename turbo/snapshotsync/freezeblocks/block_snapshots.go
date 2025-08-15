@@ -333,7 +333,7 @@ func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnap
 	}
 
 	// remove old garbage files
-	if err = snapshots.RemoveOverlaps(); err != nil {
+	if err = snapshots.RemoveOverlaps(onDelete); err != nil {
 		return false, err
 	}
 	return
@@ -500,13 +500,13 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 	return nil
 }
-func (br *BlockRetire) RemoveOverlaps() error {
-	if err := br.snapshots().RemoveOverlaps(); err != nil {
+func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
+	if err := br.snapshots().RemoveOverlaps(onDelete); err != nil {
 		return err
 	}
 
 	if br.chainConfig.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(); err != nil {
+		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(onDelete); err != nil {
 			return err
 		}
 	}

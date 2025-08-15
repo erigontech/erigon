@@ -194,7 +194,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		}
 		if onDelete != nil {
 			if err := onDelete(toMergeFileNames); err != nil {
-				return err
+				return fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}
 	}

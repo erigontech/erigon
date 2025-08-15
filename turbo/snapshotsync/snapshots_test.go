@@ -18,11 +18,13 @@ package snapshotsync
 
 import (
 	"context"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"testing"
 	"testing/fstest"
+
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/stretchr/testify/require"
 
@@ -389,7 +391,11 @@ func TestRemoveOverlaps(t *testing.T) {
 	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
-	require.NoError(s.RemoveOverlaps())
+	require.NoError(s.RemoveOverlaps(func(delList []string) error {
+		fmt.Printf("[dbg] %s\n", delList)
+		require.Len(delList, 69)
+		return nil
+	}))
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)
@@ -433,7 +439,10 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.Equal(4, len(list))
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
-	require.NoError(s.RemoveOverlaps())
+	require.NoError(s.RemoveOverlaps(func(delList []string) error {
+		require.Len(delList, 3)
+		return nil
+	}))
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)

@@ -425,8 +425,7 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		s.closeIdx()
 		s.closeSeg()
 
-		snapDir := filepath.Dir(f)
-		removeOldFiles([]string{f}, snapDir)
+		removeOldFiles([]string{f})
 	}
 }
 
@@ -1260,19 +1259,15 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	}
 }
 
-func (s *RoSnapshots) RemoveOverlaps() error {
+func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
 		return err
 	}
-	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-		filesToRemove := make([]string, 0, len(toRemove))
-
-		for _, info := range toRemove {
-			filesToRemove = append(filesToRemove, info.Path)
-		}
-
-		removeOldFiles(filesToRemove, s.dir)
+	_, segmentsToRemove := findOverlaps(list)
+	filesToRemove := make([]string, 0, len(segmentsToRemove))
+	for _, info := range segmentsToRemove {
+		filesToRemove = append(filesToRemove, info.Path)
 	}
 
 	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
@@ -1280,21 +1275,43 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 	if err != nil {
 		return err
 	}
+	_, toRemove := findOverlaps(list)
+	for _, info := range toRemove {
+		filesToRemove = append(filesToRemove, info.Path)
+	}
 
-	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-		filesToRemove := make([]string, 0, len(toRemove))
+	if err := s._callOnDeleteHookOnAbsolutePaths(filesToRemove, onDelete); err != nil {
+		return fmt.Errorf("RemoveOverlaps: %w", err)
+	}
+	removeOldFiles(filesToRemove)
 
-		for _, info := range toRemove {
-			filesToRemove = append(filesToRemove, info.Path)
-		}
-
-		removeOldFiles(filesToRemove, s.dir)
+	// remove .tmp files
+	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
+	tmpFiles, err := snaptype.TmpFiles(s.dir)
+	if err != nil {
+		return err
+	}
+	for _, f := range tmpFiles {
+		_ = dir.RemoveFile(f)
 	}
 	return nil
 }
 
-func (s *RoSnapshots) RemoveOldFiles(filesToRemove []string) {
-	removeOldFiles(filesToRemove, s.dir)
+// _callOnDeleteHookOnAbsolutePaths converts list of absolute paths to relative paths and calls onDelete hook
+func (s *RoSnapshots) _callOnDeleteHookOnAbsolutePaths(absolutePaths []string, onDelete func(l []string) error) (err error) {
+	relativePaths := make([]string, len(absolutePaths))
+	for i, f := range absolutePaths {
+		relativePaths[i], err = filepath.Rel(s.dir, f)
+		if err != nil {
+			return fmt.Errorf("rel: %w", err)
+		}
+	}
+	if onDelete != nil {
+		if err := onDelete(relativePaths); err != nil {
+			return fmt.Errorf("onDelete: %w", err)
+		}
+	}
+	return nil
 }
 
 type snapshotNotifier interface {
@@ -1610,7 +1627,7 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 	})
 }
 
-func removeOldFiles(toDel []string, snapDir string) {
+func removeOldFiles(toDel []string) {
 	for _, f := range toDel {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
@@ -1623,13 +1640,6 @@ func removeOldFiles(toDel []string, snapDir string) {
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
 		}
-	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir)
-	if err != nil {
-		return
-	}
-	for _, f := range tmpFiles {
-		_ = dir.RemoveFile(f)
 	}
 }
 

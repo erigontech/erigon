@@ -2078,7 +2078,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if err := br.RemoveOverlaps(); err != nil {
+	if err := br.RemoveOverlaps(nil); err != nil {
 		return err
 	}
 
