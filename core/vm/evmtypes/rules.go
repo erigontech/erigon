@@ -49,6 +49,6 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsAura:             c.Aura != nil,
 		ArbOSVersion:       bc.ArbOSVersion,
 		IsArbitrum:         c.IsArbitrum(),
-		IsStylus:           c.IsArbitrum() && bc.ArbOSVersion >= ArbosVersion_Stylus,
+		IsStylus:           c.IsArbitrum() && bc.ArbOSVersion >= chain.ArbosVersion_Stylus,
 	}
 }

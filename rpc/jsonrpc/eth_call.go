@@ -884,11 +884,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &common.Address{}
 	}
 
-	var arbosVersion uint64
-	if chainConfig.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	}
-
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
