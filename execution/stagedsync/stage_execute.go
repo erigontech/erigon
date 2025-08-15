@@ -374,8 +374,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		return err
 	}
 
-	// Witness cleanup during unwind is now handled by the WitnessProcessing stage
-
 	if err = u.Done(txc.Tx); err != nil {
 		return err
 	}

@@ -826,6 +826,7 @@ Loop:
 	}
 
 	//dumpPlainStateDebug(executor.tx(), executor.domains())
+
 	if !useExternalTx && executor.tx() != nil {
 		if err = executor.tx().Commit(); err != nil {
 			return err
