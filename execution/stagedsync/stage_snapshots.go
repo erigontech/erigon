@@ -493,15 +493,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			if noDl {
 				return nil
 			}
-
-			{
-				var a []string
-				for _, req := range downloadRequest {
-					a = append(a, req.Path)
-				}
-				log.Warn("[dbg] blockRetire.onChange", "files", a)
-			}
-
 			if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
 				return err
 			}
