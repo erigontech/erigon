@@ -408,6 +408,7 @@ func TestRemoveOverlaps(t *testing.T) {
 		mustSeeFile(delList, "000000-000010-transactions.seg")
 		mustSeeFile(delList, "000000-000010-transactions-to-block.idx")
 		mustSeeFile(delList, "000170-000180-transactions-to-block.idx")
+		require.False(filepath.IsAbs(delList[0])) // expecting non-absolute paths (relative as of snapshots dir)
 		return nil
 	}))
 

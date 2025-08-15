@@ -1292,6 +1292,7 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 			}
 		}
 	}
+
 	removeOldFiles(toRemove)
 
 	// remove .tmp files
