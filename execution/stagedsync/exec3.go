@@ -826,13 +826,6 @@ Loop:
 	}
 
 	//dumpPlainStateDebug(executor.tx(), executor.domains())
-
-	if executor.tx() != nil {
-		if err := cleanupOldWitnesses(executor.tx(), stageProgress, logger); err != nil {
-			logger.Warn("Failed to cleanup old witnesses", "err", err, "highest_block", stageProgress)
-		}
-	}
-
 	if !useExternalTx && executor.tx() != nil {
 		if err = executor.tx().Commit(); err != nil {
 			return err

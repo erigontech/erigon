@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"slices"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -169,8 +170,8 @@ func DefaultStages(ctx context.Context,
 	}
 }
 
-func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
-	return []*Stage{
+func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, witnessProcessing *WitnessProcessingCfg) []*Stage {
+	stageList := []*Stage{
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
@@ -226,7 +227,6 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
-
 		{
 			ID:          stages.TxLookup,
 			Description: "Generate txn lookup index",
@@ -254,11 +254,31 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			},
 		},
 	}
+
+	if witnessProcessing != nil {
+		witnessStage := &Stage{
+			ID:          stages.WitnessProcessing,
+			Description: "Process buffered witness data",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				return SpawnStageWitnessProcessing(s, txc.Tx, *witnessProcessing, ctx, logger)
+			},
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				return UnwindWitnessProcessingStage(u, s, txc, ctx, *witnessProcessing, logger)
+			},
+			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneWitnessProcessingStage(p, tx, *witnessProcessing, ctx, logger)
+			},
+		}
+		// insert after Execution, before TxLookup
+		stageList = slices.Insert(stageList, 4, witnessStage)
+	}
+
+	return stageList
 }
 
 // UploaderPipelineStages when uploading - potentially from zero we need to include headers and bodies stages otherwise we won't recover the POW portion of the chain
-func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
-	return []*Stage{
+func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, witnessProcessing *WitnessProcessingCfg, test bool) []*Stage {
+	stageList := []*Stage{
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
@@ -370,6 +390,26 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 			},
 		},
 	}
+
+	if witnessProcessing != nil {
+		witnessStage := &Stage{
+			ID:          stages.WitnessProcessing,
+			Description: "Process buffered witness data",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				return SpawnStageWitnessProcessing(s, txc.Tx, *witnessProcessing, ctx, logger)
+			},
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				return UnwindWitnessProcessingStage(u, s, txc, ctx, *witnessProcessing, logger)
+			},
+			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneWitnessProcessingStage(p, tx, *witnessProcessing, ctx, logger)
+			},
+		}
+		// insert after Execution, before TxLookup
+		stageList = slices.Insert(stageList, 6, witnessStage)
+	}
+
+	return stageList
 }
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.
@@ -490,6 +530,7 @@ var PipelineUnwindOrder = UnwindOrder{
 	stages.Finish,
 	stages.TxLookup,
 
+	stages.WitnessProcessing,
 	stages.Execution,
 	stages.Senders,
 
@@ -529,6 +570,7 @@ var PipelinePruneOrder = PruneOrder{
 	stages.Finish,
 	stages.TxLookup,
 
+	stages.WitnessProcessing,
 	stages.Execution,
 	stages.Senders,
 

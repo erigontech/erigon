@@ -40,7 +40,7 @@ const (
 	MaximumResponseSize            = 16 * 1024 * 1024  // 16 MB, helps to fast fail check
 
 	// RetentionBlocks defines how many recent blocks to keep witness data for
-	RetentionBlocks = 10000
+	RetentionBlocks = 10_000
 )
 
 const (

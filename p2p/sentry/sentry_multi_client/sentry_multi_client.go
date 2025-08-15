@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
@@ -151,7 +152,8 @@ type MultiClient struct {
 	IsMock                            bool
 	sentries                          []proto_sentry.SentryClient
 	ChainConfig                       *chain.Config
-	db                                kv.TemporalRwDB
+	db                                kv.TemporalRoDB
+	WitnessBuffer                     *stagedsync.WitnessBuffer
 	Engine                            consensus.Engine
 	blockReader                       services.FullBlockReader
 	statusDataProvider                *sentry.StatusDataProvider
@@ -171,7 +173,7 @@ type MultiClient struct {
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
-	db kv.TemporalRwDB,
+	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	sentries []proto_sentry.SentryClient,
@@ -217,12 +219,19 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
+	// Initialize witness buffer for Polygon chains
+	var witnessBuffer *stagedsync.WitnessBuffer
+	if chainConfig.Bor != nil {
+		witnessBuffer = stagedsync.NewWitnessBuffer()
+	}
+
 	cs := &MultiClient{
 		Hd:                                hd,
 		Bd:                                bd,
 		sentries:                          sentries,
 		ChainConfig:                       chainConfig,
 		db:                                db,
+		WitnessBuffer:                     witnessBuffer,
 		Engine:                            engine,
 		blockReader:                       blockReader,
 		statusDataProvider:                statusDataProvider,
@@ -751,12 +760,16 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentr
 
 // addBlockWitnesses processes response to our getBlockWitnesses request
 func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	if cs.WitnessBuffer == nil {
+		return nil
+	}
+
 	var query wit.WitnessPacketRLPPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding addBlockWitnesses: %w, data: %x", err, inreq.Data)
 	}
 
-	tx, err := cs.db.BeginRw(ctx)
+	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -865,33 +878,22 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *proto_sentr
 		}
 
 		if uint64(len(pages)) == totalPages {
-			key := dbutils.HeaderKey(header.Number.Uint64(), witnessHash)
-			witnessLen := uint64(len(completeWitness))
-
-			if err := tx.Put(kv.BorWitnesses, key, completeWitness); err != nil {
-				return fmt.Errorf("error writing witness for hash %x: %w", witnessHash, err)
-			}
-
-			if err := tx.Put(kv.BorWitnessSizes, key, dbutils.EncodeBlockNumber(witnessLen)); err != nil {
-				return fmt.Errorf("error writing witness size for hash %x: %w", witnessHash, err)
-			}
+			cs.WitnessBuffer.AddWitness(header.Number.Uint64(), witnessHash, completeWitness)
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	if cs.WitnessBuffer == nil {
+		return nil
+	}
+
 	var query wit.NewWitnessPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding newWitness: %w, data: %x", err, inreq.Data)
 	}
-
-	tx, err := cs.db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	bHash := query.Witness.Header().Hash()
 
@@ -901,19 +903,11 @@ func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.Inbou
 	}
 
 	witBytes := witBuf.Bytes()
-	witLen := uint64(len(witBytes))
+	blockNumber := query.Witness.Header().Number.Uint64()
 
-	key := dbutils.HeaderKey(query.Witness.Header().Number.Uint64(), bHash)
+	cs.WitnessBuffer.AddWitness(blockNumber, bHash, witBytes)
 
-	if err := tx.Put(kv.BorWitnesses, key, witBytes); err != nil {
-		return fmt.Errorf("error writing witness, err: %w", err)
-	}
-
-	if err := tx.Put(kv.BorWitnessSizes, key, dbutils.EncodeBlockNumber(witLen)); err != nil {
-		return fmt.Errorf("error writing witness size, err: %w", err)
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 func MakeInboundMessage() *proto_sentry.InboundMessage {
