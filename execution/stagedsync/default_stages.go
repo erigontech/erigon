@@ -545,14 +545,6 @@ var StateUnwindOrder = UnwindOrder{
 	stages.Headers,
 }
 
-var PolygonSyncUnwindOrder = UnwindOrder{
-	stages.Finish,
-	stages.TxLookup,
-	stages.Execution,
-	stages.Senders,
-	stages.PolygonSync,
-}
-
 var DefaultPruneOrder = PruneOrder{
 	stages.Finish,
 	stages.TxLookup,
@@ -575,15 +567,6 @@ var PipelinePruneOrder = PruneOrder{
 	stages.Senders,
 
 	stages.BlockHashes,
-	stages.Snapshots,
-}
-
-var PolygonSyncPruneOrder = PruneOrder{
-	stages.Finish,
-	stages.TxLookup,
-	stages.Execution,
-	stages.Senders,
-	stages.PolygonSync,
 	stages.Snapshots,
 }
 

@@ -58,10 +58,10 @@ import (
 	"github.com/anacrolix/torrent/webseed"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -71,6 +71,8 @@ import (
 )
 
 var debugWebseed = false
+
+const TorrentClientStatusPath = "/downloader/torrentClientStatus"
 
 func init() {
 	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
@@ -505,10 +507,9 @@ func (d *Downloader) allTorrentsComplete() (ret bool) {
 	return
 }
 
-// Basic checks and fixes for a snapshot torrent claiming it's complete from experiments. If passed
-// is false, come back later and check again. You could ask why this isn't in the torrent lib. This
-// is an extra level of pedantry due to some file modification I saw from outside the torrent lib.
-// It may go away with only writing torrent files and preverified after completion. TODO: Revisit
+// Basic checks and fixes for a snapshot torrent claiming it's complete. If passed is false, come
+// back later and check again. You could ask why this isn't in the torrent lib. This is an extra
+// level of pedantry due to some file modification I saw from outside the torrent lib. TODO: Revisit
 // this now partial files support is stable. Should be sufficient to tell the Client to reverify
 // data.
 func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool) {
@@ -522,25 +523,15 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			if fi.Size() == f.Length() {
 				continue
 			}
-			d.logger.Crit(
+			d.logger.Warn(
 				"snapshot file has wrong size",
 				"name", f.Path(),
 				"expected", f.Length(),
 				"actual", fi.Size(),
 			)
-			if fi.Size() > f.Length() {
-				// This isn't concurrent-safe?
-				os.Chmod(fp, 0o644)
-				//err = os.Truncate(fp, f.Length())
-				//if err != nil {
-				//	d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
-				//}
-				os.Chmod(fp, 0o444)
-				// End not concurrent safe
-			}
-		} else {
+		} else if passed {
 			// In Erigon 3.1, .torrent files are only written when the data is complete.
-			d.logger.Crit("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
+			d.logger.Warn("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
 		}
 		passed = false
 		d.verifyFile(f)
@@ -1416,12 +1407,12 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d.torrentClient.WriteStatus(w)
 	})
-	p := "/downloader/torrentClientStatus"
+
 	// This is for gopprof.
 	defaultMux := http.DefaultServeMux
-	defaultMux.Handle(p, h)
+	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
-		debugMux.Handle(p, h)
+		debugMux.Handle(TorrentClientStatusPath, h)
 	}
 }
 

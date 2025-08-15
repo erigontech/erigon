@@ -24,7 +24,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 )
 

@@ -27,9 +27,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -332,6 +332,17 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 	return s.From < minStep
 }
 
+// unblackListFilesBySubstring - removes files from the blacklist that match any of the provided substrings.
+func unblackListFilesBySubstring(blackList map[string]struct{}, strs ...string) {
+	for _, str := range strs {
+		for k := range blackList {
+			if strings.Contains(k, str) {
+				delete(blackList, k)
+			}
+		}
+	}
+}
+
 // SyncSnapshots - Check snapshot states, determine what needs to be requested from the downloader
 // then wait for downloads to complete.
 func SyncSnapshots(
@@ -346,6 +357,9 @@ func SyncSnapshots(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
+		return nil
+	}
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
@@ -360,13 +374,6 @@ func SyncSnapshots(
 		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
-
-		// Find minimum block to download.
-		if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-
-			return nil
-		}
-
 		//Corner cases:
 		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
@@ -393,6 +400,11 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
+		}
+
+		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
+		if syncCfg.PersistReceiptsCacheV2 {
+			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 		}
 
 		// build all download requests
@@ -425,14 +437,15 @@ func SyncSnapshots(
 				continue
 			}
 
-			if _, ok := blackListForPruning[p.Name]; ok {
-				continue
-			}
 			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 				continue
 			}
 
-			if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
+			isRcacheRelatedSegment := strings.Contains(p.Name, kv.RCacheDomain.String()) ||
+				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
+				strings.Contains(p.Name, kv.LogTopicIdx.String())
+
+			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
 				continue
 			}
 

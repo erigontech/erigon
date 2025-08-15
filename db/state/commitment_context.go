@@ -398,42 +398,7 @@ type TrieContext struct {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
-	//	sdc.mu.Lock()
-	//	defer sdc.mu.Unlock()
-	//}
-	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
-	// Keep dereferenced version inside sd commitmentDomain map ready to read again
-	if sdc.withHistory && sdc.limitReadAsOfTxNum > 0 {
-		v, hOk, err := sdc.roTtx.HistorySeek(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
-		if err != nil {
-			return nil, 0, fmt.Errorf("branch failed: %w", err)
-		}
-		if hOk {
-			if len(v) == 0 { // if history successfuly found marker of key creation
-				return nil, 0, nil
-			}
-			if sdc.trace {
-				fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, v, commitment.BranchData(v).String())
-			}
-			return v, 0, nil
-		}
-		return nil, 0, nil // no history found, so no branch
-	}
-
-	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
-	// Dereferenced branch is kept inside sharedDomains commitment domain map (but not written into buffer so not flushed into db, unless updated)
-	v, step, err := sdc.getter.GetLatest(kv.CommitmentDomain, pref)
-	if err != nil {
-		return nil, 0, fmt.Errorf("branch failed: %w", err)
-	}
-	if sdc.trace {
-		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
-	}
-	if len(v) == 0 {
-		return nil, 0, nil
-	}
-	return v, step, nil
+	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
@@ -451,7 +416,10 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
 }
 
-func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
+// readDomain reads data from domain, dereferences key and returns encoded value and step.
+// Step returned only when reading from domain files, otherwise it is always 0.
+// Step is used in Trie for memo stats and file depth access statistics.
+func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
@@ -464,24 +432,25 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, er
 
 		if enc == nil {
 			var ok bool
-			// reading from domain files this way will dereference domain key correctly, rotx.GetAsOf
+			// reading from domain files this way will dereference domain key correctly,
+			// rotx.GetAsOf itself does not dereference keys in commitment domain values
 			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
 				enc = nil
 			}
 		}
 	} else {
-		enc, _, err = sdc.getter.GetLatest(d, plainKey)
+		enc, step, err = sdc.getter.GetLatest(d, plainKey)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("readDomain %q: failed to read latest storage (latest=%t): %w", d, sdc.limitReadAsOfTxNum == 0, err)
+		return nil, 0, fmt.Errorf("readDomain %q: failed to read latest storage (latest=%t): %w", d, sdc.limitReadAsOfTxNum == 0, err)
 	}
-	return enc, nil
+	return enc, step, nil
 }
 
 func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err error) {
-	encAccount, err := sdc.readDomain(kv.AccountsDomain, plainKey)
+	encAccount, _, err := sdc.readDomain(kv.AccountsDomain, plainKey)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +478,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 	}
 
 	if assert.Enable {
-		code, err := sdc.readDomain(kv.CodeDomain, plainKey)
+		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err
 		}
@@ -525,7 +494,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 }
 
 func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
-	enc, err := sdc.readDomain(kv.StorageDomain, plainKey)
+	enc, _, err := sdc.readDomain(kv.StorageDomain, plainKey)
 	if err != nil {
 		return nil, err
 	}

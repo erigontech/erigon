@@ -34,16 +34,17 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/migrations"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
@@ -390,7 +391,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			}
 		}
 		if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
-			return params.SetErigonVersion(tx, params.VersionKeyCreated)
+			return rawdb.SetErigonVersion(tx, version.VersionKeyCreated)
 		}); err != nil {
 			return nil, err
 		}

@@ -171,13 +171,14 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 		}
 		eth1Block = denebResp.ExecutionPayload
 		blobsBundle = denebResp.BlobsBundle
-	case "electra":
+	case "electra", "fulu":
+		version, _ := clparams.StringToClVersion(resp.Version)
 		denebResp := &struct {
 			ExecutionPayload  *cltypes.Eth1Block          `json:"execution_payload"`
 			BlobsBundle       *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
 			ExecutionRequests *cltypes.ExecutionRequests  `json:"execution_requests"`
 		}{
-			ExecutionPayload:  cltypes.NewEth1Block(clparams.DenebVersion, b.beaconConfig),
+			ExecutionPayload:  cltypes.NewEth1Block(version, b.beaconConfig),
 			BlobsBundle:       &engine_types.BlobsBundleV1{},
 			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
 		}
