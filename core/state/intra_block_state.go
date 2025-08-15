@@ -774,32 +774,18 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}
 	}
 
-	var stateObject *stateObject
-
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
-	var account *accounts.Account
-
 	if amount.IsZero() {
-		if sdb.versionMap == nil {
-			var err error
-			stateObject, err = sdb.GetOrNewStateObject(addr)
-			if err != nil {
-				return err
-			}
-			account = &stateObject.data
-		} else {
-			var err error
-			account, _, err = sdb.getVersionedAccount(addr, true)
-			if err != nil {
-				return err
-			}
+		stateObject, err := sdb.GetOrNewStateObject(addr)
+		if err != nil {
+			return err
 		}
 
-		if account != nil && account.Empty() {
+		if stateObject.data.Empty() {
 			sdb.versionWritten(addr, BalancePath, common.Hash{}, *common.Num0)
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
-				fmt.Printf("%d (%d.%d) Touch %x %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, AccountKey{Path: BalancePath})
+				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 			}
 			sdb.touch(addr)
 		}
@@ -822,17 +808,10 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 
 	update := new(uint256.Int).Add(&prev, &amount)
 
-	if stateObject == nil {
-		if account != nil {
-			stateObject = sdb.stateObjectForAccount(addr, account)
-		} else {
-			var err error
-			if stateObject, err = sdb.GetOrNewStateObject(addr); err != nil {
-				return err
-			}
-		}
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
 	}
-
 	stateObject.SetBalance(*update, wasCommited, reason)
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
 	return nil
