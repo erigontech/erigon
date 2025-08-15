@@ -356,37 +356,25 @@ func (s *DirtySegment) FileName() string {
 	return s.Type().FileName(s.version, s.from, s.to)
 }
 
-func (s *DirtySegment) FilePaths(rel string) (relativePaths []string {
-
-	return s.Type().FileName(s.version, s.from, s.to)
-}
-
-func (i *FilesItem) FilePaths(relative string) (paths []string) {
-	if i.decompressor != nil {
-		paths = append(paths, i.decompressor.FilePath())
+func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
+	if s.Decompressor != nil {
+		relativePaths = append(relativePaths, s.Decompressor.FilePath())
 	}
-	if i.index != nil {
-		paths = append(paths, i.index.FilePath())
-	}
-	if i.bindex != nil {
-		paths = append(paths, i.bindex.FilePath())
-	}
-	if i.existence != nil {
-		paths = append(paths, i.existence.FilePath)
-	}
-	if len(relative) == 0 {
-		return paths
+	for _, index := range s.indexes {
+		if index == nil {
+			continue
+		}
+		relativePaths = append(relativePaths, index.FilePath())
 	}
 	var err error
-	for i := 0; i < len(paths); i++ {
-		paths[i], err = filepath.Rel(relative, paths[i])
+	for i := 0; i < len(relativePaths); i++ {
+		relativePaths[i], err = filepath.Rel(basePath, relativePaths[i])
 		if err != nil {
-			log.Warn("FilesItem.FilePaths: can't make relative path", "err", err, "relative", relative, "path", paths[i])
+			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
 		}
 	}
-	return paths
+	return relativePaths
 }
-
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
 	return s.Type().FileInfo(dir, s.from, s.to)
