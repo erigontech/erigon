@@ -2,7 +2,6 @@ package sentry_multi_client
 
 import (
 	"context"
-	"encoding/binary"
 	"math/big"
 	"testing"
 
@@ -11,18 +10,19 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/stateless"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -100,10 +100,13 @@ func createTestMultiClient(t *testing.T) (*MultiClient, kv.TemporalRwDB) {
 	tdb, err := temporal.New(baseDB, agg)
 	require.NoError(t, err)
 
+	witnessBuffer := stagedsync.NewWitnessBuffer()
+
 	return &MultiClient{
-		db:          tdb,
-		logger:      logger,
-		blockReader: freezeblocks.NewBlockReader(nil, nil),
+		db:            tdb,
+		WitnessBuffer: witnessBuffer,
+		logger:        logger,
+		blockReader:   freezeblocks.NewBlockReader(nil, nil),
 	}, tdb
 }
 
@@ -180,7 +183,7 @@ func TestNewWitnessFunction(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	ctx := context.Background()
 	mockSentryClient := direct.NewMockSentryClient(ctrl)
-	multiClient, testDB := createTestMultiClient(t)
+	multiClient, _ := createTestMultiClient(t)
 
 	t.Run("Invalid RLP", func(t *testing.T) {
 		inboundMsg := &proto_sentry.InboundMessage{
@@ -194,7 +197,7 @@ func TestNewWitnessFunction(t *testing.T) {
 		require.Contains(t, err.Error(), "decoding")
 	})
 
-	t.Run("Valid RLP Stores Data in Database", func(t *testing.T) {
+	t.Run("Valid RLP Stores Data in Buffer", func(t *testing.T) {
 		testHeader := &types.Header{
 			Number:     big.NewInt(200),
 			ParentHash: common.HexToHash("0xparent"),
@@ -216,27 +219,25 @@ func TestNewWitnessFunction(t *testing.T) {
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
 
+		// Store the initial buffer state
+		initialBufferLength := len(multiClient.WitnessBuffer.DrainWitnesses())
+		// Restore the buffer since DrainWitnesses clears it
+		if initialBufferLength > 0 {
+			// This shouldn't happen in a fresh test, but just in case
+			t.Fatal("Buffer should be empty at start of test")
+		}
+
 		err = multiClient.newWitness(ctx, inboundMsg, mockSentryClient)
 		require.NoError(t, err)
 
-		tx, err := testDB.BeginRo(ctx)
-		require.NoError(t, err)
-		defer tx.Rollback()
+		// Check that witness data was added to the buffer
+		witnesses := multiClient.WitnessBuffer.DrainWitnesses()
+		require.Len(t, witnesses, 1, "Should have exactly one witness in buffer")
 
-		// Use the correct HeaderKey format (block number + hash) to retrieve data
-		expectedKey := dbutils.HeaderKey(200, expectedBlockHash)
-		storedWitnessData, err := tx.GetOne(kv.BorWitnesses, expectedKey)
-		require.NoError(t, err)
-		require.NotEmpty(t, storedWitnessData, "Witness data should be stored in database")
-
-		storedWitnessSize, err := tx.GetOne(kv.BorWitnessSizes, expectedKey)
-		require.NoError(t, err)
-		require.NotEmpty(t, storedWitnessSize, "Witness size should be stored in database")
-
-		actualSize := binary.BigEndian.Uint64(storedWitnessSize)
-		require.Equal(t, uint64(len(storedWitnessData)), actualSize, "Stored size should match actual witness data length")
-
-		require.Greater(t, len(storedWitnessData), 0, "Stored witness data should not be empty")
+		storedWitness := witnesses[0]
+		require.Equal(t, uint64(200), storedWitness.BlockNumber, "Block number should match")
+		require.Equal(t, expectedBlockHash, storedWitness.BlockHash, "Block hash should match")
+		require.Greater(t, len(storedWitness.Data), 0, "Witness data should not be empty")
 	})
 }
 
@@ -285,6 +286,7 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 			Root:       common.HexToHash("0xroot456"),
 		}
 		witness := createTestWitness(t, testHeader)
+		expectedBlockHash := testHeader.Hash()
 
 		newWitnessPacket := wit.NewWitnessPacket{
 			Witness: witness,
@@ -299,18 +301,20 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
 
+		// Clear any existing data in buffer
+		multiClient.WitnessBuffer.DrainWitnesses()
+
 		err = multiClient.handleInboundMessage(ctx, inboundMsg, mockSentryClient)
 		require.NoError(t, err)
 
-		tx, err := testDB.BeginRo(ctx)
-		require.NoError(t, err)
-		defer tx.Rollback()
+		// Check that witness data was added to the buffer
+		witnesses := multiClient.WitnessBuffer.DrainWitnesses()
+		require.Len(t, witnesses, 1, "Should have exactly one witness in buffer")
 
-		expectedBlockHash := testHeader.Hash()
-		expectedKey := dbutils.HeaderKey(200, expectedBlockHash)
-		storedWitnessData, err := tx.GetOne(kv.BorWitnesses, expectedKey)
-		require.NoError(t, err)
-		require.NotEmpty(t, storedWitnessData, "Witness data should be stored in database")
+		storedWitness := witnesses[0]
+		require.Equal(t, uint64(200), storedWitness.BlockNumber, "Block number should match")
+		require.Equal(t, expectedBlockHash, storedWitness.BlockHash, "Block hash should match")
+		require.Greater(t, len(storedWitness.Data), 0, "Witness data should not be empty")
 	})
 }
 

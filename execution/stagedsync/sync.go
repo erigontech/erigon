@@ -208,7 +208,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 }
 
 func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
-	unwindStages := make([]*Stage, len(stagesList))
+	unwindStages := make([]*Stage, len(unwindOrder))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
 			if s.ID == stageIndex {
@@ -217,7 +217,7 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 			}
 		}
 	}
-	pruneStages := make([]*Stage, len(stagesList))
+	pruneStages := make([]*Stage, len(pruneOrder))
 	for i, stageIndex := range pruneOrder {
 		for _, s := range stagesList {
 			if s.ID == stageIndex {
