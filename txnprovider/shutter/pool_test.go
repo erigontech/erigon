@@ -199,7 +199,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes1, 1)
-		txnsIdFilter.Add(txnsRes1[0].Hash())
 		txnsRes2, err := pool.ProvideTxns(
 			ctx,
 			txnprovider.WithBlockTime(handle.nextBlockTime),
@@ -209,7 +208,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes2, 1)
-		txnsIdFilter.Add(txnsRes2[0].Hash())
 		require.Equal(t, 2, txnsIdFilter.Cardinality())
 	})
 }
