@@ -399,16 +399,16 @@ func TestRemoveOverlaps(t *testing.T) {
 	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
-	require.NoError(s.RemoveOverlaps(func(delList []string) error {
-		require.Len(delList, 69)
-		mustSeeFile(delList, "000000-000010-bodies.seg")
-		mustSeeFile(delList, "000000-000010-bodies.idx")
-		mustSeeFile(delList, "000000-000010-headers.seg")
-		mustSeeFile(delList, "000000-000010-transactions.seg")
-		mustSeeFile(delList, "000000-000010-transactions.seg")
-		mustSeeFile(delList, "000000-000010-transactions-to-block.idx")
-		mustSeeFile(delList, "000170-000180-transactions-to-block.idx")
-		require.False(filepath.IsAbs(delList[0])) // expecting non-absolute paths (relative as of snapshots dir)
+	require.NoError(s.RemoveOverlaps(func(delFiles []string) error {
+		require.Len(delFiles, 69)
+		mustSeeFile(delFiles, "000000-000010-bodies.seg")
+		mustSeeFile(delFiles, "000000-000010-bodies.idx")
+		mustSeeFile(delFiles, "000000-000010-headers.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions-to-block.idx")
+		mustSeeFile(delFiles, "000170-000180-transactions-to-block.idx")
+		require.False(filepath.IsAbs(delFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
 		return nil
 	}))
 
