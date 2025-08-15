@@ -17,11 +17,8 @@
 package heimdall
 
 import (
-	"encoding/binary"
 	"errors"
-	"fmt"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
@@ -59,37 +56,4 @@ func IsBlockInLastSprintOfSpan(blockNum uint64, config *borcfg.BorConfig) bool {
 	sprintLen := config.CalculateSprintLength(blockNum)
 	startBlockNum := endBlockNum - sprintLen + 1
 	return startBlockNum <= blockNum && blockNum <= endBlockNum
-}
-
-// Update span index table: span.StartBlock=> span.Id
-// This is needed for SpanIdAt(blockNum) lookups
-func UpdateSpansIndex(tx kv.RwTx, span Span) error {
-	kByte := make([]byte, 8)
-	vByte := make([]byte, 8)
-	binary.BigEndian.PutUint64(kByte, span.StartBlock)
-	binary.BigEndian.PutUint64(vByte, (uint64)(span.Id))
-	return tx.Put(kv.BorSpansIndex, kByte, vByte)
-}
-
-// Read Span Id of the span where block given by blockNum belongs to
-func SpanIdAtNew(tx kv.Tx, blockNum uint64) (SpanId, error) {
-	cursor, err := tx.Cursor(kv.BorSpansIndex)
-	if err != nil {
-		return 0, err
-	}
-
-	key := rangeIndexKey(blockNum)
-	_, value, err := cursor.Seek(key[:])
-	if err != nil {
-		return 0, err
-	}
-	// not found
-	if value == nil {
-		return 0, fmt.Errorf("SpanIdAt(%d) error %w", blockNum, ErrSpanNotFound)
-	}
-
-	spanId := uint64(binary.BigEndian.Uint64(value))
-
-	return SpanId(spanId), nil
-
 }
