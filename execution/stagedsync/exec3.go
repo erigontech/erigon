@@ -539,7 +539,7 @@ Loop:
 			accumulator.StartChange(header, txs, false)
 		}
 
-		rules := chainConfig.Rules(blockNum, b.Time())
+		rules := blockContext.Rules(chainConfig)
 		blockReceipts := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.

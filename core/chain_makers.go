@@ -374,7 +374,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
+			blockContext := NewEVMBlockContext(b.header, GetHashFn(b.header, nil), b.engine, nil, config)
+			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
