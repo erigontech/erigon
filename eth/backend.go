@@ -717,6 +717,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		stack.Config().SentryLogPeerInfo,
 		maxBlockBroadcastPeers,
 		sentryMcDisableBlockDownload,
+		stack.Config().P2P.EnableWitProtocol,
 		logger,
 	)
 	if err != nil {

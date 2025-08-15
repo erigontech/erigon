@@ -184,6 +184,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
+	enableWitProtocol bool,
 	logger log.Logger,
 ) (*MultiClient, error) {
 	// header downloader
@@ -219,9 +220,9 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
-	// Initialize witness buffer for Polygon chains
+	// Initialize witness buffer for Polygon chains with witness protocol enabled
 	var witnessBuffer *stagedsync.WitnessBuffer
-	if chainConfig.Bor != nil {
+	if chainConfig.Bor != nil && enableWitProtocol {
 		witnessBuffer = stagedsync.NewWitnessBuffer()
 	}
 
