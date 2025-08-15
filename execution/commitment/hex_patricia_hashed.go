@@ -2186,12 +2186,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	var (
 		m  runtime.MemStats
 		ki uint64
-		//hph.trace = true
 
 		updatesCount = updates.Size()
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
+
+	//hph.trace = true
 
 	if collectCommitmentMetrics {
 		hph.metrics.Reset()

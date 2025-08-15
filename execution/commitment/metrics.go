@@ -3,13 +3,15 @@ package commitment
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
 	"os"
 	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 /*
@@ -17,7 +19,7 @@ ERIGON_COMMITMENT_TRACE - file path prefix to write commitment metrics
 */
 func init() {
 	metricsFile = dbg.EnvString("ERIGON_COMMITMENT_TRACE", "")
-	collectCommitmentMetrics = metricsFile != ""
+	collectCommitmentMetrics = true //metricsFile != ""
 }
 
 var (
@@ -61,6 +63,15 @@ func (m *Metrics) WriteToCSV() {
 			panic(err)
 		}
 	}
+}
+
+func (m *Metrics) LogMetrics(logger log.Logger, level log.Lvl, prefix string) {
+	logger.Log(level, prefix+"trie progress", "upd", m.updates.Load(), "akeys", m.addressKeys.Load(), "skeys", m.storageKeys.Load(),
+		"rdb", m.loadBranch.Load(), "rda", m.loadAccount.Load(), "rds", m.loadStorage.Load(), "wrb", m.updateBranch.Load(),
+		"fld", m.unfolds.Load(), "fdur", fmt.Sprintf("%dms", m.spentFolding.Milliseconds()),
+		"ufdur", fmt.Sprintf("%dms", m.spentUnfolding.Milliseconds()), "pdur", fmt.Sprintf("%dms", m.spentProcessing.Milliseconds()))
+
+	//logger.Log(level, prefix+"sccount progress")
 }
 
 func (m *Metrics) Headers() []string {
