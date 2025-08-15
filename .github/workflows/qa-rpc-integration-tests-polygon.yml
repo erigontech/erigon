@@ -19,7 +19,6 @@ on:
 
 jobs:
   bor-mainnet-rpc-integ-tests:
-    if: false # temporarily disabled after PR 15838
     concurrency:
       group: >-
         ${{
@@ -39,7 +38,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Clean Erigon Build Directory
         run: |

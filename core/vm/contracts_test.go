@@ -61,9 +61,9 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: false},
 	common.BytesToAddress([]byte{0xa5}):       &bigModExp{eip2565: true},
 	common.BytesToAddress([]byte{0xb5}):       &bigModExp{osaka: true},
-	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x06}):       &bn254AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}):       &bn254ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}):       &bn254PairingIstanbul{},
 	common.BytesToAddress([]byte{0x09}):       &blake2F{},
 	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
 	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
@@ -204,16 +204,6 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 	})
 }
 
-// Benchmarks the sample inputs from the ECRECOVER precompile.
-func BenchmarkPrecompiledEcrecover(bench *testing.B) {
-	t := precompiledTest{
-		Input:    "38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e000000000000000000000000000000000000000000000000000000000000001b38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02",
-		Expected: "000000000000000000000000ceaccac640adf55b2028469bd36ba501f28b699d",
-		Name:     "",
-	}
-	benchmarkPrecompiled(bench, "01", t)
-}
-
 // Benchmarks the sample inputs from the SHA256 precompile.
 func BenchmarkPrecompiledSha256(bench *testing.B) {
 	t := precompiledTest{
@@ -254,9 +244,11 @@ func BenchmarkPrecompiledModExpEip2565(b *testing.B) { benchJson("modexp_eip2565
 func TestPrecompiledModExpEip7883(t *testing.T)      { testJson("modexp_eip7883", "b5", t) }
 func BenchmarkPrecompiledModExpEip7883(b *testing.B) { benchJson("modexp_eip7883", "b5", b) }
 
+func TestPrecompiledModExpEip7823Fail(t *testing.T) { testJsonFail("modexp-eip7823", "b5", t) }
+
 // Tests the sample inputs from the elliptic curve addition EIP 213.
-func TestPrecompiledBn256Add(t *testing.T)      { testJson("bn256Add", "06", t) }
-func BenchmarkPrecompiledBn256Add(b *testing.B) { benchJson("bn256Add", "06", b) }
+func TestPrecompiledBn254Add(t *testing.T)      { testJson("bn254Add", "06", t) }
+func BenchmarkPrecompiledBn254Add(b *testing.B) { benchJson("bn254Add", "06", b) }
 
 // Tests OOG
 func TestPrecompiledModExpOOG(t *testing.T) {
@@ -280,29 +272,69 @@ func TestPrecompiledModExpPotentialOutOfRange(t *testing.T) {
 }
 
 func TestPrecompiledModExpInputEip7823(t *testing.T) {
-	// length_of_EXPONENT = 2048; everything else is zero
-	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
-
 	pragueModExp := allPrecompiles[common.BytesToAddress([]byte{0xa5})]
+	osakaModExp := allPrecompiles[common.BytesToAddress([]byte{0xb5})]
+
+	// length_of_EXPONENT = 1024; everything else is zero
+	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000")
 	gas := pragueModExp.RequiredGas(in)
 	res, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
 
-	osakaModExp := allPrecompiles[common.BytesToAddress([]byte{0xb5})]
+	// length_of_EXPONENT = 1025; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004010000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+
+	// length_of_EXPONENT = 2048; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+
+	// length_of_EXPONENT = 2^32; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+	gas = osakaModExp.RequiredGas(in)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+
+	// length_of_EXPONENT = 2^64; everything else is zero
+	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000")
+	gas = pragueModExp.RequiredGas(in)
+	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
 	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
-func TestPrecompiledBn256ScalarMul(t *testing.T)      { testJson("bn256ScalarMul", "07", t) }
-func BenchmarkPrecompiledBn256ScalarMul(b *testing.B) { benchJson("bn256ScalarMul", "07", b) }
-func TestPrecompiledBn256ScalarMulFail(t *testing.T)  { testJsonFail("bn256ScalarMul", "07", t) }
+func TestPrecompiledBn254ScalarMul(t *testing.T)      { testJson("bn254ScalarMul", "07", t) }
+func BenchmarkPrecompiledBn254ScalarMul(b *testing.B) { benchJson("bn254ScalarMul", "07", b) }
+func TestPrecompiledBn254ScalarMulFail(t *testing.T)  { testJsonFail("bn254ScalarMul", "07", t) }
 
 // Tests the sample inputs from the elliptic curve pairing check EIP 197.
-func TestPrecompiledBn256Pairing(t *testing.T)      { testJson("bn256Pairing", "08", t) }
-func BenchmarkPrecompiledBn256Pairing(b *testing.B) { benchJson("bn256Pairing", "08", b) }
+func TestPrecompiledBn254Pairing(t *testing.T)      { testJson("bn254Pairing", "08", t) }
+func BenchmarkPrecompiledBn254Pairing(b *testing.B) { benchJson("bn254Pairing", "08", b) }
 
 func TestPrecompiledBlake2F(t *testing.T)      { testJson("blake2F", "09", t) }
 func BenchmarkPrecompiledBlake2F(b *testing.B) { benchJson("blake2F", "09", b) }
@@ -314,7 +346,8 @@ func TestPrecompileBlake2FMalformedInput(t *testing.T) {
 	}
 }
 
-func TestPrecompiledEcrecover(t *testing.T) { testJson("ecRecover", "01", t) }
+func TestPrecompiledEcrecover(t *testing.T)      { testJson("ecRecover", "01", t) }
+func BenchmarkPrecompiledEcrecover(b *testing.B) { benchJson("ecRecover", "01", b) }
 
 func testJson(name, addr string, t *testing.T) {
 	tests, err := loadJson(name)
@@ -362,6 +395,7 @@ func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2Mult
 func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "0f", b) }
 func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "10", b) }
 func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "11", b) }
+func BenchmarkPrecompiledPointEvaluation(b *testing.B)    { benchJson("pointEvaluation", "0a", b) }
 
 // Failure tests
 func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "0b", t) }

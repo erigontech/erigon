@@ -3,9 +3,7 @@ name: QA - Tip tracking (Polygon)
 on:
   push:
     branches:
-      - 'release/3.*'
-  schedule:
-    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
+      - 'release/3.1'
   workflow_dispatch:      # Run manually
 
 concurrency:
@@ -26,7 +24,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Clean Erigon Build Directory
       run: |

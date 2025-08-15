@@ -21,32 +21,29 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -72,7 +69,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error)
 
 	// Uncle related (see ./eth_uncles.go)
@@ -103,7 +100,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
-	Config(_ context.Context) (*EthConfigResp, error)
+	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Bytes, error)
@@ -139,8 +136,7 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
-	useBridgeReader bool
-	bridgeReader    bridgeReader
+	bridgeReader bridgeReader
 
 	evmCallTimeout      time.Duration
 	dirs                datadir.Dirs
@@ -170,10 +166,9 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(context.Background()),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),
+		receiptsGenerator:   receipts.NewGenerator(blockReader, engine, evmCallTimeout),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine),
 		dirs:                dirs,
-		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
 		bridgeReader:        bridgeReader,
 	}
 }
@@ -343,27 +338,6 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	return api._blockReader.Header(ctx, tx, hash, *number)
 }
 
-func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
-	var stateSyncEvents []*types.Message
-	if api.useBridgeReader {
-		events, err := api.bridgeReader.Events(ctx, blockHash, blockNum)
-		if err != nil {
-			return nil, err
-		}
-		stateSyncEvents = events
-	} else {
-		events, err := api._blockReader.EventsByBlock(ctx, tx, blockHash, blockNum)
-		if err != nil {
-			return nil, err
-		}
-
-		stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-		stateSyncEvents = bridge.NewStateSyncEventMessages(events, &stateReceiverContract, core.SysCallGasLimit)
-	}
-
-	return stateSyncEvents, nil
-}
-
 // checks the pruning state to see if we would hold information about this
 // block in state history or not.  Some strange issues arise getting account
 // history for blocks that have been pruned away giving nonce too low errors
@@ -436,10 +410,6 @@ type APIImpl struct {
 func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
-	}
-
-	if base.useBridgeReader {
-		logger.Info("starting rpc with polygon bridge")
 	}
 
 	return &APIImpl{

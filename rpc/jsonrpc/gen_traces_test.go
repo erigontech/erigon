@@ -27,9 +27,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -328,6 +328,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
     {
         "action": {
             "from": "0x000000000000000000000000000000000000bbbb",
+            "creationMethod": "create2",
             "gas": "0xb49d",
             "init": "0x600360035560046004556158ff6000526002601ef3",
             "value": "0x0"

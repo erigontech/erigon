@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -49,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -77,6 +77,7 @@ type ApiHandler struct {
 	stateReader          *historical_states_reader.HistoricalStatesReader
 	sentinel             sentinel.SentinelClient
 	blobStoage           blob_storage.BlobStorage
+	columnStorage        blob_storage.DataColumnStorage
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
@@ -131,6 +132,7 @@ func NewApiHandler(
 	routerCfg *beacon_router_configuration.RouterConfiguration,
 	emitters *beaconevents.EventEmitter,
 	blobStoage blob_storage.BlobStorage,
+	columnStorage blob_storage.DataColumnStorage,
 	caplinSnapshots *freezeblocks.CaplinSnapshots,
 	validatorParams *validator_params.ValidatorParams,
 	attestationProducer attestation_producer.AttestationDataProducer,
@@ -181,6 +183,7 @@ func NewApiHandler(
 		routerCfg:                        routerCfg,
 		emitters:                         emitters,
 		blobStoage:                       blobStoage,
+		columnStorage:                    columnStorage,
 		caplinSnapshots:                  caplinSnapshots,
 		attestationProducer:              attestationProducer,
 		blobBundles:                      blobBundles,
@@ -239,6 +242,7 @@ func (a *ApiHandler) init() {
 
 			if a.routerCfg.Debug {
 				r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
+				r.Get("/debug/data_column_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1DebugBeaconDataColumnSidecars))
 			}
 			if a.routerCfg.Config {
 				r.Route("/config", func(r chi.Router) {
@@ -303,6 +307,10 @@ func (a *ApiHandler) init() {
 							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
+							r.Get("/pending_consolidations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingConsolidations))
+							r.Get("/pending_deposits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingDeposits))
+							r.Get("/pending_partial_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingPartialWithdrawals))
+							r.Get("/proposer_lookahead", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesProposerLookahead))
 						})
 					})
 				})

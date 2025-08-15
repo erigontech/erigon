@@ -19,16 +19,16 @@ package exec3
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -95,7 +95,7 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
-	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
+	e.rules = blockCtx.Rules(e.chainConfig)
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }

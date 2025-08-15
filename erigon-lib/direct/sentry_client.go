@@ -37,6 +37,8 @@ const (
 	ETH67 = 67
 	ETH68 = 68
 	ETH69 = 69
+
+	WIT0 = 1
 )
 
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient
@@ -270,6 +272,10 @@ func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentryproto.AddPee
 	return c.server.AddPeer(ctx, in)
 }
 
+func (c *SentryClientDirect) RemovePeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	return c.server.RemovePeer(ctx, in)
+}
+
 type peersReply struct {
 	r   *sentryproto.PeerEvent
 	err error
@@ -332,6 +338,10 @@ func filterIds(in []sentryproto.MessageId, protocol sentryproto.Protocol) (filte
 	for _, id := range in {
 		if _, ok := libsentry.ProtoIds[protocol][id]; ok {
 			filtered = append(filtered, id)
+		} else if _, ok := libsentry.ProtoIds[sentryproto.Protocol_WIT0][id]; ok {
+			// Allow witness messages through ETH protocol clients
+			filtered = append(filtered, id)
+		} else {
 		}
 	}
 	return filtered

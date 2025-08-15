@@ -27,17 +27,17 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 // Keys in the node database.
@@ -164,7 +164,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 
 	if blob != nil && !bytes.Equal(blob, currentVer) {
 		db.Close()
-		if err := os.RemoveAll(path); err != nil {
+		if err := dir.RemoveAll(path); err != nil {
 			return nil, err
 		}
 		return newPersistentDB(ctx, logger, path)

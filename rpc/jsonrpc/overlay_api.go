@@ -27,19 +27,19 @@ import (
 	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -177,7 +177,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
-	rules := chainConfig.Rules(blockNum, blockCtx.Time)
+	rules := evm.ChainRules()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -455,7 +455,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil, chainConfig)
 
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
-	rules := chainConfig.Rules(blockNum, blockCtx.Time)
+	rules := blockCtx.Rules(chainConfig)
 
 	timeout := api.OverlayReplayBlockTimeout
 	// Setup context so it may be cancelled the call has completed

@@ -29,11 +29,11 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/rlpx"
-	"github.com/erigontech/erigon/params"
 )
 
 // https://github.com/ethereum/devp2p/blob/master/rlpx.md#p2p-capability
@@ -267,7 +267,7 @@ func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError Handshak
 }
 
 func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
-	version := params.VersionWithCommit(params.GitCommit)
+	version := version.VersionWithCommit(version.GitCommit)
 	clientID := common.MakeName("observer", version)
 
 	caps := []p2p.Cap{

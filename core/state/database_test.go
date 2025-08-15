@@ -30,20 +30,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/kv"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Create revival problem
@@ -926,7 +926,7 @@ func TestReproduceCrash(t *testing.T) {
 	value2 := uint256.NewInt(0x58c00a51)
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := libstate.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -1349,7 +1349,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := libstate.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 	blockNum, txNum := uint64(1), uint64(3)
@@ -1398,7 +1398,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := libstate.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 	blockNum, txNum := uint64(1), uint64(3)
@@ -1438,7 +1438,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
-	sd, err := libstate.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 	blockNum := uint64(1)

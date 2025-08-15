@@ -27,8 +27,8 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func createLog() *remote.SubscribeLogsReply {

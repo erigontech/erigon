@@ -7,26 +7,26 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
-	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/spf13/cobra"
 )
 
 // TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
 func parseEFFilename(fileName string) (*efFileInfo, error) {
 	partsByDot := strings.Split(fileName, ".")
 	partsByDash := strings.Split(fileName, "-")
-	stepParts := strings.Split(partsByDot[2], "-")
+	stepParts := strings.Split(partsByDot[1], "-")
 	startStep, err := strconv.ParseUint(stepParts[0], 10, 64)
 	if err != nil {
 		return nil, err

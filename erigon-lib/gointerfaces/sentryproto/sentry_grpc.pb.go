@@ -37,6 +37,7 @@ const (
 	Sentry_PeerById_FullMethodName                 = "/sentry.Sentry/PeerById"
 	Sentry_PeerEvents_FullMethodName               = "/sentry.Sentry/PeerEvents"
 	Sentry_AddPeer_FullMethodName                  = "/sentry.Sentry/AddPeer"
+	Sentry_RemovePeer_FullMethodName               = "/sentry.Sentry/RemovePeer"
 	Sentry_NodeInfo_FullMethodName                 = "/sentry.Sentry/NodeInfo"
 )
 
@@ -67,6 +68,7 @@ type SentryClient interface {
 	// Subscribe to notifications about connected or lost peers.
 	PeerEvents(ctx context.Context, in *PeerEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PeerEvent], error)
 	AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
+	RemovePeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error)
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error)
 }
@@ -257,6 +259,16 @@ func (c *sentryClient) AddPeer(ctx context.Context, in *AddPeerRequest, opts ...
 	return out, nil
 }
 
+func (c *sentryClient) RemovePeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemovePeerReply)
+	err := c.cc.Invoke(ctx, Sentry_RemovePeer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sentryClient) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(typesproto.NodeInfoReply)
@@ -294,6 +306,7 @@ type SentryServer interface {
 	// Subscribe to notifications about connected or lost peers.
 	PeerEvents(*PeerEventsRequest, grpc.ServerStreamingServer[PeerEvent]) error
 	AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
+	RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error)
 	mustEmbedUnimplementedSentryServer()
@@ -353,6 +366,9 @@ func (UnimplementedSentryServer) PeerEvents(*PeerEventsRequest, grpc.ServerStrea
 }
 func (UnimplementedSentryServer) AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddPeer not implemented")
+}
+func (UnimplementedSentryServer) RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemovePeer not implemented")
 }
 func (UnimplementedSentryServer) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NodeInfo not implemented")
@@ -652,6 +668,24 @@ func _Sentry_AddPeer_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentry_RemovePeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemovePeerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).RemovePeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentry_RemovePeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).RemovePeer(ctx, req.(*RemovePeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Sentry_NodeInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
@@ -732,6 +766,10 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddPeer",
 			Handler:    _Sentry_AddPeer_Handler,
+		},
+		{
+			MethodName: "RemovePeer",
+			Handler:    _Sentry_RemovePeer_Handler,
 		},
 		{
 			MethodName: "NodeInfo",

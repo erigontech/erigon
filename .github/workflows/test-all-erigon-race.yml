@@ -1,0 +1,86 @@
+name: All tests (with -race)
+
+on:
+  push:
+    branches:
+      - 'release/**'
+      - main
+  workflow_dispatch:
+
+jobs:
+  # 
+  # This first job is used to determine if changes are within out-of-scope dirs or files (in such case the tests are not run because they would be meaningless)
+  # NOTE: this logic is needed because the simple 'paths-ignore:' doesn't work since this workflow is set as a mandatory/required check for this repo
+  # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
+  # 
+  source-of-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_files: ${{ steps.filter.outputs.changed_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Check for changes within out-of-scope dirs or files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            changed_files:
+              - 'dashboards/**'
+              # - '**/.github/workflows/**'
+              - '**/.github/workflows/backups-dashboards.yml'
+  tests-linux:
+    needs: source-of-changes
+    concurrency:
+      # concurrency group: there can be at most one running and one pending job in a 
+      # concurrency group at any time. So for commits on main/release, we use different 
+      # concurrency group per commit; for other branches, we use a branch-level CG.
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+        }}
+      cancel-in-progress: true
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Declare runners
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: |
+          set +x
+          echo "I am being served by this runner: $RUNNER_NAME"
+          
+      - name: Checkout code
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/checkout@v5
+        
+      - name: Update submodules
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: git submodule update --init --recursive --force
+        
+      - name: Setup Go environment
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/release/3.0","refs/heads/release/2.61"]'), github.ref) }}
+          
+      - name: Install dependencies on Linux
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: sudo apt update && sudo apt install build-essential
+        
+      - name: Run all tests on ${{ matrix.os }}
+        env:
+          SKIP_FLAKY_TESTS: 'true'
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: GOGC=80 make test-all-race
+
+      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
+        if: needs.source-of-changes.outputs.changed_files == 'true'
+        run: echo "This check does not make sense for changes within out-of-scope directories"
