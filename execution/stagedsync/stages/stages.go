@@ -32,8 +32,8 @@ import (
 type SyncStage string
 
 var (
-	Snapshots         SyncStage = "OtterSync"         // Snapshots
-	Headers           SyncStage = "Headers"           // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	Snapshots SyncStage = "OtterSync" // Snapshots
+	Headers   SyncStage = "Headers"   // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 
 	BlockHashes       SyncStage = "BlockHashes"       // Headers Number are written, fills blockHash => number bucket
 	Bodies            SyncStage = "Bodies"            // Block bodies are downloaded, TxHash and UncleHash are getting verified

@@ -208,23 +208,34 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 }
 
 func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
-	unwindStages := make([]*Stage, len(unwindOrder))
-	for i, stageIndex := range unwindOrder {
-		for _, s := range stagesList {
-			if s.ID == stageIndex {
-				unwindStages[i] = s
-				break
-			}
+	stageMap := make(map[stages.SyncStage]*Stage, len(stagesList))
+	for _, s := range stagesList {
+		stageMap[s.ID] = s
+	}
+
+	// on non-Polygon chains, WitnessProcessing stage is not run
+	var filteredUnwindOrder UnwindOrder
+	for _, stageIndex := range unwindOrder {
+		if _, exists := stageMap[stageIndex]; exists {
+			filteredUnwindOrder = append(filteredUnwindOrder, stageIndex)
 		}
 	}
-	pruneStages := make([]*Stage, len(pruneOrder))
-	for i, stageIndex := range pruneOrder {
-		for _, s := range stagesList {
-			if s.ID == stageIndex {
-				pruneStages[i] = s
-				break
-			}
+
+	var filteredPruneOrder PruneOrder
+	for _, stageIndex := range pruneOrder {
+		if _, exists := stageMap[stageIndex]; exists {
+			filteredPruneOrder = append(filteredPruneOrder, stageIndex)
 		}
+	}
+
+	unwindStages := make([]*Stage, len(filteredUnwindOrder))
+	for i, stageIndex := range filteredUnwindOrder {
+		unwindStages[i] = stageMap[stageIndex]
+	}
+
+	pruneStages := make([]*Stage, len(filteredPruneOrder))
+	for i, stageIndex := range filteredPruneOrder {
+		pruneStages[i] = stageMap[stageIndex]
 	}
 
 	logPrefixes := make([]string, len(stagesList))
