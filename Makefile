@@ -61,14 +61,14 @@ PACKAGE = github.com/erigontech/erigon
 # Add to user provided GO_FLAGS. Insert it after a bunch of other stuff to allow overrides, and before tags to maintain BUILD_TAGS (set that instead if you want to modify it).
 
 GO_RELEASE_FLAGS := -trimpath -buildvcs=false \
-	-ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+	-ldflags "-X ${PACKAGE}/db/version.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/db/version.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/db/version.GitTag=${GIT_TAG}"
 GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)"
 
 # Basic release build. Pass EXTRA_BUILD_TAGS if you want to modify the tags set.
 GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
 DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
 GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
-GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
 
 default: all
 
@@ -186,7 +186,7 @@ test-erigon-ext:
 ## test-short:                run short tests with a 10m timeout
 test-short: test-erigon-lib-short
 	@{ \
-		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
+		$(GOTEST) -short > run.log 2>&1; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \
@@ -204,7 +204,7 @@ test-all: test-erigon-lib-all
 ## test-all-race:             run all tests with the race flag
 test-all-race: test-erigon-lib-all-race
 	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
+		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \

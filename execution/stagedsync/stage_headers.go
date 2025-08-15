@@ -28,25 +28,24 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/arb/ethdb"
 	snapshots "github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -323,7 +322,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 
 	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress, "hash", hash.Hex())
 
-	diagnostics.Send(diagnostics.HeadersWaitingUpdate{From: startProgress})
+	diaglib.Send(diaglib.HeadersWaitingUpdate{From: startProgress})
 
 	localTd, err := rawdb.ReadTd(tx, hash, startProgress)
 	if err != nil {
@@ -516,7 +515,7 @@ Loop:
 		headers := headerInserter.GetHighest() - startProgress
 		secs := time.Since(startTime).Seconds()
 
-		diagnostics.Send(diagnostics.HeadersProcessedUpdate{
+		diaglib.Send(diaglib.HeadersProcessedUpdate{
 			Highest:   headerInserter.GetHighest(),
 			Age:       time.Unix(int64(headerInserter.GetHighestTimestamp()), 0).Second(),
 			Headers:   headers,
@@ -556,7 +555,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 		select {
 		case <-logEvery.C:
-			diagnostics.Send(diagnostics.HeaderCanonicalMarkerUpdate{AncestorHeight: ancestorHeight, AncestorHash: ancestorHash.String()})
+			diaglib.Send(diaglib.HeaderCanonicalMarkerUpdate{AncestorHeight: ancestorHeight, AncestorHash: ancestorHash.String()})
 			logger.Info(fmt.Sprintf("[%s] write canonical markers", logPrefix), "ancestor", ancestorHeight, "hash", ancestorHash)
 		default:
 		}
@@ -717,7 +716,7 @@ func logProgressHeaders(
 		"rejectedBadHeaders", stats.RejectedBadHeaders,
 	)
 
-	diagnostics.Send(diagnostics.BlockHeadersUpdate{
+	diaglib.Send(diaglib.BlockHeadersUpdate{
 		CurrentBlockNumber:  now,
 		PreviousBlockNumber: prev,
 		Speed:               speed,
@@ -799,28 +798,4 @@ func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block
 func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
-}
-func (cr ChainReaderImpl) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
-		return nil
-	}
-	return events
-}
-func (cr ChainReaderImpl) BorStartEventId(hash common.Hash, blockNum uint64) uint64 {
-	id, err := cr.blockReader.BorStartEventId(context.Background(), cr.tx, hash, blockNum)
-	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
-		return 0
-	}
-	return id
-}
-func (cr ChainReaderImpl) BorSpan(spanId uint64) *heimdall.Span {
-	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
-	if err != nil {
-		cr.logger.Error("[staged sync] BorSpan failed", "err", err)
-		return nil
-	}
-	return span
 }

@@ -130,6 +130,8 @@ type ForkChoiceStore struct {
 	pendingDeposits       *lru.Cache[common.Hash, *solid.ListSSZ[*solid.PendingDeposit]]
 	partialWithdrawals    *lru.Cache[common.Hash, *solid.ListSSZ[*solid.PendingPartialWithdrawal]]
 
+	proposerLookahead *lru.Cache[uint64, solid.Uint64VectorSSZ]
+
 	mu sync.RWMutex
 
 	// EL
@@ -245,6 +247,11 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
+	proposerLookahead, err := lru.New[uint64, solid.Uint64VectorSSZ](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
@@ -286,6 +293,7 @@ func NewForkChoiceStore(
 		pendingConsolidations:    pendingConsolidations,
 		pendingDeposits:          pendingDeposits,
 		partialWithdrawals:       partialWithdrawals,
+		proposerLookahead:        proposerLookahead,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -718,6 +726,15 @@ func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pe
 	f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
 }
 
+func (f *ForkChoiceStore) addProposerLookahead(slot uint64, proposerLookahead solid.Uint64VectorSSZ) {
+	epoch := slot / f.beaconCfg.SlotsPerEpoch
+	if _, ok := f.proposerLookahead.Get(epoch); !ok {
+		pl := solid.NewUint64VectorSSZ(proposerLookahead.Length())
+		proposerLookahead.CopyTo(pl)
+		f.proposerLookahead.Add(epoch, pl)
+	}
+}
+
 func (f *ForkChoiceStore) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {
 	return f.pendingConsolidations.Get(blockRoot)
 }
@@ -728,4 +745,9 @@ func (f *ForkChoiceStore) GetPendingDeposits(blockRoot common.Hash) (*solid.List
 
 func (f *ForkChoiceStore) GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool) {
 	return f.partialWithdrawals.Get(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
+	epoch := slot / f.beaconCfg.SlotsPerEpoch
+	return f.proposerLookahead.Get(epoch)
 }

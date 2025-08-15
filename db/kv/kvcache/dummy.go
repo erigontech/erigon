@@ -21,7 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // DummyCache - doesn't remember anything - can be used when service is not remote

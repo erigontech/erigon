@@ -27,9 +27,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 type DynamicFeeTransaction struct {
@@ -102,6 +102,10 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 
 func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
+}
+
+func (tx *DynamicFeeTransaction) GetAuthorizations() []Authorization {
+	return nil
 }
 
 func (tx *DynamicFeeTransaction) EncodingSize() int {

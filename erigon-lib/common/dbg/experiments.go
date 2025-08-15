@@ -83,6 +83,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	TraceDeletion        = EnvBool("TRACE_DELETION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

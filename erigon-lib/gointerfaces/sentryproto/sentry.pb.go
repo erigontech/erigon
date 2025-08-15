@@ -62,6 +62,11 @@ const (
 	MessageId_POOLED_TRANSACTIONS_66     MessageId = 31
 	// ======= eth 68 protocol ===========
 	MessageId_NEW_POOLED_TRANSACTION_HASHES_68 MessageId = 32
+	// ======= wit protocol ===========
+	MessageId_GET_BLOCK_WITNESS_W0  MessageId = 33
+	MessageId_BLOCK_WITNESS_W0      MessageId = 34
+	MessageId_NEW_WITNESS_W0        MessageId = 35
+	MessageId_NEW_WITNESS_HASHES_W0 MessageId = 36
 )
 
 // Enum value maps for MessageId.
@@ -99,6 +104,10 @@ var (
 		30: "RECEIPTS_66",
 		31: "POOLED_TRANSACTIONS_66",
 		32: "NEW_POOLED_TRANSACTION_HASHES_68",
+		33: "GET_BLOCK_WITNESS_W0",
+		34: "BLOCK_WITNESS_W0",
+		35: "NEW_WITNESS_W0",
+		36: "NEW_WITNESS_HASHES_W0",
 	}
 	MessageId_value = map[string]int32{
 		"STATUS_65":                        0,
@@ -133,6 +142,10 @@ var (
 		"RECEIPTS_66":                      30,
 		"POOLED_TRANSACTIONS_66":           31,
 		"NEW_POOLED_TRANSACTION_HASHES_68": 32,
+		"GET_BLOCK_WITNESS_W0":             33,
+		"BLOCK_WITNESS_W0":                 34,
+		"NEW_WITNESS_W0":                   35,
+		"NEW_WITNESS_HASHES_W0":            36,
 	}
 )
 
@@ -213,6 +226,7 @@ const (
 	Protocol_ETH66 Protocol = 1
 	Protocol_ETH67 Protocol = 2
 	Protocol_ETH68 Protocol = 3
+	Protocol_WIT0  Protocol = 4
 )
 
 // Enum value maps for Protocol.
@@ -222,12 +236,14 @@ var (
 		1: "ETH66",
 		2: "ETH67",
 		3: "ETH68",
+		4: "WIT0",
 	}
 	Protocol_value = map[string]int32{
 		"ETH65": 0,
 		"ETH66": 1,
 		"ETH67": 2,
 		"ETH68": 3,
+		"WIT0":  4,
 	}
 )
 
@@ -1612,7 +1628,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\fAddPeerReply\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"+\n" +
 	"\x0fRemovePeerReply\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*\x80\x06\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess*\xdf\x06\n" +
 	"\tMessageId\x12\r\n" +
 	"\tSTATUS_65\x10\x00\x12\x18\n" +
 	"\x14GET_BLOCK_HEADERS_65\x10\x01\x12\x14\n" +
@@ -1646,14 +1662,19 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\fNODE_DATA_66\x10\x1d\x12\x0f\n" +
 	"\vRECEIPTS_66\x10\x1e\x12\x1a\n" +
 	"\x16POOLED_TRANSACTIONS_66\x10\x1f\x12$\n" +
-	" NEW_POOLED_TRANSACTION_HASHES_68\x10 *\x17\n" +
+	" NEW_POOLED_TRANSACTION_HASHES_68\x10 \x12\x18\n" +
+	"\x14GET_BLOCK_WITNESS_W0\x10!\x12\x14\n" +
+	"\x10BLOCK_WITNESS_W0\x10\"\x12\x12\n" +
+	"\x0eNEW_WITNESS_W0\x10#\x12\x19\n" +
+	"\x15NEW_WITNESS_HASHES_W0\x10$*\x17\n" +
 	"\vPenaltyKind\x12\b\n" +
-	"\x04Kick\x10\x00*6\n" +
+	"\x04Kick\x10\x00*@\n" +
 	"\bProtocol\x12\t\n" +
 	"\x05ETH65\x10\x00\x12\t\n" +
 	"\x05ETH66\x10\x01\x12\t\n" +
 	"\x05ETH67\x10\x02\x12\t\n" +
-	"\x05ETH68\x10\x032\x9e\b\n" +
+	"\x05ETH68\x10\x03\x12\b\n" +
+	"\x04WIT0\x10\x042\x9e\b\n" +
 	"\x06Sentry\x127\n" +
 	"\tSetStatus\x12\x12.sentry.StatusData\x1a\x16.sentry.SetStatusReply\x12C\n" +
 	"\fPenalizePeer\x12\x1b.sentry.PenalizePeerRequest\x1a\x16.google.protobuf.Empty\x12C\n" +

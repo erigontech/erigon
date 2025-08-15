@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"sort"
 	"strconv"
@@ -584,7 +585,7 @@ func (cfg *Cfg) PrintAnlyState() {
 	}
 
 	path := "cfg.dot"
-	_ = os.Remove(path)
+	_ = dir.RemoveFile(path)
 
 	f, errcr := os.Create(path)
 	if errcr != nil {

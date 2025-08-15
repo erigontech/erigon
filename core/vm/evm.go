@@ -27,8 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -36,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 var emptyHash = common.Hash{}
@@ -107,7 +107,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		intraBlockState: ibs,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time, blockCtx.ArbOSVersion),
+		chainRules:      blockCtx.Rules(chainConfig),
 	}
 	if evm.config.JumpDestCache == nil {
 		evm.config.JumpDestCache = NewJumpDestCache(JumpDestCacheLimit)

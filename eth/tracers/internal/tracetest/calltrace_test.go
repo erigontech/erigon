@@ -30,7 +30,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -42,7 +41,8 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -148,7 +148,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if test.Context.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
 			}
-			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time, 0)
+			rules := context.Rules(test.Genesis.Config)
 
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -337,7 +337,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := chainspec.MainnetChainConfig.Rules(context.BlockNumber, context.Time, 0)
+	rules := context.Rules(chainspec.MainnetChainConfig)
 	m := mock.Mock(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)

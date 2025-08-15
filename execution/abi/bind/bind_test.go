@@ -2513,7 +2513,7 @@ public class Test {
 		if err != nil {
 			t.Fatalf("test %d: failed to generate binding: %v", i, err)
 		}
-		// Remove empty lines
+		// RemoveFile empty lines
 		removeEmptys := func(input string) string {
 			lines := strings.Split(input, "\n")
 			var index int

@@ -46,19 +46,12 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/event"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -68,13 +61,8 @@ import (
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -82,22 +70,34 @@ import (
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/ethstats"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -120,9 +120,9 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -223,12 +223,11 @@ type Ethereum struct {
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
 	silkwormSentryService    *silkworm.SentryService
 
-	polygonSyncService  *polygonsync.Service
-	polygonDownloadSync *stagedsync.Sync
-	polygonBridge       *bridge.Service
-	heimdallService     *heimdall.Service
-	stopNode            func() error
-	bgComponentsEg      errgroup.Group
+	polygonSyncService *polygonsync.Service
+	polygonBridge      *bridge.Service
+	heimdallService    *heimdall.Service
+	stopNode           func() error
+	bgComponentsEg     errgroup.Group
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -534,6 +533,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
+
+			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
 			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
@@ -604,6 +605,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	var heimdallClient heimdall.Client
+	var bridgeClient bridge.Client
 	var polygonBridge *bridge.Service
 	var heimdallService *heimdall.Service
 	var bridgeRPC *bridge.BackendServer
@@ -611,18 +613,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, heimdall.WithApiVersioner(ctx))
+			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
+			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 		} else {
 			heimdallClient = heimdall.NewIdleClient(config.Miner)
+			bridgeClient = bridge.NewIdleClient()
 		}
-
 		borConfig := consensusConfig.(*borcfg.BorConfig)
 
 		polygonBridge = bridge.NewService(bridge.ServiceConfig{
 			Store:        bridgeStore,
 			Logger:       logger,
 			BorConfig:    borConfig,
-			EventFetcher: heimdallClient,
+			EventFetcher: bridgeClient,
 		})
 
 		if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
@@ -716,6 +719,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		stack.Config().SentryLogPeerInfo,
 		maxBlockBroadcastPeers,
 		sentryMcDisableBlockDownload,
+		stack.Config().P2P.EnableWitProtocol,
 		logger,
 	)
 	if err != nil {
@@ -734,6 +738,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.chainDB,
 		backend.notifications,
 		blockReader,
+		bridgeStore,
 		logger,
 		latestBlockBuiltStore,
 		chainConfig,
@@ -1078,19 +1083,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend,
 		)
 
-		// we need to initiate download before the heimdall services start rather than
-		// waiting for the stage loop to start
-		// TODO although this works we probably want to call engine.Start instead
-
-		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
-			panic("expect to have non-nil downloaderClient")
-		}
-		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
-			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
-				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
-			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
-
 		// these range extractors set the db to the local db instead of the chain db
 		// TODO this needs be refactored away by having a retire/merge component per
 		// snapshot instead of global processing in the stage loop
@@ -1287,7 +1279,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 
 		if s.chainConfig.ChainName == networkname.BorDevnet && s.config.WithoutHeimdall {
 			borcfg.Authorize(eb, func(addr common.Address, _ string, _ []byte) ([]byte, error) {
-				return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+				return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
 			})
 		}
 
@@ -1546,7 +1538,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
 	}
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
@@ -1645,30 +1637,15 @@ func (s *Ethereum) Start() error {
 	}
 
 	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
-		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
+		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.chainConfig.Bor != nil {
-		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
+		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
+		go s.eth1ExecutionServer.Start(s.sentryCtx)
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] goroutine terminated")
-			// when we're running in stand alone mode we need to run the downloader before we start the
-			// polygon services because they will wait for it to complete before opening their stores
-			// which make use of snapshots and expect them to be initialize
-			// TODO: get the snapshots to call the downloader directly - which will avoid this
-			go func() {
-				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.NewTxContainer(nil, nil), s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
-
-				if err != nil && !errors.Is(err, context.Canceled) {
-					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
-					err = s.stopNode()
-					if err != nil {
-						s.logger.Error("could not stop node", "err", err)
-					}
-				}
-			}()
-
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
 			if err == nil || errors.Is(err, context.Canceled) {
@@ -1686,7 +1663,7 @@ func (s *Ethereum) Start() error {
 			return err
 		})
 	} else {
-		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
+		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
@@ -1828,7 +1805,7 @@ func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
 	return s.eth1ExecutionServer
 }
 
-// RemoveContents is like os.RemoveAll, but preserve dir itself
+// RemoveContents is like dir.RemoveAll, but preserve dir itself
 func RemoveContents(dirname string) error {
 	d, err := os.Open(dirname)
 	if err != nil {
@@ -1845,7 +1822,7 @@ func RemoveContents(dirname string) error {
 		return err
 	}
 	for _, file := range files {
-		err = os.RemoveAll(filepath.Join(dirname, file.Name()))
+		err = dir.RemoveAll(filepath.Join(dirname, file.Name()))
 		if err != nil {
 			return err
 		}

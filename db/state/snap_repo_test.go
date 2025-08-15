@@ -7,16 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // 1. create folder with content; OpenFolder contains all dirtyFiles (check the dirty files)
@@ -534,7 +536,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 		if info.IsDir() {
 			return nil
 		}
-		os.Remove(path)
+		dir.RemoveFile(path)
 		return nil
 	})
 }

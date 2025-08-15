@@ -33,7 +33,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 var (

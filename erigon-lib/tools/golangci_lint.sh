@@ -18,4 +18,5 @@ then
 	exit 2
 fi
 
+golangci-lint run --config ./.golangci.yml --fast-only
 golangci-lint run --config ./.golangci.yml

@@ -29,9 +29,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
@@ -635,7 +635,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		}
 
 		if len(timings) > 0 {
-			e.logger.Info("Timings: Post-Forkchoice", timings...)
+			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
 		}
 	}()
 }

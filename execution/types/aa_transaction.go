@@ -9,13 +9,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/fixedgas"
 )
 
 const (
@@ -62,6 +62,10 @@ func (tx *AccountAbstractionTransaction) GetData() []byte {
 
 func (tx *AccountAbstractionTransaction) GetAccessList() AccessList {
 	return tx.AccessList
+}
+
+func (tx *AccountAbstractionTransaction) GetAuthorizations() []Authorization {
+	return tx.Authorizations
 }
 
 func (tx *AccountAbstractionTransaction) Protected() bool {
@@ -128,7 +132,7 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 }
 
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return params2.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	return params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {

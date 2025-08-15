@@ -34,11 +34,11 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 )

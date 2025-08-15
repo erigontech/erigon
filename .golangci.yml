@@ -4,6 +4,7 @@ run:
     - nosqlite
     - noboltdb
     - nosilkworm
+    - goexperiment.synctest
 linters:
   enable:
     - asasalint
@@ -17,7 +18,6 @@ linters:
     - gosmopolitan
     - loggercheck
     - nilnesserr
-    - perfsprint
     - prealloc
     - reassign
     - spancheck

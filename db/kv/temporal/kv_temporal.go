@@ -23,12 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var ( // Compile time interface checks
@@ -417,7 +417,7 @@ func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
 }
 
-func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, err error) {
+func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, err error) {
 	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx)
 	if err != nil {
 		return nil, step, err
@@ -460,11 +460,11 @@ func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []by
 	return k, v, true, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	return tx.getLatest(name, tx.Tx, k)
 }
 
-func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	return tx.getLatest(name, tx.RwTx, k)
 }
 
@@ -528,10 +528,10 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 
 // Write methods
 
-func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
@@ -552,15 +552,15 @@ func (tx *tx) rangeLatest(domain kv.Domain, dbTx kv.Tx, from, to []byte, limit i
 	return tx.aggtx.DebugRangeLatest(dbTx, domain, from, to, limit)
 }
 
-func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	return tx.getLatestFromDB(domain, tx.Tx, k)
 }
 
-func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	return tx.getLatestFromDB(domain, tx.RwTx, k)
 }
 
-func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, found bool, err error) {
+func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	return tx.aggtx.DebugGetLatestFromDB(domain, k, dbTx)
 }
 

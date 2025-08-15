@@ -156,6 +156,13 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteMore()
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
+	refund := l.env.IntraBlockState.GetRefund()
+	if refund != 0 {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("refund")
+		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund())
+	}
+
 	if err != nil {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("error")

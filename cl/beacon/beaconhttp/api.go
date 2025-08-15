@@ -127,6 +127,11 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		if slices.Contains(w.Header().Values("Content-Type"), "text/event-stream") {
 			return
 		}
+		if beaconResponse, ok := any(ans).(*BeaconResponse); ok {
+			for key, value := range beaconResponse.Headers() {
+				w.Header().Set(key, value)
+			}
+		}
 		switch {
 		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
 			if !isNil(ans) {
