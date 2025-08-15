@@ -17,6 +17,7 @@
 package snapcfg
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -54,16 +55,16 @@ var (
 	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
 
-	// Need to fix this already.
-	allPreverified = []*Preverified{
-		&Mainnet,
-		&Holesky,
-		&Sepolia,
-		&Amoy,
-		&BorMainnet,
-		&Gnosis,
-		&Chiado,
-		&Hoodi,
+	// This belongs in a generic embed.FS or something.
+	allSnapshotHashes = []*[]byte{
+		&snapshothashes.Mainnet,
+		&snapshothashes.Holesky,
+		&snapshothashes.Sepolia,
+		&snapshothashes.Amoy,
+		&snapshothashes.BorMainnet,
+		&snapshothashes.Gnosis,
+		&snapshothashes.Chiado,
+		&snapshothashes.Hoodi,
 	}
 )
 
@@ -524,25 +525,28 @@ func webseedsParse(in []byte) (res []string) {
 
 func LoadRemotePreverified(ctx context.Context) (err error) {
 	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+		log.Info("Loading local preverified override file", "file", s)
+
 		b, err := os.ReadFile(s)
 		if err != nil {
 			return fmt.Errorf("reading remote preverified override file: %w", err)
 		}
-		for _, p := range allPreverified {
-			*p = fromEmbeddedToml(b)
+		for _, sh := range allSnapshotHashes {
+			*sh = bytes.Clone(b)
 		}
-		return nil
-	}
-	// Can't log in erigon-snapshot repo due to erigon-lib module import path.
-	log.Info("Loading remote snapshot hashes")
-	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
-	if err != nil {
-		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
+	} else {
+		// Can't log in erigon-snapshot repo due to erigon-lib module import path.
+		log.Info("Loading remote snapshot hashes")
 
-		// Fallback to GitHub if R2 fails
-		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 		if err != nil {
-			return err
+			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
+
+			// Fallback to GitHub if R2 fails
+			err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
