@@ -44,11 +44,11 @@ func trackRemovedFiles() {
 	for {
 		select {
 		case path := <-removedFilesChan:
-			removedFiles = append(removedFiles, path)
-		case <-time.Tick(30 * time.Second):
 			if len(removedFiles) > 10_000 {
 				removedFiles = make([]string, 0)
 			}
+			removedFiles = append(removedFiles, path)
+		case <-time.Tick(30 * time.Second):
 			for _, path := range removedFiles {
 				if exists, _ := FileExist(path); exists {
 					panic("Removed file unexpectedly exists: " + path)
