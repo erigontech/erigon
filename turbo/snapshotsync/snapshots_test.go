@@ -18,7 +18,6 @@ package snapshotsync
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -409,7 +408,6 @@ func TestRemoveOverlaps(t *testing.T) {
 		mustSeeFile(delList, "000000-000010-transactions.seg")
 		mustSeeFile(delList, "000000-000010-transactions-to-block.idx")
 		mustSeeFile(delList, "000170-000180-transactions-to-block.idx")
-		fmt.Printf("delList: %v\n", delList)
 		return nil
 	}))
 

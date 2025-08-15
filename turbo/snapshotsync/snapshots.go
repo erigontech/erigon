@@ -1265,9 +1265,10 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		return err
 	}
 	_, segmentsToRemove := findOverlaps(list)
-	filesToRemove := make([]string, 0, len(segmentsToRemove))
+
+	toRemove := make([]string, 0, len(segmentsToRemove))
 	for _, info := range segmentsToRemove {
-		filesToRemove = append(filesToRemove, info.Path)
+		toRemove = append(toRemove, info.Path)
 	}
 
 	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
@@ -1275,15 +1276,21 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err != nil {
 		return err
 	}
-	_, toRemove := findOverlaps(list)
-	for _, info := range toRemove {
-		filesToRemove = append(filesToRemove, info.Path)
+	_, accessorsToRemove := findOverlaps(list)
+	for _, info := range accessorsToRemove {
+		toRemove = append(toRemove, info.Path)
 	}
 
-	if err := s._callOnDeleteHookOnAbsolutePaths(filesToRemove, onDelete); err != nil {
-		return fmt.Errorf("RemoveOverlaps: %w", err)
+	relativePaths, err := toRelativePaths(s.dir, toRemove)
+	if err != nil {
+		return err
 	}
-	removeOldFiles(filesToRemove)
+	if onDelete != nil {
+		if err := onDelete(relativePaths); err != nil {
+			return fmt.Errorf("onDelete: %w", err)
+		}
+	}
+	removeOldFiles(toRemove)
 
 	// remove .tmp files
 	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
@@ -1297,21 +1304,15 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	return nil
 }
 
-// _callOnDeleteHookOnAbsolutePaths converts list of absolute paths to relative paths and calls onDelete hook
-func (s *RoSnapshots) _callOnDeleteHookOnAbsolutePaths(absolutePaths []string, onDelete func(l []string) error) (err error) {
-	relativePaths := make([]string, len(absolutePaths))
+func toRelativePaths(basePath string, absolutePaths []string) (relativePaths []string, err error) {
+	relativePaths = make([]string, len(absolutePaths))
 	for i, f := range absolutePaths {
-		relativePaths[i], err = filepath.Rel(s.dir, f)
+		relativePaths[i], err = filepath.Rel(basePath, f)
 		if err != nil {
-			return fmt.Errorf("rel: %w", err)
+			return nil, fmt.Errorf("rel: %w", err)
 		}
 	}
-	if onDelete != nil {
-		if err := onDelete(relativePaths); err != nil {
-			return fmt.Errorf("onDelete: %w", err)
-		}
-	}
-	return nil
+	return relativePaths, nil
 }
 
 type snapshotNotifier interface {
