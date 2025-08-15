@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 

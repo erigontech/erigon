@@ -145,8 +145,8 @@ const (
 	BorCheckpointEnds          = "BorCheckpointEnds"          // start block_num -> checkpoint_id (first block of checkpoint)
 	BorProducerSelections      = "BorProducerSelections"      // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
 	BorProducerSelectionsIndex = "BorProducerSelectionsIndex" // span.StartBlockNumber -> span.Id
-	BorWitnesses            = "BorWitnesses"              // block_num_u64 + block_hash -> witness
-	BorWitnessSizes         = "BorWitnessSizes"           // block_num_u64 + block_hash -> witness size (uint64)
+	BorWitnesses               = "BorWitnesses"               // block_num_u64 + block_hash -> witness
+	BorWitnessSizes            = "BorWitnessSizes"            // block_num_u64 + block_hash -> witness size (uint64)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -357,12 +357,9 @@ var ChaindataTables = []string{
 	BorCheckpoints,
 	BorCheckpointEnds,
 	BorProducerSelections,
-<<<<<<< HEAD:erigon-lib/kv/tables.go
 	BorProducerSelectionsIndex,
-=======
 	BorWitnesses,
 	BorWitnessSizes,
->>>>>>> aa1229719994cca746d9224658e4faf66cafec97:db/kv/tables.go
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
@@ -593,7 +590,6 @@ var AuRaTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-<<<<<<< HEAD:erigon-lib/kv/tables.go
 	BorTxLookup:                {Flags: DupSort},
 	BorEvents:                  {Flags: DupSort},
 	BorEventNums:               {Flags: DupSort},
@@ -607,21 +603,8 @@ var BorTablesCfg = TableCfg{
 	BorMilestones:              {Flags: DupSort},
 	BorMilestoneEnds:           {Flags: DupSort},
 	BorProducerSelections:      {Flags: DupSort},
-=======
-	BorTxLookup:             {Flags: DupSort},
-	BorEvents:               {Flags: DupSort},
-	BorEventNums:            {Flags: DupSort},
-	BorEventProcessedBlocks: {Flags: DupSort},
-	BorEventTimes:           {Flags: DupSort},
-	BorSpans:                {Flags: DupSort},
-	BorCheckpoints:          {Flags: DupSort},
-	BorCheckpointEnds:       {Flags: DupSort},
-	BorMilestones:           {Flags: DupSort},
-	BorMilestoneEnds:        {Flags: DupSort},
-	BorProducerSelections:   {Flags: DupSort},
-	BorWitnesses:            {Flags: DupSort},
-	BorWitnessSizes:         {Flags: DupSort},
->>>>>>> aa1229719994cca746d9224658e4faf66cafec97:db/kv/tables.go
+	BorWitnesses:               {Flags: DupSort},
+	BorWitnessSizes:            {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}
