@@ -1281,13 +1281,15 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		toRemove = append(toRemove, info.Path)
 	}
 
-	relativePaths, err := toRelativePaths(s.dir, toRemove)
-	if err != nil {
-		return err
-	}
-	if onDelete != nil {
-		if err := onDelete(relativePaths); err != nil {
-			return fmt.Errorf("onDelete: %w", err)
+	{
+		relativePaths, err := toRelativePaths(s.dir, toRemove)
+		if err != nil {
+			return err
+		}
+		if onDelete != nil {
+			if err := onDelete(relativePaths); err != nil {
+				return fmt.Errorf("onDelete: %w", err)
+			}
 		}
 	}
 	removeOldFiles(toRemove)
