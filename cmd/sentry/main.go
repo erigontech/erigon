@@ -23,8 +23,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -51,6 +51,7 @@ var (
 	maxPendPeers int
 	healthCheck  bool
 	metrics      bool
+	witProtocol  bool // Enable/disable WIT protocol
 )
 
 func init() {
@@ -71,6 +72,7 @@ func init() {
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&healthCheck, utils.HealthCheckFlag.Name, false, utils.HealthCheckFlag.Usage)
 	rootCmd.Flags().BoolVar(&metrics, utils.MetricsEnabledFlag.Name, false, utils.MetricsEnabledFlag.Usage)
+	rootCmd.Flags().BoolVar(&witProtocol, utils.PolygonPosWitProtocolFlag.Name, false, utils.PolygonPosWitProtocolFlag.Usage)
 
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
@@ -104,6 +106,7 @@ var rootCmd = &cobra.Command{
 			protocol,
 			allowedPorts,
 			metrics,
+			witProtocol,
 		)
 		if err != nil {
 			return err

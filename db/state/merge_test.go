@@ -28,13 +28,13 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestDomainRoTx_findMergeRange(t *testing.T) {
@@ -42,10 +42,10 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 	newDomainRoTx := func(aggStep uint64, files []visibleFile) *DomainRoTx {
 		return &DomainRoTx{
-			name:    kv.AccountsDomain,
-			files:   files,
-			aggStep: aggStep,
-			ht:      &HistoryRoTx{iit: &InvertedIndexRoTx{}},
+			name:     kv.AccountsDomain,
+			files:    files,
+			stepSize: aggStep,
+			ht:       &HistoryRoTx{iit: &InvertedIndexRoTx{}},
 		}
 	}
 
@@ -580,7 +580,7 @@ func TestMergeFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 
-	txs := d.aggregationStep * 8
+	txs := d.stepSize * 8
 	data := generateTestData(t, 20, 52, txs, txs, 100)
 
 	rwTx, err := db.BeginRw(context.Background())
@@ -590,12 +590,12 @@ func TestMergeFiles(t *testing.T) {
 	w := dc.NewWriter()
 
 	prev := []byte{}
-	prevStep := uint64(0)
+	prevStep := kv.Step(0)
 	for key, upd := range data {
 		for _, v := range upd {
 			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev, prevStep)
 
-			prev, prevStep = v.value, v.txNum/d.aggregationStep
+			prev, prevStep = v.value, kv.Step(v.txNum/d.stepSize)
 			require.NoError(t, err)
 		}
 	}

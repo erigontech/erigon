@@ -42,8 +42,8 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
 	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/requests"
 	erigon_app "github.com/erigontech/erigon/turbo/app"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -174,7 +174,7 @@ func (ph PanicHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
 
 func main() {
 	app := cli.NewApp()
-	app.Version = params.VersionWithCommit(params.GitCommit)
+	app.Version = version.VersionWithCommit(version.GitCommit)
 	app.Action = mainContext
 
 	app.Flags = []cli.Flag{

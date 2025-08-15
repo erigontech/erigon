@@ -7,12 +7,12 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // i) manages dirtyfiles and visible files,
@@ -173,8 +173,8 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*FilesItem) {
 	ss := f.stepSize
 	v := version.V1_0
 
-	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
-		from, to := RootNum(fromStep*ss), RootNum(toStep*ss)
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+		from, to := RootNum(uint64(fromStep)*ss), RootNum(uint64(toStep)*ss)
 		fname := p.BtIdxFile(v, from, to)
 		return []string{fname, p.ExistenceFile(v, from, to)}
 	})
@@ -190,9 +190,9 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
 	accCount := f.schema.AccessorIdxCount()
 	files := make([]string, accCount)
 
-	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
 		for i := uint64(0); i < accCount; i++ {
-			files[i] = p.AccessorIdxFile(v, RootNum(fromStep*ss), RootNum(toStep*ss), i)
+			files[i] = p.AccessorIdxFile(v, RootNum(fromStep.ToTxNum(ss)), RootNum(toStep.ToTxNum(ss)), i)
 		}
 		return files
 	})

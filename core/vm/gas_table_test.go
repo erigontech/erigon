@@ -30,14 +30,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -144,13 +144,13 @@ func TestEIP2200(t *testing.T) {
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 					return nil
 				},
 			}
+			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
 			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
@@ -202,7 +202,6 @@ func TestCreateGas(t *testing.T) {
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
@@ -210,6 +209,7 @@ func TestCreateGas(t *testing.T) {
 				return nil
 			},
 		}
+		_ = s.CommitBlock(vmctx.Rules(chain.TestChainConfig), stateWriter)
 		config := vm.Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}

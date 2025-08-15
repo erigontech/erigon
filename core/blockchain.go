@@ -369,7 +369,8 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time), stateWriter); err != nil {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
@@ -386,7 +387,8 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	if stateWriter == nil {
 		stateWriter = state.NewNoopWriter()
 	}
-	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), stateWriter)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, nil, cc)
+	ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 	return nil
 }
 
