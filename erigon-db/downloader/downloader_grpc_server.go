@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -69,6 +70,10 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	{
 		var names []string
 		for _, name := range request.Items {
+			if filepath.IsAbs(name.Path) {
+				err := fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", name.Path)
+				panic(err)
+			}
 			names = append(names, name.Path)
 		}
 		s.d.logger.Debug("[downloader] GrpcServer.Add", "files", names)
@@ -129,8 +134,12 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (_ *emptypb.Empty, err error) {
 	{
 		var names []string
-		for _, name := range request.Paths {
-			names = append(names, name)
+		for _, relPath := range request.Paths {
+			if filepath.IsAbs(relPath) {
+				err := fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", relPath)
+				panic(err)
+			}
+			names = append(names, relPath)
 		}
 		s.d.logger.Debug("[downloader] GrpcServer.Add", "files", names)
 	}
