@@ -332,6 +332,17 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 	return s.From < minStep
 }
 
+// unblackListFilesBySubstring - removes files from the blacklist that match any of the provided substrings.
+func unblackListFilesBySubstring(blackList map[string]struct{}, strs ...string) {
+	for _, str := range strs {
+		for k := range blackList {
+			if strings.Contains(k, str) {
+				delete(blackList, k)
+			}
+		}
+	}
+}
+
 // SyncSnapshots - Check snapshot states, determine what needs to be requested from the downloader
 // then wait for downloads to complete.
 func SyncSnapshots(
@@ -391,6 +402,11 @@ func SyncSnapshots(
 			}
 		}
 
+		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
+		if syncCfg.PersistReceiptsCacheV2 {
+			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
+		}
+
 		// build all download requests
 		for _, p := range preverifiedBlockSnapshots.Items {
 			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
@@ -421,14 +437,15 @@ func SyncSnapshots(
 				continue
 			}
 
-			if _, ok := blackListForPruning[p.Name]; ok {
-				continue
-			}
 			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 				continue
 			}
 
-			if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
+			isRcacheRelatedSegment := strings.Contains(p.Name, kv.RCacheDomain.String()) ||
+				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
+				strings.Contains(p.Name, kv.LogTopicIdx.String())
+
+			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
 				continue
 			}
 
