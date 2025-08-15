@@ -489,16 +489,20 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	}
 
 	header := getData(input, 0, 3*32)
+	baseLen256 := new(uint256.Int).SetBytes32(header[0:32])
+	expLen256 := new(uint256.Int).SetBytes32(header[32:64])
+	modLen256 := new(uint256.Int).SetBytes32(header[64:96])
+	lenLimit := uint64(math.MaxUint32)
 
 	// If base or mod is bigger than uint32, the gas cost will be huge.
-	if !allZero(header[0:28]) || !allZero(header[64:64+28]) {
+	if baseLen256.CmpUint64(lenLimit) > 0 || modLen256.CmpUint64(lenLimit) > 0 {
 		return math.MaxUint64
 	}
 
 	// If exp is bigger than uint32:
-	if !allZero(header[32 : 32+28]) {
+	if expLen256.CmpUint64(lenLimit) > 0 {
 		// Before EIP-7883, 0 multiplication complexity cancels the big exp.
-		if !c.osaka && allZero(header[0:32]) && allZero(header[64:96]) {
+		if !c.osaka && baseLen256.IsZero() && modLen256.IsZero() {
 			return minGas
 		}
 		// Otherwise, the gas cost will be huge.
@@ -506,9 +510,9 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	}
 
 	var (
-		baseLen = binary.BigEndian.Uint32(header[28:32])
-		expLen  = binary.BigEndian.Uint32(header[32+28 : 64])
-		modLen  = binary.BigEndian.Uint32(header[64+28 : 96])
+		baseLen = uint32(baseLen256.Uint64())
+		expLen  = uint32(expLen256.Uint64())
+		modLen  = uint32(modLen256.Uint64())
 	)
 	if len(input) > 96 {
 		input = input[96:]
