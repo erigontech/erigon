@@ -55,18 +55,6 @@ var (
 	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
 
-	// Need to fix this already.
-	allPreverified = []*Preverified{
-		&Mainnet,
-		&Holesky,
-		&Sepolia,
-		&Amoy,
-		&BorMainnet,
-		&Gnosis,
-		&Chiado,
-		&Hoodi,
-	}
-
 	// This belongs in a generic embed.FS or something.
 	allSnapshotHashes = []*[]byte{
 		&snapshothashes.Mainnet,
