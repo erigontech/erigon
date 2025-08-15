@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -354,6 +355,38 @@ func (s *DirtySegment) IsIndexed() bool {
 func (s *DirtySegment) FileName() string {
 	return s.Type().FileName(s.version, s.from, s.to)
 }
+
+func (s *DirtySegment) FilePaths(rel string) (relativePaths []string {
+
+	return s.Type().FileName(s.version, s.from, s.to)
+}
+
+func (i *FilesItem) FilePaths(relative string) (paths []string) {
+	if i.decompressor != nil {
+		paths = append(paths, i.decompressor.FilePath())
+	}
+	if i.index != nil {
+		paths = append(paths, i.index.FilePath())
+	}
+	if i.bindex != nil {
+		paths = append(paths, i.bindex.FilePath())
+	}
+	if i.existence != nil {
+		paths = append(paths, i.existence.FilePath)
+	}
+	if len(relative) == 0 {
+		return paths
+	}
+	var err error
+	for i := 0; i < len(paths); i++ {
+		paths[i], err = filepath.Rel(relative, paths[i])
+		if err != nil {
+			log.Warn("FilesItem.FilePaths: can't make relative path", "err", err, "relative", relative, "path", paths[i])
+		}
+	}
+	return paths
+}
+
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
 	return s.Type().FileInfo(dir, s.from, s.to)

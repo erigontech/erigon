@@ -189,6 +189,9 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			if len(toMerge[t.Enum()]) == 0 {
 				continue
 			}
+
+			fmt.Printf("[dbg] %s\n", t.IdxFileNames())
+
 			toMergeFileNames := make([]string, 0, len(toMerge[t.Enum()]))
 			for _, f := range toMerge[t.Enum()] {
 				toMergeFileNames = append(toMergeFileNames, f.FileName())
