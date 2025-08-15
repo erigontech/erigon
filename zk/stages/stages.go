@@ -2,8 +2,10 @@ package stages
 
 import (
 	"context"
-
+	"fmt"
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"math/big"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -32,6 +34,7 @@ func SequencerZkStages(
 	finish stages.FinishCfg,
 	hashStateCfg stages.HashStateCfg,
 	test bool,
+	chainCfg *chain.Config,
 ) []*stages.Stage {
 	return []*stages.Stage{
 		{
@@ -112,13 +115,27 @@ func SequencerZkStages(
 			ID:          stages2.IntermediateHashes,
 			Description: "Sequencer Intermediate Hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				// this is done in execution stage for the sequencer
 				return SpawnSequencerInterhashesStage(s, u, txc.Tx, ctx, zkInterHashesCfg, true)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if zkInterHashesCfg.zk.UsingPMT() {
+				if chainCfg.PmtEnabledBlock == nil {
+					// PMT was never enabled so use SMT for unwind
+					return UnwindSequencerInterhashsStage(u, s, txc.Tx, ctx, zkInterHashesCfg)
+				} else if chainCfg.PmtEnabledBlock == big.NewInt(0) {
+					// PMT was enabled at genesis so use PMT for unwind
+					return stages.UnwindIntermediateHashesStage(u, s, txc.Tx, trieConfigSequencer(zkInterHashesCfg), ctx, logger)
+				} else {
+					// PMT has been enabled, but we must check if we are unwinding past the PMT enabled block
+					if big.NewInt(int64(u.UnwindPoint)).Cmp(chainCfg.PmtEnabledBlock) < 0 {
+						// Unwind point is lower than PMT enabled block
+						// This means we are trying to unwind past the PmtEnabledBlock
+						// We do not support this as of now, so we must panic
+						panic(fmt.Sprintf("Unwind point %d is lower than PMT enabled block %d. Unwinding past PMT enabled block is not supported.", u.UnwindPoint, chainCfg.PmtEnabledBlock))
+					}
+					// All is good, we can use PMT for unwind
 					return stages.UnwindIntermediateHashesStage(u, s, txc.Tx, trieConfigSequencer(zkInterHashesCfg), ctx, logger)
 				}
-				return UnwindSequencerInterhashsStage(u, s, txc.Tx, ctx, zkInterHashesCfg)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneSequencerInterhashesStage(p, tx, zkInterHashesCfg, ctx)
@@ -129,11 +146,7 @@ func SequencerZkStages(
 			Description: "Hash the key in the state",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				// this is only used in normalcy and the forward is used in execution stage before inters.
-				if !zkInterHashesCfg.zk.UsingPMT() {
-					return stages.SpawnHashStateStage(s, txc.Tx, hashStateCfg, ctx, logger)
-				}
-				return nil
+				return stages.SpawnHashStateStage(s, txc.Tx, hashStateCfg, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return stages.UnwindHashStateStage(u, s, txc.Tx, hashStateCfg, ctx, logger, false)
@@ -272,6 +285,7 @@ func DefaultZkStages(
 	txLookup stages.TxLookupCfg,
 	finish stages.FinishCfg,
 	test bool,
+	chainCfg *chain.Config,
 ) []*stages.Stage {
 	return []*stages.Stage{
 		{
@@ -373,11 +387,29 @@ func DefaultZkStages(
 			},
 		},
 		{
+			ID:          stages2.IntermediateHashesStandalone,
+			Description: "Standalone intermediate hashes for the PMT",
+			Disabled:    !zkInterHashesCfg.zk.SimultaneousPmtAndSmt,
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				// This should be false because we are using the SMT but building the PMT as a standalone.
+				zkInterHashesCfg.checkRoot = false
+				_, err := stages.SpawnIntermediateHashesStage(s, u, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
+				return err
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
+				zkInterHashesCfg.checkRoot = false
+				return stages.UnwindIntermediateHashesStage(u, s, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+		{
 			ID:          stages2.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if zkInterHashesCfg.zk.UsingPMT() {
+				if chainCfg.IsPmtEnabled(s.BlockNumber) {
 					_, err := stages.SpawnIntermediateHashesStage(s, u, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
 					return err
 				}
@@ -386,11 +418,23 @@ func DefaultZkStages(
 				return err
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if zkInterHashesCfg.zk.UsingPMT() {
+				if chainCfg.PmtEnabledBlock == nil {
+					// PMT was never enabled so use SMT for unwind
+					return UnwindZkIntermediateHashesStage(u, s, txc.Tx, zkInterHashesCfg, ctx, false)
+				} else if chainCfg.PmtEnabledBlock == big.NewInt(0) {
+					// PMT was enabled at genesis so use PMT for unwind
+					return stages.UnwindIntermediateHashesStage(u, s, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
+				} else {
+					// PMT has been enabled, but we must check if we are unwinding past the PMT enabled block
+					if big.NewInt(int64(u.UnwindPoint)).Cmp(chainCfg.PmtEnabledBlock) < 0 {
+						// Unwind point is lower than PMT enabled block
+						// This means we are trying to unwind past the PmtEnabledBlock
+						// We do not support this as of now, so we must panic
+						panic(fmt.Sprintf("Unwind point %d is lower than PMT enabled block %d. Unwinding past PMT enabled block is not supported.", u.UnwindPoint, chainCfg.PmtEnabledBlock))
+					}
+					// All is good, we can use PMT for unwind
 					return stages.UnwindIntermediateHashesStage(u, s, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
 				}
-
-				return UnwindZkIntermediateHashesStage(u, s, txc.Tx, zkInterHashesCfg, ctx, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				// TODO: implement this in zk interhashes

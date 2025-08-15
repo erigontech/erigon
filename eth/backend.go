@@ -336,7 +336,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, config.OverrideCancunTime, config.OverrideNormalcyBlock, config.OverrideLondonBlock, config.OverrideShanghaiTime, tmpdir, logger)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.GenesisOverrides, tmpdir, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -1028,7 +1028,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.chainConfig.AllowFreeTransactions = cfg.AllowFreeTransactions
 		backend.chainConfig.ZkDefaultGasPrice = cfg.DefaultGasPrice
 		backend.chainConfig.FreeInjectedBatch = cfg.FreeInjectedBatch
-		backend.chainConfig.Type1 = cfg.Zk.Commitment.IsType1()
 		l1Urls := strings.Split(cfg.L1RpcUrl, ",")
 
 		if cfg.Zk.L1CacheEnabled {

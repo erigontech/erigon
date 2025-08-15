@@ -1,7 +1,6 @@
 package ethconfig
 
 import (
-	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -129,57 +128,13 @@ type Zk struct {
 	L2InfoTreeUpdatesBatchSize     uint64
 	L2InfoTreeUpdatesURL           string
 
-	Hardfork        Hardfork
-	Commitment      Commitment `yaml:"zkevm.initial-commitment"`
-	InjectGers      bool
-	HonourChainspec bool `yaml:"zkevm.honour-chainspec"`
-
+	InjectGers             bool
+	HonourChainspec        bool `yaml:"zkevm.honour-chainspec"`
+	SimultaneousPmtAndSmt  bool
 	SkipSmt                bool
 	OnlySmtV2              bool
 	SequencerBlockGasLimit uint64
 	PessimisticForkNumber  uint64
-}
-
-type Hardfork string
-
-const (
-	HardforkTypeHermez   Hardfork = "hermez"
-	HardforkTypeEthereum Hardfork = "ethereum"
-)
-
-func (h Hardfork) IsValid() bool {
-	switch Hardfork(strings.ToLower(string(h))) {
-	case HardforkTypeHermez, HardforkTypeEthereum:
-		return true
-	}
-	return false
-}
-
-func (h Hardfork) ValidHardforks() []Hardfork {
-	return []Hardfork{HardforkTypeHermez, HardforkTypeEthereum}
-}
-
-type Commitment string
-
-const (
-	CommitmentPMT Commitment = "pmt"
-	CommitmentSMT Commitment = "smt"
-)
-
-func (c Commitment) IsValid() bool {
-	switch Commitment(strings.ToLower(string(c))) {
-	case CommitmentPMT, CommitmentSMT:
-		return true
-	}
-	return false
-}
-
-func ValidCommitments() []Commitment {
-	return []Commitment{CommitmentPMT, CommitmentSMT}
-}
-
-func (c Commitment) IsType1() bool {
-	return c == CommitmentPMT
 }
 
 func (c *Zk) ShouldCountersBeUnlimited(l1Recovery bool) bool {
@@ -201,14 +156,6 @@ func (c *Zk) ShouldImportInitialBatch() bool {
 
 func (c *Zk) IsL1Recovery() bool {
 	return c.L1SyncStartBlock > 0
-}
-
-func (c *Zk) UsingSMT() bool {
-	return c.Commitment == CommitmentSMT
-}
-
-func (c *Zk) UsingPMT() bool {
-	return c.Commitment == CommitmentPMT
 }
 
 type L1InfoTreeOffset struct {

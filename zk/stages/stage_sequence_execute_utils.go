@@ -493,6 +493,10 @@ func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, unwi
 	}
 
 	if !unwinding {
+		if err := stages.SaveStageProgress(tx, stages.HashState, newHeight); err != nil {
+			return err
+		}
+
 		if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, newHeight); err != nil {
 			return err
 		}
@@ -654,8 +658,7 @@ func checkSmtMigration(ctx context.Context, cfg SequenceBlockCfg, roTx kv.Tx, s 
 		return nil
 	}
 
-	// we only care to migrate the SMT if the commitment type is SMT
-	if cfg.zk.Commitment != ethconfig.CommitmentSMT {
+	if cfg.chainConfig.IsPmtEnabled(s.BlockNumber) {
 		return nil
 	}
 

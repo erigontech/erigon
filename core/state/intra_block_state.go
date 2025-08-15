@@ -98,6 +98,7 @@ type IntraBlockState struct {
 	balanceInc        map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 	disableBalanceInc bool                                   // Disable balance increase tracking and eagerly read accounts
 
+	// isType 1 indicates whether we are using PMT + Normalcy mode
 	isType1 bool
 }
 
@@ -902,7 +903,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 		}
 	}
 
-	sdb.isType1 = rules.IsType1
+	sdb.SetIsType1(rules.IsType1)
 
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
@@ -945,6 +946,6 @@ func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcom
 	return sdb.accessList.Contains(addr, slot)
 }
 
-func (sdb *IntraBlockState) SetType1(isType1 bool) {
+func (sdb *IntraBlockState) SetIsType1(isType1 bool) {
 	sdb.isType1 = isType1
 }

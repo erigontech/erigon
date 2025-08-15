@@ -119,6 +119,9 @@ type Config struct {
 	ForkId13Durian          *big.Int `json:"forkID13Durian,omitempty"`
 	NormalcyBlock           *big.Int `json:"normalcyBlock,omitempty"`
 
+	// The block at which the PMT is enabled over the SMT.
+	PmtEnabledBlock *big.Int `json:"pmtEnabledBlock,omitempty"`
+
 	AllowFreeTransactions bool   `json:"allowFreeTransactions,omitempty"`
 	FreeInjectedBatch     bool   `json:"freeInjectedBatch,omitempty"`
 	ZkDefaultGasPrice     uint64 `json:"zkDefaultGasFee,omitempty"`
@@ -127,7 +130,6 @@ type Config struct {
 	// this option should only be used in conjunction with normalcy, it is designed for testing
 	// vanilla EVM execution for comparison of state roots only and not to be used in production
 	DebugDisableZkevmStateChanges bool `json:"debugDisableZkevmStateChanges,omitempty"`
-	Type1                         bool `json:"type1,omitempty"` // if true, type1 behavior is enabled (normalcy + PMT), otherwise type2 behavior is used
 }
 
 type BlobConfig struct {
@@ -193,7 +195,7 @@ type BorConfig interface {
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Normalcy: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Normalcy: %v, PMT Enabled: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -215,6 +217,7 @@ func (c *Config) String() string {
 		c.PragueTime,
 		c.OsakaTime,
 		c.NormalcyBlock,
+		c.PmtEnabledBlock,
 		engine,
 	)
 }
@@ -408,6 +411,16 @@ func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
 
 func (c *Config) IsNormalcy(num uint64) bool {
 	return isForked(c.NormalcyBlock, num)
+}
+
+func (c *Config) IsPmtEnabled(num uint64) bool {
+	return isForked(c.PmtEnabledBlock, num)
+}
+
+func (c *Config) IsType1(num uint64) bool {
+	pmtEnabled := isForked(c.PmtEnabledBlock, num)
+	normalcy := isForked(c.NormalcyBlock, num)
+	return pmtEnabled && normalcy
 }
 
 func (c *Config) IsForkID4(num uint64) bool {
@@ -703,6 +716,7 @@ type Rules struct {
 	IsPrague, isOsaka                                                                                                                                    bool
 	IsAura                                                                                                                                               bool
 	IsNormalcy                                                                                                                                           bool
+	IsPmtEnabled                                                                                                                                         bool
 	IsType1                                                                                                                                              bool
 	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8Elderberry, IsForkId10, IsForkId11, IsForkID12Banana, IsForkID13Durian bool
 }
@@ -731,7 +745,8 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsPrague:             c.IsPrague(time),
 		isOsaka:              c.IsOsaka(time),
 		IsNormalcy:           c.IsNormalcy(num),
-		IsType1:              c.Type1,
+		IsPmtEnabled:         c.IsPmtEnabled(num),
+		IsType1:              c.IsType1(num),
 		IsAura:               c.Aura != nil,
 		IsForkID4:            c.IsForkID4(num),
 		IsForkID5Dragonfruit: c.IsForkID5Dragonfruit(num),

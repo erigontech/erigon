@@ -178,6 +178,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.OverrideNormalcyBlockFlag,
 	&utils.OverrideLondonBlockFlag,
 	&utils.OverrideShanghaiTimeFlag,
+	&utils.OverridePmtEnabledBlockFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,
@@ -338,7 +339,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BadTxPurge,
 	&utils.ZkevmLogExcludeFlags,
 
-	&utils.Commitment,
+	&utils.SimultaneousPmtAndSmt,
 	&utils.HonourChainspec,
 	&utils.InjectGers,
 	&utils.SkipSmt,

@@ -85,6 +85,8 @@ type ZkEvmAPI interface {
 
 const getBatchWitness = "getBatchWitness"
 
+var ErrStateTrieUnsupported = errors.New("state trie does not support witness")
+
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
 type ZkEvmAPIImpl struct {
 	ethApi *APIImpl
@@ -951,9 +953,6 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 // }
 
 func (api *ZkEvmAPIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *WitnessMode, debug *bool) (hexutility.Bytes, error) {
-	if api.config.Zk.UsingPMT() {
-		return nil, errors.New("state trie does not support witness")
-	}
 	checkedMode := WitnessModeNone
 	if mode != nil && *mode != WitnessModeFull && *mode != WitnessModeTrimmed {
 		return nil, errors.New("invalid mode, must be full or trimmed")
@@ -969,9 +968,6 @@ func (api *ZkEvmAPIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.Block
 }
 
 func (api *ZkEvmAPIImpl) GetBlockRangeWitness(ctx context.Context, startBlockNrOrHash rpc.BlockNumberOrHash, endBlockNrOrHash rpc.BlockNumberOrHash, mode *WitnessMode, debug *bool) (hexutility.Bytes, error) {
-	if api.config.Zk.UsingPMT() {
-		return nil, errors.New("state trie does not support witness")
-	}
 	checkedMode := WitnessModeNone
 	if mode != nil && *mode != WitnessModeFull && *mode != WitnessModeTrimmed {
 		return nil, errors.New("invalid mode, must be full or trimmed")
@@ -1023,6 +1019,15 @@ func (api *ZkEvmAPIImpl) getBatchWitness(ctx context.Context, tx kv.Tx, batchNum
 			if blockNumber > endBlock {
 				endBlock = blockNumber
 			}
+		}
+
+		cc, err := api.ethApi.chainConfig(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+
+		if cc.IsPmtEnabled(startBlock) {
+			return nil, ErrStateTrieUnsupported
 		}
 
 		startBlockInt := rpc.BlockNumber(startBlock)
@@ -1094,6 +1099,15 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		return nil, fmt.Errorf("start block number must be less than or equal to end block number, start=%d end=%d", blockNr, endBlockNr)
 	}
 
+	cc, err := api.ethApi.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if cc.IsPmtEnabled(blockNr) {
+		return nil, ErrStateTrieUnsupported
+	}
+
 	generator, fullWitness, err := api.buildGenerator(ctx, tx, witnessMode)
 	if err != nil {
 		return nil, err
@@ -1113,9 +1127,6 @@ const (
 )
 
 func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64, mode *WitnessMode) (interface{}, error) {
-	if api.config.Zk.UsingPMT() {
-		return nil, errors.New("state trie does not support witness")
-	}
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1162,9 +1173,6 @@ func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64
 }
 
 func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64, mode *WitnessMode, debug *bool) (*legacy_executor_verifier.RpcPayload, error) {
-	if api.config.Zk.UsingPMT() {
-		return nil, errors.New("state trie does not support witness")
-	}
 	if !sequencer.IsSequencer() {
 		return nil, errors.New("method only supported from a sequencer node")
 	}
@@ -1192,6 +1200,15 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 	blockNumbers, err := hDb.GetL2BlockNosByBatch(batchNumber)
 	if err != nil {
 		return nil, err
+	}
+
+	cc, err := api.ethApi.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if cc.IsPmtEnabled(blockNumbers[0]) {
+		return nil, errors.New("state trie does not support witness")
 	}
 
 	lastBlock, err := rawdb.ReadBlockByNumber(tx, blockNumbers[len(blockNumbers)-1])

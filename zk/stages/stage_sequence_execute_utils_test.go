@@ -202,7 +202,7 @@ func Test_PrepareForkId_DuringRecovery(t *testing.T) {
 				}()
 			}
 
-			forkId, err := prepareForkId(test.lastBatch, 1, forkDbMock, SequenceBlockCfg{zk: &ethconfig.Zk{Commitment: ethconfig.CommitmentSMT}})
+			forkId, err := prepareForkId(test.lastBatch, 1, forkDbMock, SequenceBlockCfg{zk: &ethconfig.Zk{}})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
