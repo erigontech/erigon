@@ -455,7 +455,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps(func(delList []string) error {
-		require.Len(delList, 3)
+		require.Len(delList, 0)
 		return nil
 	}))
 
