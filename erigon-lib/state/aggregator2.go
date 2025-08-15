@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -376,6 +377,9 @@ func checkSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
+				if os.IsNotExist(err) { //skip magically disappeared files
+					return nil
+				}
 				return err
 			}
 
