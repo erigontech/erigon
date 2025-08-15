@@ -66,7 +66,7 @@ func (m *Metrics) WriteToCSV() {
 }
 
 func (m *Metrics) LogMetrics(logger log.Logger, level log.Lvl, prefix string) {
-	logger.Log(level, prefix+"trie progress", "upd", m.updates.Load(), "akeys", m.addressKeys.Load(), "skeys", m.storageKeys.Load(),
+	logger.Log(level, prefix+" trie progress", "upd", m.updates.Load(), "akeys", m.addressKeys.Load(), "skeys", m.storageKeys.Load(),
 		"rdb", m.loadBranch.Load(), "rda", m.loadAccount.Load(), "rds", m.loadStorage.Load(), "wrb", m.updateBranch.Load(),
 		"fld", m.unfolds.Load(), "fdur", fmt.Sprintf("%dms", m.spentFolding.Milliseconds()),
 		"ufdur", fmt.Sprintf("%dms", m.spentUnfolding.Milliseconds()), "pdur", fmt.Sprintf("%dms", m.spentProcessing.Milliseconds()))
