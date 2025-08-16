@@ -216,7 +216,7 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := datadir.ApplyMigrations(&dirs); err != nil {
 		return err
 	}
 	if err := checkChainName(ctx, dirs, chain); err != nil {
@@ -600,7 +600,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := datadir.ApplyMigrations(&dirs); err != nil {
 		return err
 	}
 

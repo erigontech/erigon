@@ -17,11 +17,12 @@
 package dir
 
 import (
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"golang.org/x/sync/errgroup"
 )
