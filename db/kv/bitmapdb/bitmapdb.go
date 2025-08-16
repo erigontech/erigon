@@ -23,6 +23,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
 
