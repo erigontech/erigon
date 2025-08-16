@@ -20,6 +20,7 @@ package diskutils
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
