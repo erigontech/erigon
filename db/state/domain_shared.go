@@ -514,9 +514,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
-	if domain == kv.CommitmentDomain {
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(k), v, sd.txNum)
-	}
 	return v, step, nil
 }
 
