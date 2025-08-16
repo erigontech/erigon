@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/db/version"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
