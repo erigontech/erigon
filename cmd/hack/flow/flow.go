@@ -18,6 +18,7 @@ package flow
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -201,7 +202,7 @@ func batchServer() {
 			defer debug.LogPanic()
 			for job := range jobs {
 				enc := hex.EncodeToString(job.code)
-				cmd := exec.Command("./build/bin/hack",
+				cmd := exec.CommandContext(context.Background(), "./build/bin/hack",
 					"--action", "cfg",
 					"--mode", "worker",
 					"--quiet",

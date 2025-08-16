@@ -192,12 +192,12 @@ func abigen(c *cli.Context) error {
 
 		switch {
 		case c.IsSet(solFlag.Name):
-			contracts, err = compiler.CompileSolidity(c.String(solcFlag.Name), c.String(solFlag.Name))
+			contracts, err = compiler.CompileSolidity(c.Context, c.String(solcFlag.Name), c.String(solFlag.Name))
 			if err != nil {
 				utils.Fatalf("Failed to build Solidity contract: %v", err)
 			}
 		case c.IsSet(vyFlag.Name):
-			output, err := compiler.CompileVyper(c.String(vyperFlag.Name), c.String(vyFlag.Name))
+			output, err := compiler.CompileVyper(c.Context, c.String(vyperFlag.Name), c.String(vyFlag.Name))
 			if err != nil {
 				utils.Fatalf("Failed to build Vyper contract: %v", err)
 			}

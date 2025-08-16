@@ -22,10 +22,10 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+
+	"golang.org/x/sync/errgroup"
 )
 
 var (
