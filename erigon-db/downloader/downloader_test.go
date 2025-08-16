@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	. "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
 )
@@ -104,4 +106,66 @@ func TestVerifyData(t *testing.T) {
 
 	err = d.VerifyData(d.ctx, nil, false)
 	require.NoError(err)
+}
+
+func TestAddDel(t *testing.T) {
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	ctx := context.Background()
+
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	require.NoError(err)
+	defer d.Close()
+
+	f1 := filepath.Join(dirs.Snap, "a.seg")      // block file
+	f2 := filepath.Join(dirs.SnapDomain, "a.kv") // state file
+	_, _ = os.Create(f1)
+	_, _ = os.Create(f2)
+
+	srever, _ := NewGrpcServer(d)
+	// Add: epxect relative paths
+	_, err = srever.Add(ctx, &AddRequest{Items: []*AddItem{{Path: f1}}})
+	require.Error(err)
+	_, err = srever.Add(ctx, &AddRequest{Items: []*AddItem{{Path: f2}}})
+	require.Error(err)
+	require.Equal(0, len(d.torrentClient.Torrents()))
+
+	f1Rel, _ := filepath.Rel(dirs.Snap, f1)
+	f2Rel, _ := filepath.Rel(dirs.Snap, f2)
+	_, err = srever.Add(ctx, &AddRequest{Items: []*AddItem{{Path: f1Rel}}})
+	require.NoError(err)
+	_, err = srever.Add(ctx, &AddRequest{Items: []*AddItem{{Path: f2Rel}}})
+	require.NoError(err)
+	require.Equal(2, len(d.torrentClient.Torrents()))
+
+	// add idempotency
+	_, err = srever.Add(ctx, &AddRequest{Items: []*AddItem{{Path: f1Rel}}})
+	require.NoError(err)
+	_, err = srever.Add(ctx, &AddRequest{Items: []*AddItem{{Path: f2Rel}}})
+	require.NoError(err)
+	require.Equal(2, len(d.torrentClient.Torrents()))
+
+	// Del: epxect relative paths
+	_, err = srever.Delete(ctx, &DeleteRequest{Paths: []string{f1}})
+	require.Error(err)
+	_, err = srever.Delete(ctx, &DeleteRequest{Paths: []string{f2}})
+	require.Error(err)
+	require.Equal(2, len(d.torrentClient.Torrents()))
+
+	// Del: idempotency
+	_, err = srever.Delete(ctx, &DeleteRequest{Paths: []string{f1Rel}})
+	require.NoError(err)
+	require.Equal(1, len(d.torrentClient.Torrents()))
+	_, err = srever.Delete(ctx, &DeleteRequest{Paths: []string{f1Rel}})
+	require.NoError(err)
+	require.Equal(1, len(d.torrentClient.Torrents()))
+
+	_, err = srever.Delete(ctx, &DeleteRequest{Paths: []string{f2Rel}})
+	require.NoError(err)
+	require.Equal(0, len(d.torrentClient.Torrents()))
+	_, err = srever.Delete(ctx, &DeleteRequest{Paths: []string{f2Rel}})
+	require.NoError(err)
+	require.Equal(0, len(d.torrentClient.Torrents()))
 }
