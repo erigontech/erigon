@@ -909,6 +909,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	// Check block sanity
 	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //skip magically disappeared files
+				return nil
+			}
 			return err
 		}
 
@@ -959,7 +962,7 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("checkIfBlockSnapshotsPublishable.walk: %w", err)
 	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
@@ -995,6 +998,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 	if err := filepath.Walk(dirs.SnapDomain, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //skip magically disappeared files
+				return nil
+			}
 			return err
 		}
 		if info.IsDir() && path != dirs.SnapDomain {
@@ -1093,6 +1099,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 	if err := filepath.Walk(dirs.SnapIdx, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //skip magically disappeared files
+				return nil
+			}
 			return err
 		}
 
@@ -1200,6 +1209,9 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	intervals := []interval{}
 	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //skip magically disappeared files
+				return nil
+			}
 			return err
 		}
 		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType+".") {
@@ -1304,6 +1316,9 @@ func doClearIndexing(cliCtx *cli.Context) error {
 func deleteFilesWithExtensions(dir string, extensions []string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //skip magically disappeared files
+				return nil
+			}
 			return err
 		}
 
@@ -2078,7 +2093,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if err := br.RemoveOverlaps(); err != nil {
+	if err := br.RemoveOverlaps(nil); err != nil {
 		return err
 	}
 

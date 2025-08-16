@@ -26,6 +26,7 @@ import (
 	"strings"
 	"syscall"
 
+
 	"github.com/gofrs/flock"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -270,7 +271,7 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) {
+				if os.IsNotExist(err) { //skip magically disappeared files
 					return nil
 				}
 				return err
@@ -344,7 +345,7 @@ func (d *Dirs) RenameNewVersions() error {
 		// renaming v1.0- => v1-
 		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) {
+				if os.IsNotExist(err) { //skip magically disappeared files
 					return nil
 				}
 				return err
@@ -382,7 +383,7 @@ func (d *Dirs) RenameNewVersions() error {
 		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc., unsupported in 3.0)
 		err = filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) {
+				if os.IsNotExist(err) { //skip magically disappeared files
 					return nil
 				}
 				return err

@@ -21,6 +21,6 @@ const (
 	Major                    = 3             // Major version component of the current release
 	Minor                    = 1             // Minor version component of the current release
 	Micro                    = 0             // Patch version component of the current release
-	Modifier                 = ""            // Modifier component of the current release
+	Modifier                 = "rc1"         // Modifier component of the current release
 	DefaultSnapshotGitBranch = "release/3.1" // Branch of erigontech/erigon-snapshot to use in OtterSync
 )
