@@ -21,6 +21,7 @@ package diskutils
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -95,7 +96,7 @@ func SmlinkForDirPath(dirPath string) string {
 }
 
 func diskUUID(disk string) (string, error) {
-	cmd := exec.Command("lsblk", "-o", "MOUNTPOINT,UUID")
+	cmd := execCommandContext(context.Background(), "lsblk", "-o", "MOUNTPOINT,UUID")
 
 	// Capture the output
 	output, err := cmd.Output()
@@ -142,7 +143,7 @@ func DiskInfo(disk string) (string, error) {
 	}
 	valString = fmt.Sprintf("%s$%d", valString, len(headersArray))
 
-	cmd := exec.Command("bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", `+valString+`}'`)
+	cmd := exec.CommandContext(context.Background(), "bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", `+valString+`}'`)
 	output, err := cmd.Output()
 	if err != nil {
 		log.Debug("[diskutils] Error executing lsblk command: %v", err)
