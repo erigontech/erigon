@@ -96,7 +96,7 @@ func SmlinkForDirPath(dirPath string) string {
 }
 
 func diskUUID(disk string) (string, error) {
-	cmd := execCommandContext(context.Background(), "lsblk", "-o", "MOUNTPOINT,UUID")
+	cmd := exec.CommandContext(context.Background(), "lsblk", "-o", "MOUNTPOINT,UUID")
 
 	// Capture the output
 	output, err := cmd.Output()
