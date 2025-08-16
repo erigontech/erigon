@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/FastFilter/xorfilter"
+	"github.com/edsrzf/mmap-go"
 	mm "github.com/erigontech/erigon-lib/mmap"
 )
 
