@@ -29,7 +29,6 @@ jobs:
           go-version: '1.25'
 
       - name: Install golangci-lint
-        if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v8
         with:
           version: 'v2.1.6'
