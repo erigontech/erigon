@@ -306,6 +306,7 @@ var Schema = SchemaGen{
 		Compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
 		Accessors:   AccessorHashMap,
+		standalone:  true,
 	},
 	LogTopicIdx: iiCfg{
 		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
@@ -313,6 +314,7 @@ var Schema = SchemaGen{
 		Compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
 		Accessors:   AccessorHashMap,
+		standalone:  true,
 	},
 	TracesFromIdx: iiCfg{
 		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
@@ -320,6 +322,7 @@ var Schema = SchemaGen{
 		Compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
 		Accessors:   AccessorHashMap,
+		standalone:  true,
 	},
 	TracesToIdx: iiCfg{
 		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
@@ -327,6 +330,7 @@ var Schema = SchemaGen{
 		Compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
+		standalone:  true,
 	},
 }
 
