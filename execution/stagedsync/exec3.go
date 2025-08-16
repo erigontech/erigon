@@ -297,7 +297,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
 	case *serialExecutor:
-		readCount := uint64(te.taskExecMetrics.ReadCount.Load())
+		readCount := te.taskExecMetrics.ReadCount.Load()
 		curReadCount := readCount - p.prevReadCount
 		p.prevReadCount = readCount
 
