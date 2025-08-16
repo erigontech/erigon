@@ -238,4 +238,4 @@ jobs:
            [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
           echo "::error::Error detected during tests"
           exit 1
-        fi
+        fi 
