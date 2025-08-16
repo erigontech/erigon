@@ -1350,6 +1350,9 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	var previous *stateObject
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
+		if sdb.blockNum == 23112764 && sdb.txIndex == 86 {
+			fmt.Println("CRA", sdb.blockNum, sdb.txIndex)
+		}
 		defer func() {
 			var creatingContract string
 			if contractCreation {
@@ -1396,9 +1399,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
-	if previous == nil {
-		sdb.versionRead(addr, BalancePath, common.Hash{}, StorageRead, newObj.Balance())
-	}
+	sdb.versionRead(addr, BalancePath, common.Hash{}, StorageRead, newObj.Balance())
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
 
 	return nil
