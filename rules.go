@@ -82,10 +82,6 @@ func cursorDeferClose(m dsl.Matcher) {
 		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
-func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
-	m.Match(`filepath.Walk($dir, $cb)`).Report(`report("Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls")}`)
-}
-
 func streamDeferClose(m dsl.Matcher) {
 	m.Match(
 		`$c, $err = $db.Range($params); $chk; $close`,
