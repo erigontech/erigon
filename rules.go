@@ -92,8 +92,7 @@ func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
 		return err
 	}
 
-	//TODO: catch all filepath.Walk, filepath.WalkDir, fs.WalkDir. Provide our own walker which will skip os.IsNotExist errors
-	m.Match(`filepath.Walk($dir, $fn) {`).Report(`report("Use the project helper instead of filepath.Walk")}`)
+	m.Match(`filepath.Walk($dir)`).Report(`report("Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls")}`)
 }
 
 func streamDeferClose(m dsl.Matcher) {
