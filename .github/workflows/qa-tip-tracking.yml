@@ -19,7 +19,7 @@ concurrency:
 jobs:
   mainnet-tip-tracking-test:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
-    timeout-minutes: 600
+    timeout-minutes: 1000
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.0/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -232,7 +232,10 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Action for Not Success
-      if: steps.test_step.outputs.TEST_RESULT != 'success' || steps.downgrade_test_step.outputs.TEST_RESULT != 'success'
+      if: ${{ always() }}
       run: |
-        echo "::error::Error detected during tests"
-        exit 1
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]] || \
+           [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during tests"
+          exit 1
+        fi 
