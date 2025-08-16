@@ -418,7 +418,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporalDb
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
 		return nil, err
 	}
 
