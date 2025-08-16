@@ -20,6 +20,7 @@ package diskutils
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"syscall"
@@ -68,8 +69,8 @@ func SmlinkForDirPath(dirPath string) string {
 	}
 }
 
-func DiskInfo(disk string) (string, error) {
-	cmd := exec.Command("diskutil", "info", disk)
+func DiskInfo(ctx context.Context, disk string) (string, error) {
+	cmd := exec.CommandContext(ctx, "diskutil", "info", disk)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()

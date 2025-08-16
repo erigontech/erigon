@@ -17,6 +17,7 @@
 package diagnostics
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 
@@ -134,7 +135,7 @@ func GetDiskInfo(nodeDisk string) DiskInfo {
 		}
 	}
 
-	diskDetails, err := diskutils.DiskInfo(device)
+	diskDetails, err := diskutils.DiskInfo(context.Background(), device)
 	if err != nil {
 		log.Debug("[diagnostics] Failed to get disk info", "err", err)
 	}

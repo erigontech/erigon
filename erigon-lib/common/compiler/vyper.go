@@ -87,7 +87,7 @@ func CompileVyper(ctx context.Context, vyper string, sourcefiles ...string) (map
 		return nil, err
 	}
 	args := s.makeArgs()
-	cmd := exec.Command(s.Path, append(args, sourcefiles...)...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, s.Path, append(args, sourcefiles...)...) //nolint:gosec
 	return s.run(cmd, source)
 }
 
