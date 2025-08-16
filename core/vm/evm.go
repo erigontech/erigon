@@ -166,6 +166,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 
 	depth := evm.interpreter.Depth()
 
+	version := evm.intraBlockState.Version()
+	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Address())) {
+		fmt.Printf("%d (%d.%d) %s: %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr)
+		defer func() {
+			fmt.Printf("%d (%d.%d) %s: %x RET: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, ret, leftOverGas, err)
+		}()
+	}
+
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
