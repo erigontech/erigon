@@ -69,8 +69,8 @@ func SmlinkForDirPath(dirPath string) string {
 	}
 }
 
-func DiskInfo(ctx context.Context, disk string) (string, error) {
-	cmd := exec.CommandContext(ctx, "diskutil", "info", disk)
+func DiskInfo(disk string) (string, error) {
+	cmd := exec.CommandContext(context.Background(),, "diskutil", "info", disk)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
