@@ -20,9 +20,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/turbo/node"
-	"github.com/urfave/cli/v2"
 )
 
 type PeerNetworkInfo struct {

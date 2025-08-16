@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -28,6 +28,7 @@ type dataColumnSidecarService struct {
 	syncDataManager      synced_data.SyncedData
 	seenSidecar          *lru.Cache[seenSidecarKey, struct{}]
 	columnSidecarStorage blob_storage.DataColumnStorage
+	emitters             *beaconevents.EventEmitter
 }
 
 func NewDataColumnSidecarService(
@@ -36,6 +37,7 @@ func NewDataColumnSidecarService(
 	forkChoice forkchoice.ForkChoiceStorage,
 	syncDataManager synced_data.SyncedData,
 	columnSidecarStorage blob_storage.DataColumnStorage,
+	emitters *beaconevents.EventEmitter,
 ) DataColumnSidecarService {
 	size := cfg.NumberOfColumns * cfg.SlotsPerEpoch * 4
 	seenSidecar, err := lru.New[seenSidecarKey, struct{}]("seenDataColumnSidecar", int(size))
@@ -49,6 +51,7 @@ func NewDataColumnSidecarService(
 		syncDataManager:      syncDataManager,
 		seenSidecar:          seenSidecar,
 		columnSidecarStorage: columnSidecarStorage,
+		emitters:             emitters,
 	}
 }
 

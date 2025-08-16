@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -519,7 +518,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
-	rules := chainConfig.Rules(blockNum, blockCtx.Time)
+	rules := evm.ChainRules()
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {

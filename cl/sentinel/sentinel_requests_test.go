@@ -24,17 +24,12 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	gomock "go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	antiquarytests "github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -48,6 +43,9 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 

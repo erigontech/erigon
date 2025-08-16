@@ -3,8 +3,7 @@ package heimdall
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 )
 
 func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *RoSnapshots, failFast bool) error {

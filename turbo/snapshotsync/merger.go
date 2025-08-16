@@ -11,8 +11,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"

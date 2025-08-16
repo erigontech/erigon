@@ -20,19 +20,17 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv/remotedbserver"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpoolproto.TxpoolServer,

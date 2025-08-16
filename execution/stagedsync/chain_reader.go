@@ -21,8 +21,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"

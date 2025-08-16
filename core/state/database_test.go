@@ -32,12 +32,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"

@@ -7,8 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 )
 

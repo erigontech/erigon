@@ -24,10 +24,9 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 )

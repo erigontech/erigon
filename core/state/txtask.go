@@ -27,10 +27,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"

@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -176,7 +175,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
-	rules := chainConfig.Rules(blockNum, blockCtx.Time)
+	rules := evm.ChainRules()
 
 	timeoutMilliSeconds := int64(5000)
 

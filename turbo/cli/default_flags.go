@@ -17,8 +17,6 @@
 package cli
 
 import (
-	"github.com/urfave/cli/v2"
-
 	"github.com/erigontech/erigon/cmd/utils"
 )
 
@@ -248,6 +246,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.PolygonPosSingleSlotFinalityFlag,
 	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
+	&utils.PolygonPosWitProtocolFlag,
+
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,

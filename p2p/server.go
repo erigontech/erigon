@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -181,6 +180,9 @@ type Config struct {
 	MetricsEnabled bool
 
 	DiscoveryDNS []string
+
+	// Enable WIT protocol for stateless witness data exchange
+	EnableWitProtocol bool
 }
 
 func (config *Config) ListenPort() int {

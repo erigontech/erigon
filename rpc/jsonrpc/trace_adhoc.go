@@ -30,13 +30,12 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	math2 "github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -1462,7 +1461,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 
-		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+		chainRules := blockCtx.Rules(chainConfig)
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
@@ -1662,7 +1661,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+	chainRules := blockCtx.Rules(chainConfig)
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)

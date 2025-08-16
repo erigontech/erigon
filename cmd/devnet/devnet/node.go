@@ -25,16 +25,13 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/args"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/debug"
 	enode "github.com/erigontech/erigon/turbo/node"
@@ -178,7 +175,7 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
 
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 
 	nodeConf, err := enode.NewNodConfigUrfave(ctx, debugMux, logger)
 	if err != nil {

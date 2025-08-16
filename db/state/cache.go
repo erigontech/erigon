@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func u32noHash(u uint32) uint32        { return u }            //nolint

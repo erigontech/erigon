@@ -21,13 +21,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -311,13 +310,13 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench9(erigonURL, gethURL, needCompare)
+			err := rpctest.Bench9(erigonURL, gethURL, needCompare, latest)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 		},
 	}
-	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
+	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare, withLatest)
 
 	var benchTraceCallCmd = &cobra.Command{
 		Use:   "benchTraceCall",

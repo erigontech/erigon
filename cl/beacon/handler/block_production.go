@@ -33,14 +33,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
@@ -59,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 )

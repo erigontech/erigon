@@ -32,23 +32,20 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
-	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/params"
 )
 
 type LType int
@@ -204,7 +201,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 		return nil, err
 	}
 
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
+	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	cfg, err := downloadercfg.New(
 		ctx,

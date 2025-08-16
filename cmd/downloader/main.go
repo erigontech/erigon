@@ -31,10 +31,8 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/go-viper/mapstructure/v2"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -44,24 +42,23 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
@@ -201,7 +198,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if cmd.Name() != "torrent_cat" {
 			logger = debug.SetupCobra(cmd, "downloader")
-			logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
@@ -248,7 +245,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"webseed", webseeds,
 	)
 
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
+	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(webseeds)
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {

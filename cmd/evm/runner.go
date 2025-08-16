@@ -32,31 +32,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
-
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/runtime"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/holiman/uint256"
 )
 
 var runCommand = cli.Command{
@@ -333,7 +331,11 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.Bool(DumpFlag.Name) {
 		rules := &chain.Rules{}
 		if chainConfig != nil {
-			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64())
+			blockContext := evmtypes.BlockContext{
+				BlockNumber: runtimeConfig.BlockNumber.Uint64(),
+				Time:        runtimeConfig.Time.Uint64(),
+			}
+			rules = blockContext.Rules(chainConfig)
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)

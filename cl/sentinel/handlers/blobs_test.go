@@ -26,15 +26,12 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -45,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
 func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltypes.BlobSidecar {

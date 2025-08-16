@@ -25,7 +25,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 )
@@ -126,6 +125,11 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		// early return for event stream
 		if slices.Contains(w.Header().Values("Content-Type"), "text/event-stream") {
 			return
+		}
+		if beaconResponse, ok := any(ans).(*BeaconResponse); ok {
+			for key, value := range beaconResponse.Headers() {
+				w.Header().Set(key, value)
+			}
 		}
 		switch {
 		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):

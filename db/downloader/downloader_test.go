@@ -24,8 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )

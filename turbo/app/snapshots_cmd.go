@@ -37,28 +37,24 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/compress"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/compress"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -67,14 +63,15 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
@@ -897,9 +894,6 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	}); err != nil {
 		return err
 	}
-	if sum != maxTo {
-		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
-	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
 	}
@@ -920,6 +914,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
 		return fmt.Errorf("failed to check transactions-to-block idx: %w", err)
+	}
+	if sum != maxTo {
+		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
 	// Iterate over all fies in snapDir
 	return nil
@@ -2124,8 +2121,8 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 
 	// initializing the node and providing the current git commit there
 
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
-	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
+	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 
 	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)

@@ -27,8 +27,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -38,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )

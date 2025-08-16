@@ -27,19 +27,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/felixge/fgprof"
-	"github.com/pelletier/go-toml"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
-	"gopkg.in/yaml.v2"
-
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/fdlimit"
-	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/felixge/fgprof"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -239,13 +235,15 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	metricsEnabled := ctx.Bool(metricsEnabledFlag.Name)
 	metricsAddr := ctx.String(metricsAddrFlag.Name)
 
-	var metricsMux *http.ServeMux
+	var metricsMux, pprofMux *http.ServeMux
 	var metricsAddress string
+	var torrentClientStatusAddr string
 
 	if metricsEnabled {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		metricsMux = metrics.Setup(metricsAddress, logger)
+		torrentClientStatusAddr = metricsAddress
 	}
 
 	if pprofEnabled {
@@ -255,12 +253,19 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 		if (address == metricsAddress) && metricsEnabled {
 			metricsMux = StartPProf(address, metricsMux)
 		} else {
-			pprofMux := StartPProf(address, nil)
-			return logger, tracer, metricsMux, pprofMux, nil
+			pprofMux = StartPProf(address, nil)
+		}
+		if !metricsEnabled {
+			torrentClientStatusAddr = address
 		}
 	}
 
-	return logger, tracer, metricsMux, nil, nil
+	if metricsEnabled || pprofEnabled {
+		torrentMsg := fmt.Sprintf("curl -s http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
+		log.Info("To get torrent client status", "command", torrentMsg)
+	}
+
+	return logger, tracer, metricsMux, pprofMux, nil
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {

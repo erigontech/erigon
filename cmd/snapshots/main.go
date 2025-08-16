@@ -24,12 +24,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon/cmd/snapshots/cmp"
 	"github.com/erigontech/erigon/cmd/snapshots/copy"
 	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
@@ -38,7 +33,8 @@ import (
 	"github.com/erigontech/erigon/cmd/snapshots/torrents"
 	"github.com/erigontech/erigon/cmd/snapshots/verify"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -49,7 +45,7 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = "snapshots"
-	app.Version = params.VersionWithCommit(params.GitCommit)
+	app.Version = version.VersionWithCommit(version.GitCommit)
 
 	app.Commands = []*cli.Command{
 		&cmp.Command,

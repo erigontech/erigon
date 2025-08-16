@@ -19,7 +19,7 @@ jobs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter
@@ -58,8 +58,7 @@ jobs:
 
       - name: Checkout code
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v5
       - name: Update submodules
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: git submodule update --init --recursive --force

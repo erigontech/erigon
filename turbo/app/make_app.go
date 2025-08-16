@@ -22,20 +22,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon/turbo/logging"
-	enode "github.com/erigontech/erigon/turbo/node"
-
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
 	cli2 "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
+	enode "github.com/erigontech/erigon/turbo/node"
+	shuttercmd "github.com/erigontech/erigon/txnprovider/shutter/cmd"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
@@ -44,7 +40,7 @@ import (
 // * action: the main function for the application. receives `*cli.Context` with parsed command-line flags.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
 func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
-	app := cli2.NewApp(params.GitCommit, "erigon")
+	app := cli2.NewApp(version.GitCommit, "erigon")
 	app.Name = name
 	app.UsageText = app.Name + ` [command] [flags]`
 	app.Action = func(context *cli.Context) error {
@@ -84,6 +80,7 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&supportCommand,
 		//&backupCommand,
 	}
+	shuttercmd.RegisterCmds(app)
 	return app
 }
 
@@ -173,10 +170,10 @@ func NewNodeConfig(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error)
 	}
 
 	// see similar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit := params.GitCommit; commit != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit)
+	if commit := version.GitCommit; commit != "" {
+		nodeConfig.Version = version.VersionWithCommit(commit)
 	} else {
-		nodeConfig.Version = params.Version
+		nodeConfig.Version = version.VersionNoMeta
 	}
 
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint

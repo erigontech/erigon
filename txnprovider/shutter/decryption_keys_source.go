@@ -24,17 +24,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
-	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
@@ -187,7 +183,7 @@ func (dks *PubSubDecryptionKeysSource) initP2pHost() (host.Host, error) {
 	p2pHost, err := libp2p.New(
 		libp2p.Identity(privKey),
 		libp2p.ListenAddrs(listenAddr),
-		libp2p.UserAgent("erigon/shutter/"+params.VersionWithCommit(params.GitCommit)),
+		libp2p.UserAgent("erigon/shutter/"+version.VersionWithCommit(version.GitCommit)),
 		libp2p.ProtocolVersion(ProtocolVersion),
 	)
 	if err != nil {

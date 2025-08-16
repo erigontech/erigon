@@ -27,16 +27,17 @@ require (
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.66
+	github.com/FastFilter/xorfilter v0.2.1
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.9.0
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/chansync v0.6.1-0.20250805140455-89f141559964
+	github.com/anacrolix/chansync v0.7.0
 	github.com/anacrolix/envpprof v1.4.0
-	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647
+	github.com/anacrolix/generics v0.1.0
 	github.com/anacrolix/go-libutp v1.3.2
-	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b
+	github.com/anacrolix/log v0.17.0
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.58.2-0.20250811011913-5c778813ff6d
+	github.com/anacrolix/torrent v1.59.0
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.18.0
@@ -50,8 +51,9 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
 	github.com/emicklei/dot v1.6.2
+	github.com/erigontech/speedtest v0.0.2
 	github.com/ethereum/c-kzg-4844/v2 v2.1.1
-	github.com/felixge/fgprof v0.9.3
+	github.com/felixge/fgprof v0.9.5
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-chi/cors v1.2.1
@@ -74,6 +76,7 @@ require (
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/heimdalr/dag v1.5.0
+	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.2
 	github.com/huandu/xstrings v1.5.0
 	github.com/huin/goupnp v1.3.0
@@ -99,6 +102,7 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.11.1
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
+	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/afero v1.9.5
 	github.com/spf13/cobra v1.9.1
@@ -134,7 +138,6 @@ require (
 )
 
 require (
-	github.com/FastFilter/xorfilter v0.2.1 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
@@ -143,7 +146,7 @@ require (
 	github.com/alecthomas/assert/v2 v2.8.1 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/alecthomas/repr v0.4.0 // indirect
-	github.com/anacrolix/dht/v2 v2.22.2-0.20250623060212-d7b7d8a52b01 // indirect
+	github.com/anacrolix/dht/v2 v2.23.0 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/mmsg v1.0.1 // indirect
@@ -173,7 +176,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
@@ -191,7 +193,6 @@ require (
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -278,7 +279,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/shirou/gopsutil/v4 v4.24.8 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect

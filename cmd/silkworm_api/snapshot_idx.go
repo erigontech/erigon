@@ -21,15 +21,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/turbo/debug"

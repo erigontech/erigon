@@ -41,23 +41,23 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -72,13 +72,14 @@ const (
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
 type PeerInfo struct {
-	peer          *p2p.Peer
-	lock          sync.RWMutex
-	deadlines     []time.Time // Request deadlines
-	latestDealine time.Time
-	height        uint64
-	rw            p2p.MsgReadWriter
-	protocol      uint
+	peer                  *p2p.Peer
+	lock                  sync.RWMutex
+	deadlines             []time.Time // Request deadlines
+	latestDealine         time.Time
+	height                uint64
+	rw                    p2p.MsgReadWriter
+	protocol, witProtocol uint
+	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -97,6 +98,11 @@ type PeerInfo struct {
 type PeerRef struct {
 	pi     *PeerInfo
 	height uint64
+}
+
+// WitnessRequest tracks when a witness request was initiated (for deduplication and cleanup)
+type WitnessRequest struct {
+	RequestedAt time.Time
 }
 
 // PeersByMinBlock is the priority queue of peers. Used to select certain number of peers considered to be "best available"
@@ -139,12 +145,13 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &PeerInfo{
-		peer:      peer,
-		rw:        rw,
-		removed:   make(chan struct{}),
-		tasks:     make(chan func(), 32),
-		ctx:       ctx,
-		ctxCancel: cancel,
+		peer:           peer,
+		rw:             rw,
+		knownWitnesses: wit.NewKnownCache(wit.MaxKnownWitnesses),
+		removed:        make(chan struct{}),
+		tasks:          make(chan func(), 32),
+		ctx:            ctx,
+		ctxCancel:      cancel,
 	}
 
 	p.lock.RLock()
@@ -266,6 +273,12 @@ func (pi *PeerInfo) RemoveReason() *p2p.PeerError {
 	default:
 		return nil
 	}
+}
+
+func (pi *PeerInfo) AddKnownWitness(hash common.Hash) {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	pi.knownWitnesses.Add(hash)
 }
 
 // ConvertH512ToPeerID() ensures the return type is [64]byte
@@ -548,9 +561,9 @@ func runPeer(
 }
 
 func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
+	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
-		stats := diagnostics.PeerStatisticMsgUpdate{
+		stats := diaglib.PeerStatisticMsgUpdate{
 			PeerName: peerName,
 			PeerID:   peerID,
 			Inbound:  inbound,
@@ -560,7 +573,125 @@ func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType s
 			PeerType: "Sentry",
 		}
 
-		diagnostics.Send(stats)
+		diaglib.Send(stats)
+	}
+}
+func runWitPeer(
+	ctx context.Context,
+	peerID [64]byte,
+	rw p2p.MsgReadWriter,
+	peerInfo *PeerInfo,
+	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
+	hasSubscribers func(msgId proto_sentry.MessageId) bool,
+	getWitnessRequest func(hash common.Hash, peerID [64]byte) bool,
+	logger log.Logger,
+) *p2p.PeerError {
+	protocol := uint(wit.WIT1)
+	pubkey := peerInfo.peer.Pubkey()
+	logger.Debug("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
+	for {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
+		}
+		if err := peerInfo.RemoveReason(); err != nil {
+			return err
+		}
+
+		msg, err := rw.ReadMsg()
+		if err != nil {
+			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
+		}
+
+		if msg.Size > wit.MaxMessageSize {
+			msg.Discard()
+			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
+		}
+
+		switch msg.Code {
+		case wit.GetWitnessMsg | wit.WitnessMsg:
+			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
+				continue
+			}
+
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			send(wit.ToProto[protocol][msg.Code], peerID, b)
+		case wit.NewWitnessMsg:
+			// add hashes to peer
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+
+			var query wit.NewWitnessPacket
+			if err := rlp.DecodeBytes(b, &query); err != nil {
+				logger.Error("decoding NewWitnessMsg: %w, data: %x", err, b)
+			}
+
+			peerInfo.AddKnownWitness(query.Witness.Header().Hash())
+
+			// send to client to add witness to db
+			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			send(wit.ToProto[protocol][msg.Code], peerID, b)
+		case wit.NewWitnessHashesMsg:
+			// add hashes to peer
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+
+			var query wit.NewWitnessHashesPacket
+			if err := rlp.DecodeBytes(b, &query); err != nil {
+				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+			}
+
+			for _, hash := range query.Hashes {
+				peerInfo.AddKnownWitness(hash)
+			}
+
+			// process each announced block hash with deduplication
+			for _, hash := range query.Hashes {
+				shouldRequest := getWitnessRequest(hash, peerID)
+				if !shouldRequest {
+					continue // already being requested by another peer
+				}
+
+				// send GetWitnessMsg request starting from page 0
+				getWitnessReq := wit.GetWitnessPacket{
+					RequestId: rand.Uint64(),
+					GetWitnessRequest: &wit.GetWitnessRequest{
+						WitnessPages: []wit.WitnessPageRequest{
+							{
+								Hash: hash,
+								Page: 0,
+							},
+						},
+					},
+				}
+
+				reqData, err := rlp.EncodeToBytes(&getWitnessReq)
+				if err != nil {
+					logger.Error("encoding GetWitnessMsg request", "err", err, "hash", hash)
+					continue
+				}
+
+				if err := rw.WriteMsg(p2p.Msg{
+					Code:    wit.GetWitnessMsg,
+					Size:    uint32(len(reqData)),
+					Payload: bytes.NewReader(reqData),
+				}); err != nil {
+					logger.Debug("sending GetWitnessMsg request", "err", err, "hash", hash)
+				} else {
+					logger.Debug("sent GetWitnessMsg request", "hash", hash, "page", 0, "peer", hex.EncodeToString(peerID[:]))
+				}
+			}
+		default:
+			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(pubkey[:]), msg.Code))
+		}
 	}
 }
 
@@ -598,10 +729,11 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 
 func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger) *GrpcServer {
 	ss := &GrpcServer{
-		ctx:          ctx,
-		p2p:          cfg,
-		peersStreams: NewPeersStreams(),
-		logger:       logger,
+		ctx:                   ctx,
+		p2p:                   cfg,
+		peersStreams:          NewPeersStreams(),
+		logger:                logger,
+		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
 	}
 
 	var disc enode.Iterator
@@ -619,12 +751,11 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 			peerID := peer.Pubkey()
 			printablePeerID := hex.EncodeToString(peerID[:])
-			if ss.getPeer(peerID) != nil {
-				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
-			}
 			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
-
-			peerInfo := NewPeerInfo(peer, rw)
+			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			if err != nil {
+				return err
+			}
 			peerInfo.protocol = protocol
 			defer peerInfo.Close()
 
@@ -642,9 +773,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			}
 
 			// handshake is successful
-			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
+			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
 
-			ss.GoodPeers.Store(peerID, peerInfo)
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
@@ -673,7 +803,62 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			return nil
 		},
 		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+		FromProto: eth.FromProto[protocol],
+		ToProto:   eth.ToProto[protocol],
 	})
+
+	// Add WIT protocol if enabled
+	if cfg.EnableWitProtocol {
+		log.Debug("[wit] running wit protocol")
+		ss.Protocols = append(ss.Protocols, p2p.Protocol{
+			Name:           wit.ProtocolName,
+			Version:        wit.ProtocolVersions[0],
+			Length:         wit.ProtocolLengths[wit.ProtocolVersions[0]],
+			DialCandidates: nil,
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
+				peerID := peer.Pubkey()
+				peerInfo, err := ss.getOrCreatePeer(peer, rw, wit.ProtocolName)
+				if err != nil {
+					return err
+				}
+				peerInfo.witProtocol = wit.ProtocolVersions[0]
+
+				return runWitPeer(
+					ctx,
+					peerID,
+					rw,
+					peerInfo,
+					ss.send,
+					ss.hasSubscribers,
+					ss.getWitnessRequest,
+					logger,
+				)
+			},
+			NodeInfo: func() interface{} {
+				return readNodeInfo()
+			},
+			PeerInfo: func(peerID [64]byte) interface{} {
+				return nil
+			},
+			FromProto: wit.FromProto[wit.ProtocolVersions[0]],
+			ToProto:   wit.ToProto[wit.ProtocolVersions[0]],
+		})
+	}
+
+	// start cleanup routine for stale witness requests
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				ss.cleanupOldWitnessRequests()
+			}
+		}
+	}()
 
 	return ss
 }
@@ -719,6 +904,46 @@ type GrpcServer struct {
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
 	logger               log.Logger
+	// Mutex to synchronize PeerInfo creation between protocols
+	peerCreationMutex sync.Mutex
+
+	// witness request tracking
+	activeWitnessRequests map[common.Hash]*WitnessRequest
+	witnessRequestMutex   sync.RWMutex
+}
+
+// cleanupOldWitnessRequests removes witness requests that have been active for too long
+func (ss *GrpcServer) cleanupOldWitnessRequests() {
+	ss.witnessRequestMutex.Lock()
+	defer ss.witnessRequestMutex.Unlock()
+
+	timeout := 1 * time.Minute
+	now := time.Now()
+
+	for hash, req := range ss.activeWitnessRequests {
+		if now.Sub(req.RequestedAt) > timeout {
+			ss.logger.Debug("cleaning up stale witness request", "hash", hash, "age", now.Sub(req.RequestedAt))
+			delete(ss.activeWitnessRequests, hash)
+		}
+	}
+}
+
+// getWitnessRequest checks if we should request a witness
+func (ss *GrpcServer) getWitnessRequest(hash common.Hash, peerID [64]byte) bool {
+	ss.witnessRequestMutex.Lock()
+	defer ss.witnessRequestMutex.Unlock()
+
+	if _, exists := ss.activeWitnessRequests[hash]; exists {
+		return false
+	}
+
+	witnessReq := &WitnessRequest{
+		RequestedAt: time.Now(),
+	}
+	ss.activeWitnessRequests[hash] = witnessReq
+
+	ss.logger.Debug("initiating new witness request", "hash", hash, "peer", hex.EncodeToString(peerID[:]))
+	return true
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
@@ -742,6 +967,43 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 	return nil
 }
 
+// getOrCreatePeer gets or creates PeerInfo
+func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, protocolName string) (*PeerInfo, *p2p.PeerError) {
+	peerID := peer.Pubkey()
+
+	ss.peerCreationMutex.Lock()
+	defer ss.peerCreationMutex.Unlock()
+
+	existingPeerInfo := ss.getPeer(peerID)
+
+	if existingPeerInfo == nil {
+		peerInfo := NewPeerInfo(peer, rw)
+		ss.GoodPeers.Store(peerID, peerInfo)
+		return peerInfo, nil
+	}
+
+	// allow one connection per protocol
+	if protocolName == eth.ProtocolName {
+		existingVersion := existingPeerInfo.protocol
+		if existingVersion != 0 {
+			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
+		}
+
+		return existingPeerInfo, nil
+	}
+
+	if protocolName == wit.ProtocolName {
+		existingVersion := existingPeerInfo.witProtocol
+		if existingVersion != 0 {
+			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
+		}
+
+		return existingPeerInfo, nil
+	}
+
+	return existingPeerInfo, nil
+}
+
 func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 	if value, ok := ss.GoodPeers.LoadAndDelete(peerID); ok {
 		peerInfo := value.(*PeerInfo)
@@ -753,8 +1015,8 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
-		msgType := eth.ToProto[peerInfo.protocol][msgcode]
-		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", eth.ProtocolName, peerInfo.protocol), len(data))
+		msgType, protocolName, protocolVersion := ss.protoMessageID(msgcode)
+		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
@@ -906,8 +1168,8 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *proto_sentry.Sen
 		return reply, nil
 	}
 
-	msgcode, ok := eth.FromProto[peerInfo.protocol][inreq.Data.Id]
-	if !ok {
+	msgcode, protocolVersions := ss.messageCode(inreq.Data.Id)
+	if protocolVersions.Cardinality() == 0 {
 		return reply, fmt.Errorf("msgcode not found for message Id: %s (peer protocol %d)", inreq.Data.Id, peerInfo.protocol)
 	}
 
@@ -920,9 +1182,18 @@ func (ss *GrpcServer) messageCode(id proto_sentry.MessageId) (code uint64, proto
 	protocolVersions = mapset.NewSet[uint]()
 	for i := 0; i < len(ss.Protocols); i++ {
 		version := ss.Protocols[i].Version
-		if val, ok := eth.FromProto[version][id]; ok {
+		if val, ok := ss.Protocols[i].FromProto[id]; ok {
 			code = val // assuming that the code doesn't change between protocol versions
 			protocolVersions.Add(version)
+		}
+	}
+	return
+}
+
+func (ss *GrpcServer) protoMessageID(code uint64) (id proto_sentry.MessageId, protocolName string, protocolVersion uint) {
+	for i := 0; i < len(ss.Protocols); i++ {
+		if val, ok := ss.Protocols[i].ToProto[code]; ok {
+			return val, ss.Protocols[i].Name, ss.Protocols[i].Version
 		}
 	}
 	return

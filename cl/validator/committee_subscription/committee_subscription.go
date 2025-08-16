@@ -24,8 +24,6 @@ import (
 	"time"
 
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -36,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 var (

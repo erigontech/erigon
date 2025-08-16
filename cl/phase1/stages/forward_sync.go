@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -19,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // shouldProcessBlobs checks if any block in the given list of blocks

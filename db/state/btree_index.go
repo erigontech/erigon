@@ -31,14 +31,12 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"

@@ -25,9 +25,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -36,9 +36,9 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/klauspost/compress/zstd"
 )
 
 var buffersPool = sync.Pool{

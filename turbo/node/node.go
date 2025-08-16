@@ -26,19 +26,16 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/gdbme"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 )
 
@@ -170,10 +167,10 @@ func New(
 func NewNodeConfig(debugMux *http.ServeMux) *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
 	// see similar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit := params.GitCommit; commit != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit)
+	if commit := version.GitCommit; commit != "" {
+		nodeConfig.Version = version.VersionWithCommit(commit)
 	} else {
-		nodeConfig.Version = params.Version
+		nodeConfig.Version = version.VersionNoMeta
 	}
 	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"

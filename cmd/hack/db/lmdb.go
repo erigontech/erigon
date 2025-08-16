@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"math"
 	"os"
@@ -32,9 +31,9 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/db/kv"
+	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 var logger = log.New()

@@ -34,18 +34,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainparams "github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -54,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -313,7 +312,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 			NoDownloader: true,
 		},
 		TxPool: txPoolConfig,
-		Miner: params.MiningConfig{
+		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
 		Shutter: shutterConfig,

@@ -21,14 +21,13 @@ package nodecfg_test
 
 import (
 	"context"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/db/datadir"
 	node2 "github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 )

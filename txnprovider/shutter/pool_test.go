@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -199,7 +198,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes1, 1)
-		txnsIdFilter.Add(txnsRes1[0].Hash())
 		txnsRes2, err := pool.ProvideTxns(
 			ctx,
 			txnprovider.WithBlockTime(handle.nextBlockTime),
@@ -209,7 +207,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes2, 1)
-		txnsIdFilter.Add(txnsRes2[0].Hash())
 		require.Equal(t, 2, txnsIdFilter.Cardinality())
 	})
 }

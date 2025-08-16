@@ -22,7 +22,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -128,6 +127,6 @@ func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
 	status := c.hs.Status()
 	log.Debug("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
-		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]))
+		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", c.peerdasStateReader.GetEarliestAvailableSlot())
 	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }

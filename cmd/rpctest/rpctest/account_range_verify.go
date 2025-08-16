@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"net"
 	"net/http"
 	"time"
@@ -29,11 +28,10 @@ import (
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {

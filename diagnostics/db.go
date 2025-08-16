@@ -25,10 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/node/paths"
 )
 
