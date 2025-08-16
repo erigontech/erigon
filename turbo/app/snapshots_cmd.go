@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"net/http"
 	"os"
@@ -41,7 +42,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
@@ -93,8 +93,8 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 }
 
 var snapshotCommand = cli.Command{
-	Name:    "seg",
-	Aliases: []string{"snapshots", "segments"},
+	Name:    "snapshots",
+	Aliases: []string{"seg", "snapshot", "segments", "segment"},
 	Usage:   `Managing historical data segments (partitions)`,
 	Before: func(cliCtx *cli.Context) error {
 		go mem.LogMemStats(cliCtx.Context, log.New())
@@ -214,7 +214,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "uncompress",
 			Action: doUncompress,
-			Usage:  "erigon seg uncompress a.seg | erigon seg compress b.seg",
+			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
@@ -275,9 +275,9 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:        "reset",
-			Description: "Reset state to resumable initial sync.",
-			Action:      resetCliAction,
+			Name:   "reset",
+			Usage:  "Reset state to resumable initial sync",
+			Action: resetCliAction,
 			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
 			Flags: append(
 				slices.Clone(logging.Flags),
@@ -295,6 +295,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
@@ -403,6 +404,81 @@ var (
 	}
 )
 
+// checkCommitmentFileHasRoot checks if a commitment file contains state root key
+func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err error) {
+	const stateKey = "state" // by this key, trie stores root cell encoded along with latest state hash.
+	_, fileName := filepath.Split(filePath)
+
+	// First try with recsplit index (.kvi files)
+	derivedKvi := strings.Replace(filePath, ".kv", ".kvi", 1)
+	fPathMask, err := version.ReplaceVersionWithMask(derivedKvi)
+	if err != nil {
+		return false, false, err
+	}
+	kvi, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+	if err != nil {
+		return false, false, err
+	}
+	if ok {
+		idx, err := recsplit.OpenIndex(kvi)
+		if err != nil {
+			return false, false, err
+		}
+		defer idx.Close()
+
+		rd := idx.GetReaderFromPool()
+		defer rd.Close()
+		if rd.Empty() {
+			log.Warn("[dbg] allow files deletion because accessor broken", "accessor", idx.FileName())
+			return false, true, nil
+		}
+
+		_, found := rd.Lookup([]byte(stateKey))
+		if found {
+			fmt.Printf("found state key with kvi %s\n", filePath)
+			return true, false, nil
+		} else {
+			fmt.Printf("skipping file because it doesn't have state key %s\n", fileName)
+			return false, false, nil
+		}
+	} else {
+		log.Warn("[dbg] not found files for", "pattern", fPathMask)
+	}
+
+	// If recsplit index not found, try btree index (.bt files)
+	derivedBt := strings.Replace(filePath, ".kv", ".bt", 1)
+	fPathMask, err = version.ReplaceVersionWithMask(derivedBt)
+	if err != nil {
+		return false, false, nil
+	}
+	bt, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+	if err != nil {
+		return false, false, nil
+	}
+	if !ok {
+		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
+	}
+	rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, filePath, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
+	if err != nil {
+		return false, false, err
+	}
+	defer rd.Close()
+	defer btindex.Close()
+
+	getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
+	c, err := btindex.Seek(getter, []byte(stateKey))
+	if err != nil {
+		return false, false, err
+	}
+	defer c.Close()
+
+	if bytes.Equal(c.Key(), []byte(stateKey)) {
+		fmt.Printf("found state key using bt %s\n", filePath)
+		return true, false, nil
+	}
+	return false, false, nil
+}
+
 func doRmStateSnapshots(cliCtx *cli.Context) error {
 	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
@@ -411,10 +487,18 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	defer l.Unlock()
 
 	removeLatest := cliCtx.Bool("latest")
+	dryRun := cliCtx.Bool("dry-run")
 
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
+
+	// Step 1: Collect and parse all candidate state files
+	candidateFiles := make([]struct {
+		fileInfo snaptype.FileInfo
+		dirPath  string
+		filePath string
+	}, 0)
 	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
@@ -441,72 +525,36 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					}
 				}
 			}
+			candidateFiles = append(candidateFiles, struct {
+				fileInfo snaptype.FileInfo
+				dirPath  string
+				filePath string
+			}{res, dirPath, filePath})
+		}
+	}
 
-			// check that commitment file has state in it
-			// When domains are "compacted", we want to keep latest commitment file with state key in it
-			if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
-				const trieStateKey = "state"
+	// Step 2: Process each candidate file (already parsed)
+	for _, candidate := range candidateFiles {
+		res := candidate.fileInfo
 
-				skipped := false
-				kvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
-				_, ek := os.Stat(kvi)
-				if ek == nil {
-					idx, err := recsplit.OpenIndex(kvi)
-					if err != nil {
-						return err
-					}
-
-					rd := idx.GetReaderFromPool()
-					oft, found := rd.Lookup([]byte(trieStateKey))
-					if found {
-						fmt.Printf("found state key with kvi %s\n", res.Path)
-						commitmentFilesWithState = append(commitmentFilesWithState, res)
-					}
-					skipped = true
-					_ = oft
-					rd.Close()
-					idx.Close()
-				}
-
-				if !skipped { // try to lookup in bt index
-					bt := strings.Replace(res.Path, ".kv", ".bt", 1)
-					_, eb := os.Stat(bt)
-					if eb == nil {
-						rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
-						if err != nil {
-							return err
-						}
-
-						getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
-						//for getter.HasNext() {
-						//	k, _ := getter.Next(nil)
-						//	if bytes.Equal(k, []byte(trieStateKey)) {
-						//		fmt.Printf("found state key without bt in %s\n", res.Path)
-						//		commitmentFilesWithState = append(commitmentFilesWithState, res)
-						//		break
-						//	}
-						//	getter.Skip()
-						//}
-						c, err := btindex.Seek(getter, []byte(trieStateKey))
-						if err != nil {
-							return err
-						}
-						if bytes.Equal(c.Key(), []byte(trieStateKey)) {
-							fmt.Printf("found state key using bt %s\n", res.Path)
-							commitmentFilesWithState = append(commitmentFilesWithState, res)
-						}
-						c.Close()
-						btindex.Close()
-						rd.Close()
-					}
-
-				}
+		// check that commitment file has state in it
+		// When domains are "compacted", we want to keep latest commitment file with state key in it
+		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
+			if err != nil {
+				return err
 			}
-
-			files = append(files, res)
-			if removeLatest {
-				_maxFrom = max(_maxFrom, res.From)
+			if hasState {
+				commitmentFilesWithState = append(commitmentFilesWithState, res)
 			}
+			if broken {
+				commitmentFilesWithState = append(commitmentFilesWithState, res)
+			}
+		}
+
+		files = append(files, res)
+		if removeLatest {
+			_maxFrom = max(_maxFrom, res.From)
 		}
 	}
 
@@ -617,6 +665,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
+		if dryRun {
+			fmt.Printf("[dry-run] rm %s\n", res.Path)
+			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
+			continue
+		}
 		dir2.RemoveFile(res.Path)
 		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
@@ -769,12 +822,14 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	blockReader, _ := blockRetire.IO()
+	heimdallStore, _ := blockRetire.BorStore()
 	found := false
 	for _, chk := range checks {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
 		found = true
+		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -809,7 +864,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorSpans skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
@@ -817,15 +872,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorCheckpoints skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
-				return err
-			}
-		case integrity.BorMilestones:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorMilestones skipped because not bor chain")
-				continue
-			}
-			if err := integrity.ValidateBorMilestones(ctx, logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
@@ -834,6 +881,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.RCacheNoDups:
 			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
+		case integrity.Publishable:
+			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
 		default:
@@ -856,15 +907,17 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	var sum uint64
 	var maxTo uint64
 	// Check block sanity
-	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+				return nil
+			}
 			return err
 		}
-
-		// Skip directories
 		if info.IsDir() {
 			return nil
 		}
+
 		// Skip CL files
 		if !strings.Contains(info.Name(), "headers") || !strings.HasSuffix(info.Name(), ".seg") {
 			return nil
@@ -881,31 +934,33 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
 			// check that the file exist
-			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, segName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing file %s", segName)
 			}
 			// check that the index file exist
 			idxName := strings.Replace(segName, ".seg", ".idx", 1)
-			if _, err := os.Stat(filepath.Join(snapDir, idxName)); err != nil {
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, idxName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing index file %s", idxName)
 			}
 			if snapType == "transactions" {
 				// check that the tx index file exist
 				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-				if _, err := os.Stat(filepath.Join(snapDir, txIdxName)); err != nil {
+				if exists, err := dir2.FileExist(filepath.Join(snapDir, txIdxName)); err != nil {
+					return err
+				} else if !exists {
 					return fmt.Errorf("missing tx index file %s", txIdxName)
 				}
 			}
 		}
 
 		maxTo = max(maxTo, res.To)
-
 		return nil
 	}); err != nil {
 		return err
-	}
-	if sum != maxTo {
-		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
@@ -928,6 +983,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
 		return fmt.Errorf("failed to check transactions-to-block idx: %w", err)
 	}
+	if sum != maxTo {
+		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
+	}
 	// Iterate over all fies in snapDir
 	return nil
 }
@@ -936,14 +994,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
-	if err := filepath.Walk(dirs.SnapDomain, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.WalkDir(dirs.SnapDomain, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+				return nil
+			}
 			return err
 		}
-		if info.IsDir() && path != dirs.SnapDomain {
-			return fmt.Errorf("unexpected directory in domain (%s) check %s", dirs.SnapDomain, path)
-		}
-		if path == dirs.SnapDomain {
+		if info.IsDir() {
 			return nil
 		}
 
@@ -966,6 +1024,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	sort.Slice(accFiles, func(i, j int) bool {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
+
+	if accFiles[0].From != 0 {
+		return fmt.Errorf("gap at start: state snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
+	}
 
 	prevFrom, prevTo := accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
@@ -1030,18 +1092,17 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	var maxStepII uint64 // across all files in SnapIdx
 	accFiles = accFiles[:0]
 
-	if err := filepath.Walk(dirs.SnapIdx, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.WalkDir(dirs.SnapIdx, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+				return nil
+			}
 			return err
 		}
-
-		if info.IsDir() && path != dirs.SnapIdx {
-			return fmt.Errorf("unexpected directory in idx (%s) check %s", dirs.SnapIdx, path)
-
-		}
-		if path == dirs.SnapIdx {
+		if info.IsDir() {
 			return nil
 		}
+
 		res, _, ok := snaptype.ParseFileName(dirs.SnapIdx, info.Name())
 		if !ok {
 			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
@@ -1063,6 +1124,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	sort.Slice(accFiles, func(i, j int) bool {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
+	if accFiles[0].From != 0 {
+		return fmt.Errorf("gap at start: state ef snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
+	}
 
 	prevFrom, prevTo = accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
@@ -1119,11 +1183,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapHistory, fileName), err)
 			}
 		}
-
 	}
 
-	if maxStepII != accFiles[len(accFiles)-1].To {
-		return fmt.Errorf("accounts idx max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepII)
+	if maxStepDomain != accFiles[len(accFiles)-1].To {
+		return fmt.Errorf("accounts domain max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepDomain)
 	}
 	return nil
 }
@@ -1135,9 +1198,15 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	}
 
 	intervals := []interval{}
-	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+				return nil
+			}
 			return err
+		}
+		if info.IsDir() {
+			return nil
 		}
 		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType+".") {
 			return nil
@@ -1154,6 +1223,9 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	sort.Slice(intervals, func(i, j int) bool {
 		return intervals[i].from < intervals[j].from
 	})
+	if intervals[0].from != 0 {
+		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
+	}
 	// Check that there are no gaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from != intervals[i-1].to {
@@ -1236,12 +1308,13 @@ func doClearIndexing(cliCtx *cli.Context) error {
 }
 
 func deleteFilesWithExtensions(dir string, extensions []string) error {
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+				return nil
+			}
 			return err
 		}
-
-		// Skip directories
 		if info.IsDir() {
 			return nil
 		}
@@ -1568,7 +1641,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if chainConfig.Bor != nil {
 		borSnaps.DownloadComplete() // mark as ready
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+		if err = bridgeStore.Prepare(ctx); err != nil {
+			return
+		}
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
+		if err = heimdallStore.Prepare(ctx); err != nil {
+			return
+		}
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore, bridgeStore)
@@ -1597,12 +1676,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 
-	ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-	mtime := time.Time{}
-	if er == nil {
-		mtime = ls.ModTime()
-	}
-	logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 	return
 }
 
@@ -2001,14 +2074,16 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		from, to = from2, to2
 	}
 
+	logger.Info("retiring blocks", "from", from, "to", to)
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 
-	if err := br.RemoveOverlaps(); err != nil {
+	if err := br.RemoveOverlaps(nil); err != nil {
 		return err
 	}
 
+	logger.Info("pruning blocks")
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs

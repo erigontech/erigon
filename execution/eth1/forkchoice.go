@@ -449,11 +449,41 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	// Run the forkchoice
 	initialCycle := limitedBigJump
 	firstCycle := false
-	if _, err := e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle); err != nil {
-		err = fmt.Errorf("updateForkChoice: %w", err)
-		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		return
+	for {
+		hasMore, err := e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle)
+		if err != nil {
+			err = fmt.Errorf("updateForkChoice: %w", err)
+			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return
+		}
+		if !hasMore {
+			break
+		}
+		err = e.executionPipeline.RunPrune(e.db, tx, initialCycle)
+		if err != nil {
+			err = fmt.Errorf("updateForkChoice: RunPrune after hasMore: %w", err)
+			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return
+		}
+		err = tx.Commit()
+		if err != nil {
+			err = fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
+			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return
+		}
+		tx, err = e.db.BeginTemporalRw(ctx)
+		if err != nil {
+			err = fmt.Errorf("updateForkChoice: begin tx after has more %w", err)
+			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return
+		}
+		// note we already have defer tx.Rollback() on stack from earlier
+		// we update the same tx var so defer should see the latest tx
+		//(prev tx-es have commit called on them)
 	}
 
 	// if head hash was set then success otherwise no
@@ -605,7 +635,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		}
 
 		if len(timings) > 0 {
-			e.logger.Info("Timings: Post-Forkchoice", timings...)
+			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
 		}
 	}()
 }

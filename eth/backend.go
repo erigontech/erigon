@@ -1092,7 +1092,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		// we need to initiate download before the heimdall services start rather than
 		// waiting for the stage loop to start
-		// TODO although this works we probably want to call engine.Start instead
 
 		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
 			panic("expect to have non-nil downloaderClient")
@@ -1475,8 +1474,12 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Config, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
-	var err error
+func (s *Ethereum) setUpSnapDownloader(
+	ctx context.Context,
+	nodeCfg *nodecfg.Config,
+	downloaderCfg *downloadercfg.Cfg,
+	cc *chain.Config,
+) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
@@ -1484,16 +1487,29 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
 			return
 		}
-		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
-			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
-			for _, fName := range frozenFileNames {
-				req.Items = append(req.Items, &protodownloader.AddItem{
-					Path: filepath.Join("history", fName),
-				})
-			}
-			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-				s.logger.Warn("[snapshots] notify downloader", "err", err)
-			}
+		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(frozenFileNames) == 0 {
+			return
+		}
+
+		req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
+		for _, fName := range frozenFileNames {
+			req.Items = append(req.Items, &protodownloader.AddItem{
+				Path: fName,
+			})
+		}
+		if _, err := s.downloaderClient.Add(ctx, req); err != nil {
+			s.logger.Warn("[snapshots] downloader.Add", "err", err)
+		}
+	}, func(deletedFiles []string) {
+		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+			return
+		}
+		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(deletedFiles) == 0 {
+			return
+		}
+
+		if _, err := s.downloaderClient.Delete(ctx, &protodownloader.DeleteRequest{Paths: deletedFiles}); err != nil {
+			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
 		}
 	})
 
@@ -1510,17 +1526,22 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, nodeCfg *nodecfg.Con
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
-		// start embedded Downloader
-		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) > 0 {
-			downloaderCfg.AddTorrentsFromDisk = false
-		}
+		// Always disable the asynchronous adder. We will do it here to support downloader.verify.
+		downloaderCfg.AddTorrentsFromDisk = false
 
 		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
 		if err != nil {
 			return err
 		}
-
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+
+		// start embedded Downloader
+		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) == 0 {
+			err = s.downloader.AddTorrentsFromDisk(ctx)
+			if err != nil {
+				return fmt.Errorf("adding torrents from disk: %w", err)
+			}
+		}
 
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {

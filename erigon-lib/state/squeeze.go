@@ -483,7 +483,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			if !smthDone {
 				break
 			}
-			a.onFilesChange(nil)
 		}
 
 	}

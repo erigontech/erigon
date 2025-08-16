@@ -118,7 +118,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Check if blob data is available
 	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 {
 		if block.Version() >= clparams.FuluVersion {
-			available, err := f.peerDas.IsDataAvailable(blockRoot)
+			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 			if err != nil {
 				return err
 			}

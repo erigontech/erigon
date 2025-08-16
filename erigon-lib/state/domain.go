@@ -159,16 +159,16 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
 
-func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
+func (d *Domain) kvNewFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.version.DataKV.String(), d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) kviAccessorFilePath(fromStep, toStep uint64) string {
+func (d *Domain) kviAccessorNewFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.version.AccessorKVI.String(), d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
+func (d *Domain) kvExistenceIdxNewFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.version.AccessorKVEI.String(), d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) kvBtAccessorFilePath(fromStep, toStep uint64) string {
+func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.version.AccessorBT.String(), d.filenameBase, fromStep, toStep))
 }
 
@@ -361,13 +361,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					continue
 				}
 
-				if !fileVer.Eq(d.version.DataKV.Current) {
-					if !fileVer.Less(d.version.DataKV.MinSupported) {
-						d.version.DataKV.Current = fileVer
-					} else {
-						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.DataKV)
-					}
+				if fileVer.Less(d.version.DataKV.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, d.version.DataKV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -393,13 +389,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorKVI.Current) {
-						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
-							d.version.AccessorKVI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorKVI)
-						}
+					if fileVer.Less(d.version.AccessorKVI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.AccessorKVI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -416,13 +408,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorBT.Current) {
-						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
-							d.version.AccessorBT.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorBT)
-						}
+					if fileVer.Less(d.version.AccessorBT.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.AccessorBT)
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -439,13 +427,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if !fileVer.Eq(d.version.AccessorKVEI.Current) {
-						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
-							d.version.AccessorKVEI.Current = fileVer
-						} else {
-							_, fName := filepath.Split(fPath)
-							versionTooLowPanic(fName, d.version.AccessorKVEI)
-						}
+					if fileVer.Less(d.version.AccessorKVEI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.version.AccessorKVEI)
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -826,7 +810,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 		mxCollateTook.ObserveDuration(started)
 	}()
 
-	coll.valuesPath = d.kvFilePath(stepFrom, stepTo)
+	coll.valuesPath = d.kvNewFilePath(stepFrom, stepTo)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
@@ -942,7 +926,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}()
 
-	coll.valuesPath = d.kvFilePath(step, step+1)
+	coll.valuesPath = d.kvNewFilePath(step, step+1)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
@@ -1116,21 +1100,21 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorFilePath(stepFrom, stepTo))
+		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(stepFrom, stepTo))
 		if err != nil {
 			return StaticFiles{}, err
 		}
 	}
 
 	if d.Accessors.Has(AccessorBTree) {
-		btPath := d.kvBtAccessorFilePath(stepFrom, stepTo)
+		btPath := d.kvBtAccessorNewFilePath(stepFrom, stepTo)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
 	if d.Accessors.Has(AccessorExistence) {
-		fPath := d.kvExistenceIdxFilePath(stepFrom, stepTo)
+		fPath := d.kvExistenceIdxNewFilePath(stepFrom, stepTo)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
@@ -1218,21 +1202,21 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorFilePath(step, step+1))
+		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(step, step+1))
 		if err != nil {
 			return StaticFiles{}, err
 		}
 	}
 
 	if d.Accessors.Has(AccessorBTree) {
-		btPath := d.kvBtAccessorFilePath(step, step+1)
+		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
 	if d.Accessors.Has(AccessorExistence) {
-		fPath := d.kvExistenceIdxFilePath(step, step+1)
+		fPath := d.kvExistenceIdxNewFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
@@ -1255,9 +1239,13 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 }
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
-	idxPath := d.kviAccessorFilePath(fromStep, toStep)
+	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
+	versionOfRs := uint8(0)
+	if !d.version.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+		versionOfRs = 1
+	}
 	cfg := recsplit.RecSplitArgs{
-		Version:            1,
+		Version:            versionOfRs,
 		Enums:              false,
 		LessFalsePositives: true,
 
@@ -1280,7 +1268,15 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{d.kvBtAccessorFilePath(fromStep, toStep), d.kvExistenceIdxFilePath(fromStep, toStep)}
+		exF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvExistenceIdxFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		btF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvBtAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return []string{btF, exF}
 	})
 }
 
@@ -1293,13 +1289,17 @@ func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{d.kviAccessorFilePath(fromStep, toStep)}
+		fPath, _, _, err := version.FindFilesWithVersionsByPattern(d.kviAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return []string{fPath}
 	})
 	//return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
 	//	var files []string
 	//	if d.Accessors.Has(AccessorHashMap) {
-	//		files = append(files, d.kviAccessorFilePath(fromStep, toStep))
-	//		files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
+	//		files = append(files, d.kviAccessorNewFilePath(fromStep, toStep))
+	//		files = append(files, d.kvExistenceIdxNewFilePath(fromStep, toStep))
 	//	}
 	//	return files
 	//})
@@ -1316,7 +1316,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			idxPath := d.kvBtAccessorFilePath(fromStep, toStep)
+			idxPath := d.kvBtAccessorNewFilePath(fromStep, toStep)
 			if err := BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
@@ -1345,7 +1345,7 @@ func BuildHashMapAccessor(ctx context.Context, d *seg.Reader, idxPath string, va
 	return buildHashMapAccessor(ctx, d, idxPath, values, cfg, ps, logger)
 }
 
-func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
 	if !values {
@@ -1357,7 +1357,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 	defer g.MadvNormal().DisableReadAhead()
 
 	var rs *recsplit.RecSplit
-	var err error
 	cfg.KeyCount = count
 	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -1605,6 +1604,11 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 			fmt.Printf("DomainGetAsOf(%s, %x, %d) -> found in history\n", dt.d.filenameBase, key, txNum)
 		}
 		return v, v != nil, nil
+	}
+	if dt.name == kv.CommitmentDomain {
+		// we need to dereference commitment keys to get actual value. DomainRoTx itself does not have
+		// pointers to storage and account domains to do the reference. Aggregator tx must be called instead
+		return nil, false, nil
 	}
 
 	var ok bool
@@ -2126,5 +2130,5 @@ func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
 
 func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon seg reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
 }

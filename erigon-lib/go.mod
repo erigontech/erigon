@@ -16,9 +16,9 @@ require (
 
 require (
 	github.com/FastFilter/xorfilter v0.2.1
-	github.com/RoaringBitmap/roaring/v2 v2.5.0
-	github.com/anacrolix/missinggo/v2 v2.8.1-0.20250604020133-83210197e79c
-	github.com/anacrolix/torrent v1.58.2-0.20250604010703-7c29c120a504
+	github.com/RoaringBitmap/roaring/v2 v2.9.0
+	github.com/anacrolix/missinggo/v2 v2.10.0
+	github.com/anacrolix/torrent v1.58.2-0.20250812132736-231b02a64d10
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/consensys/gnark-crypto v0.17.0
@@ -57,14 +57,14 @@ require (
 	github.com/ugorji/go/codec v1.2.12
 	github.com/valyala/fastjson v1.6.4
 	go.uber.org/mock v0.5.0
-	golang.org/x/crypto v0.39.0
+	golang.org/x/crypto v0.41.0
 	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476
-	golang.org/x/net v0.41.0
-	golang.org/x/sync v0.15.0
-	golang.org/x/sys v0.33.0
-	google.golang.org/grpc v1.72.1
+	golang.org/x/net v0.43.0
+	golang.org/x/sync v0.16.0
+	golang.org/x/sys v0.35.0
+	google.golang.org/grpc v1.74.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
-	google.golang.org/protobuf v1.36.6
+	google.golang.org/protobuf v1.36.7
 )
 
 require (
@@ -74,14 +74,13 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
-	golang.org/x/mod v0.25.0 // indirect
-	golang.org/x/tools v0.34.0 // indirect
+	golang.org/x/mod v0.26.0 // indirect
+	golang.org/x/tools v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 )
 
 require (
-	github.com/anacrolix/dht/v2 v2.21.1 // indirect
-	github.com/anacrolix/generics v0.0.3-0.20250526144502-593be7092deb // indirect
+	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
@@ -111,7 +110,7 @@ require (
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.uber.org/goleak v1.3.0 // indirect
-	golang.org/x/text v0.26.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect

@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/downloader"
@@ -271,16 +272,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		ctx,
 		s.LogPrefix(),
 		"header-chain",
-		cfg.dirs,
 		true, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
 		cfg.prune,
 		cstate,
-		agg,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
@@ -288,7 +286,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	// Erigon can start on datadir with broken files `transactions.seg` files and Downloader will
+	// fix them, but only if Erigon call `.Add()` for broken files. But `headerchain` feature
+	// calling `.Add()` only for header/body files (not for `transactions.seg`) and `.OpenFolder()` will fail
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
+		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
 
@@ -297,21 +299,40 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		ctx,
 		s.LogPrefix(),
 		"remaining snapshots",
-		cfg.dirs,
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
 		cfg.prune,
 		cstate,
-		agg,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
 		return err
+	}
+
+	{ // Now can open all files
+		if err := agg.ReloadSalt(); err != nil {
+			return err
+		}
+		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
+			return err
+		}
+
+		if cfg.chainConfig.Bor != nil {
+			if err := cfg.blockReader.BorSnapshots().OpenFolder(); err != nil {
+				return err
+			}
+		}
+		if err := agg.OpenFolder(); err != nil {
+			return err
+		}
+
+		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
+			return err
+		}
 	}
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
@@ -388,6 +409,21 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
+func firstNonGenesisCheck(tx kv.RwTx, snapshots snapshotsync.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return err
+	}
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
+		}
+	}
+	return nil
+}
+
 func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
@@ -425,9 +461,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 	return nil
 }
 
-/* ====== PRUNING ====== */
-// snapshots pruning sections works more as a retiring of blocks
-// retiring blocks means moving block data from db into snapshots
+// SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -454,25 +488,21 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
+		noDl := cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()
 		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []snapshotsync.DownloadRequest) error {
-			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
-					return err
-				}
+			if noDl {
+				return nil
 			}
-
-			return nil
-		}, func(l []string) error {
-			//if cfg.snapshotUploader != nil {
-			// TODO - we need to also remove files from the uploader (100k->500K transition)
-			//}
-
-			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+			if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
 				return err
 			}
-
 			return nil
+		}, func(l []string) error {
+			if noDl {
+				return nil
+			}
+			_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+			return err
 		}, func() error {
 			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
 			if filesDeleted && cfg.notifier != nil {
@@ -553,6 +583,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, nil
 	}
 
+	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 	filesDeleted := false
 	// Prune blocks snapshots if necessary

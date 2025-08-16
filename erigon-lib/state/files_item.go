@@ -18,6 +18,7 @@ package state
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -145,6 +146,29 @@ func (i *FilesItem) closeFiles() {
 		i.existence.Close()
 		i.existence = nil
 	}
+}
+
+func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
+	if i.decompressor != nil {
+		relativePaths = append(relativePaths, i.decompressor.FilePath())
+	}
+	if i.index != nil {
+		relativePaths = append(relativePaths, i.index.FilePath())
+	}
+	if i.bindex != nil {
+		relativePaths = append(relativePaths, i.bindex.FilePath())
+	}
+	if i.existence != nil {
+		relativePaths = append(relativePaths, i.existence.FilePath)
+	}
+	var err error
+	for i := 0; i < len(relativePaths); i++ {
+		relativePaths[i], err = filepath.Rel(basePath, relativePaths[i])
+		if err != nil {
+			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
+		}
+	}
+	return relativePaths
 }
 
 func (i *FilesItem) closeFilesAndRemove() {

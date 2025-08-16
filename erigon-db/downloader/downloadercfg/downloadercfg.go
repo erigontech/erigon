@@ -25,18 +25,21 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	"golang.org/x/time/rate"
 
 	g "github.com/anacrolix/generics"
 	analog "github.com/anacrolix/log"
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent"
+	pp "github.com/anacrolix/torrent/peer_protocol"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -47,8 +50,18 @@ import (
 const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
-// default: 16Kb
-const DefaultNetworkChunkSize = 256 << 10
+// BitTorrent client default: 16Kb
+var NetworkChunkSize pp.Integer = 256 << 10 // 256 KiB
+
+func init() {
+	s := os.Getenv("DOWNLOADER_NETWORK_CHUNK_SIZE")
+	if s == "" {
+		return
+	}
+	i64, err := strconv.ParseInt(s, 10, 0)
+	panicif.Err(err)
+	NetworkChunkSize = pp.Integer(i64)
+}
 
 type Cfg struct {
 	Dirs datadir.Dirs
@@ -83,7 +96,7 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
 	// but when downloader is started as a separated process - rise it to max
-	torrentConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", min(16, max(2, runtime.NumCPU()-2)))
+	//torrentConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", min(16, max(2, runtime.NumCPU()-2)))
 
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
@@ -128,8 +141,10 @@ func New(
 ) (_ *Cfg, err error) {
 	torrentConfig := defaultTorrentClientConfig()
 
-	for value := range opts.DisableTrackers.Iter() {
-		torrentConfig.DisableTrackers = value
+	torrentConfig.MaxUnverifiedBytes = 0
+
+	torrentConfig.MetainfoSourcesMerger = func(t *torrent.Torrent, info *metainfo.MetaInfo) error {
+		return t.SetInfoBytes(info.InfoBytes)
 	}
 
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
@@ -148,11 +163,22 @@ func New(
 		torrentConfig.UploadRateLimiter = rate.NewLimiter(opts.UploadRateLimit.Value, 0)
 	}
 	for value := range opts.DownloadRateLimit.Iter() {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(value, 0)
-		if value == 0 {
+		switch value {
+		case rate.Inf:
+			torrentConfig.DownloadRateLimiter = nil
+		case 0:
 			torrentConfig.DialForPeerConns = false
 			torrentConfig.AcceptPeerConnections = false
+			torrentConfig.DisableTrackers = true
+			fallthrough
+		default:
+			torrentConfig.DownloadRateLimiter = rate.NewLimiter(value, 0)
 		}
+	}
+
+	// Override value set by download rate-limit.
+	for value := range opts.DisableTrackers.Iter() {
+		torrentConfig.DisableTrackers = value
 	}
 
 	var analogLevel analog.Level

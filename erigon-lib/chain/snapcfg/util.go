@@ -17,10 +17,13 @@
 package snapcfg
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -51,6 +54,18 @@ var (
 	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
 	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
 	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
+
+	// This belongs in a generic embed.FS or something.
+	allSnapshotHashes = []*[]byte{
+		&snapshothashes.Mainnet,
+		&snapshothashes.Holesky,
+		&snapshothashes.Sepolia,
+		&snapshothashes.Amoy,
+		&snapshothashes.BorMainnet,
+		&snapshothashes.Gnosis,
+		&snapshothashes.Chiado,
+		&snapshothashes.Hoodi,
+	}
 )
 
 func fromEmbeddedToml(in []byte) Preverified {
@@ -372,7 +387,7 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 // IsFrozen - can't be merged to bigger files
 func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
-	return info.To-info.From == mergeLimit
+	return info.To-info.From >= mergeLimit
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
@@ -509,16 +524,29 @@ func webseedsParse(in []byte) (res []string) {
 }
 
 func LoadRemotePreverified(ctx context.Context) (err error) {
-	// Can't log in erigon-snapshot repo due to erigon-lib module import path.
-	log.Info("Loading remote snapshot hashes")
-	err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
-	if err != nil {
-		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
+	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+		log.Info("Loading local preverified override file", "file", s)
 
-		// Fallback to GitHub if R2 fails
-		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		b, err := os.ReadFile(s)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading remote preverified override file: %w", err)
+		}
+		for _, sh := range allSnapshotHashes {
+			*sh = bytes.Clone(b)
+		}
+	} else {
+		// Can't log in erigon-snapshot repo due to erigon-lib module import path.
+		log.Info("Loading remote snapshot hashes")
+
+		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
+		if err != nil {
+			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
+
+			// Fallback to GitHub if R2 fails
+			err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

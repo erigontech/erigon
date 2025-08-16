@@ -26,7 +26,7 @@ import (
 func parseEFFilename(fileName string) (*efFileInfo, error) {
 	partsByDot := strings.Split(fileName, ".")
 	partsByDash := strings.Split(fileName, "-")
-	stepParts := strings.Split(partsByDot[2], "-")
+	stepParts := strings.Split(partsByDot[1], "-")
 	startStep, err := strconv.ParseUint(stepParts[0], 10, 64)
 	if err != nil {
 		return nil, err

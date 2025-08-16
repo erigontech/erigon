@@ -18,11 +18,13 @@ package snapshotsync
 
 import (
 	"context"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
+
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/stretchr/testify/require"
 
@@ -343,6 +345,14 @@ func TestRemoveOverlaps(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
+		for _, f := range files {
+			if strings.HasSuffix(f, fileNameWithoutVersion) {
+				return true
+			}
+		}
+		return false
+	}
 
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
@@ -389,7 +399,18 @@ func TestRemoveOverlaps(t *testing.T) {
 	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
-	require.NoError(s.RemoveOverlaps())
+	require.NoError(s.RemoveOverlaps(func(delFiles []string) error {
+		require.Len(delFiles, 69)
+		mustSeeFile(delFiles, "000000-000010-bodies.seg")
+		mustSeeFile(delFiles, "000000-000010-bodies.idx")
+		mustSeeFile(delFiles, "000000-000010-headers.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions-to-block.idx")
+		mustSeeFile(delFiles, "000170-000180-transactions-to-block.idx")
+		require.False(filepath.IsAbs(delFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
+		return nil
+	}))
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)
@@ -433,7 +454,10 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.Equal(4, len(list))
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
-	require.NoError(s.RemoveOverlaps())
+	require.NoError(s.RemoveOverlaps(func(delList []string) error {
+		require.Len(delList, 0)
+		return nil
+	}))
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)
@@ -576,6 +600,7 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1.0-022695-022696-transactions-to-block.idx.tmp.tmp.torrent.tmp": &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent":                                   &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent.tmp.tmp.tmp":                       &fstest.MapFile{},
+		"v1.0-070200-070300-bodies.seg.torrent4014494284":                  &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -646,6 +671,15 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
 	require.Equal("bodies", f.TypeString)
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-070200-070300-bodies.seg.torrent4014494284"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(f.Type.Enum(), coresnaptype.Bodies.Enum())
+	require.Equal(70200_000, int(f.From))
+	require.Equal(70300_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
+	require.Equal(".torrent4014494284", f.Ext)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef"))
 	require.True(ok)

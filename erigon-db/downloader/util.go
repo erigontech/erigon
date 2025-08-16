@@ -17,7 +17,12 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
+	"io"
+	"os"
+
 	//nolint:gosec
 	"errors"
 	"fmt"
@@ -119,7 +124,7 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !skipSeedableCheck && !snaptype.E3Seedable(name) {
+		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -325,7 +330,7 @@ func (d *Downloader) addTorrentSpec(
 	ts *torrent.TorrentSpec,
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
-	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
+	ts.ChunkSize = downloadercfg.NetworkChunkSize
 	ts.Trackers = nil // to reduce mutex contention - see `afterAdd`
 	ts.Webseeds = nil
 	ts.DisallowDataDownload = true
@@ -334,12 +339,18 @@ func (d *Downloader) addTorrentSpec(
 	// completion data? We might want to clobber any piece completion and force the client to accept
 	// what we provide, assuming we trust our own metainfo generation more.
 	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
-	ts.DisableInitialPieceCheck = !d.cfg.ManualDataVerification
+	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	t, first, err = d.torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return
+	}
+	// This is rough, but we intend to download everything added to completion, so this is a good
+	// time to start the clock. We shouldn't just do it on Torrent.DownloadAll because we might also
+	// need to fetch the metainfo (source).
+	if !t.Complete().Bool() {
+		d.setStartTime()
 	}
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
@@ -351,6 +362,7 @@ func (d *Downloader) afterAdd() {
 	for _, t := range d.torrentClient.Torrents() {
 		// add webseed first - otherwise opts will be ignored
 		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+		// Should be disabled by no download rate or the disable trackers flag.
 		t.AddTrackers(Trackers)
 		t.AllowDataDownload()
 		t.AllowDataUpload()
@@ -404,4 +416,43 @@ func verifyTorrentComplete(
 		}
 		return
 	})
+}
+
+func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completeBytes *atomic.Uint64) error {
+	info := t.Info()
+	file := info.UpvertedFiles()[0]
+	fPath := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
+	f, err := os.Open(fPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			f.Close()
+		}
+	}()
+
+	hasher := sha1.New()
+	for i := 0; i < info.NumPieces(); i++ {
+		p := info.Piece(i)
+		hasher.Reset()
+		_, err := io.Copy(hasher, io.NewSectionReader(f, p.Offset(), p.Length()))
+		if err != nil {
+			return err
+		}
+		good := bytes.Equal(hasher.Sum(nil), p.V1Hash().Value.Bytes())
+		if !good {
+			err := fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
+			log.Warn("[verify.failfast] ", "err", err)
+			return err
+		}
+
+		completeBytes.Add(uint64(p.V1Length()))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	return nil
 }

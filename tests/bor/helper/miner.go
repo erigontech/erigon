@@ -84,7 +84,6 @@ func InitMiner(
 	genesis *types.Genesis,
 	privKey *ecdsa.PrivateKey,
 	withoutHeimdall bool,
-	minerID int,
 ) (_ *node.Node, _ *eth.Ethereum, err error) {
 	// Define the basic configurations for the Ethereum node
 
@@ -93,11 +92,13 @@ func InitMiner(
 		Version: params.Version,
 		Dirs:    datadir.New(dirName),
 		P2P: p2p.Config{
-			ListenAddr:      ":30303",
-			ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
-			MaxPeers:        100,
-			MaxPendingPeers: 1000,
-			AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307, 30308, 30309, 30310},
+			ListenAddr:      ":0",
+			ProtocolVersion: []uint{direct.ETH68},
+			AllowedPorts:    []uint{0},
+			NoDiscovery:     true,
+			NoDial:          true,
+			MaxPeers:        1,
+			MaxPendingPeers: 1,
 			PrivateKey:      privKey,
 			NAT:             nat.Any(),
 		},
@@ -134,7 +135,7 @@ func InitMiner(
 		datadir.New(dirName),
 		nodeCfg.Version,
 		torrentLogLevel,
-		utils.TorrentPortFlag.Value,
+		0,
 		utils.TorrentConnsPerFileFlag.Value,
 		[]string{},
 		"",
@@ -158,7 +159,7 @@ func InitMiner(
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
 			GasLimit:   &genesis.GasLimit,
 			GasPrice:   big.NewInt(1),
-			Recommit:   125 * time.Second,
+			Recommit:   ethconfig.Defaults.Miner.Recommit,
 			SigKey:     privKey,
 			Enabled:    true,
 			EnabledPOS: true,
@@ -174,7 +175,7 @@ func InitMiner(
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second
-	ethCfg.Downloader.ClientConfig.ListenPort = utils.TorrentPortFlag.Value + minerID
+	ethCfg.Downloader.ClientConfig.ListenPort = 0
 	ethCfg.TxPool.AccountSlots = 1000000
 	ethCfg.TxPool.PendingSubPoolLimit = 1000000
 
