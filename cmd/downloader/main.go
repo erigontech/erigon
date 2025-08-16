@@ -554,7 +554,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 
-	files, err := downloader.SeedableFiles(dirs, chain, all)
+	files, err := downloader.SeedableFiles(dirs, chain, true)
 	if err != nil {
 		return err
 	}

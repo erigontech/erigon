@@ -3,12 +3,14 @@
 package gdbme
 
 import (
+	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
@@ -78,7 +80,7 @@ quit
 	}
 
 	fmt.Fprintln(os.Stderr, "Restarting under LLDB for crash diagnostics...")
-	cmd := exec.Command(lldbPath, "-s", tmpFile.Name())
+	cmd := exec.CommandContext(context.Background(), lldbPath, "-s", tmpFile.Name())
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
