@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -37,7 +36,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	chain2 "github.com/erigontech/erigon-lib/chain"
@@ -1143,15 +1141,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			return nil
 		})
 
-		g.Go(func() error {
-			ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-			mtime := time.Time{}
-			if er == nil {
-				mtime = ls.ModTime()
-			}
-			logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-			return nil
-		})
 		if err = g.Wait(); err != nil {
 			return
 		}
