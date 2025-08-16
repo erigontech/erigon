@@ -25,7 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1108,7 +1108,7 @@ func (as *AggregatorPruneStat) String() string {
 		names = append(names, k)
 	}
 
-	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+	slices.Sort(names)
 
 	var sb strings.Builder
 	for _, d := range names {
@@ -1121,7 +1121,7 @@ func (as *AggregatorPruneStat) String() string {
 	for k := range as.Indices {
 		names = append(names, k)
 	}
-	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+	slices.Sort(names)
 
 	for _, d := range names {
 		v, ok := as.Indices[d]
