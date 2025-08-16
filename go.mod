@@ -49,7 +49,6 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.2.0
-	github.com/elastic/go-freelru v0.16.0
 	github.com/emicklei/dot v1.6.2
 	github.com/erigontech/speedtest v0.0.2
 	github.com/ethereum/c-kzg-4844/v2 v2.1.1
@@ -61,7 +60,6 @@ require (
 	github.com/go-quicktest/qt v1.101.0
 	github.com/go-stack/stack v1.8.1
 	github.com/go-test/deep v1.1.1
-	github.com/go-viper/mapstructure/v2 v2.3.0
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
@@ -91,14 +89,12 @@ require (
 	github.com/multiformats/go-multiaddr v0.13.0
 	github.com/nxadm/tail v1.4.11
 	github.com/pelletier/go-toml v1.9.5
-	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
-	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.11.1
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -115,7 +111,6 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.30
-	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.5.2
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.41.0
@@ -131,7 +126,6 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
-	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.38.2
 	pgregory.net/rapid v1.2.0
 	sigs.k8s.io/yaml v1.4.0
@@ -187,6 +181,7 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
@@ -303,6 +298,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20250528174236-200df99c418a // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250721164621-a45f3dfb1074 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 	modernc.org/libc v1.66.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
