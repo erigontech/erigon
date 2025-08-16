@@ -74,7 +74,7 @@ func (bl *BlockListener) Run(ctx context.Context) error {
 			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
 		}
 
-		bl.events.NotifySync(blockEvent)
+		bl.events.NotifySync(ctx, blockEvent)
 	}
 
 	select {

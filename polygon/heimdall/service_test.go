@@ -163,7 +163,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	suite.logger = testlog.Logger(suite.T(), log.LvlCrit)
-	store := NewMdbxStore(suite.logger, dataDir, false, 1)
+	store := NewMdbxStore(suite.logger, dataDir, false, 100)
 	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
@@ -176,6 +176,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupMilestones()
 	suite.service = NewService(ServiceConfig{
 		Store:     store,
+		Db:        store.db,
 		BorConfig: borConfig,
 		Client:    suite.client,
 		Logger:    suite.logger,
@@ -188,12 +189,15 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		suite.observedMilestones = append(suite.observedMilestones, milestone)
 	})
 
-	suite.service.RegisterSpanObserver(func(span *Span) {
+	suite.service.RegisterSpanObserver(func(ctx context.Context, span *Span) {
 		suite.observedSpans = append(suite.observedSpans, span)
 	})
 
 	suite.eg.Go(func() error {
-		return suite.service.Run(suite.ctx)
+		defer suite.cancel()
+		err := suite.service.Run(suite.ctx)
+		require.ErrorIs(suite.T(), err, context.Canceled)
+		return err
 	})
 
 	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)

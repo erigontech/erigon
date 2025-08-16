@@ -131,7 +131,7 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 		return sentryClient.Messages(ctx, &messagesRequest, grpc.WaitForReady(true))
 	}
 
-	streamMessages(ctx, ml, "InboundMessages", streamFactory, func(message *sentryproto.InboundMessage) error {
+	streamMessages(ctx, ml, "InboundMessages", streamFactory, func(ctx context.Context, message *sentryproto.InboundMessage) error {
 		switch message.Id {
 		case sentryproto.MessageId_NEW_BLOCK_66:
 			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockObservers, message)
@@ -155,10 +155,10 @@ func (ml *MessageListener) listenPeerEvents(ctx context.Context) {
 	streamMessages(ctx, ml, "PeerEvents", streamFactory, ml.notifyPeerEventObservers)
 }
 
-func (ml *MessageListener) notifyPeerEventObservers(peerEvent *sentryproto.PeerEvent) error {
+func (ml *MessageListener) notifyPeerEventObservers(ctx context.Context, peerEvent *sentryproto.PeerEvent) error {
 	// wait on all observers to finish processing the peer event before notifying them
 	// with subsequent events in order to preserve the ordering of the sentry messages
-	ml.peerEventObservers.NotifySync(peerEvent)
+	ml.peerEventObservers.NotifySync(ctx, peerEvent)
 	return nil
 }
 
@@ -167,12 +167,12 @@ func streamMessages[TMessage any](
 	ml *MessageListener,
 	name string,
 	streamFactory sentry.MessageStreamFactory,
-	handler func(event *TMessage) error,
+	handler func(ctx context.Context, event *TMessage) error,
 ) {
 	defer ml.stopWg.Done()
 
 	messageHandler := func(_ context.Context, event *TMessage, client sentryproto.SentryClient) error {
-		return handler(event)
+		return handler(ctx, event)
 	}
 
 	sentry.ReconnectAndPumpStreamLoop(
@@ -215,7 +215,7 @@ func notifyInboundMessageObservers[TPacket any](
 		Decoded:        decodedData,
 		PeerId:         peerId,
 	}
-	observers.Notify(&decodedMessage)
+	observers.Notify(ctx, &decodedMessage)
 
 	return nil
 }

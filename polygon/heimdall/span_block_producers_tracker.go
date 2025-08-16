@@ -27,12 +27,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 func newSpanBlockProducersTracker(
 	logger log.Logger,
 	borConfig *borcfg.BorConfig,
 	store EntityStore[*SpanBlockProducerSelection],
+	db *polygoncommon.Database,
 ) *spanBlockProducersTracker {
 	recentSelectionsLru, err := lru.New[uint64, SpanBlockProducerSelection](1024)
 	if err != nil {
@@ -43,6 +45,7 @@ func newSpanBlockProducersTracker(
 		logger:           logger,
 		borConfig:        borConfig,
 		store:            store,
+		db:               db,
 		recentSelections: recentSelectionsLru,
 		newSpans:         make(chan *Span),
 		idleSignal:       make(chan struct{}),
@@ -53,6 +56,7 @@ type spanBlockProducersTracker struct {
 	logger           log.Logger
 	borConfig        *borcfg.BorConfig
 	store            EntityStore[*SpanBlockProducerSelection]
+	db               *polygoncommon.Database
 	recentSelections *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
 	newSpans         chan *Span
 	queued           atomic.Int32
@@ -100,9 +104,14 @@ func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {
 	}
 }
 
-func (t *spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
-	t.queued.Add(1)
-	t.newSpans <- span
+func (t *spanBlockProducersTracker) ObserveSpanAsync(ctx context.Context, span *Span) {
+	select {
+	case <-ctx.Done():
+		return
+	case t.newSpans <- span:
+		t.queued.Add(1)
+		return
+	}
 }
 
 func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
@@ -205,12 +214,18 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
-	spanId := SpanIdAt(blockNum)
+	spanId, ok, err := t.store.EntityIdFromBlockNum(ctx, blockNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		return nil, 0, fmt.Errorf("could not get spanId from blockNum=%d", blockNum)
+	}
 	var prevSprintNum uint64
 	if currentSprintNum > 0 {
 		prevSprintNum = currentSprintNum - 1
 	}
-	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && spanId == selection.SpanId {
+	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && SpanId(spanId) == selection.SpanId {
 		producersCopy := selection.Producers.Copy()
 		producersCopy.IncrementProposerPriority(1)
 		selectionCopy := selection

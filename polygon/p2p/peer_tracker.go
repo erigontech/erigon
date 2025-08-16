@@ -226,7 +226,7 @@ func (pt *PeerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *p
 }
 
 func newPeerEventObserver(pt *PeerTracker) event.Observer[*sentryproto.PeerEvent] {
-	return func(message *sentryproto.PeerEvent) {
+	return func(ctx context.Context, message *sentryproto.PeerEvent) {
 		peerId := PeerIdFromH512(message.PeerId)
 		switch message.EventId {
 		case sentryproto.PeerEvent_Connect:
@@ -238,7 +238,7 @@ func newPeerEventObserver(pt *PeerTracker) event.Observer[*sentryproto.PeerEvent
 }
 
 func newBlockHashAnnouncesObserver(pt *PeerTracker) event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]] {
-	return func(message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+	return func(ctx context.Context, message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		for _, hashOrNum := range *message.Decoded {
 			pt.BlockHashPresent(message.PeerId, hashOrNum.Hash)
 		}
@@ -246,7 +246,7 @@ func newBlockHashAnnouncesObserver(pt *PeerTracker) event.Observer[*DecodedInbou
 }
 
 func newBlockAnnouncesObserver(pt *PeerTracker) event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]] {
-	return func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
+	return func(ctx context.Context, message *DecodedInboundMessage[*eth.NewBlockPacket]) {
 		pt.BlockHashPresent(message.PeerId, message.Decoded.Block.Hash())
 	}
 }
