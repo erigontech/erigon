@@ -2210,10 +2210,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-			hph.metrics.LogMetrics(log.Root(), log.LvlInfo, fmt.Sprintf("[%s][agg]", logPrefix))
-
+				append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
+					hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
 		default:
 		}
 

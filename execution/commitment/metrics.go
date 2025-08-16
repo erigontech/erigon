@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 /*
@@ -66,12 +65,13 @@ func (m *Metrics) WriteToCSV() {
 	}
 }
 
-func (m *Metrics) LogMetrics(logger log.Logger, level log.Lvl, prefix string) {
-	logger.Log(level, prefix+" trie progress",
+func (m *Metrics) logMetrics() []any {
+	return []any{
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
 		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0))
+		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
+	}
 
 	//logger.Log(level, prefix+"sccount progress")
 }
