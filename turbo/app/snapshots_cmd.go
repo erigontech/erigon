@@ -1059,6 +1059,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			}
 			return err
 		}
+
 		if info.IsDir() && path != dirs.SnapDomain {
 			return fmt.Errorf("unexpected directory in domain (%s) check %s", dirs.SnapDomain, path)
 		}
