@@ -20,12 +20,14 @@ ERIGON_COMMITMENT_TRACE - file path prefix to write commitment metrics
 */
 func init() {
 	metricsFile = dbg.EnvString("ERIGON_COMMITMENT_TRACE", "")
-	collectCommitmentMetrics = true //metricsFile != ""
+	collectCommitmentMetrics = true
+	writeCommitmentMetrics = metricsFile != ""
 }
 
 var (
 	metricsFile              string
 	collectCommitmentMetrics bool
+	writeCommitmentMetrics   bool
 )
 
 type CsvMetrics interface {
@@ -56,20 +58,18 @@ func NewMetrics() *Metrics {
 }
 
 func (m *Metrics) WriteToCSV() {
-	if collectCommitmentMetrics {
-		if err := writeMetricsToCSV(m, metricsFile+"_process.csv"); err != nil {
-			panic(err)
-		}
-		if err := writeMetricsToCSV(m.Accounts, metricsFile+"_accounts.csv"); err != nil {
-			panic(err)
-		}
+	if err := writeMetricsToCSV(m, metricsFile+"_process.csv"); err != nil {
+		panic(err)
+	}
+	if err := writeMetricsToCSV(m.Accounts, metricsFile+"_accounts.csv"); err != nil {
+		panic(err)
 	}
 }
 
 func (m *Metrics) LogMetrics(logger log.Logger, level log.Lvl, prefix string) {
-	logger.Log(level, prefix+" trie progress", "upd", common.PrettyCounter(m.updates.Load()),
+	logger.Log(level, prefix+" trie progress",
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
-		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()), 
+		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
 		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", m.spentFolding.String(), "ufdur", m.spentUnfolding.String())
 
@@ -140,7 +140,7 @@ func (m *Metrics) Reset() {
 }
 
 func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
-	if !collectCommitmentMetrics {
+	if !writeCommitmentMetrics {
 		return
 	}
 	ends := make([]uint64, 0, len(endTxNumStats))
@@ -317,7 +317,7 @@ func (am *AccountMetrics) Reset() {
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) error {
-	if !collectCommitmentMetrics {
+	if !writeCommitmentMetrics {
 		return nil
 	}
 	// Open the file in append mode or create if it doesn't exist
