@@ -33,7 +33,7 @@ func MountPointForDirPath(dirPath string) string {
 	actualPath := SmlinkForDirPath(dirPath)
 
 	psCommand := fmt.Sprintf(`(Get-Item -Path "%s").PSDrive.Name`, actualPath)
-	cmd := exec.Command("powershell", "-Command", psCommand)
+	cmd := exec.CommandContext(context.Background(), "powershell", "-Command", psCommand)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
@@ -84,7 +84,7 @@ func DiskInfo(disk string) (string, error) {
 		exit 3
 	}
 	`, disk, disk)
-	cmd := exec.Command("powershell", "-Command", psCommand)
+	cmd := exec.CommandContext(context.Background(), "powershell", "-Command", psCommand)
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out

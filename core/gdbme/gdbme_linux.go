@@ -70,7 +70,7 @@ func RestartUnderGDB() {
 	gdbArgs = append(gdbArgs, filteredArgs...)
 
 	fmt.Fprintln(os.Stderr, "Restarting under GDB for crash diagnostics...")
-	cmd := exec.Command(gdbPath, gdbArgs...)
+	cmd := exec.CommandContext(context.Background(), gdbPath, gdbArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
