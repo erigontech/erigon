@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 const CheckpointSizeSSZ = 40
@@ -39,12 +39,12 @@ func (*Checkpoint) EncodingSizeSSZ() int {
 
 // DecodeSSZ decodes the Checkpoint object from SSZ-encoded data.
 func (c *Checkpoint) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &c.Epoch, c.Root[:])
+	return ssz.UnmarshalSSZ(buf, version, &c.Epoch, c.Root[:])
 }
 
 // EncodeSSZ encodes the Checkpoint object into SSZ format.
 func (c *Checkpoint) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, c.Epoch, c.Root[:])
+	return ssz.MarshalSSZ(dst, c.Epoch, c.Root[:])
 }
 
 // Clone returns a new Checkpoint object that is a copy of the current object.

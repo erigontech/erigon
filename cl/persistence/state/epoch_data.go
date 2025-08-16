@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 // EpochData stores the data for the epoch (valid throughout the epoch)
@@ -67,7 +67,7 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 
 // Serialize serializes the state into a byte slice with zstd compression.
 func (m *EpochData) WriteTo(w io.Writer) error {
-	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
+	buf, err := ssz.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (m *EpochData) ReadFrom(r io.Reader) error {
 	if m.Version >= clparams.FuluVersion {
 		m.ProposerLookahead = solid.NewUint64VectorSSZ(int((1 + m.BeaconConfig.MinSeedLookahead) * m.BeaconConfig.SlotsPerEpoch))
 	}
-	return ssz2.UnmarshalSSZ(buf, 0, m.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, 0, m.getSchema()...)
 }
 
 func (m *EpochData) getSchema() []interface{} {

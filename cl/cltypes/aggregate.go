@@ -20,7 +20,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 /*
@@ -34,7 +34,7 @@ type AggregateAndProof struct {
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
+	return ssz.MarshalSSZ(dst, a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 func (a *AggregateAndProof) Static() bool {
@@ -43,7 +43,7 @@ func (a *AggregateAndProof) Static() bool {
 
 func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Aggregate = new(solid.Attestation)
-	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
+	return ssz.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 func (a *AggregateAndProof) EncodingSizeSSZ() int {
@@ -60,12 +60,12 @@ type SignedAggregateAndProof struct {
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, a.Message, a.Signature[:])
+	return ssz.MarshalSSZ(dst, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Message = new(AggregateAndProof)
-	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
@@ -110,7 +110,7 @@ func (agg *SyncAggregate) IsSet(idx uint64) bool {
 }
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
+	return ssz.MarshalSSZ(buf, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (*SyncAggregate) Static() bool {
@@ -118,7 +118,7 @@ func (*SyncAggregate) Static() bool {
 }
 
 func (agg *SyncAggregate) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
+	return ssz.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {

@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 const AttestationDataSize = 128
@@ -47,11 +47,11 @@ func (a *AttestationData) EncodingSizeSSZ() int {
 }
 
 func (a *AttestationData) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, &a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
+	return ssz.UnmarshalSSZ(buf, version, &a.Slot, &a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
 }
 
 func (a *AttestationData) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, a.Slot, a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
+	return ssz.MarshalSSZ(dst, a.Slot, a.CommitteeIndex, a.BeaconBlockRoot[:], &a.Source, &a.Target)
 }
 
 func (a *AttestationData) Clone() clonable.Clonable {

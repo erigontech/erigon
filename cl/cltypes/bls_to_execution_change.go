@@ -20,9 +20,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 // Change to EL engine
@@ -33,7 +32,7 @@ type BLSToExecutionChange struct {
 }
 
 func (b *BLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.ValidatorIndex, b.From[:], b.To[:])
+	return ssz.MarshalSSZ(buf, b.ValidatorIndex, b.From[:], b.To[:])
 }
 
 func (b *BLSToExecutionChange) HashSSZ() ([32]byte, error) {
@@ -47,7 +46,7 @@ func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	b.ValidatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	copy(b.From[:], buf[8:])
 	copy(b.To[:], buf[56:])
-	return ssz2.UnmarshalSSZ(buf, version, &b.ValidatorIndex, b.From[:], b.To[:])
+	return ssz.UnmarshalSSZ(buf, version, &b.ValidatorIndex, b.From[:], b.To[:])
 }
 
 func (*BLSToExecutionChange) EncodingSizeSSZ() int {
@@ -64,12 +63,12 @@ type SignedBLSToExecutionChange struct {
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
+	return ssz.MarshalSSZ(buf, s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	s.Message = new(BLSToExecutionChange)
-	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) HashSSZ() ([32]byte, error) {

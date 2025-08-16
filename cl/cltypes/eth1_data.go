@@ -19,9 +19,8 @@ package cltypes
 import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 type Eth1Data struct {
@@ -48,12 +47,12 @@ func (e *Eth1Data) Equal(b *Eth1Data) bool {
 
 // MarshalSSZTo ssz marshals the Eth1Data object to a target array
 func (e *Eth1Data) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, e.Root[:], e.DepositCount, e.BlockHash[:])
+	return ssz.MarshalSSZ(buf, e.Root[:], e.DepositCount, e.BlockHash[:])
 
 }
 
 func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, e.Root[:], &e.DepositCount, e.BlockHash[:])
+	return ssz.UnmarshalSSZ(buf, 0, e.Root[:], &e.DepositCount, e.BlockHash[:])
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Eth1Data object

@@ -6,15 +6,15 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
 	_ EncodableHashableSSZ = (*WithdrawalRequest)(nil)
-	_ ssz2.SizedObjectSSZ  = (*WithdrawalRequest)(nil)
+	_ ssz.SizedObjectSSZ   = (*WithdrawalRequest)(nil)
 
 	_ EncodableHashableSSZ = (*PendingPartialWithdrawal)(nil)
-	_ ssz2.SizedObjectSSZ  = (*PendingPartialWithdrawal)(nil)
+	_ ssz.SizedObjectSSZ   = (*PendingPartialWithdrawal)(nil)
 )
 
 const (
@@ -33,11 +33,11 @@ func (p *WithdrawalRequest) EncodingSizeSSZ() int {
 }
 
 func (p *WithdrawalRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
+	return ssz.MarshalSSZ(buf, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
 }
 
 func (p *WithdrawalRequest) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
+	return ssz.UnmarshalSSZ(buf, version, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
 }
 
 func (p *WithdrawalRequest) Clone() clonable.Clonable {
@@ -63,11 +63,11 @@ func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {
 }
 
 func (p *PendingPartialWithdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return ssz.MarshalSSZ(buf, &p.Index, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return ssz.UnmarshalSSZ(buf, version, &p.Index, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {

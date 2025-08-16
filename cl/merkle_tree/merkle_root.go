@@ -23,11 +23,12 @@ import (
 	"reflect"
 	"unsafe"
 
+	"github.com/prysmaticlabs/gohashtree"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/prysmaticlabs/gohashtree"
 )
 
 // HashTreeRoot returns the hash for a given schema of objects.

@@ -10,7 +10,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 const (
@@ -20,15 +20,15 @@ const (
 )
 
 var (
-	_ ssz2.SizedObjectSSZ = (*DataColumnSidecar)(nil)
-	_ ssz2.SizedObjectSSZ = (*ColumnSidecarsByRangeRequest)(nil)
+	_ ssz.SizedObjectSSZ = (*DataColumnSidecar)(nil)
+	_ ssz.SizedObjectSSZ = (*ColumnSidecarsByRangeRequest)(nil)
 
-	_ ssz2.SizedObjectSSZ        = (*DataColumnsByRootIdentifier)(nil)
+	_ ssz.SizedObjectSSZ         = (*DataColumnsByRootIdentifier)(nil)
 	_ solid.EncodableHashableSSZ = (*DataColumnsByRootIdentifier)(nil)
 
-	_ ssz2.SizedObjectSSZ = (*MatrixEntry)(nil)
+	_ ssz.SizedObjectSSZ = (*MatrixEntry)(nil)
 
-	_ ssz2.SizedObjectSSZ = (*Cell)(nil)
+	_ ssz.SizedObjectSSZ = (*Cell)(nil)
 )
 
 type DataColumnSidecar struct {
@@ -73,11 +73,11 @@ func (d *DataColumnSidecar) tryInit() {
 }
 
 func (d *DataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, d.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, version, d.getSchema()...)
 }
 
 func (d *DataColumnSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, d.getSchema()...)
+	return ssz.MarshalSSZ(buf, d.getSchema()...)
 }
 
 func (d *DataColumnSidecar) getSchema() []interface{} {
@@ -106,7 +106,7 @@ func (c *Cell) Clone() clonable.Clonable {
 }
 
 func (c *Cell) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, c[:])
+	return ssz.UnmarshalSSZ(buf, version, c[:])
 }
 
 func (c *Cell) EncodingSizeSSZ() int {
@@ -149,11 +149,11 @@ type MatrixEntry struct {
 }
 
 func (m *MatrixEntry) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, m.Cell[:], m.KzgProof[:], m.ColumnIndex, m.RowIndex)
+	return ssz.MarshalSSZ(buf, m.Cell[:], m.KzgProof[:], m.ColumnIndex, m.RowIndex)
 }
 
 func (m *MatrixEntry) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, m.Cell[:], m.KzgProof[:], &m.ColumnIndex, &m.RowIndex)
+	return ssz.UnmarshalSSZ(buf, version, m.Cell[:], m.KzgProof[:], &m.ColumnIndex, &m.RowIndex)
 }
 
 func (m *MatrixEntry) EncodingSizeSSZ() int {
@@ -198,12 +198,12 @@ func (c *ColumnSidecarsByRangeRequest) tryInit() {
 
 func (c *ColumnSidecarsByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
 	c.tryInit()
-	return ssz2.MarshalSSZ(buf, &c.StartSlot, &c.Count, c.Columns)
+	return ssz.MarshalSSZ(buf, &c.StartSlot, &c.Count, c.Columns)
 }
 
 func (c *ColumnSidecarsByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
 	c.tryInit()
-	return ssz2.UnmarshalSSZ(buf, 0, &c.StartSlot, &c.Count, c.Columns)
+	return ssz.UnmarshalSSZ(buf, 0, &c.StartSlot, &c.Count, c.Columns)
 }
 
 func (c *ColumnSidecarsByRangeRequest) EncodingSizeSSZ() int {
@@ -239,12 +239,12 @@ func (d *DataColumnsByRootIdentifier) tryInit() {
 
 func (d *DataColumnsByRootIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
 	d.tryInit()
-	return ssz2.MarshalSSZ(buf, d.BlockRoot[:], d.Columns)
+	return ssz.MarshalSSZ(buf, d.BlockRoot[:], d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) DecodeSSZ(buf []byte, _ int) error {
 	d.tryInit()
-	return ssz2.UnmarshalSSZ(buf, 0, d.BlockRoot[:], d.Columns)
+	return ssz.UnmarshalSSZ(buf, 0, d.BlockRoot[:], d.Columns)
 }
 
 func (d *DataColumnsByRootIdentifier) EncodingSizeSSZ() int {

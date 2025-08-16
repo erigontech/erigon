@@ -22,19 +22,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
-// make sure that the type implements the interface ssz2.ObjectSSZ
+// make sure that the type implements the interface ssz.ObjectSSZ
 var (
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
-	_ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)
+	_ ssz.ObjectSSZ = (*BlindedBeaconBody)(nil)
+	_ ssz.ObjectSSZ = (*BlindedBeaconBlock)(nil)
+	_ ssz.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)
 
 	_ GenericBeaconBlock = (*BlindedBeaconBlock)(nil)
 	_ GenericBeaconBody  = (*BlindedBeaconBody)(nil)
@@ -91,7 +89,7 @@ func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeac
 }
 
 func (b *SignedBlindedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.Block, b.Signature[:])
+	return ssz.MarshalSSZ(buf, b.Block, b.Signature[:])
 }
 
 func (b *SignedBlindedBeaconBlock) EncodingSizeSSZ() int {
@@ -102,7 +100,7 @@ func (b *SignedBlindedBeaconBlock) EncodingSizeSSZ() int {
 }
 
 func (b *SignedBlindedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
-	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
+	return ssz.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
 }
 
 func (b *SignedBlindedBeaconBlock) HashSSZ() ([32]byte, error) {
@@ -151,7 +149,7 @@ func (b *BlindedBeaconBlock) SetVersion(version clparams.StateVersion) *BlindedB
 }
 
 func (b *BlindedBeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+	return ssz.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BlindedBeaconBlock) EncodingSizeSSZ() int {
@@ -162,7 +160,7 @@ func (b *BlindedBeaconBlock) EncodingSizeSSZ() int {
 }
 
 func (b *BlindedBeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+	return ssz.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BlindedBeaconBlock) HashSSZ() ([32]byte, error) {
@@ -272,7 +270,7 @@ func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBe
 }
 
 func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
+	return ssz.MarshalSSZ(dst, b.getSchema(false)...)
 }
 
 func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
@@ -350,7 +348,7 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 
 	b.ExecutionPayload = NewEth1Header(b.Version)
 
-	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
+	err := ssz.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
 }
 

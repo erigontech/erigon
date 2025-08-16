@@ -10,12 +10,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
 	_ solid.EncodableHashableSSZ = (*ExecutionRequests)(nil)
-	_ ssz2.SizedObjectSSZ        = (*ExecutionRequests)(nil)
+	_ ssz.SizedObjectSSZ         = (*ExecutionRequests)(nil)
 )
 
 // class ExecutionRequests(Container):
@@ -45,11 +45,11 @@ func (e *ExecutionRequests) EncodingSizeSSZ() int {
 }
 
 func (e *ExecutionRequests) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, e.Deposits, e.Withdrawals, e.Consolidations)
+	return ssz.MarshalSSZ(buf, e.Deposits, e.Withdrawals, e.Consolidations)
 }
 
 func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
+	return ssz.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
 }
 
 func (e *ExecutionRequests) Clone() clonable.Clonable {

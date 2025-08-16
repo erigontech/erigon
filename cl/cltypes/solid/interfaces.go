@@ -20,8 +20,7 @@ import (
 	"encoding/json"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 type IterableSSZ[T any] interface {
@@ -36,7 +35,7 @@ type IterableSSZ[T any] interface {
 	Pop() T
 	Append(v T)
 
-	ssz2.Sized
+	ssz.Sized
 	ssz.EncodableSSZ
 	ssz.HashableSSZ
 }

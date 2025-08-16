@@ -20,7 +20,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 type HistoricalSummary struct {
@@ -29,11 +29,11 @@ type HistoricalSummary struct {
 }
 
 func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
+	return ssz.MarshalSSZ(buf, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
 func (h *HistoricalSummary) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
+	return ssz.UnmarshalSSZ(buf, 0, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
 func (h *HistoricalSummary) HashSSZ() ([32]byte, error) {

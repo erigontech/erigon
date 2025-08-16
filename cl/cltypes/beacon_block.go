@@ -25,20 +25,18 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
-	_ ssz2.SizedObjectSSZ = (*BeaconBody)(nil)
-	_ ssz2.SizedObjectSSZ = (*BeaconBlock)(nil)
-	_ ssz2.SizedObjectSSZ = (*SignedBeaconBlock)(nil)
-	_ ssz2.SizedObjectSSZ = (*DenebBeaconBlock)(nil)
-	_ ssz2.SizedObjectSSZ = (*DenebSignedBeaconBlock)(nil)
+	_ ssz.SizedObjectSSZ = (*BeaconBody)(nil)
+	_ ssz.SizedObjectSSZ = (*BeaconBlock)(nil)
+	_ ssz.SizedObjectSSZ = (*SignedBeaconBlock)(nil)
+	_ ssz.SizedObjectSSZ = (*DenebBeaconBlock)(nil)
+	_ ssz.SizedObjectSSZ = (*DenebSignedBeaconBlock)(nil)
 )
 
 const (
@@ -108,7 +106,7 @@ func (b *SignedBeaconBlock) Version() clparams.StateVersion {
 }
 
 func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.Block, b.Signature[:])
+	return ssz.MarshalSSZ(buf, b.Block, b.Signature[:])
 }
 
 func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
@@ -119,7 +117,7 @@ func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
 }
 
 func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
-	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
+	return ssz.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
 }
 
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
@@ -163,7 +161,7 @@ func (b *BeaconBlock) Version() clparams.StateVersion {
 }
 
 func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+	return ssz.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) EncodingSizeSSZ() int {
@@ -174,7 +172,7 @@ func (b *BeaconBlock) EncodingSizeSSZ() int {
 }
 
 func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+	return ssz.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
@@ -265,7 +263,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
+	return ssz.MarshalSSZ(dst, b.getSchema(false)...)
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
@@ -341,7 +339,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	}
 
 	b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
-	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
+	err := ssz.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
 }
 
@@ -573,11 +571,11 @@ func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams
 }
 
 func (b *DenebBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.Block, b.KZGProofs, b.Blobs)
+	return ssz.MarshalSSZ(buf, b.Block, b.KZGProofs, b.Blobs)
 }
 
 func (b *DenebBeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, b.Block, b.KZGProofs, b.Blobs)
+	return ssz.UnmarshalSSZ(buf, version, b.Block, b.KZGProofs, b.Blobs)
 }
 
 func (b *DenebBeaconBlock) EncodingSizeSSZ() int {
@@ -634,11 +632,11 @@ func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version cl
 }
 
 func (b *DenebSignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.SignedBlock, b.KZGProofs, b.Blobs)
+	return ssz.MarshalSSZ(buf, b.SignedBlock, b.KZGProofs, b.Blobs)
 }
 
 func (b *DenebSignedBeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, b.SignedBlock, b.KZGProofs, b.Blobs)
+	return ssz.UnmarshalSSZ(buf, version, b.SignedBlock, b.KZGProofs, b.Blobs)
 }
 
 func (b *DenebSignedBeaconBlock) EncodingSizeSSZ() int {

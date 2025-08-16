@@ -24,11 +24,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -104,7 +103,7 @@ func (e *Eth1Header) IsZero() bool {
 
 // EncodeSSZ encodes the header in SSZ format.
 func (h *Eth1Header) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, h.getSchema()...)
+	return ssz.MarshalSSZ(dst, h.getSchema()...)
 }
 
 // DecodeSSZ decodes given SSZ slice.
@@ -113,7 +112,7 @@ func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < h.EncodingSizeSSZ() {
 		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
 	}
-	return ssz2.UnmarshalSSZ(buf, version, h.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, version, h.getSchema()...)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Header object

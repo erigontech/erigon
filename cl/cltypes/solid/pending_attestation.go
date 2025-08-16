@@ -21,11 +21,9 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon-lib/common/length"
-
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 type PendingAttestation struct {
@@ -49,14 +47,14 @@ func (a *PendingAttestation) DecodeSSZ(buf []byte, _ int) error {
 	}
 	a.AggregationBits = NewBitList(0, 2048)
 	a.Data = &AttestationData{}
-	return ssz2.UnmarshalSSZ(buf, 0, a.AggregationBits, a.Data, &a.InclusionDelay, &a.ProposerIndex)
+	return ssz.UnmarshalSSZ(buf, 0, a.AggregationBits, a.Data, &a.InclusionDelay, &a.ProposerIndex)
 }
 
 func (a *PendingAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
 	if a.Data == nil {
 		return nil, errors.New("attestation data is nil")
 	}
-	return ssz2.MarshalSSZ(dst, a.AggregationBits, a.Data, a.InclusionDelay, a.ProposerIndex)
+	return ssz.MarshalSSZ(dst, a.AggregationBits, a.Data, a.InclusionDelay, a.ProposerIndex)
 }
 
 func (a *PendingAttestation) HashSSZ() (o [32]byte, err error) {

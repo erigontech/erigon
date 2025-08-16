@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 type SlotData struct {
@@ -81,7 +81,7 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 
 // Serialize serializes the state into a byte slice with zstd compression.
 func (m *SlotData) WriteTo(w io.Writer) error {
-	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
+	buf, err := ssz.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error 
 		return io.ErrUnexpectedEOF
 	}
 
-	return ssz2.UnmarshalSSZ(buf, int(m.Version), m.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, int(m.Version), m.getSchema()...)
 }
 
 func (m *SlotData) getSchema() []interface{} {

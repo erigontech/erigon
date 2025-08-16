@@ -21,11 +21,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 const (
@@ -41,11 +39,11 @@ type DepositData struct {
 }
 
 func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, d.PubKey[:], d.WithdrawalCredentials[:], ssz.Uint64SSZ(d.Amount), d.Signature[:])
+	return ssz.MarshalSSZ(dst, d.PubKey[:], d.WithdrawalCredentials[:], ssz.Uint64SSZ(d.Amount), d.Signature[:])
 }
 
 func (d *DepositData) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, d.PubKey[:], d.WithdrawalCredentials[:], &d.Amount, d.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, d.PubKey[:], d.WithdrawalCredentials[:], &d.Amount, d.Signature[:])
 }
 
 func (d *DepositData) EncodingSizeSSZ() int {
@@ -81,14 +79,14 @@ func (d *Deposit) UnmarshalJSON(buf []byte) error {
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, d.Proof, d.Data)
+	return ssz.MarshalSSZ(dst, d.Proof, d.Data)
 }
 
 func (d *Deposit) DecodeSSZ(buf []byte, version int) error {
 	d.Proof = solid.NewHashVector(33)
 	d.Data = new(DepositData)
 
-	return ssz2.UnmarshalSSZ(buf, version, d.Proof, d.Data)
+	return ssz.UnmarshalSSZ(buf, version, d.Proof, d.Data)
 }
 
 func (d *Deposit) EncodingSizeSSZ() int {
@@ -105,7 +103,7 @@ type VoluntaryExit struct {
 }
 
 func (e *VoluntaryExit) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, e.Epoch, e.ValidatorIndex)
+	return ssz.MarshalSSZ(buf, e.Epoch, e.ValidatorIndex)
 }
 
 func (*VoluntaryExit) Clone() clonable.Clonable {
@@ -117,7 +115,7 @@ func (*VoluntaryExit) Static() bool {
 }
 
 func (e *VoluntaryExit) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &e.Epoch, &e.ValidatorIndex)
+	return ssz.UnmarshalSSZ(buf, 0, &e.Epoch, &e.ValidatorIndex)
 }
 
 func (e *VoluntaryExit) HashSSZ() ([32]byte, error) {
@@ -134,12 +132,12 @@ type SignedVoluntaryExit struct {
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, e.VoluntaryExit, e.Signature[:])
+	return ssz.MarshalSSZ(dst, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, version int) error {
 	e.VoluntaryExit = new(VoluntaryExit)
-	return ssz2.UnmarshalSSZ(buf, version, e.VoluntaryExit, e.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, e.VoluntaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {

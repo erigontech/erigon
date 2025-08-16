@@ -14,14 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package ssz2
+package ssz
 
 import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
-
-	"github.com/erigontech/erigon-lib/types/ssz"
 )
 
 /*
@@ -67,14 +65,14 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 		switch obj := element.(type) {
 		case *uint64:
 			if len(buf) < position+8 {
-				return ssz.ErrLowBufferSize
+				return ErrLowBufferSize
 			}
 			// If the element is a pointer to uint64, decode it from the buf using little-endian encoding
 			*obj = binary.LittleEndian.Uint64(buf[position:])
 			position += 8
 		case []byte:
 			if len(buf) < position+len(obj) {
-				return ssz.ErrLowBufferSize
+				return ErrLowBufferSize
 			}
 			// If the element is a byte slice, copy the corresponding data from the buf to the slice
 			copy(obj, buf[position:])
@@ -83,7 +81,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 			// If the element implements the SizedObjectSSZ interface
 			if obj.Static() {
 				if len(buf) < position+obj.EncodingSizeSSZ() {
-					return ssz.ErrLowBufferSize
+					return ErrLowBufferSize
 				}
 				// If the object is static (fixed size), decode it from the buf and update the position
 				if err = obj.DecodeSSZ(buf[position:], version); err != nil {
@@ -92,7 +90,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 				position += obj.EncodingSizeSSZ()
 			} else {
 				if len(buf) < position+4 {
-					return ssz.ErrLowBufferSize
+					return ErrLowBufferSize
 				}
 				// If the object is dynamic (variable size), store the offset and the object in separate slices
 				offsets = append(offsets, int(binary.LittleEndian.Uint32(buf[position:])))
@@ -113,10 +111,10 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 			endOffset = offsets[i+1]
 		}
 		if offsets[i] > endOffset {
-			return ssz.ErrBadOffset
+			return ErrBadOffset
 		}
 		if len(buf) < endOffset {
-			return ssz.ErrLowBufferSize
+			return ErrLowBufferSize
 		}
 		if err = obj.DecodeSSZ(buf[offsets[i]:endOffset], version); err != nil {
 			return fmt.Errorf("dynamic element (sz:%d) %d/%s: %w", endOffset-offsets[i], i, reflect.TypeOf(obj), err)

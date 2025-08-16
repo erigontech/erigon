@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
@@ -52,7 +52,7 @@ func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment common.Bytes48, kzgP
 }
 
 func (b *BlobSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.getSchema()...)
+	return ssz.MarshalSSZ(buf, b.getSchema()...)
 }
 
 func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
@@ -85,7 +85,7 @@ func (b *BlobSidecar) EncodingSizeSSZ() int {
 func (b *BlobSidecar) DecodeSSZ(buf []byte, version int) error {
 	b.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
 	b.SignedBlockHeader = &SignedBeaconBlockHeader{}
-	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
 
 func (b *BlobSidecar) HashSSZ() ([32]byte, error) {
@@ -121,7 +121,7 @@ func NewBlobIdentifier(blockRoot common.Hash, index uint64) *BlobIdentifier {
 }
 
 func (b *BlobIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.getSchema()...)
+	return ssz.MarshalSSZ(buf, b.getSchema()...)
 }
 
 func (b *BlobIdentifier) EncodingSizeSSZ() int {
@@ -129,7 +129,7 @@ func (b *BlobIdentifier) EncodingSizeSSZ() int {
 }
 
 func (b *BlobIdentifier) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
+	return ssz.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
 
 func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {

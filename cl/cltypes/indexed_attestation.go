@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 const (
@@ -93,7 +93,7 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 }
 
 func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	return ssz2.MarshalSSZ(buf, i.AttestingIndices, i.Data, i.Signature[:])
+	return ssz.MarshalSSZ(buf, i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
@@ -105,7 +105,7 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
 		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
 	}
 
-	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
+	return ssz.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the IndexedAttestation object

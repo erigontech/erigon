@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -917,7 +917,7 @@ type validatorIdentityResponse struct {
 }
 
 func (v *validatorIdentityResponse) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, v.Index, v.Pubkey[:], v.ActivationEpoch)
+	return ssz.MarshalSSZ(buf, v.Index, v.Pubkey[:], v.ActivationEpoch)
 }
 
 func (v *validatorIdentityResponse) DecodeSSZ(buf []byte, version int) error {

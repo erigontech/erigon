@@ -6,15 +6,15 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
 	_ EncodableHashableSSZ = (*ConsolidationRequest)(nil)
-	_ ssz2.SizedObjectSSZ  = (*ConsolidationRequest)(nil)
+	_ ssz.SizedObjectSSZ   = (*ConsolidationRequest)(nil)
 
 	_ EncodableHashableSSZ = (*PendingConsolidation)(nil)
-	_ ssz2.SizedObjectSSZ  = (*PendingConsolidation)(nil)
+	_ ssz.SizedObjectSSZ   = (*PendingConsolidation)(nil)
 )
 
 const (
@@ -33,11 +33,11 @@ func (p *ConsolidationRequest) EncodingSizeSSZ() int {
 }
 
 func (p *ConsolidationRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
+	return ssz.MarshalSSZ(buf, p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
 }
 
 func (p *ConsolidationRequest) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
+	return ssz.UnmarshalSSZ(buf, version, p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
 }
 
 func (p *ConsolidationRequest) Clone() clonable.Clonable {
@@ -62,11 +62,11 @@ func (p *PendingConsolidation) EncodingSizeSSZ() int {
 }
 
 func (p *PendingConsolidation) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &p.SourceIndex, &p.TargetIndex)
+	return ssz.MarshalSSZ(buf, &p.SourceIndex, &p.TargetIndex)
 }
 
 func (p *PendingConsolidation) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &p.SourceIndex, &p.TargetIndex)
+	return ssz.UnmarshalSSZ(buf, version, &p.SourceIndex, &p.TargetIndex)
 }
 
 func (p *PendingConsolidation) Clone() clonable.Clonable {
