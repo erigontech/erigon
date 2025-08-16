@@ -27,11 +27,11 @@ import (
 	"syscall"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/gofrs/flock"
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -83,7 +83,7 @@ func New(datadir string) Dirs {
 	return dirs
 }
 
-// Create new Dirs instance without forcing all the directories to exist.
+// Open new Dirs instance without forcing all the directories to exist.
 func Open(datadir string) Dirs {
 	relativeDataDir := datadir
 	if datadir != "" {
@@ -143,30 +143,30 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 
 // Dirs is huge, use pointer receiver to avoid copying it around. Returns a new flock.Flock for the
 // datadir.
-func (dirs *Dirs) newFlock() *flock.Flock {
+func (d *Dirs) newFlock() *flock.Flock {
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
-	return flock.New(filepath.Join(dirs.DataDir, "LOCK"))
+	return flock.New(filepath.Join(d.DataDir, "LOCK"))
 }
 
-func (dirs Dirs) MustFlock() (Dirs, *flock.Flock, error) {
-	l, locked, err := TryFlock(dirs)
+func (d Dirs) MustFlock() (Dirs, *flock.Flock, error) {
+	l, locked, err := TryFlock(d)
 	if err != nil {
-		return dirs, l, err
+		return d, l, err
 	}
 	if !locked {
-		return dirs, l, ErrDataDirLocked
+		return d, l, ErrDataDirLocked
 	}
-	return dirs, l, nil
+	return d, l, nil
 }
 
-// Tries a non-blocking lock on the data directory. Converts failure to lock into ErrDataDirLocked.
+// TryFlock a non-blocking lock on the data directory. Converts failure to lock into ErrDataDirLocked.
 // If err is nil, the unlock function must be called to release and close the flock.
-func (dirs *Dirs) TryFlock() (unlock func(), err error) {
-	f := dirs.newFlock()
+func (d Dirs) TryFlock() (unlock func(), err error) {
+	f := d.newFlock()
 	defer func() {
 		if err != nil {
-			f.Close()
+			_ = f.Close()
 		}
 	}()
 	locked, err := f.TryLock()
@@ -185,9 +185,9 @@ func (dirs *Dirs) TryFlock() (unlock func(), err error) {
 	return
 }
 
-// ApplyMigrations - if can get flock.
+// ApplyMigrations - can get flock.
 func ApplyMigrations(dirs Dirs) error { //nolint
-	need, err := downloaderV2MigrationNeeded(dirs)
+	need, err := downloaderV2MigrationNeeded(&dirs)
 	if err != nil {
 		return err
 	}
@@ -206,16 +206,16 @@ func ApplyMigrations(dirs Dirs) error { //nolint
 
 	// add your migration here
 
-	if err := downloaderV2Migration(dirs); err != nil {
+	if err := downloaderV2Migration(&dirs); err != nil {
 		return err
 	}
 	return nil
 }
 
-func downloaderV2MigrationNeeded(dirs Dirs) (bool, error) {
+func downloaderV2MigrationNeeded(dirs *Dirs) (bool, error) {
 	return dir.FileExist(filepath.Join(dirs.Snap, "db", "mdbx.dat"))
 }
-func downloaderV2Migration(dirs Dirs) error {
+func downloaderV2Migration(dirs *Dirs) error {
 	// move db from `datadir/snapshot/db` to `datadir/downloader`
 	exists, err := downloaderV2MigrationNeeded(dirs)
 	if err != nil {
@@ -246,19 +246,19 @@ func CopyFile(from, to string) error {
 	}
 	defer w.Close()
 	if _, err = w.ReadFrom(r); err != nil {
-		w.Close()
-		dir.RemoveFile(to)
+		_ = w.Close()
+		_ = dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	if err = w.Sync(); err != nil {
-		w.Close()
-		dir.RemoveFile(to)
+		_ = w.Close()
+		_ = dir.RemoveFile(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	return nil
 }
 
-func (d Dirs) RenameOldVersions(cmdCommand bool) error {
+func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -276,34 +276,36 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 				return err
 			}
 
-			if !entry.IsDir() {
-				name := entry.Name()
-				if strings.HasPrefix(name, "v1-") {
-					if strings.HasSuffix(name, ".torrent") {
-						if err := dir.RemoveFile(path); err != nil {
-							return err
-						}
-						torrentsRemoved++
-						return nil
-					}
+			if entry.IsDir() {
+				return nil
+			}
 
-					if strings.Contains(entry.Name(), "commitment") &&
-						(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
-						// remove the file instead of renaming
-						if err := dir.RemoveFile(path); err != nil {
-							return fmt.Errorf("failed to remove file %s: %w", path, err)
-						}
-						removed++
-						return nil
-					}
-
-					newName := strings.Replace(name, "v1-", "v1.0-", 1)
-					newPath := filepath.Join(filepath.Dir(path), newName)
-					if err := os.Rename(path, newPath); err != nil {
+			name := entry.Name()
+			if strings.HasPrefix(name, "v1-") {
+				if strings.HasSuffix(name, ".torrent") {
+					if err := dir.RemoveFile(path); err != nil {
 						return err
 					}
-					renamed++
+					torrentsRemoved++
+					return nil
 				}
+
+				if strings.Contains(entry.Name(), "commitment") &&
+					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
+					// remove the file instead of renaming
+					if err := dir.RemoveFile(path); err != nil {
+						return fmt.Errorf("failed to remove file %s: %w", path, err)
+					}
+					removed++
+					return nil
+				}
+
+				newName := strings.Replace(name, "v1-", "v1.0-", 1)
+				newPath := filepath.Join(filepath.Dir(path), newName)
+				if err := os.Rename(path, newPath); err != nil {
+					return err
+				}
+				renamed++
 			}
 			return nil
 		})
@@ -326,7 +328,7 @@ func (d Dirs) RenameOldVersions(cmdCommand bool) error {
 	return nil
 }
 
-func (d Dirs) RenameNewVersions() error {
+func (d *Dirs) RenameNewVersions() error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -342,8 +344,11 @@ func (d Dirs) RenameNewVersions() error {
 				}
 				return err
 			}
+			if dirEntry.IsDir() {
+				return nil
+			}
 
-			if !dirEntry.IsDir() && strings.HasPrefix(dirEntry.Name(), "v1.0-") {
+			if strings.HasPrefix(dirEntry.Name(), "v1.0-") {
 				if strings.Contains(dirEntry.Name(), "commitment") &&
 					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 					// remove the file instead of renaming
@@ -367,7 +372,7 @@ func (d Dirs) RenameNewVersions() error {
 			return err
 		}
 
-		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
+		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc., unsupported in 3.0)
 		err = filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { //skip magically disappeared files
@@ -375,8 +380,11 @@ func (d Dirs) RenameNewVersions() error {
 				}
 				return err
 			}
+			if dirEntry.IsDir() {
+				return nil
+			}
 
-			if !dirEntry.IsDir() && IsVersionedName(dirEntry.Name()) {
+			if IsVersionedName(dirEntry.Name()) {
 				err = dir.RemoveFile(path)
 				if err != nil {
 					return fmt.Errorf("failed to remove file %s: %w", path, err)
@@ -414,7 +422,7 @@ func (d Dirs) RenameNewVersions() error {
 	return nil
 }
 
-func (d Dirs) PreverifiedPath() string {
+func (d *Dirs) PreverifiedPath() string {
 	return filepath.Join(d.Snap, PreverifiedFileName)
 }
 

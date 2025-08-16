@@ -382,35 +382,36 @@ func checkSnapshotsCompatibility(d datadir.Dirs) error {
 				}
 				return err
 			}
+			if entry.IsDir() {
+				return nil
+			}
 
-			if !entry.IsDir() {
-				name := entry.Name()
-				if strings.HasPrefix(name, "v1-") {
-					return errors.New("The datadir has bad snapshot files or they are " +
-						"incompatible with the current erigon version. If you want to upgrade from an" +
-						"older version, you may run the following to rename files to the " +
-						"new version: `erigon seg update-to-new-ver-format`")
-				}
-				fileInfo, _, _ := snaptype.ParseFileName("", name)
+			name := entry.Name()
+			if strings.HasPrefix(name, "v1-") {
+				return errors.New("The datadir has bad snapshot files or they are " +
+					"incompatible with the current erigon version. If you want to upgrade from an" +
+					"older version, you may run the following to rename files to the " +
+					"new version: `erigon seg update-to-new-ver-format`")
+			}
+			fileInfo, _, _ := snaptype.ParseFileName("", name)
 
-				currentFileVersion := fileInfo.Version
+			currentFileVersion := fileInfo.Version
 
-				msVs, ok := SchemeMinSupportedVersions[fileInfo.TypeString]
-				if !ok {
-					//println("file type not supported", fileInfo.TypeString, name)
-					return nil
-				}
-				requiredVersion, ok := msVs[fileInfo.Ext]
-				if !ok {
-					return nil
-				}
+			msVs, ok := SchemeMinSupportedVersions[fileInfo.TypeString]
+			if !ok {
+				//println("file type not supported", fileInfo.TypeString, name)
+				return nil
+			}
+			requiredVersion, ok := msVs[fileInfo.Ext]
+			if !ok {
+				return nil
+			}
 
-				if currentFileVersion.Major < requiredVersion.Major {
-					return fmt.Errorf("snapshot file major version mismatch for file %s, "+
-						" requiredVersion: %d, currentVersion: %d"+
-						" You may want to downgrade to an older version (not older than 3.1)",
-						fileInfo.Name(), requiredVersion.Major, currentFileVersion.Major)
-				}
+			if currentFileVersion.Major < requiredVersion.Major {
+				return fmt.Errorf("snapshot file major version mismatch for file %s, "+
+					" requiredVersion: %d, currentVersion: %d"+
+					" You may want to downgrade to an older version (not older than 3.1)",
+					fileInfo.Name(), requiredVersion.Major, currentFileVersion.Major)
 			}
 			return nil
 		})

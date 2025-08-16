@@ -51,6 +51,10 @@ type GrpcServer struct {
 	d *Downloader
 }
 
+func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
+	return &emptypb.Empty{}, nil
+}
+
 // Add files to the downloader. Existing/New files - both ok.
 // "download once" invariant: means after initial download finiwh - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
 // After "download once": Erigon will produce and seed new files
@@ -68,8 +72,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		var names []string
 		for _, name := range request.Items {
 			if filepath.IsAbs(name.Path) {
-				err := fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", name.Path)
-				panic(err)
+				return nil, fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", name.Path)
 			}
 			names = append(names, name.Path)
 		}
@@ -133,8 +136,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 		var names []string
 		for _, relPath := range request.Paths {
 			if filepath.IsAbs(relPath) {
-				err := fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", relPath)
-				panic(err)
+				return nil, fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", relPath)
 			}
 			names = append(names, relPath)
 		}
