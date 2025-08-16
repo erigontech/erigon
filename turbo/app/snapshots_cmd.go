@@ -910,7 +910,7 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	// Check block sanity
 	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -963,63 +963,6 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	}); err != nil {
 		return err
 	}
-	//if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
-	//	if err != nil {
-	//		if os.IsNotExist(err) { //skip magically disappeared files
-	//			return nil
-	//		}
-	//		return err
-	//	}
-	//
-	//	// Skip directories
-	//	if info.IsDir() {
-	//		return nil
-	//	}
-	//	// Skip CL files
-	//	if !strings.Contains(info.Name(), "headers") || !strings.HasSuffix(info.Name(), ".seg") {
-	//		return nil
-	//	}
-	//	// Do the range check
-	//	res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
-	//	if !ok {
-	//		return nil
-	//	}
-	//	sum += res.To - res.From
-	//	headerSegName := info.Name()
-	//
-	//	// check that all files exist
-	//	for _, snapType := range []string{"headers", "transactions", "bodies"} {
-	//		segName := strings.Replace(headerSegName, "headers", snapType, 1)
-	//		// check that the file exist
-	//		if exists, err := dir2.FileExist(filepath.Join(snapDir, segName)); err != nil {
-	//			return err
-	//		} else if !exists {
-	//			return fmt.Errorf("missing file %s", segName)
-	//		}
-	//		// check that the index file exist
-	//		idxName := strings.Replace(segName, ".seg", ".idx", 1)
-	//		if exists, err := dir2.FileExist(filepath.Join(snapDir, idxName)); err != nil {
-	//			return err
-	//		} else if !exists {
-	//			return fmt.Errorf("missing index file %s", idxName)
-	//		}
-	//		if snapType == "transactions" {
-	//			// check that the tx index file exist
-	//			txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-	//			if exists, err := dir2.FileExist(filepath.Join(snapDir, txIdxName)); err != nil {
-	//				return err
-	//			} else if !exists {
-	//				return fmt.Errorf("missing tx index file %s", txIdxName)
-	//			}
-	//		}
-	//	}
-	//
-	//	maxTo = max(maxTo, res.To)
-	//
-	//	return nil
-	//}); err != nil {
-	//	return fmt.Errorf("checkIfBlockSnapshotsPublishable.walk: %w", err)
-	//}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
 	}
@@ -1052,18 +995,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
-	if err := filepath.Walk(dirs.SnapDomain, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.WalkDir(dirs.SnapDomain, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
 		}
-
-		if info.IsDir() && path != dirs.SnapDomain {
-			return fmt.Errorf("unexpected directory in domain (%s) check %s", dirs.SnapDomain, path)
-		}
-		if path == dirs.SnapDomain {
+		if info.IsDir() {
 			return nil
 		}
 
@@ -1154,21 +1093,17 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	var maxStepII uint64 // across all files in SnapIdx
 	accFiles = accFiles[:0]
 
-	if err := filepath.Walk(dirs.SnapIdx, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.WalkDir(dirs.SnapIdx, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
 		}
-
-		if info.IsDir() && path != dirs.SnapIdx {
-			return fmt.Errorf("unexpected directory in idx (%s) check %s", dirs.SnapIdx, path)
-
-		}
-		if path == dirs.SnapIdx {
+		if info.IsDir() {
 			return nil
 		}
+
 		res, _, ok := snaptype.ParseFileName(dirs.SnapIdx, info.Name())
 		if !ok {
 			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
@@ -1264,12 +1199,15 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	}
 
 	intervals := []interval{}
-	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
+		}
+		if info.IsDir() {
+			return nil
 		}
 		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType+".") {
 			return nil
@@ -1371,15 +1309,13 @@ func doClearIndexing(cliCtx *cli.Context) error {
 }
 
 func deleteFilesWithExtensions(dir string, extensions []string) error {
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { //it's ok if some file get removed during walk
 				return nil
 			}
 			return err
 		}
-
-		// Skip directories
 		if info.IsDir() {
 			return nil
 		}
