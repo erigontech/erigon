@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/db/kv"
