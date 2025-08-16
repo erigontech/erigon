@@ -26,7 +26,6 @@ import (
 	"strings"
 	"syscall"
 
-
 	"github.com/gofrs/flock"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -133,7 +132,7 @@ func convertFileLockError(err error) error {
 	return err
 }
 
-func TryFlock(dirs *Dirs) (*flock.Flock, bool, error) {
+func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 	l := dirs.newFlock()
 	locked, err := l.TryLock()
 	if err != nil {
@@ -150,7 +149,7 @@ func (d *Dirs) newFlock() *flock.Flock {
 	return flock.New(filepath.Join(d.DataDir, "LOCK"))
 }
 
-func (d *Dirs) MustFlock() (*Dirs, *flock.Flock, error) {
+func (d Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 	l, locked, err := TryFlock(d)
 	if err != nil {
 		return d, l, err
@@ -163,7 +162,7 @@ func (d *Dirs) MustFlock() (*Dirs, *flock.Flock, error) {
 
 // TryFlock a non-blocking lock on the data directory. Converts failure to lock into ErrDataDirLocked.
 // If err is nil, the unlock function must be called to release and close the flock.
-func (d *Dirs) TryFlock() (unlock func(), err error) {
+func (d Dirs) TryFlock() (unlock func(), err error) {
 	f := d.newFlock()
 	defer func() {
 		if err != nil {
@@ -187,8 +186,8 @@ func (d *Dirs) TryFlock() (unlock func(), err error) {
 }
 
 // ApplyMigrations - can get flock.
-func ApplyMigrations(dirs *Dirs) error { //nolint
-	need, err := downloaderV2MigrationNeeded(dirs)
+func ApplyMigrations(dirs Dirs) error { //nolint
+	need, err := downloaderV2MigrationNeeded(&dirs)
 	if err != nil {
 		return err
 	}
@@ -207,7 +206,7 @@ func ApplyMigrations(dirs *Dirs) error { //nolint
 
 	// add your migration here
 
-	if err := downloaderV2Migration(dirs); err != nil {
+	if err := downloaderV2Migration(&dirs); err != nil {
 		return err
 	}
 	return nil
