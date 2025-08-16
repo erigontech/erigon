@@ -908,6 +908,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	var sum uint64
 	var maxTo uint64
 	// Check block sanity
+	_ = filepath.Walk(snapDir, func(path string, info fs.FileInfo, err error) error {
+		return nil
+	})
 	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //it's ok if some file get removed during walk
