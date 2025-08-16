@@ -121,10 +121,10 @@ type Progress struct {
 	prevBlockDuration       time.Duration
 	prevAbortCount          uint64
 	prevInvalidCount        uint64
-	prevReadCount           uint64
-	prevAccountReadCount    uint64
-	prevStorageReadCount    uint64
-	prevCodeReadCount       uint64
+	prevReadCount           int64
+	prevAccountReadCount    int64
+	prevStorageReadCount    int64
+	prevCodeReadCount       int64
 	prevWriteCount          uint64
 	prevCommitTime          time.Time
 	prevCommittedBlockNum   uint64
@@ -160,6 +160,9 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	storageReadDur := time.Duration(te.taskExecMetrics.StorageReadDuration.Load())
 	codeReadDur := time.Duration(te.taskExecMetrics.CodeReadDuration.Load())
 	activations := te.taskExecMetrics.Active.Total.Load()
+	accountReadCount := te.taskExecMetrics.AccountReadCount.Load()
+	storageReadCount := te.taskExecMetrics.StorageReadCount.Load()
+	codeReadCount := te.taskExecMetrics.CodeReadCount.Load()
 
 	curTaskGas := taskGas - p.prevTaskGas
 	curTaskDur := taskDur - p.prevTaskDuration
@@ -167,6 +170,9 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	curAccountReadDur := accountReadDur - p.prevAccountReadDuration
 	curStorageReadDur := storageReadDur - p.prevStorageReadDuration
 	curCodeReadDur := codeReadDur - p.prevCodeReadDuration
+	curAccountReadCount := accountReadCount - p.prevAccountReadCount
+	curStorageReadCount := storageReadCount - p.prevStorageReadCount
+	curCodeReadCount := codeReadCount - p.prevCodeReadCount
 	curActivations := activations - p.prevActivations
 
 	p.prevTaskGas = taskGas
@@ -176,6 +182,9 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	p.prevStorageReadDuration = storageReadDur
 	p.prevCodeReadDuration = codeReadDur
 	p.prevActivations = activations
+	p.prevAccountReadCount = accountReadCount
+	p.prevStorageReadCount = storageReadCount
+	p.prevCodeReadCount = codeReadCount
 
 	var readRatio float64
 	var execRatio float64
@@ -216,11 +225,11 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		execCount := uint64(te.execCount.Load())
 		abortCount := uint64(te.abortCount.Load())
 		invalidCount := uint64(te.invalidCount.Load())
-		readCount := uint64(te.readCount.Load())
+		readCount := te.readCount.Load()
 		writeCount := uint64(te.writeCount.Load())
 
 		// not sure why this happens but sometime we read more from disk than from memory
-		storageReadCount := uint64(te.taskExecMetrics.ReadCount.Load())
+		storageReadCount := te.taskExecMetrics.ReadCount.Load()
 		if storageReadCount > readCount {
 			readCount = storageReadCount
 		}
@@ -250,9 +259,10 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		}
 
 		curReadCount := int64(readCount - p.prevReadCount)
+		curWriteCount := int64(writeCount - p.prevWriteCount)
 
 		curReadRate := uint64(float64(curReadCount) / interval.Seconds())
-		curWriteRate := uint64(float64(writeCount-p.prevWriteCount) / interval.Seconds())
+		curWriteRate := uint64(float64(curWriteCount) / interval.Seconds())
 
 		mxExecReadRate.SetUint64(curReadRate)
 		mxExecWriteRate.SetUint64(curWriteRate)
@@ -267,12 +277,13 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
-			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
+			"tdur", common.Round(avgTaskDur, 0).String(),
 			"exec", fmt.Sprintf("%dµs(%.2f%%)", avgExecDur.Microseconds(), execRatio),
 			"read", fmt.Sprintf("%dµs(%.2f%%),a=%dµs,s=%dµs,c=%dµs", avgReadDur.Microseconds(), readRatio, avgAccountReadDur.Microseconds(), avgStorageReadDur.Microseconds(), avgCodeReadDur.Microseconds()),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
-			"rd", common.PrettyCounter(curReadCount),
-			"wrt", common.PrettyCounter(curReadCount),
+			"rd", fmt.Sprintf("%s,a=%s,s=%s,c=%s", common.PrettyCounter(curReadCount), common.PrettyCounter(curAccountReadCount),
+				common.PrettyCounter(curStorageReadCount), common.PrettyCounter(curCodeReadCount)),
+			"wrt", common.PrettyCounter(curWriteCount),
 			"rd/s", common.PrettyCounter(curReadRate),
 			"wrt/s", common.PrettyCounter(curWriteRate),
 		}

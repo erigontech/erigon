@@ -1,6 +1,9 @@
 package common
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type number interface {
 	int | int64 | uint | uint64
@@ -33,4 +36,23 @@ func PrettyCounter[N number](num N) string {
 		return fmt.Sprintf("%d.%02dT", num/N(numT), num%N(numT)/N(numB*10))
 	}
 	return fmt.Sprintf("%d.%02dQ", num/N(numQ), num%N(numQ)/N(numT*10))
+}
+
+var divs = []time.Duration{
+	time.Duration(1), time.Duration(10), time.Duration(100), time.Duration(1000)}
+
+func round(d time.Duration, digits int) time.Duration {
+	switch {
+	case d > time.Second:
+		d = d.Round(time.Second / divs[digits])
+	case d > time.Millisecond:
+		d = d.Round(time.Millisecond / divs[digits])
+	case d > time.Microsecond:
+		d = d.Round(time.Microsecond / divs[digits])
+	}
+	return d
+}
+
+func Round(d time.Duration, digits int) time.Duration {
+	return round(d, digits)
 }

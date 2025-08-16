@@ -71,7 +71,7 @@ func (m *Metrics) LogMetrics(logger log.Logger, level log.Lvl, prefix string) {
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
 		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", m.spentFolding.String(), "ufdur", m.spentUnfolding.String())
+		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0))
 
 	//logger.Log(level, prefix+"sccount progress")
 }
