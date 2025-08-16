@@ -1492,13 +1492,6 @@ func (s *Ethereum) setUpSnapDownloader(
 		if _, err := s.downloaderClient.Add(ctx, req); err != nil {
 			s.logger.Warn("[snapshots] downloader.Add", "err", err)
 		}
-		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(deletedFiles) == 0 {
-			return
-		}
-
-		if _, err := s.downloaderClient.Delete(ctx, &protodownloader.DeleteRequest{Paths: deletedFiles}); err != nil {
-			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
-		}
 	}, func(deletedFiles []string) {
 		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
 			return
