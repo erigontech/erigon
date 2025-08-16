@@ -42,7 +42,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-db/downloader"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
@@ -1677,12 +1676,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 
-	ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-	mtime := time.Time{}
-	if er == nil {
-		mtime = ls.ModTime()
-	}
-	logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 	return
 }
 
