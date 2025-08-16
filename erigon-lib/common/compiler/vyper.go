@@ -22,6 +22,7 @@ package compiler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,12 +45,12 @@ func (s *Vyper) makeArgs() []string {
 }
 
 // VyperVersion runs vyper and parses its version output.
-func VyperVersion(vyper string) (*Vyper, error) {
+func VyperVersion(ctx context.Context, vyper string) (*Vyper, error) {
 	if vyper == "" {
 		vyper = "vyper"
 	}
 	var out bytes.Buffer
-	cmd := exec.Command(vyper, "--version")
+	cmd := exec.CommandContext(ctx, vyper, "--version")
 	cmd.Stdout = &out
 	err := cmd.Run()
 	if err != nil {
@@ -73,7 +74,7 @@ func VyperVersion(vyper string) (*Vyper, error) {
 }
 
 // CompileVyper compiles all given Vyper source files.
-func CompileVyper(vyper string, sourcefiles ...string) (map[string]*Contract, error) {
+func CompileVyper(ctx context.Context, vyper string, sourcefiles ...string) (map[string]*Contract, error) {
 	if len(sourcefiles) == 0 {
 		return nil, errors.New("vyper: no source files")
 	}
@@ -81,7 +82,7 @@ func CompileVyper(vyper string, sourcefiles ...string) (map[string]*Contract, er
 	if err != nil {
 		return nil, err
 	}
-	s, err := VyperVersion(vyper)
+	s, err := VyperVersion(ctx, vyper)
 	if err != nil {
 		return nil, err
 	}
