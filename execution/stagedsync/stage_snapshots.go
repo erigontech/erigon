@@ -614,7 +614,11 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 			continue
 		}
 		if cfg.snapshotDownloader != nil {
-			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
+			relativePathToFile := file
+			if filepath.IsAbs(file) {
+				relativePathToFile, _ = filepath.Rel(cfg.dirs.Snap, file)
+			}
+			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{relativePathToFile}}); err != nil {
 				return filesDeleted, err
 			}
 		}
