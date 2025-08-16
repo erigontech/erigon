@@ -3,6 +3,7 @@
 package gdbme
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"

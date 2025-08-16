@@ -29,6 +29,7 @@ import (
 )
 
 var (
+\
 	blsSignatureT = reflect.TypeOf(Bytes96{})
 )
 
