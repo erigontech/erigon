@@ -2,7 +2,6 @@ package blob_storage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -97,9 +96,7 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	fh, err := s.fs.Open(filepath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 	defer fh.Close()
