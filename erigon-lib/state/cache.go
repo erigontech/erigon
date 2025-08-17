@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/elastic/go-freelru"
+	"github.com/negrel/assert"
+
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -36,6 +38,9 @@ var (
 )
 
 func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
+	assert.Greater(limit, uint32(0))
+	assert.LessOrEqual(limit, uint32(1_000_000), "reasonable limit")
+
 	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
 	if err != nil {
 		panic(err)
@@ -75,12 +80,18 @@ func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	if !domainGetFromFileCacheEnabled {
 		return nil
 	}
-	return v.caches.Get().(*DomainGetFromFileCache)
+	cache := v.caches.Get().(*DomainGetFromFileCache)
+	assert.NotNil(cache)
+	assert.Equal(cache.enabled, domainGetFromFileCacheEnabled, "cache state consistent")
+	return cache
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 	if c == nil {
 		return
 	}
+	assert.NotNil(c.LRU)
+	assert.LessOrEqual(uint32(c.Len()), c.limit, "within limit")
+
 	c.LogStats(v.name)
 	v.caches.Put(c)
 }
@@ -105,6 +116,9 @@ func NewIISeekInFilesCache() *IISeekInFilesCache {
 	if !iiGetFromFileCacheEnabled {
 		return nil
 	}
+	assert.Greater(iiGetFromFileCacheLimit, uint32(0))
+	assert.LessOrEqual(iiGetFromFileCacheLimit, uint32(100_000), "reasonable limit")
+
 	c, err := freelru.New[uint64, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u64noHash)
 	if err != nil {
 		panic(err)

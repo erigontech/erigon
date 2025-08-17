@@ -28,6 +28,8 @@ import (
 
 	"github.com/tidwall/btree"
 
+	"github.com/negrel/assert"
+
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -117,6 +119,10 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
+	assert.Greater(maxEndTxNum, uint64(0))
+	assert.Greater(maxSpan, uint64(0))
+	assert.LessOrEqual(maxSpan, maxEndTxNum)
+
 	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
 
 	r := DomainRanges{
@@ -141,6 +147,13 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 
 		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 	}
+
+	// Validate merge range consistency
+	if r.values.needMerge {
+		assert.Less(r.values.from, r.values.to, "invalid merge range: from >= to")
+		assert.LessOrEqual(r.values.to, maxEndTxNum, "merge range exceeds maxEndTxNum")
+	}
+
 	return r
 }
 

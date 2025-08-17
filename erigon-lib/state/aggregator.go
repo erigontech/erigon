@@ -31,11 +31,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	rand2 "golang.org/x/exp/rand"
-
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
+	"github.com/negrel/assert"
 	"github.com/tidwall/btree"
+	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -158,6 +158,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 		saltV := rand2.Uint32()
 		salt = &saltV
 		saltBytes := make([]byte, 4)
+		assert.Equal(len(saltBytes), 4)
 		binary.BigEndian.PutUint32(saltBytes, *salt)
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
@@ -403,9 +404,17 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].disable = false }
-func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
-func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
+func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].disable = false }
+func (a *Aggregator) SetCollateAndBuildWorkers(i int) {
+	assert.Greater(i, 0)
+	assert.LessOrEqual(i, 32, "reasonable worker limit")
+	a.collateAndBuildWorkers = i
+}
+func (a *Aggregator) SetMergeWorkers(i int) {
+	assert.Greater(i, 0)
+	assert.LessOrEqual(i, 16, "reasonable merge worker limit")
+	a.mergeWorkers = i
+}
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
 		d.CompressCfg.Workers = i
@@ -495,6 +504,9 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 }
 
 func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) error {
+	assert.Greater(workers, 0)
+	assert.LessOrEqual(workers, 64, "reasonable worker limit")
+
 	startIndexingTime := time.Now()
 	ps := background.NewProgressSet()
 
@@ -608,6 +620,9 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
+	assert.Greater(a.aggregationStep, uint64(0))
+	assert.LessOrEqual(step, math.MaxUint64/a.aggregationStep, "no overflow")
+
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
@@ -622,6 +637,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		collations      = make([]Collation, 0)
 	)
 
+	assert.Less(txFrom, txTo)
+	assert.Equal(txTo-txFrom, a.aggregationStep)
+	assert.Equal(len(static.ivfs), len(a.iis), "arrays size match")
+
 	defer logEvery.Stop()
 	defer func() {
 		if !closeCollations {
@@ -633,6 +652,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	}()
 
 	g, ctx := errgroup.WithContext(ctx)
+	assert.Greater(a.collateAndBuildWorkers, 0)
+	assert.LessOrEqual(a.collateAndBuildWorkers, 32, "reasonable worker limit")
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
 		if d.disable {
@@ -825,6 +846,8 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
+
+	assert.False(a.buildingFiles.Load(), "no concurrent build/merge")
 
 	// Merge is background operation. It must not crush application.
 	// Convert panic to error.
@@ -1270,6 +1293,9 @@ func lastTxNumOfStep(step, size uint64) uint64 {
 // Step 0 is a range [0, stepSize).
 // To prune step needed to fully Prune range [txStepBeginning, txNextStepBeginning)
 func (a *Aggregator) FirstTxNumOfStep(step uint64) uint64 { // could have some smaller steps to prune// could have some smaller steps to prune
+	assert.Greater(a.aggregationStep, uint64(0))
+	assert.LessOrEqual(step, math.MaxUint64/a.aggregationStep, "no step overflow")
+
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
@@ -1386,7 +1412,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
 	mf = &MergedFilesV3{iis: make([]*FilesItem, len(at.a.iis))}
+	assert.Equal(len(mf.iis), len(at.a.iis), "merged arrays size match")
 	g, ctx := errgroup.WithContext(ctx)
+	assert.Greater(at.a.mergeWorkers, 0)
+	assert.LessOrEqual(at.a.mergeWorkers, 16, "reasonable merge worker limit")
 	g.SetLimit(at.a.mergeWorkers)
 	closeFiles := true
 	defer func() {
@@ -1581,6 +1610,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
+	assert.Greater(a.aggregationStep, uint64(0))
+
 	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
 		close(fin)
 		return fin
@@ -1592,6 +1623,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
+	assert.Equal(step*a.aggregationStep, step*a.StepSize(), "step boundary consistency")
 
 	a.wg.Add(1)
 	go func() {
@@ -1736,6 +1768,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		_leakID: a.leakDetector.Add(),
 		iis:     make([]*InvertedIndexRoTx, len(a.iis)),
 	}
+	assert.Equal(len(ac.iis), len(a.iis), "aggregator tx arrays size match")
 
 	a.visibleFilesLock.RLock()
 	for id, ii := range a.iis {
@@ -1797,6 +1830,8 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	defer logEvery.Stop()
 
 	step := txNumUnwindTo / at.StepSize()
+	assert.LessOrEqual(txNumUnwindTo, step*at.StepSize()+at.StepSize(), "unwind within step bounds")
+
 	for idx, d := range at.d {
 		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
 			return err

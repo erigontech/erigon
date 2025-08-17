@@ -33,14 +33,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/snaptype"
 
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/negrel/assert"
+
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
@@ -464,6 +466,9 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *InvertedIndexBufferedWriter) Add(key []byte, txNum uint64) error {
+	assert.NotNil(key)
+	assert.Greater(len(key), 0)
+
 	return w.add(key, key, txNum)
 }
 
@@ -471,6 +476,9 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	if w.discard {
 		return nil
 	}
+	assert.NotNil(key)
+	assert.NotNil(indexKey)
+
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
@@ -729,6 +737,11 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 // todo IdxRange operates over ii.valuesTable . Passing `nil` as a key will not return all keys
 func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+	assert.NotNil(key)
+	assert.NotNil(roTx)
+	assert.LessOrEqual(startTxNum, endTxNum, "range ordering")
+	assert.GreaterOrEqual(limit, 0)
+
 	frozenIt, err := iit.iterateRangeOnFiles(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err
@@ -1043,6 +1056,9 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 }
 
 func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator1 {
+	assert.NotNil(roTx)
+	assert.Less(startTxNum, endTxNum)
+
 	var ii1 InvertedIterator1
 	ii1.hasNextInDb = true
 	ii1.roTx = roTx
@@ -1075,8 +1091,13 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 
 // collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (InvertedIndexCollation, error) {
+	assert.NotNil(roTx)
+	assert.Greater(ii.aggregationStep, uint64(0))
+	assert.LessOrEqual(step, math.MaxUint64/ii.aggregationStep, "no step overflow")
+
 	stepTo := step + 1
 	txFrom, txTo := step*ii.aggregationStep, stepTo*ii.aggregationStep
+	assert.Less(txFrom, txTo)
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
@@ -1215,6 +1236,9 @@ func (ic InvertedIndexCollation) Close() {
 
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll InvertedIndexCollation, ps *background.ProgressSet) (InvertedFiles, error) {
+	assert.NotNil(coll.writer)
+	assert.Greater(ii.aggregationStep, uint64(0))
+
 	var (
 		decomp          *seg.Decompressor
 		mapAccessor     *recsplit.Index
@@ -1239,7 +1263,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 		}
 	}()
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		if coll.iiPath == "" && reflect.ValueOf(coll.writer).IsNil() {
 			panic("assert: collation is not initialized " + ii.filenameBase)
 		}

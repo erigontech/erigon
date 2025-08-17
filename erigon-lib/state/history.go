@@ -32,6 +32,8 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/negrel/assert"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
@@ -483,6 +485,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	if w.discard {
 		return nil
 	}
+	assert.NotNil(k)
+	assert.Greater(len(k), 0)
 
 	if original == nil {
 		original = []byte{}
@@ -614,6 +618,10 @@ func (c HistoryCollation) Close() {
 
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
+	assert.NotNil(roTx)
+	assert.Less(txFrom, txTo)
+	assert.Greater(h.aggregationStep, uint64(0))
+
 	if h.snapshotsDisabled {
 		return HistoryCollation{}, nil
 	}
@@ -850,6 +858,8 @@ func (h *History) reCalcVisibleFiles(toTxNum uint64) {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (h *History) buildFiles(ctx context.Context, step uint64, collation HistoryCollation, ps *background.ProgressSet) (HistoryFiles, error) {
+	assert.Greater(h.aggregationStep, uint64(0))
+
 	if h.snapshotsDisabled {
 		return HistoryFiles{}, nil
 	}
@@ -1281,6 +1291,9 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	assert.NotNil(key)
+	assert.NotNil(roTx)
+
 	if ht.h.disable {
 		return nil, false, nil
 	}
@@ -1354,6 +1367,9 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 }
 
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	assert.NotNil(roTx)
+	assert.GreaterOrEqual(limit, 0)
+
 	if !asc {
 		panic("implement me")
 	}
@@ -1519,6 +1535,11 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 }
 
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+	assert.NotNil(key)
+	assert.NotNil(roTx)
+	assert.LessOrEqual(startTxNum, endTxNum, "range ordering")
+	assert.GreaterOrEqual(limit, 0)
+
 	frozenIt, err := ht.iit.iterateRangeOnFiles(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err

@@ -24,6 +24,8 @@ require (
 	github.com/erigontech/silkworm-go v0.24.0
 )
 
+require github.com/negrel/assert v0.5.0 // indirect
+
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.66

@@ -32,6 +32,8 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/negrel/assert"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -1585,6 +1587,9 @@ func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	assert.NotNil(key)
+	assert.NotNil(roTx)
+
 	if dt.d.disable {
 		return nil, false, nil
 	}
@@ -1722,21 +1727,10 @@ type canCheckClosed interface {
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil { // run in assert mode only
 		if asserts {
-			if tx.ViewID() != dt.valCViewID {
-				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.filenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
+			assert.Equal(tx.ViewID(), dt.valCViewID, "ViewID consistent")
+			if mc, ok := dt.valsC.(canCheckClosed); ok {
+				assert.False(mc.IsClosed(), "cursor alive")
 			}
-			if mc, ok := dt.valsC.(canCheckClosed); !ok && mc.IsClosed() {
-				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			}
-			// if dt.d.largeValues {
-			// 	if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
-			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			// 	}
-			// } else {
-			// 	if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
-			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than DupCursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			// 	}
-			// }
 		}
 		return dt.valsC, nil
 	}
@@ -1803,6 +1797,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	assert.NotNil(key)
+	assert.NotNil(roTx)
+
 	if dt.d.disable {
 		return nil, 0, false, nil
 	}

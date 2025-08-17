@@ -314,6 +314,8 @@ github.com/multiformats/go-varint v0.0.6/go.mod h1:3Ls8CIEsrijN6+B7PbrXRPxHRPuXS
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/mwitkow/go-conntrack v0.0.0-20161129095857-cc309e4a2223/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
+github.com/negrel/assert v0.5.0 h1:woWYcJDBNLMxpIv9XaRacA0l9K6cStkoYygu58J4DzI=
+github.com/negrel/assert v0.5.0/go.mod h1:Llg7o+ziRE+JPUR7Je9Ojnd7/efvwOXDuUN6lBo8uS4=
 github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 h1:+3bXHpIl3RiBuPKlqeCZZeShGHC9RFhR/P2OJfOLRyA=
 github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4/go.mod h1:9YR30vCq/4djj0WO7AvLm48YvNs7M094LWRieEFDE4A=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
