@@ -267,6 +267,8 @@ type Version struct {
 	Incarnation int
 }
 
+var UnknownVersion = Version{TxIndex: -1, Incarnation: -1}
+
 const (
 	MVReadResultDone       = 0
 	MVReadResultDependency = 1
