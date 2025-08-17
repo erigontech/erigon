@@ -5,14 +5,13 @@ import (
 	"io/fs"
 	"os"
 
-	clparams2 "github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils"
-
 	"gopkg.in/yaml.v3"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 func ReadMeta(root fs.FS, name string, obj any) error {
@@ -39,7 +38,7 @@ func ReadYml(root fs.FS, name string, obj any) error {
 	return nil
 }
 
-func ReadSsz(root fs.FS, version clparams2.StateVersion, name string, obj ssz.Unmarshaler) error {
+func ReadSsz(root fs.FS, version clparams.StateVersion, name string, obj ssz.Unmarshaler) error {
 	bts, err := fs.ReadFile(root, name)
 	if err != nil {
 		return fmt.Errorf("couldnt read meta: %w", err)
@@ -47,16 +46,16 @@ func ReadSsz(root fs.FS, version clparams2.StateVersion, name string, obj ssz.Un
 	return utils.DecodeSSZSnappy(obj, bts, int(version))
 }
 
-func ReadSszOld(root fs.FS, obj ssz.Unmarshaler, version clparams2.StateVersion, name string) error {
+func ReadSszOld(root fs.FS, obj ssz.Unmarshaler, version clparams.StateVersion, name string) error {
 	return ReadSsz(root, version, name, obj)
 }
 
-func ReadBeaconState(root fs.FS, version clparams2.StateVersion, name string) (*state.CachingBeaconState, error) {
+func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*state.CachingBeaconState, error) {
 	sszSnappy, err := fs.ReadFile(root, name)
 	if err != nil {
 		return nil, err
 	}
-	config := clparams2.MainnetBeaconConfig
+	config := clparams.MainnetBeaconConfig
 	testState := state.New(&config)
 	if err := utils.DecodeSSZSnappy(testState, sszSnappy, int(version)); err != nil {
 		return nil, err
@@ -64,7 +63,7 @@ func ReadBeaconState(root fs.FS, version clparams2.StateVersion, name string) (*
 	return testState, nil
 }
 
-func ReadBlock(root fs.FS, version clparams2.StateVersion, index int) (*cltypes.SignedBeaconBlock, error) {
+func ReadBlock(root fs.FS, version clparams.StateVersion, index int) (*cltypes.SignedBeaconBlock, error) {
 	var blockBytes []byte
 	var err error
 	blockBytes, err = fs.ReadFile(root, fmt.Sprintf("blocks_%d.ssz_snappy", index))
@@ -74,7 +73,7 @@ func ReadBlock(root fs.FS, version clparams2.StateVersion, index int) (*cltypes.
 	if err != nil {
 		return nil, err
 	}
-	blk := cltypes.NewSignedBeaconBlock(&clparams2.MainnetBeaconConfig, version)
+	blk := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 	if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 		return nil, err
 	}
@@ -82,7 +81,7 @@ func ReadBlock(root fs.FS, version clparams2.StateVersion, index int) (*cltypes.
 	return blk, nil
 }
 
-func ReadBlockByPath(root fs.FS, version clparams2.StateVersion, path string) (*cltypes.SignedBeaconBlock, error) {
+func ReadBlockByPath(root fs.FS, version clparams.StateVersion, path string) (*cltypes.SignedBeaconBlock, error) {
 	var blockBytes []byte
 	var err error
 	blockBytes, err = fs.ReadFile(root, path)
@@ -92,7 +91,7 @@ func ReadBlockByPath(root fs.FS, version clparams2.StateVersion, path string) (*
 	if err != nil {
 		return nil, err
 	}
-	blk := cltypes.NewSignedBeaconBlock(&clparams2.MainnetBeaconConfig, version)
+	blk := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 	if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 		return nil, err
 	}
@@ -100,7 +99,7 @@ func ReadBlockByPath(root fs.FS, version clparams2.StateVersion, path string) (*
 	return blk, nil
 }
 
-func ReadAnchorBlock(root fs.FS, version clparams2.StateVersion, name string) (*cltypes.BeaconBlock, error) {
+func ReadAnchorBlock(root fs.FS, version clparams.StateVersion, name string) (*cltypes.BeaconBlock, error) {
 	var blockBytes []byte
 	var err error
 	blockBytes, err = fs.ReadFile(root, name)
@@ -110,7 +109,7 @@ func ReadAnchorBlock(root fs.FS, version clparams2.StateVersion, name string) (*
 	if err != nil {
 		return nil, err
 	}
-	blk := cltypes.NewBeaconBlock(&clparams2.MainnetBeaconConfig, version)
+	blk := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, version)
 	if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 		return nil, err
 	}
@@ -135,7 +134,7 @@ func ReadBlockSlot(root fs.FS, index int) (uint64, error) {
 	}
 	return ssz.UnmarshalUint64SSZ(blockBytes[100:108]), nil
 }
-func ReadBlocks(root fs.FS, version clparams2.StateVersion) ([]*cltypes.SignedBeaconBlock, error) {
+func ReadBlocks(root fs.FS, version clparams.StateVersion) ([]*cltypes.SignedBeaconBlock, error) {
 	i := 0
 	blocks := []*cltypes.SignedBeaconBlock{}
 	var err error
@@ -145,7 +144,7 @@ func ReadBlocks(root fs.FS, version clparams2.StateVersion) ([]*cltypes.SignedBe
 		if err != nil {
 			break
 		}
-		blk := cltypes.NewSignedBeaconBlock(&clparams2.MainnetBeaconConfig, version)
+		blk := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 		if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 			return nil, err
 		}

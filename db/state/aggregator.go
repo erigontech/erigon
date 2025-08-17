@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type Aggregator struct {
@@ -1745,13 +1746,37 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
-	return at.d[domain].GetLatest(k, tx)
+	if domain != kv.CommitmentDomain {
+		return at.d[domain].GetLatest(k, tx)
+	}
+
+	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
+	if err != nil {
+		return nil, kv.Step(0), false, err
+	}
+	if ok {
+		return v, step, true, nil
+	}
+
+	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
+	if !found {
+		return nil, kv.Step(0), false, err
+	}
+
+	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
 }
+
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {
 	return at.d[domain].getLatestFromDb(key, tx)
 }
+
 func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
-	return at.d[domain].getLatestFromFiles(k, maxTxNum)
+	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, maxTxNum)
+	if domain == kv.CommitmentDomain && found {
+		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	}
+	return
 }
 
 func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {

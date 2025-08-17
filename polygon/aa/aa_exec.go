@@ -53,7 +53,7 @@ func ValidateAATransaction(
 	}
 
 	vmConfig := evm.Config()
-	rules := chainConfig.Rules(header.Number.Uint64(), header.Time)
+	rules := evm.ChainRules()
 	hasEIP3860 := vmConfig.HasEip3860(rules)
 
 	preTxCost, err := tx.PreTransactionGasCost(rules, hasEIP3860)
