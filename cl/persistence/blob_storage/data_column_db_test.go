@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -43,7 +44,8 @@ func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clp
 		return slot / 32
 	}).AnyTimes()
 
-	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock)
+	emitters := beaconevents.NewEventEmitter()
+	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock, emitters)
 	return storage, fs, globalBeaconConfig, mockClock
 }
 

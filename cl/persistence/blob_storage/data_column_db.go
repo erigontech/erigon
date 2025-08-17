@@ -47,6 +47,7 @@ func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clpara
 		beaconChainConfig: beaconChainConfig,
 		ethClock:          ethClock,
 		slotsKept:         slotsKept,
+		emitters:          emitters,
 	}
 	return impl
 }
