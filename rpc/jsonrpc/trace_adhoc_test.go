@@ -32,12 +32,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
@@ -403,7 +403,7 @@ func TestOeTracer(t *testing.T) {
 			if test.Context.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
 			}
-			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+			rules := context.Rules(test.Genesis.Config)
 
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)

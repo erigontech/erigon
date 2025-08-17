@@ -27,11 +27,11 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool"
+	datadir2 "github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/services"
@@ -43,7 +43,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }

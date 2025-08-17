@@ -99,10 +99,10 @@ func ApplyProvideOptions(opts ...ProvideOption) ProvideOptions {
 }
 
 var defaultProvideOptions = ProvideOptions{
-	ParentBlockNum:    0,                         // no parent block to wait for by default
-	Amount:            math.MaxInt,               // all transactions by default
-	GasTarget:         math.MaxUint64,            // all transactions by default
-	BlobGasTarget:     math.MaxUint64,            // all transactions by default
-	TxnIdsFilter:      mapset.NewSet[[32]byte](), // no filter by default
-	AvailableRlpSpace: math.MaxInt,               // unlimited by default
+	ParentBlockNum:    0,              // no parent block to wait for by default
+	Amount:            math.MaxInt,    // all transactions by default
+	GasTarget:         math.MaxUint64, // all transactions by default
+	BlobGasTarget:     math.MaxUint64, // all transactions by default
+	TxnIdsFilter:      nil,            // no filter by default
+	AvailableRlpSpace: math.MaxInt,    // unlimited by default
 }

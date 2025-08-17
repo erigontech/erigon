@@ -59,8 +59,7 @@ func TestEventChannel(t *testing.T) {
 	})
 
 	t.Run("ConsumeEvents", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 
 		ch := NewEventChannel[string](2)
 

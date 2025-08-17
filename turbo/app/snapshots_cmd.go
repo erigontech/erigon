@@ -40,26 +40,23 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/compress"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/compress"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -68,13 +65,15 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
+	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
@@ -775,6 +774,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 			continue
 		}
 		found = true
+		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -823,6 +823,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.RCacheNoDups:
 			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
+				return err
+			}
+		case integrity.Publishable:
+			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
 		default:
@@ -892,9 +896,6 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	}); err != nil {
 		return err
 	}
-	if sum != maxTo {
-		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
-	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
 	}
@@ -915,6 +916,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
 		return fmt.Errorf("failed to check transactions-to-block idx: %w", err)
+	}
+	if sum != maxTo {
+		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
 	// Iterate over all fies in snapDir
 	return nil
@@ -954,6 +958,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	sort.Slice(accFiles, func(i, j int) bool {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
+
+	if accFiles[0].From != 0 {
+		return fmt.Errorf("gap at start: state snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
+	}
 
 	prevFrom, prevTo := accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
@@ -1062,6 +1070,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	sort.Slice(accFiles, func(i, j int) bool {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
+	if accFiles[0].From != 0 {
+		return fmt.Errorf("gap at start: state ef snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
+	}
 
 	prevFrom, prevTo = accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
@@ -1155,6 +1166,9 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	sort.Slice(intervals, func(i, j int) bool {
 		return intervals[i].from < intervals[j].from
 	})
+	if intervals[0].from != 0 {
+		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
+	}
 	// Check that there are no gaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from != intervals[i-1].to {
@@ -1569,10 +1583,16 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if chainConfig.Bor != nil {
 		borSnaps.DownloadComplete() // mark as ready
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
+		if err = bridgeStore.Prepare(ctx); err != nil {
+			return
+		}
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
+		if err = heimdallStore.Prepare(ctx); err != nil {
+			return
+		}
 	}
 
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
@@ -2002,6 +2022,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		from, to = from2, to2
 	}
 
+	logger.Info("retiring blocks", "from", from, "to", to)
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
@@ -2010,6 +2031,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	logger.Info("pruning blocks")
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
@@ -2101,8 +2123,8 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 
 	// initializing the node and providing the current git commit there
 
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
-	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
+	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 
 	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
