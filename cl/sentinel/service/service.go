@@ -29,18 +29,17 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/sentinel"
-	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
-
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 const gracePeerCount = 8
@@ -87,6 +86,11 @@ func extractSubnetIndexByGossipTopic(name string) int {
 //BanPeer(context.Context, *Peer) (*EmptyMessage, error)
 
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
+	active, _, _ := s.sentinel.GetPeersCount()
+	if active < gracePeerCount {
+		return &sentinelrpc.EmptyMessage{}, nil
+	}
+
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
@@ -462,9 +466,9 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 }
 
 func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
+	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
-		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
+		diaglib.Send(diaglib.PeerStatisticMsgUpdate{
 			PeerName: "TODO",
 			PeerType: "Sentinel",
 			PeerID:   peerID,

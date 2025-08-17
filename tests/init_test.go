@@ -33,7 +33,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 var (
@@ -193,6 +193,12 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 		t.Skip("missing test files")
 	}
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) { //skip magically disappeared files
+				return nil
+			}
+			return err
+		}
 		name := filepath.ToSlash(strings.TrimPrefix(path, dir+string(filepath.Separator)))
 		if info.IsDir() {
 			if _, skipload := tm.findSkip(name + "/"); skipload {

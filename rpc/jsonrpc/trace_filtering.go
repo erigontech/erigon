@@ -23,25 +23,25 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -75,11 +75,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.useBridgeReader {
-			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
-		} else {
-			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
-		}
+		blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -431,7 +427,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
-			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
+			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+			lastRules = blockCtx.Rules(chainConfig)
 		}
 		if isFnalTxn {
 			// TODO(yperbasis) proper rewards for Gnosis
@@ -728,8 +725,10 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
+	engine := api.engine()
+	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	rules := blockCtx.Rules(cfg)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -738,15 +737,8 @@ func (api *TraceAPIImpl) callBlock(
 		blockHash := block.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
-		var ok bool
-		var err error
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
-
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
-		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -776,7 +768,6 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
@@ -813,7 +804,7 @@ func (api *TraceAPIImpl) callBlock(
 		msgs[i] = msg
 	}
 
-	traces, tracingHooks, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
+	traces, _, cmErr := api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
 
 	if cmErr != nil {
@@ -821,7 +812,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks, vm.Config{})
+		ret, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
 
@@ -846,7 +837,9 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	rules := cfg.Rules(blockNumber, header.Time)
+	engine := api.engine()
+	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	rules := blockCtx.Rules(cfg)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
@@ -855,15 +848,7 @@ func (api *TraceAPIImpl) callTransaction(
 		blockHash := header.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
-		var ok bool
-		var err error
-
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
-
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
-		}
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 		if err != nil {
 			return nil, err
 		}
@@ -897,7 +882,6 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)

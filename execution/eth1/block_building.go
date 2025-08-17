@@ -27,11 +27,11 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -84,6 +84,8 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	if e.lastParameters != nil {
 		param.PayloadId = e.lastParameters.PayloadId
 		if reflect.DeepEqual(e.lastParameters, &param) {
+
+			// update the payload with inclusion lists
 			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 			return &execution.AssembleBlockResponse{
 				Id:   e.lastParameters.PayloadId,
@@ -99,7 +101,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	param.PayloadId = e.nextPayloadId
 	e.lastParameters = &param
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param)
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot())
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return &execution.AssembleBlockResponse{

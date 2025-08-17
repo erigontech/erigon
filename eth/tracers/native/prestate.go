@@ -31,10 +31,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 //go:generate gencodec -type account -field-override accountMarshaling -out gen_account_json.go
@@ -178,6 +178,18 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
+
+	// Add accounts with authorizations to the prestate before they get applied.
+	var b [32]byte
+	data := bytes.NewBuffer(nil)
+	for _, auth := range tx.GetAuthorizations() {
+		data.Reset()
+		addr, err := auth.RecoverSigner(data, b[:])
+		if err != nil {
+			continue
+		}
+		t.lookupAccount(*addr)
+	}
 
 	if t.create && t.config.DiffMode {
 		t.created[t.to] = true

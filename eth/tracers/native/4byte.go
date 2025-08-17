@@ -27,10 +27,11 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func init() {
@@ -91,7 +92,11 @@ func (t *fourByteTracer) store(id []byte, size int) {
 }
 
 func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
-	rules := env.ChainConfig.Rules(env.BlockNumber, env.Time)
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: env.BlockNumber,
+		Time:        env.Time,
+	}
+	rules := blockContext.Rules(env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 

@@ -25,23 +25,23 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -172,7 +172,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -184,10 +184,14 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if rw.background { // `Final` system txn must be executed in reducer, because `consensus.Finalize` requires "all receipts of block" to be available
 			break
 		}
+		tracer := calltracer.NewCallTracer(nil)
+		vmCfg := *rw.vmCfg
+		vmCfg.Tracer = tracer.Tracer().Hooks
+		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks, *rw.vmCfg)
+			ret, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, vmCfg)
 			if err != nil {
 				return nil, err
 			}
@@ -200,7 +204,15 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		} else {
-			txTask.TraceTos = map[common.Address]struct{}{}
+			txTask.TraceFroms = tracer.Froms()
+			txTask.TraceTos = tracer.Tos()
+			if txTask.TraceFroms == nil {
+				txTask.TraceFroms = map[common.Address]struct{}{}
+			}
+			if txTask.TraceTos == nil {
+				txTask.TraceTos = map[common.Address]struct{}{}
+			}
+
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
@@ -210,8 +222,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		tracer := calltracer.NewCallTracer(nil)
 
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
-		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		rw.vmCfg.Tracer = tracer.Tracer().Hooks
+		vmCfg := *rw.vmCfg
+		vmCfg.SkipAnalysis = txTask.SkipAnalysis
+		vmCfg.Tracer = tracer.Tracer().Hooks
 		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
 
@@ -227,20 +240,20 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 				break
 			}
 
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, rules)
 			rw.execAATxn(txTask, tracer)
 			break
 		}
 
 		msg := txTask.TxAsMessage
 		txContext := core.NewEVMTxContext(msg)
-		if rw.vmCfg.TraceJumpDest {
+		if vmCfg.TraceJumpDest {
 			txContext.TxHash = txn.Hash()
 		}
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
-		if hooks != nil && hooks.OnTxStart != nil {
-			hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
-		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, vmCfg, rules)
+		// if hooks != nil && hooks.OnTxStart != nil {
+		// 	hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
+		// }
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
@@ -610,7 +623,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
-				Rules:           chainConfig.Rules(blockNum, b.Time()),
+				Rules:           blockContext.Rules(chainConfig),
 				Txs:             txs,
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,

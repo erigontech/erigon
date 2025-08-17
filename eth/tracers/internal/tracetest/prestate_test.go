@@ -32,7 +32,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -40,6 +39,7 @@ import (
 	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/tests"
 )
 
@@ -114,7 +114,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if test.Context.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
 			}
-			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+			rules := context.Rules(test.Genesis.Config)
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)

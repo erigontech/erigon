@@ -22,6 +22,9 @@ import (
 	"strings"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func MustExist(path ...string) {
@@ -124,7 +127,7 @@ func DeleteFiles(dirs ...string) error {
 		}
 		for _, fPath := range files {
 			fPath := fPath
-			g.Go(func() error { return os.Remove(fPath) })
+			g.Go(func() error { return RemoveFile(fPath) })
 		}
 	}
 	return g.Wait()
@@ -159,4 +162,18 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 		paths = append(paths, filepath.Join(dir, f.Name()))
 	}
 	return paths, nil
+}
+
+func RemoveFile(path string) error {
+	if dbg.TraceDeletion {
+		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
+	}
+	return os.Remove(path)
+}
+
+func RemoveAll(path string) error {
+	if dbg.TraceDeletion {
+		log.Debug("[removing] removing dir", "path", path, "stack", dbg.Stack())
+	}
+	return os.RemoveAll(path)
 }

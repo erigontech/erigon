@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const foreseenProposers = 16
@@ -68,10 +68,12 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	}
 
 	maxBlobsPerBlock := cfg.MaxBlobsPerBlockByVersion(block.Version())
+	checkMaxBlobsPerTxn := false
 	if block.Version() >= clparams.FuluVersion {
 		maxBlobsPerBlock = cfg.GetBlobParameters(block.Slot / cfg.SlotsPerEpoch).MaxBlobsPerBlock
+		checkMaxBlobsPerTxn = true
 	}
-	return ethutils.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
+	return ethutils.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions, checkMaxBlobsPerTxn)
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
@@ -118,7 +120,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Check if blob data is available
 	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 {
 		if block.Version() >= clparams.FuluVersion {
-			available, err := f.peerDas.IsDataAvailable(blockRoot)
+			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 			if err != nil {
 				return err
 			}
@@ -238,6 +240,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		currentJustifiedCheckpoint:  lastProcessedState.CurrentJustifiedCheckpoint(),
 		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint(),
 	})
+
+	f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations())
+	f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits())
+	f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals())
+	f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead())
 
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints

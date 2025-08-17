@@ -26,7 +26,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
@@ -52,7 +52,7 @@ type ContractCaller interface {
 	CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error)
 	// CallContract executes an Ethereum contract call with the specified data as the
 	// input.
-	CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+	CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 }
 
 // PendingContractCaller defines methods to perform contract calls on the pending state.
@@ -82,7 +82,7 @@ type ContractTransactor interface {
 	// There is no guarantee that this is the true gas limit requirement as other
 	// transactions may be added or removed by miners, but it should provide a basis
 	// for setting a reasonable default.
-	EstimateGas(ctx context.Context, call ethereum.CallMsg) (gas uint64, err error)
+	EstimateGas(ctx context.Context, callMsg ethereum.CallMsg) (gas uint64, err error)
 	// SendTransaction injects the transaction into the pending pool for execution.
 	SendTransaction(ctx context.Context, txn types.Transaction) error
 }

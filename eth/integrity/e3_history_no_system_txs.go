@@ -26,17 +26,17 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
 func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader) error {
-	defer func(t time.Time) { log.Info("[integrity] HistoryCheckNoSystemTxs done", "took", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { log.Info("[integrity] HistoryNoSystemTxs done", "took", time.Since(t)) }(time.Now())
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()

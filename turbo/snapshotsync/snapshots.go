@@ -32,20 +32,21 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 type SortedRange interface {
@@ -354,6 +355,26 @@ func (s *DirtySegment) FileName() string {
 	return s.Type().FileName(s.version, s.from, s.to)
 }
 
+func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
+	if s.Decompressor != nil {
+		relativePaths = append(relativePaths, s.Decompressor.FilePath())
+	}
+	for _, index := range s.indexes {
+		if index == nil {
+			continue
+		}
+		relativePaths = append(relativePaths, index.FilePath())
+	}
+	var err error
+	for i := 0; i < len(relativePaths); i++ {
+		relativePaths[i], err = filepath.Rel(basePath, relativePaths[i])
+		if err != nil {
+			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
+		}
+	}
+	return relativePaths
+}
+
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
 	return s.Type().FileInfo(dir, s.from, s.to)
 }
@@ -403,8 +424,7 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		s.closeIdx()
 		s.closeSeg()
 
-		snapDir := filepath.Dir(f)
-		removeOldFiles([]string{f}, snapDir)
+		removeOldFiles([]string{f})
 	}
 }
 
@@ -505,7 +525,7 @@ type BlockSnapshots interface {
 	SetSegmentsMin(uint64)
 
 	DownloadComplete()
-	RemoveOverlaps() error
+	RemoveOverlaps(onDelete func(l []string) error) error
 	DownloadReady() bool
 	Ready(context.Context) <-chan error
 }
@@ -1159,7 +1179,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.closeWhatNotInList(list)
 		return s.openSegments(list, true, false)
 	}(); err != nil {
-		return err
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
@@ -1238,19 +1258,16 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	}
 }
 
-func (s *RoSnapshots) RemoveOverlaps() error {
+func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
 		return err
 	}
-	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-		filesToRemove := make([]string, 0, len(toRemove))
+	_, segmentsToRemove := findOverlaps(list)
 
-		for _, info := range toRemove {
-			filesToRemove = append(filesToRemove, info.Path)
-		}
-
-		removeOldFiles(filesToRemove, s.dir)
+	toRemove := make([]string, 0, len(segmentsToRemove))
+	for _, info := range segmentsToRemove {
+		toRemove = append(toRemove, info.Path)
 	}
 
 	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
@@ -1258,21 +1275,46 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 	if err != nil {
 		return err
 	}
+	_, accessorsToRemove := findOverlaps(list)
+	for _, info := range accessorsToRemove {
+		toRemove = append(toRemove, info.Path)
+	}
 
-	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-		filesToRemove := make([]string, 0, len(toRemove))
-
-		for _, info := range toRemove {
-			filesToRemove = append(filesToRemove, info.Path)
+	{
+		relativePaths, err := toRelativePaths(s.dir, toRemove)
+		if err != nil {
+			return err
 		}
+		if onDelete != nil {
+			if err := onDelete(relativePaths); err != nil {
+				return fmt.Errorf("onDelete: %w", err)
+			}
+		}
+	}
 
-		removeOldFiles(filesToRemove, s.dir)
+	removeOldFiles(toRemove)
+
+	// remove .tmp files
+	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
+	tmpFiles, err := snaptype.TmpFiles(s.dir)
+	if err != nil {
+		return err
+	}
+	for _, f := range tmpFiles {
+		_ = dir.RemoveFile(f)
 	}
 	return nil
 }
 
-func (s *RoSnapshots) RemoveOldFiles(filesToRemove []string) {
-	removeOldFiles(filesToRemove, s.dir)
+func toRelativePaths(basePath string, absolutePaths []string) (relativePaths []string, err error) {
+	relativePaths = make([]string, len(absolutePaths))
+	for i, f := range absolutePaths {
+		relativePaths[i], err = filepath.Rel(basePath, f)
+		if err != nil {
+			return nil, fmt.Errorf("rel: %w", err)
+		}
+	}
+	return relativePaths, nil
 }
 
 type snapshotNotifier interface {
@@ -1492,7 +1534,7 @@ func (s *RoSnapshots) View() *View {
 	for _, t := range s.enums {
 		sgs[t] = s.visible[t].BeginRo()
 	}
-	return &View{s: s, segments: sgs, baseSegType: coresnaptype.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
+	return &View{s: s, segments: sgs, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 }
 
 func (v *View) Close() {
@@ -1558,7 +1600,7 @@ func (v *View) Ranges() (ranges []Range) {
 }
 
 func notifySegmentIndexingFinished(name string) {
-	dts := []diagnostics.SnapshotSegmentIndexingStatistics{
+	dts := []diaglib.SnapshotSegmentIndexingStatistics{
 		{
 			SegmentName: name,
 			Percent:     100,
@@ -1566,48 +1608,41 @@ func notifySegmentIndexingFinished(name string) {
 			Sys:         0,
 		},
 	}
-	diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+	diaglib.Send(diaglib.SnapshotIndexingStatistics{
 		Segments:    dts,
 		TimeElapsed: -1,
 	})
 }
 
 func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
-	segmentsStats := make([]diagnostics.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
+	segmentsStats := make([]diaglib.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
 	for k, v := range indexPercent {
-		segmentsStats = append(segmentsStats, diagnostics.SnapshotSegmentIndexingStatistics{
+		segmentsStats = append(segmentsStats, diaglib.SnapshotSegmentIndexingStatistics{
 			SegmentName: k,
 			Percent:     v,
 			Alloc:       alloc,
 			Sys:         sys,
 		})
 	}
-	diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+	diaglib.Send(diaglib.SnapshotIndexingStatistics{
 		Segments:    segmentsStats,
 		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
 	})
 }
 
-func removeOldFiles(toDel []string, snapDir string) {
+func removeOldFiles(toDel []string) {
 	for _, f := range toDel {
-		_ = os.Remove(f)
-		_ = os.Remove(f + ".torrent")
+		_ = dir.RemoveFile(f)
+		_ = dir.RemoveFile(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		_ = os.Remove(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
+		_ = dir.RemoveFile(withoutExt + ".idx")
+		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
+		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
 		if isTxnType {
-			_ = os.Remove(withoutExt + "-to-block.idx")
-			_ = os.Remove(withoutExt + "-to-block.idx.torrent")
+			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
+			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
 		}
-	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir)
-	if err != nil {
-		return
-	}
-	for _, f := range tmpFiles {
-		_ = os.Remove(f)
 	}
 }
 

@@ -26,14 +26,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	borrawdb "github.com/erigontech/erigon/polygon/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -127,13 +126,13 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 
 	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
-	rules := chainConfig.Rules(blockNumber, timestamp)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	rules := blockCtx.Rules(chainConfig)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(firstMsg)
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
@@ -230,21 +229,14 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		if api.useBridgeReader {
-			possibleBorTxnHash := bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
-			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				borTx = bortypes.NewBorTransaction()
-				borTxHash = possibleBorTxnHash
-			}
-		} else {
-			borTx = borrawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
-			if borTx != nil {
-				borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
-			}
+		possibleBorTxnHash := bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			borTx = bortypes.NewBorTransaction()
+			borTxHash = possibleBorTxnHash
 		}
 	}
 
@@ -296,21 +288,14 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		if api.useBridgeReader {
-			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				borTx = bortypes.NewBorTransaction()
-				borTxHash = possibleBorTxnHash
-			}
-		} else {
-			borTx = borrawdb.ReadBorTransactionForBlock(tx, number)
-			if borTx != nil {
-				borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
-			}
+		possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			borTx = bortypes.NewBorTransaction()
+			borTxHash = possibleBorTxnHash
 		}
 	}
 
@@ -374,15 +359,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 
-		var ok bool
-		var err error
-
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
-		}
-
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err
 		}
@@ -424,14 +401,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 
-		var ok bool
-		var err error
-
-		if api.useBridgeReader {
-			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		} else {
-			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
-		}
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		if err != nil {
 			return nil, err
 		}

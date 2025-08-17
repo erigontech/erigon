@@ -25,8 +25,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -36,9 +37,9 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/klauspost/compress/zstd"
 )
 
 var buffersPool = sync.Pool{
@@ -308,15 +309,15 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		pendingWithdrawals    = solid.NewPendingWithdrawalList(r.cfg)
 	)
 
-	if err := readQueueSSZ(kvGetter, slot, kv.PendingConsolidationsDump, kv.PendingConsolidations, pendingConsolidations); err != nil {
+	if err := ReadQueueSSZ(kvGetter, slot, kv.PendingConsolidationsDump, kv.PendingConsolidations, pendingConsolidations); err != nil {
 		return nil, fmt.Errorf("failed to read pending consolidations: %w", err)
 	}
 
-	if err := readQueueSSZ(kvGetter, slot, kv.PendingDepositsDump, kv.PendingDeposits, pendingDeposits); err != nil {
+	if err := ReadQueueSSZ(kvGetter, slot, kv.PendingDepositsDump, kv.PendingDeposits, pendingDeposits); err != nil {
 		return nil, fmt.Errorf("failed to read pending deposits: %w", err)
 	}
 
-	if err := readQueueSSZ(kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
+	if err := ReadQueueSSZ(kvGetter, slot, kv.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawals, pendingWithdrawals); err != nil {
 		return nil, fmt.Errorf("failed to read pending withdrawals: %w", err)
 	}
 
@@ -989,7 +990,7 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter 
 	return common.BytesToHash(mixBytes), nil
 }
 
-func readQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
+func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValFn, slot uint64, dumpTable, diffsTable string, out *solid.ListSSZ[T]) error {
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 

@@ -1,19 +1,3 @@
-// Copyright 2025 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
 package engineapi
 
 import (
@@ -22,11 +6,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/types"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -38,7 +22,6 @@ var ourCapabilities = []string{
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
 	"engine_newPayloadV4",
-	"engine_newPayloadV5",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
@@ -49,8 +32,6 @@ var ourCapabilities = []string{
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
-	"engine_getInclusionListV1",
-	"engine_updatePayloadWithInclusionListV1",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -125,10 +106,6 @@ func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState 
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
 }
 
-func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
-}
-
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
@@ -157,25 +134,13 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
 }
 
-// Returns an array of execution payload bodies referenced by their block hashes
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
-func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
-	return e.getPayloadBodiesByHash(ctx, hashes)
-}
-
-// Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
-func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
-	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
-}
-
 // Returns the node's code and commit details in a slice
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1
 func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
 	if callerVersion != nil {
 		e.logger.Info("[GetClientVersionV1] Received request from" + callerVersion.String())
 	}
-	commitString := params.GitCommit
+	commitString := version.GitCommit
 	if len(commitString) >= 8 {
 		commitString = commitString[:8]
 	} else {
@@ -183,14 +148,13 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 	}
 	result := make([]engine_types.ClientVersionV1, 1)
 	result[0] = engine_types.ClientVersionV1{
-		Code:    params.ClientCode,
-		Name:    params.ClientName,
-		Version: params.VersionWithCommit(params.GitCommit),
+		Code:    version.ClientCode,
+		Name:    version.ClientName,
+		Version: version.VersionWithCommit(version.GitCommit),
 		Commit:  "0x" + commitString,
 	}
 	return result, nil
 }
-
 func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	e.engineLogSpamer.RecordRequest()
 	missingOurs := compareCapabilities(fromCl, ourCapabilities)

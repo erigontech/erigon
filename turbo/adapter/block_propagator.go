@@ -20,7 +20,7 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type BlockPropagator func(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int)

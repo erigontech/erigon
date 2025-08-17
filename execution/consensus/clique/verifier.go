@@ -24,10 +24,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // verifyHeader checks whether a header conforms to the consensus rules.The

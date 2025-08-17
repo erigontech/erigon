@@ -18,19 +18,15 @@ package rpchelper
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	borfinality "github.com/erigontech/erigon/polygon/bor/finality"
-	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -81,17 +77,6 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizedBlockNumber:
-			if whitelist.GetWhitelistingService() != nil {
-				num := borfinality.GetFinalizedBlockNumber(tx)
-				if num == 0 {
-					// nolint
-					return 0, common.Hash{}, false, false, errors.New("No finalized block")
-				}
-
-				blockNum := borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
-				blockHash := rawdb.ReadHeaderByNumber(tx, blockNum).Hash()
-				return blockNum, blockHash, false, false, nil
-			}
 			blockNumber, err = GetFinalizedBlockNumber(tx)
 			if err != nil {
 				return 0, common.Hash{}, false, false, err
@@ -181,7 +166,7 @@ func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
 	return state.NewReaderV3(getter)
 }
 
-func NewLatestStateWriter(tx kv.Tx, domains *libstate.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+func NewLatestStateWriter(tx kv.Tx, domains *dbstate.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	minTxNum, err := blockReader.TxnumReader(context.Background()).Min(tx, blockNum)
 	if err != nil {
 		panic(err)

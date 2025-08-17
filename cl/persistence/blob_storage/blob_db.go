@@ -23,20 +23,22 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	"github.com/spf13/afero"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/spf13/afero"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -47,6 +49,7 @@ type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) (out []*cltypes.BlobSidecar, found bool, err error)
+	BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
 	Prune() error
@@ -173,6 +176,16 @@ func (bs *BlobStore) Prune() error {
 	return nil
 }
 
+func (bs *BlobStore) BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error) {
+	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
+	_, err := bs.fs.Stat(filePath)
+	if os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
 func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
 	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
 	file, err := bs.fs.Open(filePath)

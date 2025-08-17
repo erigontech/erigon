@@ -17,9 +17,9 @@ import (
 	common "github.com/erigontech/erigon-lib/common"
 	hexutil "github.com/erigontech/erigon-lib/common/hexutil"
 	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	types "github.com/erigontech/erigon-lib/types"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	engine_types "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	types "github.com/erigontech/erigon/execution/types"
 	gomock "go.uber.org/mock/gomock"
 )
 

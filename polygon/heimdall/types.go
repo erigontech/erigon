@@ -27,21 +27,21 @@ import (
 	"runtime"
 	"time"
 
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -50,8 +50,8 @@ func init() {
 }
 
 func initTypes() {
-	borTypes := append(coresnaptype.BlockSnapshotTypes, SnapshotTypes()...)
-	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
+	borTypes := append(snaptype2.BlockSnapshotTypes, SnapshotTypes()...)
+	borTypes = append(borTypes, snaptype2.E3StateTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Amoy, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.BorMainnet, borTypes)
@@ -161,10 +161,7 @@ var (
 	Events = snaptype.RegisterType(
 		Enums.Events,
 		"borevents",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
 		snaptype.IndexBuilderFunc(
@@ -259,10 +256,7 @@ var (
 	Spans = snaptype.RegisterType(
 		Enums.Spans,
 		"borspans",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				spanFrom := uint64(SpanIdAt(blockFrom))
@@ -291,10 +285,7 @@ var (
 	Checkpoints = snaptype.RegisterType(
 		Enums.Checkpoints,
 		"borcheckpoints",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
@@ -359,10 +350,7 @@ var (
 	Milestones = snaptype.RegisterType(
 		Enums.Milestones,
 		"bormilestones",
-		snaptype.Versions{
-			Current:      version.V1_0, //2,
-			MinSupported: version.V1_0,
-		},
+		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId

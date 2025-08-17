@@ -36,13 +36,10 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/estimate"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -63,6 +60,9 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -163,7 +163,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 	defer db.Close()
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock)
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock, nil)
 
 	bRoot, err := bs.BlockRoot()
 	if err != nil {
@@ -186,7 +186,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -581,7 +581,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())

@@ -22,7 +22,7 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 type (
