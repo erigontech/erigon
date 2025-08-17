@@ -201,7 +201,7 @@ func (db *DB) Close() {
 	db.RwDB.Close()
 }
 
-func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
+func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { db.agg.OnFilesChange(onChange, onDel) }
 
 type tx struct {
 	db               *DB

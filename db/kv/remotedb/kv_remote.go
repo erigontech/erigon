@@ -262,7 +262,7 @@ func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.
 func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
-func (db *DB) OnFilesChange(f kv.OnFilesChange) { panic("not implemented") }
+func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}

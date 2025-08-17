@@ -22,6 +22,7 @@ package compiler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,12 +77,12 @@ func (s *Solidity) makeArgs() []string {
 }
 
 // SolidityVersion runs solc and parses its version output.
-func SolidityVersion(solc string) (*Solidity, error) {
+func SolidityVersion(ctx context.Context, solc string) (*Solidity, error) {
 	if solc == "" {
 		solc = "solc"
 	}
 	var out bytes.Buffer
-	cmd := exec.Command(solc, "--version")
+	cmd := exec.CommandContext(ctx, solc, "--version")
 	cmd.Stdout = &out
 	err := cmd.Run()
 	if err != nil {
@@ -105,22 +106,22 @@ func SolidityVersion(solc string) (*Solidity, error) {
 }
 
 // CompileSolidityString builds and returns all the contracts contained within a source string.
-func CompileSolidityString(solc, source string) (map[string]*Contract, error) {
+func CompileSolidityString(ctx context.Context, solc, source string) (map[string]*Contract, error) {
 	if len(source) == 0 {
 		return nil, errors.New("solc: empty source string")
 	}
-	s, err := SolidityVersion(solc)
+	s, err := SolidityVersion(ctx, solc)
 	if err != nil {
 		return nil, err
 	}
 	args := append(s.makeArgs(), "--")
-	cmd := exec.Command(s.Path, append(args, "-")...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, s.Path, append(args, "-")...) //nolint:gosec
 	cmd.Stdin = strings.NewReader(source)
 	return s.run(cmd, source)
 }
 
 // CompileSolidity compiles all given Solidity source files.
-func CompileSolidity(solc string, sourcefiles ...string) (map[string]*Contract, error) {
+func CompileSolidity(ctx context.Context, solc string, sourcefiles ...string) (map[string]*Contract, error) {
 	if len(sourcefiles) == 0 {
 		return nil, errors.New("solc: no source files")
 	}
@@ -128,12 +129,12 @@ func CompileSolidity(solc string, sourcefiles ...string) (map[string]*Contract, 
 	if err != nil {
 		return nil, err
 	}
-	s, err := SolidityVersion(solc)
+	s, err := SolidityVersion(ctx, solc)
 	if err != nil {
 		return nil, err
 	}
 	args := append(s.makeArgs(), "--")
-	cmd := exec.Command(s.Path, append(args, sourcefiles...)...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, s.Path, append(args, sourcefiles...)...) //nolint:gosec
 	return s.run(cmd, source)
 }
 
