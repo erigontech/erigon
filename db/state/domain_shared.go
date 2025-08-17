@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -74,13 +73,10 @@ type SharedDomains struct {
 
 	txNum    uint64
 	blockNum atomic.Uint64
-	estSize  int
 	trace    bool //nolint
 	//walLock sync.RWMutex
 
-	muMaps  sync.RWMutex
-	domains [kv.DomainLen]map[string]dataWithPrevStep
-	storage *btree2.Map[string, dataWithPrevStep]
+	mem *DomainMaps
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
@@ -95,21 +91,19 @@ type HasAgg interface {
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
-		logger:  logger,
-		storage: btree2.NewMap[string, dataWithPrevStep](128),
+		logger: logger,
+		mem:    NewDomainMaps(),
 		//trace:   true,
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
 
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
-
 	for id, ii := range aggTx.iis {
 		sd.iiWriters[id] = ii.NewWriter()
 	}
 
 	for id, d := range aggTx.d {
-		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
@@ -202,117 +196,37 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	sd.muMaps.Lock()
-	defer sd.muMaps.Unlock()
-	for i := range sd.domains {
-		sd.domains[i] = map[string]dataWithPrevStep{}
-	}
+	sd.mem.ClearRam()
 	if resetCommitment {
 		sd.sdCtx.updates.Reset()
 		sd.sdCtx.Reset()
 	}
-
-	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	sd.estSize = 0
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
-	sd.muMaps.Lock()
-	defer sd.muMaps.Unlock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
-	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
-			sd.estSize += len(val) - len(old.data)
-		} else {
-			sd.estSize += len(key) + len(val)
-		}
-		return
-	}
-
-	if old, ok := sd.domains[domain][key]; ok {
-		sd.estSize += len(val) - len(old.data)
+	prevStep := kv.Step(txNum / sd.stepSize)
+	if val == nil {
+		sd.mem.DomainDel(domain, key, prevStep)
 	} else {
-		sd.estSize += len(key) + len(val)
+		sd.mem.DomainPut(domain, key, val, prevStep)
 	}
-	sd.domains[domain][key] = valWithPrevStep
 }
 
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
-	sd.muMaps.RLock()
-	defer sd.muMaps.RUnlock()
-
-	keyS := toStringZeroCopy(key)
-	var dataWithPrevStep dataWithPrevStep
-	if table == kv.StorageDomain {
-		dataWithPrevStep, ok = sd.storage.Get(keyS)
-		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
-
-	}
-
-	dataWithPrevStep, ok = sd.domains[table][keyS]
-	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
+	return sd.mem.GetLatest(table, key)
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
-	sd.muMaps.RLock()
-	defer sd.muMaps.RUnlock()
-
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.estSize) * 4
+	return uint64(sd.mem.SizeEstimate()) * 4
 }
 
 const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
-	sd.muMaps.RLock()
-	defer sd.muMaps.RUnlock()
-
-	for table, list := range readLists {
-		switch table {
-		case kv.AccountsDomain.String():
-			m := sd.domains[kv.AccountsDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case kv.CodeDomain.String():
-			m := sd.domains[kv.CodeDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case kv.StorageDomain.String():
-			m := sd.storage
-			for i, key := range list.Keys {
-				if val, ok := m.Get(key); ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case CodeSizeTableFake:
-			m := sd.domains[kv.CodeDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val.data)) {
-						return false
-					}
-				}
-			}
-		default:
-			panic(table)
-		}
-	}
-
-	return true
+	return sd.mem.ReadsValid(readLists)
 }
 
 func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
@@ -364,7 +278,7 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64
 			return writer.Add(key, txNum)
 		}
 	}
-	panic(fmt.Errorf("unknown index %s", table))
+	return fmt.Errorf("unknown index %s", table)
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
@@ -408,11 +322,12 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, roTx kv.Tx, it func
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
-	sd.muMaps.RLock()
-	defer sd.muMaps.RUnlock()
+	sd.mem.muMaps.RLock()
+	defer sd.mem.muMaps.RUnlock()
+
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
-		ramIter = sd.storage.Iter()
+		ramIter = sd.mem.storage.Iter()
 	}
 
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, sd.stepSize, roTx)
@@ -426,13 +341,15 @@ func (sd *SharedDomains) Close() {
 	sd.SetBlockNum(0)
 	sd.SetTxNum(0)
 
-	//sd.walLock.Lock()
-	//defer sd.walLock.Unlock()
 	for _, d := range sd.domainWriters {
-		d.Close()
+		if d != nil {
+			d.Close()
+		}
 	}
 	for _, iiWriter := range sd.iiWriters {
-		iiWriter.close()
+		if iiWriter != nil {
+			iiWriter.close()
+		}
 	}
 
 	sd.sdCtx.Close()
@@ -458,7 +375,9 @@ func (sd *SharedDomains) flushWriters(ctx context.Context, tx kv.RwTx) error {
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		aggTx.d[di].closeValsCursor() //TODO: why?
+		if aggTx != nil {
+			aggTx.d[di].closeValsCursor()
+		}
 		w.Close()
 	}
 	for _, w := range sd.iiWriters {
