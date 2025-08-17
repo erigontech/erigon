@@ -97,7 +97,7 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-const AggregatorSqueezeCommitmentValues = false
+const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
