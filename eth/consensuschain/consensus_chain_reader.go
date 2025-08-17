@@ -20,13 +20,12 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -97,13 +96,4 @@ func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
 func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
-}
-
-func (cr Reader) BorSpan(spanId uint64) *heimdall.Span {
-	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
-	if err != nil {
-		log.Warn("BorSpan failed", "err", err)
-		return nil
-	}
-	return span
 }

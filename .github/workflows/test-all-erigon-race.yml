@@ -19,7 +19,7 @@ jobs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter
@@ -58,8 +58,7 @@ jobs:
 
       - name: Checkout code
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v5
       - name: Update submodules
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: git submodule update --init --recursive --force
@@ -80,14 +79,6 @@ jobs:
           SKIP_FLAKY_TESTS: 'true'
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: GOGC=80 make test-all-race
-
-      - name: SonarCloud scan in case OS Linux and changed_files is not true
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: SonarSource/sonarqube-scan-action@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

@@ -21,14 +21,13 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
@@ -54,21 +53,6 @@ type HeaderReader interface {
 	// HeadersRange - TODO: change it to `stream`
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
 	Integrity(ctx context.Context) error
-}
-type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error)
-	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	LastFrozenSpanId() uint64
-}
-
-type BorMilestoneReader interface {
-	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error)
-}
-
-type BorCheckpointReader interface {
-	LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error)
 }
 
 type CanonicalReader interface {
@@ -113,9 +97,6 @@ type FullBlockReader interface {
 	BlockReader
 	BodyReader
 	HeaderReader
-	BorSpanReader
-	BorMilestoneReader
-	BorCheckpointReader
 	TxnReader
 	CanonicalReader
 

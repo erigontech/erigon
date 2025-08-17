@@ -32,7 +32,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -43,7 +42,8 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -500,8 +500,8 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
 
 					g, gctx = errgroup.WithContext(ctx)
 					g.SetLimit(2)
@@ -779,8 +779,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
 
 					return func() error {
 						for i := ent1.From; i < ent1.To; i++ {

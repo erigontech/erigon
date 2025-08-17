@@ -24,23 +24,23 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"
@@ -272,7 +272,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
+	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionNoMeta)}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {
@@ -481,7 +481,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	ibs.SetHooks(validationTracer.Hooks())
 
 	vmConfig := evm.Config()
-	rules := s.chainConfig.Rules(header.Number.Uint64(), header.Time)
+	rules := evm.ChainRules()
 	hasEIP3860 := vmConfig.HasEip3860(rules)
 
 	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
