@@ -387,7 +387,7 @@ func (sdb *IntraBlockState) Exist(addr common.Address) (exists bool, err error) 
 		return s != nil && !s.deleted, nil
 	}
 
-	readAccount, _, err := sdb.getVersionedAccount(addr, true)
+	readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
 	if err != nil {
 		return false, err
 	}
@@ -420,7 +420,7 @@ func (sdb *IntraBlockState) Empty(addr common.Address) (empty bool, err error) {
 		return so == nil || so.deleted || so.data.Empty(), nil
 	}
 
-	account, _, err := sdb.getVersionedAccount(addr, true)
+	account, _, _, err := sdb.getVersionedAccount(addr, true)
 	if err != nil {
 		return false, err
 	}
@@ -828,16 +828,16 @@ func (sdb *IntraBlockState) touch(addr common.Address) {
 	}
 }
 
-func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage bool) (*accounts.Account, Version, error) {
+func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if sdb.versionMap == nil {
-		return nil, Version{}, nil
+		return nil, UnknownSource, UnknownVersion, nil
 	}
 
-	readAccount, _, version, err := versionedRead[*accounts.Account](sdb, addr, AddressPath, common.Hash{}, false, nil,
+	readAccount, source, version, err := versionedRead[*accounts.Account](sdb, addr, AddressPath, common.Hash{}, false, nil,
 		func(v *accounts.Account) *accounts.Account { return v }, nil)
 
 	if err != nil {
-		return nil, Version{}, err
+		return nil, UnknownSource, UnknownVersion, err
 	}
 
 	if readAccount == nil {
@@ -846,26 +846,27 @@ func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage
 			readAccount, err = sdb.stateReader.ReadAccountData(addr)
 			sdb.accountReadDuration += time.Since(readStart)
 			sdb.accountReadCount++
+			source = StorageRead
 		}
 
 		if readAccount == nil || err != nil {
-			return nil, Version{}, err
+			return nil, StorageRead, UnknownVersion, err
 		}
 	}
 
-	return sdb.refreshVersionedAccount(addr, readAccount, version)
+	return sdb.refreshVersionedAccount(addr, readAccount, source, version)
 }
 
-func (sdb *IntraBlockState) refreshVersionedAccount(addr common.Address, readAccount *accounts.Account, version Version) (*accounts.Account, Version, error) {
+func (sdb *IntraBlockState) refreshVersionedAccount(addr common.Address, readAccount *accounts.Account, readSource ReadSource, readVersion Version) (*accounts.Account, ReadSource, Version, error) {
 	account := readAccount
-	txIndex := version.TxIndex
-	incarnation := version.Incarnation
+	version := readVersion
+	source := readSource
 
-	balance, _, bversion, err := versionedRead(sdb, addr, BalancePath, common.Hash{}, false, account.Balance, nil, nil)
+	balance, bsource, bversion, err := versionedRead(sdb, addr, BalancePath, common.Hash{}, false, account.Balance, nil, nil)
 	if err != nil {
-		return nil, Version{}, err
+		return nil, UnknownSource, UnknownVersion, err
 	}
-	if bversion.TxIndex >= version.TxIndex {
+	if bversion.TxIndex >= readVersion.TxIndex {
 		if balance.Cmp(&account.Balance) != 0 {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -873,21 +874,19 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr common.Address, readAcc
 			}
 			account.Balance = balance
 		}
-		switch {
-		case bversion.TxIndex > txIndex:
-			txIndex, incarnation = bversion.TxIndex, bversion.Incarnation
-		case bversion.TxIndex == txIndex:
-			if bversion.Incarnation > incarnation {
-				incarnation = bversion.Incarnation
+		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex > version.TxIndex && bversion.Incarnation > version.Incarnation) {
+			version = bversion
+			if bsource != source {
+				source = bsource
 			}
 		}
 	}
 
-	nonce, _, nversion, err := versionedRead[uint64](sdb, addr, NoncePath, common.Hash{}, false, account.Nonce, nil, nil)
+	nonce, nsource, nversion, err := versionedRead[uint64](sdb, addr, NoncePath, common.Hash{}, false, account.Nonce, nil, nil)
 	if err != nil {
-		return nil, Version{}, err
+		return nil, UnknownSource, UnknownVersion, err
 	}
-	if nversion.TxIndex >= version.TxIndex {
+	if nversion.TxIndex >= readVersion.TxIndex {
 		if nonce > account.Nonce {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -895,22 +894,20 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr common.Address, readAcc
 			}
 			account.Nonce = nonce
 		}
-		switch {
-		case nversion.TxIndex > txIndex:
-			txIndex, incarnation = nversion.TxIndex, nversion.Incarnation
-		case nversion.TxIndex == txIndex:
-			if bversion.Incarnation > incarnation {
-				incarnation = nversion.Incarnation
+		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex > version.TxIndex && nversion.Incarnation > version.Incarnation) {
+			version = nversion
+			if nsource != source {
+				source = nsource
 			}
 		}
 	}
 
-	codeHash, _, cversion, err := versionedRead(sdb, addr, CodeHashPath, common.Hash{}, false, account.CodeHash, nil, nil)
+	codeHash, csource, cversion, err := versionedRead(sdb, addr, CodeHashPath, common.Hash{}, false, account.CodeHash, nil, nil)
 	if err != nil {
-		return nil, Version{}, err
+		return nil, UnknownSource, UnknownVersion, err
 	}
 
-	if cversion.TxIndex >= version.TxIndex {
+	if cversion.TxIndex >= readVersion.TxIndex {
 		if codeHash != account.CodeHash {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -918,17 +915,15 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr common.Address, readAcc
 			}
 			account.CodeHash = codeHash
 		}
-		switch {
-		case cversion.TxIndex > txIndex:
-			txIndex, incarnation = cversion.TxIndex, cversion.Incarnation
-		case cversion.TxIndex == txIndex:
-			if cversion.Incarnation > incarnation {
-				incarnation = cversion.Incarnation
+		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex > version.TxIndex && cversion.Incarnation > version.Incarnation) {
+			version = cversion
+			if csource != source {
+				source = csource
 			}
 		}
 	}
 
-	return account, Version{TxIndex: txIndex, Incarnation: incarnation}, nil
+	return account, source, version, nil
 }
 
 // SubBalance subtracts amount from the account associated with addr.
@@ -1221,7 +1216,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 		return nil, nil
 	}
 
-	account, _, err := sdb.getVersionedAccount(addr, false)
+	account, _, _, err := sdb.getVersionedAccount(addr, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1235,13 +1230,16 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 	sdb.accountReadDuration += time.Since(readStart)
 	sdb.accountReadCount++
 
+	accountSource := StorageRead
+	accountVersion := sdb.Version()
+
 	if err != nil {
 		return nil, err
 	}
 
 	if readAccount == nil {
 		if sdb.versionMap != nil {
-			readAccount, _, _, err = versionedRead[*accounts.Account](sdb, addr, AddressPath, common.Hash{}, false, nil, nil, nil)
+			readAccount, accountSource, accountVersion, err = versionedRead[*accounts.Account](sdb, addr, AddressPath, common.Hash{}, false, nil, nil, nil)
 
 			if readAccount == nil || err != nil {
 				return nil, err
@@ -1270,7 +1268,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 	var code []byte
 
 	if sdb.versionMap != nil {
-		account, _, err = sdb.refreshVersionedAccount(addr, readAccount, Version{TxIndex: sdb.txIndex, Incarnation: sdb.version})
+		account, accountSource, accountVersion, err = sdb.refreshVersionedAccount(addr, readAccount, accountSource, accountVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -1279,7 +1277,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 		account = readAccount
 	}
 
-	sdb.accountRead(addr, account)
+	sdb.accountRead(addr, account, accountSource, accountVersion)
 	obj := newObject(sdb, addr, account, account)
 	if code != nil {
 		obj.code = code
@@ -1350,9 +1348,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	var previous *stateObject
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
-		if sdb.blockNum == 23112764 && sdb.txIndex == 86 {
-			fmt.Println("CRA", sdb.blockNum, sdb.txIndex)
-		}
 		defer func() {
 			var creatingContract string
 			if contractCreation {
@@ -1370,7 +1365,38 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		}()
 	}
 
-	previous, err = sdb.getStateObject(addr)
+	source := StorageRead
+	version := UnknownVersion
+
+	if sdb.versionMap == nil {
+		previous, err = sdb.getStateObject(addr)
+		if err != nil {
+			return err
+		}
+	} else {
+		readAccount, accountSource, accountVersion, err := sdb.getVersionedAccount(addr, true)
+
+		if err != nil {
+			return err
+		}
+
+		if readAccount != nil {
+			account := readAccount
+
+			destructed, _, _, err := versionedRead[bool](sdb, addr, SelfDestructPath, common.Hash{}, false, false,
+				func(v bool) bool { return v }, nil)
+
+			if err != nil {
+				return err
+			}
+
+			previous = newObject(sdb, addr, account, account)
+			previous.selfdestructed = destructed
+			source = accountSource
+			version = accountVersion
+		}
+	}
+
 	if err != nil {
 		return err
 	}
@@ -1399,7 +1425,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
-	sdb.versionRead(addr, BalancePath, common.Hash{}, StorageRead, newObj.Balance())
+	sdb.versionRead(addr, BalancePath, common.Hash{}, source, version, newObj.Balance())
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, newObj.Balance())
 
 	return nil
@@ -1777,10 +1803,10 @@ func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Ha
 	return sdb.accessList.Contains(addr, slot)
 }
 
-func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.Account) {
+func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
-		sdb.versionRead(addr, AddressPath, common.Hash{}, StorageRead, &data)
+		sdb.versionRead(addr, AddressPath, common.Hash{}, source, version, &data)
 	}
 }
 
@@ -1806,7 +1832,7 @@ func (sdb *IntraBlockState) versionWritten(addr common.Address, path AccountPath
 	}
 }
 
-func (sdb *IntraBlockState) versionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, val any) {
+func (sdb *IntraBlockState) versionRead(addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version, val any) {
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}
@@ -1817,7 +1843,7 @@ func (sdb *IntraBlockState) versionRead(addr common.Address, path AccountPath, k
 			Path:    path,
 			Key:     key,
 			Source:  source,
-			Version: sdb.Version(),
+			Version: version,
 			Val:     val,
 		})
 	}
