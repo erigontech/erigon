@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon/cmd/snapshots/torrents"
 	"github.com/erigontech/erigon/cmd/snapshots/verify"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -48,7 +48,7 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = "snapshots"
-	app.Version = params.VersionWithCommit(params.GitCommit)
+	app.Version = version.VersionWithCommit(version.GitCommit)
 
 	app.Commands = []*cli.Command{
 		&cmp.Command,

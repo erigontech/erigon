@@ -13,11 +13,11 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -38,7 +38,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Dirs                                datadir.Dirs
 		ExternalSnapshotDownloaderAddr      string
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Miner                               params.MiningConfig
+		Miner                               buildercfg.MiningConfig
 		Ethash                              ethashcfg.Config
 		Clique                              chainspec.ConsensusSnapshotConfig
 		Aura                                chain.AuRaConfig
@@ -130,7 +130,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Dirs                                *datadir.Dirs
 		ExternalSnapshotDownloaderAddr      *string
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Miner                               *params.MiningConfig
+		Miner                               *buildercfg.MiningConfig
 		Ethash                              *ethashcfg.Config
 		Clique                              *chainspec.ConsensusSnapshotConfig
 		Aura                                *chain.AuRaConfig
