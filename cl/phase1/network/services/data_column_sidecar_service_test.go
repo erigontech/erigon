@@ -9,6 +9,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -73,6 +74,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		t.mockForkChoice,
 		t.mockSyncedData,
 		t.mockColumnSidecarStorage,
+		beaconevents.NewEventEmitter(),
 	)
 
 	t.mockFuncs = &mockFuncs{

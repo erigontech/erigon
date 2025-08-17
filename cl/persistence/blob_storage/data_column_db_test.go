@@ -68,7 +68,7 @@ func TestNewDataColumnStore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)
 
-	storage := NewDataColumnStore(fs, 1000, beaconConfig, mockClock)
+	storage := NewDataColumnStore(fs, 1000, beaconConfig, mockClock, beaconevents.NewEventEmitter())
 
 	assert.NotNil(t, storage)
 
@@ -381,7 +381,7 @@ func TestWriteColumnSidecarsErrorHandling(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)
 
-	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock)
+	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock, beaconevents.NewEventEmitter())
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
