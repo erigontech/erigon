@@ -388,14 +388,14 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		so, err := s.getStateObject(addr)
 
 		if err != nil || readStorage == nil {
-			return defaultV, StorageRead, Version{}, err
+			return defaultV, StorageRead, UnknownVersion, err
 		}
 		val, err := readStorage(so)
-		return val, StorageRead, Version{}, err
+		return val, StorageRead, UnknownVersion, err
 	}
 
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
-		return defaultV, StorageRead, Version{}, nil
+		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, common.Hash{}, s.txIndex); res.Status() == MVReadResultDone {
 		return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
 	}
@@ -520,7 +520,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		}
 
 		if readStorage == nil {
-			return defaultV, UnknownSource, Version{}, nil
+			return defaultV, UnknownSource, UnknownVersion, nil
 		}
 
 		var so *stateObject
@@ -531,7 +531,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 				func(v *accounts.Account) *accounts.Account { return v }, nil)
 
 			if err != nil {
-				return defaultV, source, Version{}, err
+				return defaultV, source, UnknownVersion, err
 			}
 
 			if readAccount != nil {
@@ -545,12 +545,12 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 			vr.Source = StorageRead
 			so, err = s.getStateObject(addr)
 			if err != nil {
-				return defaultV, StorageRead, Version{}, err
+				return defaultV, StorageRead, UnknownVersion, err
 			}
 		}
 
 		if v, err = readStorage(so); err != nil {
-			return defaultV, StorageRead, Version{}, err
+			return defaultV, StorageRead, UnknownVersion, err
 		}
 
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
@@ -560,7 +560,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		vr.Val = copyV(v)
 
 	default:
-		return defaultV, UnknownSource, Version{}, nil
+		return defaultV, UnknownSource, UnknownVersion, nil
 	}
 
 	if s.versionedReads == nil {
