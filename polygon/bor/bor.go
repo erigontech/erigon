@@ -250,7 +250,7 @@ func ValidateHeaderTime(
 		return err
 	}
 
-	proposer := validatorSet.(*valset.ValidatorSet).GetProposer()
+	proposer := validatorSet.(*heimdall.ValidatorSet).GetProposer()
 	fmt.Printf("VALIDATE_HEADER_TIME: blockNum=%d , blockHash=%x, signer=%x, proposer=%x succession=%d\n", header.Number.Uint64(), header.Hash(), signer, proposer, succession)
 
 	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
@@ -1119,7 +1119,7 @@ func (c *Bor) fetchAndCommitSpan(newSpanID uint64, syscall consensus.SystemCall)
 		return err
 	}
 	if !ok {
-		return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+		return fmt.Errorf("error fetching span %v", newSpanID)
 	}
 
 	// check if chain id matches with heimdall span

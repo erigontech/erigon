@@ -25,8 +25,8 @@ import (
 type SpanId uint64
 
 const (
-	spanLength    = 128 // Number of blocks in a span
-	zerothSpanEnd = 127 // End block of 0th span
+	spanLength    = 6400 // Number of blocks in a span
+	zerothSpanEnd = 255  // End block of 0th span
 )
 
 var (
