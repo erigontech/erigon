@@ -40,6 +40,7 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	t.Cleanup(heimdallStore.Close)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
 	lastFrozenSpanId, found, err := heimdallStore.spans.LastFrozenEntityId()
@@ -62,6 +63,7 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	t.Cleanup(heimdallStore.Close)
 	lastFrozenSpanId, found, err := heimdallStore.spans.LastFrozenEntityId()
 	require.NoError(t, err)
 	require.False(t, found)
@@ -90,6 +92,7 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	t.Cleanup(heimdallStore.Close)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
 	lastFrozenSpanid, found, err := heimdallStore.spans.LastFrozenEntityId()
@@ -116,6 +119,7 @@ func TestHeimdallStoreEntity(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	t.Cleanup(heimdallStore.Close)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
 	for i := 0; i < len(spanDataForTesting); i++ {
@@ -147,6 +151,7 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	t.Cleanup(heimdallStore.Close)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
 	lastFrozenId, found, err := heimdallStore.spans.LastFrozenEntityId()
@@ -173,6 +178,7 @@ func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	heimdallStore := NewSnapshotStore(NewMdbxStore(logger, dataDir, false, 1), borRoSnapshots)
+	t.Cleanup(heimdallStore.Close)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
 	for i := 0; i < len(spanDataWithRotations); i++ {
