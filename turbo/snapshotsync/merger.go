@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -206,11 +205,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
 	defer snapshots.recalcVisibleFiles(snapshots.alignMin)
-	if err := filepath.Walk("ok", func(path string, info fs.FileInfo, err error) error {
-		return nil
-	}); err != nil {
-
-	}
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
