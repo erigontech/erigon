@@ -269,6 +269,9 @@ func (sdb *IntraBlockState) Reset() {
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log.TxIndex = uint(sdb.txIndex)
+
+	fmt.Println("LAL AddLog", sdb.logSize)
+
 	log.Index = sdb.logSize
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
 		sdb.tracingHooks.OnLog(log)
