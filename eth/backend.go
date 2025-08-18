@@ -803,6 +803,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			httpRpcCfg.Dirs,
 			backend.polygonBridge,
 		)
+
 		ethApi := jsonrpc.NewEthAPI(
 			baseApi,
 			backend.chainDB,

@@ -1454,6 +1454,8 @@ func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	log.Debug("LAL DomainRoTx GetAsOf", "txNum", txNum)
+
 	if dt.d.disable {
 		return nil, false, nil
 	}
@@ -1463,6 +1465,8 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return nil, false, err
 	}
 	if hOk {
+		log.Debug("LAL hOK", "txNum", txNum)
+
 		if len(v) == 0 { // if history successfuly found marker of key creation
 			if traceGetAsOf == dt.d.filenameBase {
 				fmt.Printf("DomainGetAsOf(%s  , %x, %d) -> not found in history\n", dt.d.filenameBase, key, txNum)
@@ -1479,6 +1483,8 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		// pointers to storage and account domains to do the reference. Aggregator tx must be called instead
 		return nil, false, nil
 	}
+
+	log.Debug("LAL !hOK", "txNum", txNum)
 
 	var ok bool
 	v, _, ok, err = dt.GetLatest(key, roTx)
