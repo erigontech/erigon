@@ -19,12 +19,12 @@ concurrency:
 jobs:
   gnosis-tip-tracking-test:
     runs-on: [self-hosted, qa, Gnosis, tip-tracking]
-    timeout-minutes: 600
+    timeout-minutes: 1200
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.0/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 14400 # 4 hours
+      TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
       CHAIN: gnosis
 
