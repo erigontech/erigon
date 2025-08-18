@@ -213,6 +213,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 	require.NoError(t, err)
 	d, err := seg.NewDecompressor(segFileName)
 	require.NoError(t, err)
+	t.Cleanup(d.Close)
 	indexFileName := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String()))
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   c.Count(),
@@ -242,6 +243,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 	require.NoError(t, err)
 	index, err := recsplit.OpenIndex(indexFileName)
 	require.NoError(t, err)
+	t.Cleanup(index.Close)
 	baseId := index.BaseDataID()
 	require.Equal(t, baseId, from/1000)
 	if name == snaptype2.Transactions.Enum() {
