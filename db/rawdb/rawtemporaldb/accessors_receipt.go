@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
 )
 
@@ -38,12 +39,20 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 		cumGasUsed = uvarint(v)
 	}
 
+	if ok {
+		log.Debug("LAL found CumulativeGasUsedInBlockKey", txNum)
+	}
+
 	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, txNum)
 	if err != nil {
 		return
 	}
 	if ok && v != nil {
 		cumBlobGasused = uvarint(v)
+	}
+
+	if ok {
+		log.Debug("LAL found CumulativeBlobGasUsedInBlockKey", txNum)
 	}
 
 	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, LogIndexAfterTxKey, txNum)
@@ -53,6 +62,11 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	if ok && v != nil {
 		logIndexAfterTx = uint32(uvarint(v))
 	}
+
+	if ok {
+		log.Debug("LAL found LogIndexAfterTxKey", txNum)
+	}
+
 	return
 }
 
