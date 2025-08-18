@@ -50,7 +50,7 @@ func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(ctx context.Context, message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
+		observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Equal(t, uint64(1), message.Decoded.RequestId)
 			require.Len(t, message.Decoded.BlockHeadersPacket, 2)
@@ -82,7 +82,7 @@ func TestMessageListenerRegisterPeerEventObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(ctx context.Context, message *sentryproto.PeerEvent) {
+		observer := func(message *sentryproto.PeerEvent) {
 			require.Equal(t, peerId.H512(), message.PeerId)
 			require.Equal(t, sentryproto.PeerEvent_Connect, message.EventId)
 			done.Store(true)
@@ -110,7 +110,7 @@ func TestMessageListenerRegisterNewBlockObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(ctx context.Context, message *DecodedInboundMessage[*eth.NewBlockPacket]) {
+		observer := func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Equal(t, uint64(1), message.Decoded.Block.Number().Uint64())
 			done.Store(true)
@@ -139,7 +139,7 @@ func TestMessageListenerRegisterNewBlockHashesObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(ctx context.Context, message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+		observer := func(message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Len(t, *message.Decoded, 1)
 			require.Equal(t, uint64(1), (*message.Decoded)[0].Number)
@@ -169,7 +169,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(ctx context.Context, message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+		observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Equal(t, uint64(23), message.Decoded.RequestId)
 			require.Len(t, message.Decoded.BlockBodiesPacket, 1)
@@ -201,7 +201,7 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	mockExpectPenalizePeer(t, test.sentryClient, peerId1)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(ctx context.Context, message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
+		observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
 			require.Equal(t, peerId2, message.PeerId)
 			done.Store(true)
 		}

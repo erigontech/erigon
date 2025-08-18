@@ -21,7 +21,7 @@ import (
 	"sync"
 )
 
-type Observer[TEvent any] func(ctx context.Context, event TEvent)
+type Observer[TEvent any] func(event TEvent)
 type UnregisterFunc func()
 
 type Observers[TEvent any] struct {
@@ -69,12 +69,12 @@ func (o *Observers[TEvent]) Close() {
 }
 
 // Notify all observers in parallel without waiting for them to process the event.
-func (o *Observers[TEvent]) Notify(ctx context.Context, event TEvent) {
+func (o *Observers[TEvent]) Notify(event TEvent) {
 	o.observersMu.Lock()
 	defer o.observersMu.Unlock()
 
 	for _, observer := range o.observers {
-		go observer(ctx, event)
+		go observer(event)
 	}
 }
 
@@ -88,7 +88,7 @@ func (o *Observers[TEvent]) NotifySync(ctx context.Context, event TEvent) {
 		wg.Add(1)
 		go func(observer Observer[TEvent]) {
 			defer wg.Done()
-			observer(ctx, event)
+			observer(event)
 		}(observer)
 	}
 

@@ -270,7 +270,7 @@ func (f *FetcherBase) fetchHeaders(
 	defer cancel()
 
 	messages := make(chan *DecodedInboundMessage[*eth.BlockHeadersPacket66])
-	observer := func(ctx context.Context, message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
+	observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
 		select {
 		case <-ctx.Done():
 			return
@@ -377,7 +377,7 @@ func (f *FetcherBase) fetchBodies(
 	defer cancel()
 
 	messages := make(chan *DecodedInboundMessage[*eth.BlockBodiesPacket66])
-	observer := func(ctx context.Context, message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+	observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
 		select {
 		case <-ctx.Done():
 			return

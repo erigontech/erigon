@@ -305,7 +305,7 @@ func (ptt *peerTrackerTest) mockPeerEvents(events <-chan *sentryproto.PeerEvent)
 					case <-ctx.Done():
 						return
 					case event := <-events:
-						observer(ctx, event)
+						observer(event)
 					}
 				}
 			}()
@@ -327,7 +327,7 @@ func (ptt *peerTrackerTest) mockNewBlockHashesEvents(events <-chan *DecodedInbou
 						case <-ctx.Done():
 							return
 						case event := <-events:
-							observer(ctx, event)
+							observer(event)
 						}
 					}
 				}()
@@ -350,7 +350,7 @@ func (ptt *peerTrackerTest) mockNewBlockEvents(events <-chan *DecodedInboundMess
 						case <-ctx.Done():
 							return
 						case event := <-events:
-							observer(ctx, event)
+							observer(event)
 						}
 					}
 				}()

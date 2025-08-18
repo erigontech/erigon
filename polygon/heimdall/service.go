@@ -234,7 +234,7 @@ func (s *Service) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet
 
 func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) event.UnregisterFunc {
 	options := NewObserverOptions(opts...)
-	return s.milestoneScraper.RegisterObserver(func(ctx context.Context, entities []*Milestone) {
+	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
 		for _, entity := range common.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
@@ -243,18 +243,18 @@ func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...O
 
 func (s *Service) RegisterCheckpointObserver(callback func(*Checkpoint), opts ...ObserverOption) event.UnregisterFunc {
 	options := NewObserverOptions(opts...)
-	return s.checkpointScraper.RegisterObserver(func(ctx context.Context, entities []*Checkpoint) {
+	return s.checkpointScraper.RegisterObserver(func(entities []*Checkpoint) {
 		for _, entity := range common.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
 	})
 }
 
-func (s *Service) RegisterSpanObserver(callback func(context.Context, *Span), opts ...ObserverOption) event.UnregisterFunc {
+func (s *Service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) event.UnregisterFunc {
 	options := NewObserverOptions(opts...)
-	return s.spanScraper.RegisterObserver(func(ctx context.Context, entities []*Span) {
+	return s.spanScraper.RegisterObserver(func(entities []*Span) {
 		for _, entity := range common.SliceTakeLast(entities, options.eventsLimit) {
-			callback(ctx, entity)
+			callback(entity)
 		}
 	})
 }
@@ -323,7 +323,7 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 
-	s.RegisterSpanObserver(func(ctx context.Context, span *Span) {
+	s.RegisterSpanObserver(func(span *Span) {
 		s.spanBlockProducersTracker.ObserveSpanAsync(ctx, span)
 	})
 

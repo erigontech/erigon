@@ -91,6 +91,6 @@ func (dkl DecryptionKeysListener) listenLoop(ctx context.Context) error {
 			continue
 		}
 
-		dkl.observers.Notify(ctx, decryptionKeys)
+		dkl.observers.Notify(decryptionKeys)
 	}
 }

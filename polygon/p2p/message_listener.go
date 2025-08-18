@@ -215,7 +215,7 @@ func notifyInboundMessageObservers[TPacket any](
 		Decoded:        decodedData,
 		PeerId:         peerId,
 	}
-	observers.Notify(ctx, &decodedMessage)
+	observers.Notify(&decodedMessage)
 
 	return nil
 }

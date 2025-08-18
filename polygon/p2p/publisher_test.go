@@ -242,7 +242,7 @@ func (pt publisherTest) mockPeerEvents(events <-chan *sentryproto.PeerEvent) {
 					case <-ctx.Done():
 						return
 					case event := <-events:
-						observer(ctx, event)
+						observer(event)
 					}
 				}
 			}()
@@ -268,7 +268,7 @@ func (pt publisherTest) mockNewBlockHashesEvents(events <-chan *DecodedInboundMe
 						case <-ctx.Done():
 							return
 						case event := <-events:
-							observer(ctx, event)
+							observer(event)
 						}
 					}
 				}()
@@ -295,7 +295,7 @@ func (pt publisherTest) mockNewBlockEvents(events <-chan *DecodedInboundMessage[
 						case <-ctx.Done():
 							return
 						case event := <-events:
-							observer(ctx, event)
+							observer(event)
 						}
 					}
 				}()

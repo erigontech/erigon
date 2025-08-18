@@ -119,7 +119,7 @@ func (p *Pool) Run(ctx context.Context) error {
 	}()
 
 	p.logger.Info("running pool")
-	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(ctx context.Context, msg *proto.DecryptionKeys) {
+	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {
 		p.decryptionKeysProcessor.Enqueue(msg)
 	})
 	defer unregisterDkpObserver()

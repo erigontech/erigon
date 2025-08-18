@@ -144,7 +144,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (s *Scraper[TEntity]) RegisterObserver(observer func(context.Context, []TEntity)) event.UnregisterFunc {
+func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) event.UnregisterFunc {
 	return s.observers.Register(observer)
 }
 

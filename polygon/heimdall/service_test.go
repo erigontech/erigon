@@ -188,7 +188,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		suite.observedMilestones = append(suite.observedMilestones, milestone)
 	})
 
-	suite.service.RegisterSpanObserver(func(ctx context.Context, span *Span) {
+	suite.service.RegisterSpanObserver(func(span *Span) {
 		suite.observedSpans = append(suite.observedSpans, span)
 	})
 

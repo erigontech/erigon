@@ -145,7 +145,7 @@ func (et *KsmEonTracker) recentEon(index EonIndex) (Eon, bool) {
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
-	unregisterBlockEventObserver := et.blockListener.RegisterObserver(func(ctx context.Context, blockEvent BlockEvent) {
+	unregisterBlockEventObserver := et.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done(): // no-op
 		case blockEventC <- blockEvent:
