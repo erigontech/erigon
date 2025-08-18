@@ -133,3 +133,8 @@ var PendingConsolidationTest = NewEpochProcessing(func(s abstract.BeaconState) e
 	statechange.ProcessPendingConsolidations(s)
 	return nil
 })
+
+var ProposerLookaheadTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessProposerLookahead(s)
+	return nil
+})
