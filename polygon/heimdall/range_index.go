@@ -168,6 +168,7 @@ func (i *txRangeIndex) Last(ctx context.Context) (uint64, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
+	defer cursor.Close()
 	key, value, err := cursor.Last()
 	if err != nil {
 		return 0, false, err

@@ -235,7 +235,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 
 	// no recent selection that we can easily use, re-calculate from DB
-	producerSelection, ok, err := t.store.Entity(ctx, uint64(spanId))
+	producerSelection, ok, err := t.store.Entity(ctx, spanId)
 	if err != nil {
 		return nil, 0, err
 	}
