@@ -75,7 +75,7 @@ func (NoopEntityStore[TEntity]) Close() {}
 func (NoopEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	return 0, false, errors.New("noop")
 }
-func (NoopEntityStore[TEntity]) LastFrozenEntityId() (uint64, error) { return 0, nil }
+func (NoopEntityStore[TEntity]) LastFrozenEntityId() (uint64, bool, error) { return 0, false, nil }
 func (NoopEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
 	var res TEntity
 	return res, false, errors.New("noop")
