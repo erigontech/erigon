@@ -158,7 +158,7 @@ func (ml *MessageListener) listenPeerEvents(ctx context.Context) {
 func (ml *MessageListener) notifyPeerEventObservers(ctx context.Context, peerEvent *sentryproto.PeerEvent) error {
 	// wait on all observers to finish processing the peer event before notifying them
 	// with subsequent events in order to preserve the ordering of the sentry messages
-	ml.peerEventObservers.NotifySync(ctx, peerEvent)
+	ml.peerEventObservers.NotifySync(peerEvent)
 	return nil
 }
 

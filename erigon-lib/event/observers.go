@@ -17,7 +17,6 @@
 package event
 
 import (
-	"context"
 	"sync"
 )
 
@@ -79,7 +78,7 @@ func (o *Observers[TEvent]) Notify(event TEvent) {
 }
 
 // NotifySync all observers in parallel and wait until all of them process the event.
-func (o *Observers[TEvent]) NotifySync(ctx context.Context, event TEvent) {
+func (o *Observers[TEvent]) NotifySync(event TEvent) {
 	o.observersMu.Lock()
 	defer o.observersMu.Unlock()
 
