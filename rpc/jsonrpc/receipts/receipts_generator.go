@@ -211,6 +211,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
+	log.Debug("LAL GetReceipt", "logIdxAfterTx", logIdxAfterTx)
+
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
 		blockContext := core.NewEVMBlockContext(header, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
