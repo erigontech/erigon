@@ -28,9 +28,10 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -995,7 +996,8 @@ func (t *Updates) initCollector() {
 				t.nibbles[i] = nil
 			}
 
-			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+			//t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+			t.nibbles[i] = etl.NewCollector("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 			t.nibbles[i].SortAndFlushInBackground(true)
 		}
 		if t.etl != nil {
@@ -1009,7 +1011,8 @@ func (t *Updates) initCollector() {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+	//t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
 }
 
@@ -1046,20 +1049,17 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
-		if _, ok := t.keys[key]; !ok {
-			keyBytes := toBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+		keyBytes := toBytesZeroCopy(key)
+		hashedKey := t.hasher(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
-			t.keys[key] = struct{}{}
+		var err error
+		if !t.sortPerNibble {
+			err = t.etl.Collect(hashedKey, keyBytes)
+		} else {
+			err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
+		}
+		if err != nil {
+			log.Warn("failed to collect updated key", "key", key, "err", err)
 		}
 	default:
 	}
