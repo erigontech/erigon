@@ -124,7 +124,7 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 		// sanity check
 		isInRange := blockNumInRange(blockNum, lastStartBlock, lastEndBlock)
 		if !isInRange {
-			return 0, false, fmt.Errorf("SpanIndexLookup(%d) return Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, lastSpanId, lastStartBlock, lastEndBlock, blockNum)
+			return 0, false, fmt.Errorf("SpanIndexLookup(%d) returns Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, lastSpanId, lastStartBlock, lastEndBlock, blockNum)
 		}
 		// happy case
 		return lastSpanId, true, nil
@@ -138,7 +138,7 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 		// sanityCheck
 		isInRange := blockNumInRange(blockNum, currStartBlock, currEndBlock)
 		if !isInRange {
-			return 0, false, fmt.Errorf("SpanIndexLookup(%d) return Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, currSpanId, currStartBlock, currEndBlock, blockNum)
+			return 0, false, fmt.Errorf("SpanIndexLookup(%d) returns Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, currSpanId, currStartBlock, currEndBlock, blockNum)
 		}
 		// happy case
 		return currSpanId, true, nil
@@ -154,7 +154,7 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 	// sanity check
 	isInRange := blockNumInRange(blockNum, prevStartBlock, endBlock)
 	if !isInRange {
-		return 0, false, fmt.Errorf("SpanIndexLookup(%d) return Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, spanId, prevStartBlock, endBlock, blockNum)
+		return 0, false, fmt.Errorf("SpanIndexLookup(%d) returns Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, spanId, prevStartBlock, endBlock, blockNum)
 	}
 	// happy case
 	return spanId, true, nil
