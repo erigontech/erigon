@@ -979,7 +979,7 @@ func (sdb *IntraBlockState) SetNonce(addr common.Address, nonce uint64) error {
 		return err
 	}
 
-	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, BalancePath, common.Hash{}))
+	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, NoncePath, common.Hash{}))
 	sdb.versionWritten(addr, NoncePath, common.Hash{}, stateObject.Nonce())
 	return nil
 }
