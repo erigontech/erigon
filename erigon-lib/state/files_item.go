@@ -299,6 +299,9 @@ type visibleFile struct {
 func (i visibleFile) Fullpath() string {
 	return i.src.decompressor.FilePath()
 }
+func (i visibleFile) FileName() string {
+	return i.src.decompressor.FileName()
+}
 
 func (i visibleFile) StartRootNum() uint64 {
 	return i.startTxNum
