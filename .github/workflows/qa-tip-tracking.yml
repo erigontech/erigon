@@ -19,13 +19,13 @@ concurrency:
 jobs:
   mainnet-tip-tracking-test:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
-    timeout-minutes: 1000
+    timeout-minutes: 1300 # 21.66667 hours
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.0/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 28800 # 8 hours
+      TOTAL_TIME_SECONDS: 36000 # 10 hours
       CHAIN: mainnet
 
     steps:
