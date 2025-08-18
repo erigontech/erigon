@@ -193,7 +193,10 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	})
 
 	suite.eg.Go(func() error {
-		return suite.service.Run(suite.ctx)
+		defer suite.cancel()
+		err := suite.service.Run(suite.ctx)
+		require.ErrorIs(suite.T(), err, context.Canceled)
+		return err
 	})
 
 	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)
