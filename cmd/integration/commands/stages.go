@@ -395,11 +395,11 @@ var cmdRunMigrations = &cobra.Command{
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
 		// (see kv/tables.go).
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
-		if exists, err := dir.FileExist(consensus); err == nil && exists {
+		if exists, err := dir.Exist(consensus); err == nil && exists {
 			dbPaths[kv.ConsensusDB] = consensus
 		} else {
 			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
-			if exists, err := dir.FileExist(consensus); err == nil && exists {
+			if exists, err := dir.Exist(consensus); err == nil && exists {
 				dbPaths[kv.ConsensusDB] = consensus
 			}
 		}
