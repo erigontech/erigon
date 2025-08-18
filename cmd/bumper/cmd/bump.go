@@ -7,7 +7,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/cmd/versioner/internal/tui"
+	"github.com/erigontech/erigon/cmd/bumper/internal/tui"
 )
 
 var bumpCmd = &cobra.Command{

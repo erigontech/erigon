@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/erigontech/erigon/cmd/versioner/internal/schema"
+	"github.com/erigontech/erigon/cmd/bumper/internal/schema"
 )
 
 type focus int
