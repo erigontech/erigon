@@ -198,7 +198,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 	segFileName := filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name))
 	c, err := seg.NewCompressor(context.Background(), "test", segFileName, dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
-	t.Cleanup(c.Close)
+	defer c.Close()
 	c.DisableFsync()
 	// use from and to to determine which spans go inside this .seg file from the spansForTesting
 	// it is not a requirement, but a handy convention for testing purposes
@@ -213,7 +213,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 	require.NoError(t, err)
 	d, err := seg.NewDecompressor(segFileName)
 	require.NoError(t, err)
-	t.Cleanup(d.Close)
+	defer d.Close()
 	indexFileName := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String()))
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   c.Count(),
@@ -225,7 +225,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 		LeafSize:   recsplit.DefaultLeafSize,
 	}, logger)
 	require.NoError(t, err)
-	t.Cleanup(idx.Close)
+	defer idx.Close()
 	idx.DisableFsync()
 	getter := d.MakeGetter()
 	//
@@ -243,7 +243,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 	require.NoError(t, err)
 	index, err := recsplit.OpenIndex(indexFileName)
 	require.NoError(t, err)
-	t.Cleanup(index.Close)
+	defer index.Close()
 	baseId := index.BaseDataID()
 	require.Equal(t, baseId, from/1000)
 	if name == snaptype2.Transactions.Enum() {
@@ -259,7 +259,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 		require.NoError(t, err)
 		err = idx.Build(context.Background())
 		require.NoError(t, err)
-		t.Cleanup(idx.Close)
+		defer idx.Close()
 	}
 }
 
@@ -276,7 +276,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 		logger,
 	)
 	require.NoError(t, err)
-	t.Cleanup(compressor.Close)
+	defer compressor.Close()
 	compressor.DisableFsync()
 	data := make([]byte, length.Hash+length.BlockNum+8)
 	binary.BigEndian.PutUint64(data[length.Hash+length.BlockNum:length.Hash+length.BlockNum+8], eventId)
@@ -295,7 +295,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 		logger,
 	)
 	require.NoError(t, err)
-	t.Cleanup(idx.Close)
+	defer idx.Close()
 	idx.DisableFsync()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
