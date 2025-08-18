@@ -26,6 +26,7 @@ func (v VisibleFiles) EndRootNum() uint64 {
 	}
 	return v[len(v)-1].EndRootNum()
 }
+
 func (v VisibleFiles) String() string {
 	if len(v) == 0 {
 		return ""
