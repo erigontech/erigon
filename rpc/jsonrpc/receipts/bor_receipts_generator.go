@@ -65,6 +65,12 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return nil, err
 	}
 
+	cnt, err := tx.Count(kv.ReceiptDomain.String())
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("LAL GenerateBorReceipt count", "count", cnt)
 	log.Debug("LAL GenerateBorReceipt logIdxAfterTx", "logIdxAfterTx", logIdxAfterTx)
 
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
