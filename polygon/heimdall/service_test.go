@@ -163,7 +163,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
 	suite.logger = testlog.Logger(suite.T(), log.LvlCrit)
-	store := NewMdbxStore(suite.logger, dataDir, false, 100)
+	store := NewMdbxStore(suite.logger, dataDir, false, 1)
 	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
@@ -176,7 +176,6 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupMilestones()
 	suite.service = NewService(ServiceConfig{
 		Store:     store,
-		Db:        store.db,
 		BorConfig: borConfig,
 		Client:    suite.client,
 		Logger:    suite.logger,

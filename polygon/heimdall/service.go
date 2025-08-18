@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 const (
@@ -39,7 +38,6 @@ const (
 
 type ServiceConfig struct {
 	Store     Store
-	Db        *polygoncommon.Database
 	BorConfig *borcfg.BorConfig
 	Client    Client
 	Logger    log.Logger
@@ -48,7 +46,6 @@ type ServiceConfig struct {
 type Service struct {
 	logger                    log.Logger
 	store                     Store
-	db                        *polygoncommon.Database
 	reader                    *Reader
 	checkpointScraper         *Scraper[*Checkpoint]
 	milestoneScraper          *Scraper[*Milestone]
@@ -62,7 +59,6 @@ func NewService(config ServiceConfig) *Service {
 	logger := config.Logger
 	borConfig := config.BorConfig
 	store := config.Store
-	db := config.Db
 	client := config.Client
 	checkpointFetcher := NewCheckpointFetcher(client, logger)
 	milestoneFetcher := NewMilestoneFetcher(client, logger)
@@ -104,12 +100,11 @@ func NewService(config ServiceConfig) *Service {
 	return &Service{
 		logger:                    logger,
 		store:                     store,
-		db:                        db,
-		reader:                    NewReader(borConfig, store, db, logger),
+		reader:                    NewReader(borConfig, store, logger),
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections(), db),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 		client:                    client,
 	}
 }

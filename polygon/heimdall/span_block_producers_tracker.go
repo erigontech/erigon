@@ -27,14 +27,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 func newSpanBlockProducersTracker(
 	logger log.Logger,
 	borConfig *borcfg.BorConfig,
 	store EntityStore[*SpanBlockProducerSelection],
-	db *polygoncommon.Database,
 ) *spanBlockProducersTracker {
 	recentSelectionsLru, err := lru.New[uint64, SpanBlockProducerSelection](1024)
 	if err != nil {
@@ -45,7 +43,6 @@ func newSpanBlockProducersTracker(
 		logger:           logger,
 		borConfig:        borConfig,
 		store:            store,
-		db:               db,
 		recentSelections: recentSelectionsLru,
 		newSpans:         make(chan *Span),
 		idleSignal:       make(chan struct{}),
@@ -56,7 +53,6 @@ type spanBlockProducersTracker struct {
 	logger           log.Logger
 	borConfig        *borcfg.BorConfig
 	store            EntityStore[*SpanBlockProducerSelection]
-	db               *polygoncommon.Database
 	recentSelections *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
 	newSpans         chan *Span
 	queued           atomic.Int32
