@@ -84,6 +84,7 @@ type Aggregator struct {
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
 	onFilesChange kv.OnFilesChange
+	onFilesDelete kv.OnFilesChange
 
 	ps *background.ProgressSet
 
@@ -105,6 +106,7 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, d
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFilesChange:          func(frozenFileNames []string) {},
+		onFilesDelete:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		stepSize:               stepSize,
 		db:                     db,
@@ -203,8 +205,12 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) StepSize() uint64                 { return a.stepSize }
-func (a *Aggregator) OnFilesChange(f kv.OnFilesChange) { a.onFilesChange = f }
+func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
+	a.onFilesChange = onChange
+	a.onFilesDelete = onDel
+}
+
+func (a *Aggregator) StepSize() uint64 { return a.stepSize }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
@@ -214,7 +220,7 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) ReloadSalt() error {
+func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {
 		return err
@@ -305,6 +311,9 @@ func (a *Aggregator) DisableAllDependencies() {
 func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	if err := a.reloadSalt(); err != nil {
+		return err
+	}
 	if err := a.openFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -354,11 +363,8 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 }
 
 func (a *Aggregator) WaitForFiles() {
-	for {
-		select {
-		case <-a.WaitForBuildAndMerge(a.ctx):
-			return
-		}
+	for range a.WaitForBuildAndMerge(a.ctx) {
+		// The loop will exit when the channel is closed
 	}
 }
 
@@ -776,7 +782,6 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) 
 			if err := a.MergeLoop(ctx); err != nil {
 				panic(err)
 			}
-			a.onFilesChange(nil)
 		}()
 	}()
 	return nil
@@ -809,8 +814,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	}
 	a.IntegrateMergedDirtyFiles(outs, in)
 	a.cleanAfterMerge(in)
-
-	a.onFilesChange(in.FrozenList())
 	return true, nil
 }
 
@@ -848,6 +851,8 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+	defer a.onFilesChange(nil) //TODO: add relative file paths
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -1467,6 +1472,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 }
 
 func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *MergedFilesV3) {
+	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
@@ -1488,20 +1495,25 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
+	var deleted []string
+
 	at := a.BeginFilesRo()
 	defer at.Close()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	// Step 1: collect file names and do Blocking-Notification of downstream (like Downloader). Only then delete files (otherwise Downloader may re-create deleted file)
+	// ToDo: call only `.garbage()` and remove `dryRun` parameter from `cleanAfterMerge`. Also remove return parameter from `cleanAfterMerge`
+	dryRun := true
 	for id, d := range at.d {
 		if d.d.disable {
 			continue
 		}
 		if in == nil {
-			d.cleanAfterMerge(nil, nil, nil)
+			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil, dryRun)...)
 		} else {
-			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)...)
 		}
 	}
 	for id, ii := range at.iis {
@@ -1509,9 +1521,33 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			continue
 		}
 		if in == nil {
-			ii.cleanAfterMerge(nil)
+			deleted = append(deleted, ii.cleanAfterMerge(nil, dryRun)...)
 		} else {
-			ii.cleanAfterMerge(in.iis[id])
+			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id], dryRun)...)
+		}
+	}
+	a.onFilesDelete(deleted)
+
+	// Step 2: delete
+	dryRun = false
+	for id, d := range at.d {
+		if d.d.disable {
+			continue
+		}
+		if in == nil {
+			d.cleanAfterMerge(nil, nil, nil, dryRun)
+		} else {
+			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
+		}
+	}
+	for id, ii := range at.iis {
+		if ii.ii.disable {
+			continue
+		}
+		if in == nil {
+			ii.cleanAfterMerge(nil, dryRun)
+		} else {
+			ii.cleanAfterMerge(in.iis[id], dryRun)
 		}
 	}
 }
@@ -1613,7 +1649,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-			a.onFilesChange(nil)
 		}()
 	}()
 	return fin
