@@ -38,26 +38,27 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/estimate"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
@@ -247,15 +248,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
+	diaglib.Send(diaglib.CurrentSyncStage{Stage: string(stages.Snapshots)})
 
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin {
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	subStages := diagnostics.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
-	diagnostics.Send(diagnostics.SetSyncSubStageList{
+	subStages := diaglib.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
+	diaglib.Send(diaglib.SetSyncSubStageList{
 		Stage: string(stages.Snapshots),
 		List:  subStages,
 	})
@@ -263,7 +264,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	log.Info("[OtterSync] Starting Ottersync")
 	log.Info(snapshotsync.GreatOtterBanner)
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
@@ -271,16 +272,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		ctx,
 		s.LogPrefix(),
 		"header-chain",
-		cfg.dirs,
 		true, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
 		cfg.prune,
 		cstate,
-		agg,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
@@ -288,31 +286,50 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	// Erigon can start on datadir with broken files `transactions.seg` files and Downloader will
+	// fix them, but only if Erigon call `.Add()` for broken files. But `headerchain` feature
+	// calling `.Add()` only for header/body files (not for `transactions.seg`) and `.OpenFolder()` will fail
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false); err != nil {
 		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
 		"remaining snapshots",
-		cfg.dirs,
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
 		cfg.prune,
 		cstate,
-		agg,
 		tx,
 		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
 		return err
+	}
+
+	{ // Now can open all files
+		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
+			return err
+		}
+
+		if cfg.chainConfig.Bor != nil {
+			if err := cfg.blockReader.BorSnapshots().OpenFolder(); err != nil {
+				return err
+			}
+		}
+		if err := agg.OpenFolder(); err != nil {
+			return err
+		}
+
+		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
+			return err
+		}
 	}
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
@@ -327,13 +344,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 		return err
 	}
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -367,7 +384,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
@@ -386,6 +403,21 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+func firstNonGenesisCheck(tx kv.RwTx, snapshots snapshotsync.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return err
+	}
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
+		}
+	}
 	return nil
 }
 
@@ -426,9 +458,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 	return nil
 }
 
-/* ====== PRUNING ====== */
-// snapshots pruning sections works more as a retiring of blocks
-// retiring blocks means moving block data from db into snapshots
+// SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -455,29 +485,24 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
+		noDl := cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()
 		started := cfg.blockRetire.RetireBlocksInBackground(
 			ctx,
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
 			func(downloadRequest []snapshotsync.DownloadRequest) error {
-				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
-						return err
-					}
+				if noDl {
+					return nil
 				}
-
-				return nil
+				return snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, "")
 			}, func(l []string) error {
-				//if cfg.snapshotUploader != nil {
-				// TODO - we need to also remove files from the uploader (100k->500K transition)
-				//}
-
-				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+				if noDl {
+					return nil
+				}
+				if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l}); err != nil {
 					return err
 				}
-
 				return nil
 			}, func() error {
 				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
@@ -565,6 +590,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, nil
 	}
 
+	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 	filesDeleted := false
 	// Prune blocks snapshots if necessary
@@ -585,7 +611,11 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 			continue
 		}
 		if cfg.snapshotDownloader != nil {
-			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
+			relativePathToFile := file
+			if filepath.IsAbs(file) {
+				relativePathToFile, _ = filepath.Rel(cfg.dirs.Snap, file)
+			}
+			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{relativePathToFile}}); err != nil {
 				return filesDeleted, err
 			}
 		}

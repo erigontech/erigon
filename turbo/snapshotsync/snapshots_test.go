@@ -20,24 +20,25 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
@@ -343,6 +344,14 @@ func TestRemoveOverlaps(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
+		for _, f := range files {
+			if strings.HasSuffix(f, fileNameWithoutVersion) {
+				return true
+			}
+		}
+		return false
+	}
 
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
@@ -389,7 +398,18 @@ func TestRemoveOverlaps(t *testing.T) {
 	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
 	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true))
-	require.NoError(s.RemoveOverlaps())
+	require.NoError(s.RemoveOverlaps(func(delFiles []string) error {
+		require.Len(delFiles, 69)
+		mustSeeFile(delFiles, "000000-000010-bodies.seg")
+		mustSeeFile(delFiles, "000000-000010-bodies.idx")
+		mustSeeFile(delFiles, "000000-000010-headers.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions.seg")
+		mustSeeFile(delFiles, "000000-000010-transactions-to-block.idx")
+		mustSeeFile(delFiles, "000170-000180-transactions-to-block.idx")
+		require.False(filepath.IsAbs(delFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
+		return nil
+	}))
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)
@@ -433,7 +453,10 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.Equal(4, len(list))
 
 	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true))
-	require.NoError(s.RemoveOverlaps())
+	require.NoError(s.RemoveOverlaps(func(delList []string) error {
+		require.Len(delList, 0)
+		return nil
+	}))
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)

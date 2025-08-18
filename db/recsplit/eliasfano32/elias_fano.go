@@ -26,8 +26,9 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/common/bitutil"
-	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html

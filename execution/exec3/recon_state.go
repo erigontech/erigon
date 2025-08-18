@@ -30,9 +30,7 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/exec"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type reconPair struct {

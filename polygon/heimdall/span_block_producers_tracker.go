@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 func newSpanBlockProducersTracker(
@@ -101,9 +100,14 @@ func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {
 	}
 }
 
-func (t *spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
-	t.queued.Add(1)
-	t.newSpans <- span
+func (t *spanBlockProducersTracker) ObserveSpanAsync(ctx context.Context, span *Span) {
+	select {
+	case <-ctx.Done():
+		return
+	case t.newSpans <- span:
+		t.queued.Add(1)
+		return
+	}
 }
 
 func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
@@ -124,7 +128,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 			EndBlock:   newSpan.EndBlock,
 			// https://github.com/maticnetwork/genesis-contracts/blob/master/contracts/BorValidatorSet.template#L82-L89
 			// initial producers == initial validators
-			Producers: valset.NewValidatorSet(newSpan.ValidatorSet.Validators),
+			Producers: NewValidatorSet(newSpan.ValidatorSet.Validators),
 		}
 		err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
 		if err != nil {
@@ -158,11 +162,11 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	spanEndSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
 	increments := int(spanEndSprintNum - spanStartSprintNum)
 	for i := 0; i < increments; i++ {
-		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
 
-	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
+	newProducers := GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducers.IncrementProposerPriority(1)
 	newProducerSelection := &SpanBlockProducerSelection{
 		SpanId:     newSpan.Id,
@@ -179,7 +183,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	return nil
 }
 
-func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
 	startTime := time.Now()
 
 	producers, increments, err := t.producers(ctx, blockNum)
@@ -197,7 +201,7 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 	return producers, nil
 }
 
-func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, int, error) {
+func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint64) (*ValidatorSet, int, error) {
 	currentSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
 
 	// have we previously calculated the producers for the same sprint num (chain tip optimisation)
@@ -206,12 +210,18 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
-	spanId := SpanIdAt(blockNum)
+	spanId, ok, err := t.store.EntityIdFromBlockNum(ctx, blockNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		return nil, 0, fmt.Errorf("could not get spanId from blockNum=%d", blockNum)
+	}
 	var prevSprintNum uint64
 	if currentSprintNum > 0 {
 		prevSprintNum = currentSprintNum - 1
 	}
-	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && spanId == selection.SpanId {
+	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && SpanId(spanId) == selection.SpanId {
 		producersCopy := selection.Producers.Copy()
 		producersCopy.IncrementProposerPriority(1)
 		selectionCopy := selection
@@ -221,7 +231,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 
 	// no recent selection that we can easily use, re-calculate from DB
-	producerSelection, ok, err := t.store.Entity(ctx, uint64(spanId))
+	producerSelection, ok, err := t.store.Entity(ctx, spanId)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -239,7 +249,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	spanStartSprintNum := t.borConfig.CalculateSprintNumber(producerSelection.StartBlock)
 	increments := int(currentSprintNum - spanStartSprintNum)
 	for i := 0; i < increments; i++ {
-		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
 

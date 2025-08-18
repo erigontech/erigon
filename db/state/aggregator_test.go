@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -35,19 +36,20 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -133,8 +135,47 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
+	mustSeeFile := func(files []string, folderName, fileNameWithoutVersion string) bool { //file-version agnostic
+		for _, f := range files {
+			if strings.HasPrefix(f, folderName) && strings.HasSuffix(f, fileNameWithoutVersion) {
+				return true
+			}
+		}
+		return false
+	}
+
+	onChangeCalls, onDelCalls := 0, 0
+	agg.OnFilesChange(func(newFiles []string) {
+		if len(newFiles) == 0 {
+			return
+		}
+
+		onChangeCalls++
+		if onChangeCalls == 1 {
+			mustSeeFile(newFiles, "domain", "accounts.0-2.kv") //TODO: when we build `accounts.0-1.kv` - we sending empty notifcation
+			require.False(t, filepath.IsAbs(newFiles[0]))      // expecting non-absolute paths (relative as of snapshots dir)
+		}
+	}, func(deletedFiles []string) {
+		if len(deletedFiles) == 0 {
+			return
+		}
+
+		onDelCalls++
+		if onDelCalls == 1 {
+			mustSeeFile(deletedFiles, "domain", "accounts.0-1.kv")
+			mustSeeFile(deletedFiles, "domain", "commitment.0-1.kv")
+			mustSeeFile(deletedFiles, "history", "accounts.0-1.v")
+			mustSeeFile(deletedFiles, "accessor", "accounts.0-1.vi")
+
+			mustSeeFile(deletedFiles, "domain", "accounts.1-2.kv")
+			require.False(t, filepath.IsAbs(deletedFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
+		}
+	})
+
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
+	require.Equal(t, 13, onChangeCalls)
+	require.Equal(t, 14, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())
@@ -150,8 +191,12 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 	}
+
+	onChangeCalls, onDelCalls = 0, 0
 	err = agg.MergeLoop(context.Background())
 	require.NoError(t, err)
+	require.Equal(t, 0, onChangeCalls)
+	require.Equal(t, 0, onDelCalls)
 
 	// Check the history
 	roTx, err := db.BeginTemporalRo(context.Background())
@@ -909,6 +954,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
 	require.Equal(t, 5, int(latestStepInDB))
 
+	latestStepInDBNoHist := agg.d[kv.AccountsDomain].maxStepInDBNoHistory(tx)
+	require.Equal(t, 2, int(latestStepInDBNoHist))
+
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -1590,6 +1638,130 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 	checkFn(aggTx.d[kv.CodeDomain].files, true)
 	checkFn(aggTx.d[kv.StorageDomain].files, false)
 	checkFn(aggTx.d[kv.CommitmentDomain].files, false)
+}
+
+func TestReceiptFilesVersionAdjust(t *testing.T) {
+	touchFn := func(t *testing.T, dirs datadir.Dirs, file string) {
+		t.Helper()
+		fullpath := filepath.Join(dirs.SnapDomain, file)
+		ofile, err := os.Create(fullpath)
+		require.NoError(t, err)
+		ofile.Close()
+	}
+
+	t.Run("v1.0 files", func(t *testing.T) {
+		// Schema is global and edited by subtests
+		backup := Schema
+		t.Cleanup(func() {
+			Schema = backup
+		})
+		require, logger := require.New(t), log.New()
+		dirs := datadir.New(t.TempDir())
+
+		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		t.Cleanup(db.Close)
+
+		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
+		touchFn(t, dirs, "v1.0-receipt.2048-2049.kv")
+
+		salt, err := GetStateIndicesSalt(dirs, true, logger)
+		require.NoError(err)
+		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
+		require.NoError(err)
+		t.Cleanup(agg.Close)
+
+		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+
+		require.Equal(kv_versions.Current, version.V1_1)
+		require.Equal(kv_versions.MinSupported, version.V1_0)
+		require.Equal(v_versions.Current, version.V1_1)
+		require.Equal(v_versions.MinSupported, version.V1_0)
+	})
+
+	t.Run("v1.1 files", func(t *testing.T) {
+		backup := Schema
+		t.Cleanup(func() {
+			Schema = backup
+		})
+		require, logger := require.New(t), log.New()
+		dirs := datadir.New(t.TempDir())
+
+		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		t.Cleanup(db.Close)
+
+		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
+		touchFn(t, dirs, "v1.1-receipt.2048-2049.kv")
+
+		salt, err := GetStateIndicesSalt(dirs, true, logger)
+		require.NoError(err)
+		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
+		require.NoError(err)
+		t.Cleanup(agg.Close)
+
+		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+
+		require.Equal(kv_versions.Current, version.V1_1)
+		require.Equal(kv_versions.MinSupported, version.V1_0)
+		require.Equal(v_versions.Current, version.V1_1)
+		require.Equal(v_versions.MinSupported, version.V1_0)
+	})
+
+	t.Run("v2.0 files", func(t *testing.T) {
+		backup := Schema
+		t.Cleanup(func() {
+			Schema = backup
+		})
+		require, logger := require.New(t), log.New()
+		dirs := datadir.New(t.TempDir())
+
+		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		t.Cleanup(db.Close)
+
+		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
+		touchFn(t, dirs, "v2.0-receipt.2048-2049.kv")
+
+		salt, err := GetStateIndicesSalt(dirs, true, logger)
+		require.NoError(err)
+		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
+		require.NoError(err)
+		t.Cleanup(agg.Close)
+
+		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+
+		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
+		require.Equal(kv_versions.MinSupported, version.V1_0)
+		require.True(v_versions.Current.Cmp(version.V2_1) >= 0)
+		require.Equal(v_versions.MinSupported, version.V1_0)
+	})
+
+	t.Run("empty files", func(t *testing.T) {
+		backup := Schema
+		t.Cleanup(func() {
+			Schema = backup
+		})
+		require, logger := require.New(t), log.New()
+		dirs := datadir.New(t.TempDir())
+
+		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		t.Cleanup(db.Close)
+		salt, err := GetStateIndicesSalt(dirs, true, logger)
+		require.NoError(err)
+		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
+		require.NoError(err)
+		t.Cleanup(agg.Close)
+
+		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+
+		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
+		require.Equal(kv_versions.MinSupported, version.V1_0)
+		require.True(v_versions.Current.Cmp(version.V2_1) >= 0)
+		require.Equal(v_versions.MinSupported, version.V1_0)
+	})
+
 }
 
 func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {

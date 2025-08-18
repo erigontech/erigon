@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/params"
 	cli2 "github.com/erigontech/erigon/turbo/cli"
 )
 
@@ -103,7 +103,7 @@ var (
 )
 
 func init() {
-	app = cli2.NewApp(params.GitCommit, "ethereum checkpoint helper tool")
+	app = cli2.NewApp(version.GitCommit, "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		&abiFlag,
 		&binFlag,
@@ -192,12 +192,12 @@ func abigen(c *cli.Context) error {
 
 		switch {
 		case c.IsSet(solFlag.Name):
-			contracts, err = compiler.CompileSolidity(c.String(solcFlag.Name), c.String(solFlag.Name))
+			contracts, err = compiler.CompileSolidity(c.Context, c.String(solcFlag.Name), c.String(solFlag.Name))
 			if err != nil {
 				utils.Fatalf("Failed to build Solidity contract: %v", err)
 			}
 		case c.IsSet(vyFlag.Name):
-			output, err := compiler.CompileVyper(c.String(vyperFlag.Name), c.String(vyFlag.Name))
+			output, err := compiler.CompileVyper(c.Context, c.String(vyperFlag.Name), c.String(vyFlag.Name))
 			if err != nil {
 				utils.Fatalf("Failed to build Vyper contract: %v", err)
 			}

@@ -4,6 +4,7 @@ run:
     - nosqlite
     - noboltdb
     - nosilkworm
+    - goexperiment.synctest
 linters:
   enable:
     - asasalint
@@ -107,9 +108,6 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - linters:
-          - golint
-        text: should be
       - linters:
           - errcheck
         text: not checked

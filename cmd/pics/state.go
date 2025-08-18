@@ -29,17 +29,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/pics/contracts"
 	"github.com/erigontech/erigon/cmd/pics/visual"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types"
@@ -77,7 +77,7 @@ import (
 		return nil, err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -120,7 +120,7 @@ func hexPalette() error {
 		return err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -242,7 +242,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 		return err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -254,7 +254,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 			return err
 		}
 		//nolint:gosec
-		cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
+		cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("error: %v, output: %s\n", err, output)
 		}

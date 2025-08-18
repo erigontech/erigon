@@ -18,7 +18,6 @@ package snapshotsync
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -28,20 +27,18 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/config3"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 var GreatOtterBanner = `
@@ -212,6 +209,7 @@ type blockReader interface {
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
 	FrozenFiles() (list []string)
+	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
@@ -334,25 +332,34 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 	return s.From < minStep
 }
 
+// unblackListFilesBySubstring - removes files from the blacklist that match any of the provided substrings.
+func unblackListFilesBySubstring(blackList map[string]struct{}, strs ...string) {
+	for _, str := range strs {
+		for k := range blackList {
+			if strings.Contains(k, str) {
+				delete(blackList, k)
+			}
+		}
+	}
+}
+
 // SyncSnapshots - Check snapshot states, determine what needs to be requested from the downloader
 // then wait for downloads to complete.
 func SyncSnapshots(
 	ctx context.Context,
 	logPrefix, task string,
-	dirs datadir.Dirs,
 	headerchain, blobs, caplinState bool,
 	prune prune.Mode,
 	caplin CaplinMode,
-	agg *state.Aggregator,
 	tx kv.RwTx,
 	blockReader blockReader,
-	txNumsReader rawdbv3.TxNumsReader,
 	cc *chain.Config,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
-	snapshots := blockReader.Snapshots()
-	borSnapshots := blockReader.BorSnapshots()
+	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
+		return nil
+	}
 	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
@@ -361,25 +368,12 @@ func SyncSnapshots(
 			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 		}
 	} else {
-		// This clause belongs in another function.
+		txNumsReader := blockReader.TxnumReader(ctx)
 
+		// This clause belongs in another function.
 		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
-
-		// Find minimum block to download.
-		if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-			if err := snapshots.OpenFolder(); err != nil {
-				return err
-			}
-			if cc.Bor != nil {
-				if err := borSnapshots.OpenFolder(); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-
 		//Corner cases:
 		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
@@ -406,6 +400,11 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
+		}
+
+		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
+		if syncCfg.PersistReceiptsCacheV2 {
+			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 		}
 
 		// build all download requests
@@ -438,14 +437,15 @@ func SyncSnapshots(
 				continue
 			}
 
-			if _, ok := blackListForPruning[p.Name]; ok {
-				continue
-			}
 			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 				continue
 			}
 
-			if strings.Contains(p.Name, kv.RCacheDomain.String()) && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
+			isRcacheRelatedSegment := strings.Contains(p.Name, kv.RCacheDomain.String()) ||
+				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
+				strings.Contains(p.Name, kv.LogTopicIdx.String())
+
+			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
 				continue
 			}
 
@@ -491,46 +491,6 @@ func SyncSnapshots(
 		interval = min(interval*2, 20*time.Second)
 	}
 	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
-
-	if !headerchain {
-		if err := agg.ReloadSalt(); err != nil {
-			return err
-		}
-	}
-
-	if err := snapshots.OpenFolder(); err != nil {
-		return err
-	}
-
-	if cc.Bor != nil {
-		if err := borSnapshots.OpenFolder(); err != nil {
-			return err
-		}
-	}
-
-	if err := agg.OpenFolder(); err != nil {
-		return err
-	}
-
-	if err := firstNonGenesisCheck(tx, snapshots, logPrefix, dirs); err != nil {
-		return err
-	}
-
 	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
-	return nil
-}
-
-func firstNonGenesisCheck(tx kv.RwTx, snapshots BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
-	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
-	if err != nil {
-		return err
-	}
-	if firstNonGenesis != nil {
-		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
-		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
-			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
-		}
-	}
 	return nil
 }

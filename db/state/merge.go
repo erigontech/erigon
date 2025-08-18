@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -105,11 +105,11 @@ func (r DomainRanges) String() string {
 
 func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
-func (ht *HistoryRoTx) FirstStepNotInFiles() uint64 {
-	return ht.files.EndTxNum() / ht.aggStep
+func (ht *HistoryRoTx) FirstStepNotInFiles() kv.Step {
+	return kv.Step(ht.files.EndTxNum() / ht.stepSize)
 }
-func (iit *InvertedIndexRoTx) FirstStepNotInFiles() uint64 {
-	return iit.files.EndTxNum() / iit.aggStep
+func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
+	return kv.Step(iit.files.EndTxNum() / iit.stepSize)
 }
 
 // findMergeRange
@@ -121,15 +121,15 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	r := DomainRanges{
 		name:    dt.name,
 		history: hr,
-		aggStep: dt.aggStep,
+		aggStep: dt.stepSize,
 	}
 	for _, item := range dt.files {
 		if item.endTxNum > maxEndTxNum {
 			break
 		}
-		endStep := item.endTxNum / dt.aggStep
+		endStep := item.endTxNum / dt.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := spanStep * dt.aggStep
+		span := spanStep * dt.stepSize
 		fromTxNum := item.endTxNum - span
 		if fromTxNum >= item.startTxNum {
 			continue
@@ -152,9 +152,9 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / ht.aggStep
+		endStep := item.endTxNum / ht.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*ht.aggStep, maxSpan)
+		span := min(spanStep*ht.stepSize, maxSpan)
 		startTxNum := item.endTxNum - span
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
@@ -202,9 +202,9 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		endStep := item.endTxNum / iit.aggStep
+		endStep := item.endTxNum / iit.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := min(spanStep*iit.aggStep, maxSpan)
+		span := min(spanStep*iit.stepSize, maxSpan)
 		start := item.endTxNum - span
 		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
 		if foundSuperSet {
@@ -327,7 +327,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.version.AccessorEFI.String(), ht.h.filenameBase, item.startTxNum/ht.aggStep, item.endTxNum/ht.aggStep)
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.version.AccessorEFI.String(), ht.h.filenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
 				return nil, nil, walkErr
 			}
 		}
@@ -424,8 +424,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return
 	}
 
-	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
-	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
+	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
+	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
 
 	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
@@ -538,14 +538,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
-	valuesIn = newFilesItem(r.values.from, r.values.to, dt.aggStep)
+	valuesIn = newFilesItem(r.values.from, r.values.to, dt.stepSize)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
 	if dt.d.Accessors.Has(AccessorBTree) {
-		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
+		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
@@ -559,13 +559,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, dt.dataReader(valuesIn.decompressor), ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
-		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kviAccessorFilePath(fromStep, toStep)); err != nil {
+		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kviAccessorNewFilePath(fromStep, toStep)); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
 
 	if dt.d.Accessors.Has(AccessorExistence) {
-		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
+		bloomIndexPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
@@ -608,9 +608,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	fromStep, toStep := startTxNum/iit.aggStep, endTxNum/iit.aggStep
+	fromStep, toStep := kv.Step(startTxNum/iit.stepSize), kv.Step(endTxNum/iit.stepSize)
 
-	datPath := iit.ii.efFilePath(fromStep, toStep)
+	datPath := iit.ii.efNewFilePath(fromStep, toStep)
 	if comp, err = seg.NewCompressor(ctx, iit.ii.filenameBase+".ii.merge", datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.filenameBase, err)
 	}
@@ -718,7 +718,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	comp.Close()
 	comp = nil
 
-	outItem = newFilesItem(startTxNum, endTxNum, iit.aggStep)
+	outItem = newFilesItem(startTxNum, endTxNum, iit.stepSize)
 	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
@@ -727,7 +727,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, iit.dataReader(outItem.decompressor), ps); err != nil {
 		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
-	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
+	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorNewFilePath(fromStep, toStep)); err != nil {
 		return nil, err
 	}
 
@@ -776,9 +776,9 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}()
-		fromStep, toStep := r.history.from/ht.aggStep, r.history.to/ht.aggStep
-		datPath := ht.h.vFilePath(fromStep, toStep)
-		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
+		fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
+		datPath := ht.h.vNewFilePath(fromStep, toStep)
+		idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
@@ -870,7 +870,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.filenameBase, err)
 		}
-		historyIn = newFilesItem(r.history.from, r.history.to, ht.aggStep)
+		historyIn = newFilesItem(r.history.from, r.history.to, ht.stepSize)
 		historyIn.decompressor = decomp
 		historyIn.index = index
 
@@ -902,31 +902,50 @@ func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
 	}
 }
 
-func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) {
-	dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
+func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem, dryRun bool) (deleted []string) {
+	deleted = append(deleted, dt.ht.cleanAfterMerge(mergedHist, mergedIdx, dryRun)...)
 	outs := dt.garbage(mergedDomain)
-	deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
+	for _, out := range outs { // collect file names before files descriptors closed
+		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
+	}
+	if !dryRun {
+		deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
+	}
+	return deleted
 }
 
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) {
-	ht.iit.cleanAfterMerge(mergedIdx)
+func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem, dryRun bool) (deleted []string) {
+	deleted = append(deleted, ht.iit.cleanAfterMerge(mergedIdx, dryRun)...)
 	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
 	outs := ht.garbage(merged)
-	deleteMergeFile(ht.h.dirtyFiles, outs, ht.h.filenameBase, ht.h.logger)
+	for _, out := range outs { // collect file names before files descriptors closed
+		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
+	}
+
+	if !dryRun {
+		deleteMergeFile(ht.h.dirtyFiles, outs, ht.h.filenameBase, ht.h.logger)
+	}
+	return deleted
 }
 
 // cleanAfterMerge - mark all small files before `f` as `canDelete=true`
-func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) {
+func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem, dryRun bool) (deleted []string) {
 	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
 	outs := iit.garbage(merged)
-	deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.filenameBase, iit.ii.logger)
+	for _, out := range outs { // collect file names before files descriptors closed
+		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
+	}
+	if !dryRun {
+		deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.filenameBase, iit.ii.logger)
+	}
+	return deleted
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
