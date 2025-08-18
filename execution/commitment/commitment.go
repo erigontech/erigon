@@ -937,7 +937,10 @@ func ParseCommitmentMode(s string) Mode {
 
 type Updates struct {
 	hasher keyHasher
-	etl    *etl.Collector            // all-in-one collector
+
+	totalKeys int
+	etl       *etl.Collector // all-in-one collector
+
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	mode   Mode
 	tmpdir string
@@ -1011,6 +1014,7 @@ func (t *Updates) initCollector() {
 	//t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
+	t.totalKeys = 0
 }
 
 func (t *Updates) Mode() Mode { return t.mode }
@@ -1019,7 +1023,7 @@ func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
 		if t.etl != nil {
-			return uint64(t.etl.Len())
+			return uint64(t.totalKeys)
 		}
 		return 0
 	case ModeUpdate:
@@ -1054,6 +1058,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 
 		var err error
 		if !t.sortPerNibble {
+			t.totalKeys++
 			err = t.etl.Collect(hashedKey, keyBytes)
 		} else {
 			err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
