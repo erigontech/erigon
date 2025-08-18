@@ -15,14 +15,14 @@ Anyway, if you've done something terrible and looking for troubleshooting:
 Developers, devops and other folks that are interested in bumping snapshot version of erigon for some reason.
 ### Purpose of this tool
 Provide simple tooling for devs to bump version of existing snapshots.
-### Structure of bumper
+### Structure of bump
 - CLI util (bumper itself) `bump.go`
 - Version Schema Generator (inside e3) `version_gen.go`
 - Version Schema (generated) `version_schema_gen.go`
 - Version Schema yaml (could be modified w/o bumper tool) `versions.yaml`
 ### How to
 There're two mods of bumper: `CLI` and `TUI`:
-##### TUI
+#### TUI
 run tool with `go run ./cmd/bumper bump`
 ```
 Schema Versions                                                                                                     
@@ -65,15 +65,48 @@ versions.yaml • no changes • Ctrl+S=Save&Exit
 
 **P.S**
 If you don't want to use the tool, you could edit `versions.yaml` after it exec `go run ./cmd/bumper bump` and press `q`
-##### CLI
+#### CLI
 in development
 
 ## Rename
 Tool for rename existing snapshots to align them with existing version schema. 
 ### Totally last warning
 This could mess up your snapshot folder DO NOT USE IT w/o confidence (if you're not a dev/devops it's better to avoid it.)
+### Purpose of this tool
+Provide simple tooling for devs and devopses to align a version of all the files in the provided directory to the Schema 
+in Erigon code.
+### How to
+This tool behaves much simpler than previous. All you need to do is to run `go run ./cmd/bumper rename --datadir /path/to/your/datadir`
+and tick preferable domains and extensions to rename in simple TUI.
+#### Flags
+As the only arguments to our rename func are exts and domains there are some simple flags to help you tick right options.
+1. `--datadir string`            Directory containing versioned files
+2. `--exclude-domains strings`   Domains to exclude
+3. `--exclude-exts strings`      Extensions to exclude
+4. `-h, --help`                      help for rename
+5. `--include-domains strings`   Domains to include (default: all)
+6. `--include-exts strings`      Extensions to include (default: all)
 
+#### TUI
+```aiignore
+  ←/→ to switch columns or OK/Cancel, ↑/↓ to move, enter/space to toggle, tab to confirm  
+                                                                                          
+>  [x] accounts                    [x] .kv
+    [x] storage                    [x] .bt
+    [x] code                       [x] .kvi
+    [x] commitment                 [x] .kvei
+    [x] receipt                    [x] .vi
+    [x] rcache                     [x] .v
+    [x] logaddr                    [x] .efi
+    [x] logtopic                   [x] .ef
+    [x] tracesfrom             
+    [x] tracesto               
 
+(Tab to switch to OK/Cancel)
+```
+Tbh, it's much simpler than bump TUI, so just tick preferable exts and domains -> tab -> Ok or Cancel (arrows and tab to navigate)
+#### CLI
+in development
 ## Algorythm
 If you want to upgrade something:
 1. write new logic for new versions of files
