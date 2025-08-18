@@ -48,6 +48,7 @@ type EntityStore[TEntity Entity] interface {
 	Close()
 
 	LastEntityId(ctx context.Context) (uint64, bool, error)
+	LastFrozenEntityId() (uint64, bool, error)
 	LastEntity(ctx context.Context) (TEntity, bool, error)
 	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
@@ -166,8 +167,8 @@ func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bo
 	return txEntityStore[TEntity]{s, tx}.LastEntityId(ctx)
 }
 
-func (s *mdbxEntityStore[TEntity]) LastFrozenEntityId() uint64 {
-	return 0
+func (s *mdbxEntityStore[TEntity]) LastFrozenEntityId() (uint64, bool, error) {
+	return 0, false, nil
 }
 
 func (s *mdbxEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {

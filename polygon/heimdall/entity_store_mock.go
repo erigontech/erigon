@@ -315,6 +315,46 @@ func (c *MockEntityStoreLastEntityIdCall[TEntity]) DoAndReturn(f func(context.Co
 	return c
 }
 
+// LastFrozenEntityId mocks base method.
+func (m *MockEntityStore[TEntity]) LastFrozenEntityId() (uint64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LastFrozenEntityId")
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LastFrozenEntityId indicates an expected call of LastFrozenEntityId.
+func (mr *MockEntityStoreMockRecorder[TEntity]) LastFrozenEntityId() *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastFrozenEntityId", reflect.TypeOf((*MockEntityStore[TEntity])(nil).LastFrozenEntityId))
+	return &MockEntityStoreLastFrozenEntityIdCall[TEntity]{Call: call}
+}
+
+// MockEntityStoreLastFrozenEntityIdCall wrap *gomock.Call
+type MockEntityStoreLastFrozenEntityIdCall[TEntity Entity] struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) Return(arg0 uint64, arg1 bool, arg2 error) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) Do(f func() (uint64, bool, error)) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEntityStoreLastFrozenEntityIdCall[TEntity]) DoAndReturn(f func() (uint64, bool, error)) *MockEntityStoreLastFrozenEntityIdCall[TEntity] {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Prepare mocks base method.
 func (m *MockEntityStore[TEntity]) Prepare(ctx context.Context) error {
 	m.ctrl.T.Helper()

@@ -30,9 +30,9 @@ func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 
 type SnapshotStore struct {
 	Store
-	checkpoints                 *CheckpointSnapshotStore
+	checkpoints                 EntityStore[*Checkpoint]
 	milestones                  EntityStore[*Milestone]
-	spans                       *SpanSnapshotStore
+	spans                       EntityStore[*Span]
 	spanBlockProducerSelections EntityStore[*SpanBlockProducerSelection]
 }
 
@@ -281,11 +281,7 @@ func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, err
 	}
 
 	// check in snapshots
-	lastIdInSnaps, foundInSnaps, err := s.LastFrozenEntityId()
-	if err != nil {
-		return 0, false, err
-	}
-	return lastIdInSnaps, foundInSnaps, nil
+	return s.LastFrozenEntityId()
 }
 
 func (s *SpanSnapshotStore) LastEntity(ctx context.Context) (*Span, bool, error) {
@@ -329,9 +325,9 @@ func (s *MilestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (s *MilestoneSnapshotStore) LastFrozenEntityId() uint64 {
+func (s *MilestoneSnapshotStore) LastFrozenEntityId() (uint64, bool, error) {
 	if s.snapshots == nil {
-		return 0
+		return 0, false, nil
 	}
 
 	tx := s.snapshots.ViewType(s.SnapType())
@@ -339,7 +335,7 @@ func (s *MilestoneSnapshotStore) LastFrozenEntityId() uint64 {
 	segments := tx.Segments
 
 	if len(segments) == 0 {
-		return 0
+		return 0, false, nil
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
@@ -353,23 +349,24 @@ func (s *MilestoneSnapshotStore) LastFrozenEntityId() uint64 {
 		}
 	}
 	if lastSegment == nil {
-		return 0
+		return 0, false, nil
 	}
 
 	index := lastSegment.Src().Index()
 
-	return index.BaseDataID() + index.KeyCount() - 1
+	return index.BaseDataID() + index.KeyCount() - 1, true, nil
 }
 
 func (s *MilestoneSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
-
-	snapshotLastId := s.LastFrozenEntityId()
-	if snapshotLastId > lastId {
-		return snapshotLastId, true, nil
+	lastId, foundInMdbx, err := s.EntityStore.LastEntityId(ctx)
+	if err != nil {
+		return lastId, foundInMdbx, err
 	}
 
-	return lastId, ok, err
+	if foundInMdbx { // found in mdbx return immediately
+		return lastId, true, nil
+	}
+	return s.LastFrozenEntityId()
 }
 
 func (s *MilestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milestone, bool, error) {
@@ -457,15 +454,14 @@ func (s *CheckpointSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Checkpoint] {
 }
 
 func (s *CheckpointSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
-
-	snapshotLastCheckpointId := s.LastFrozenEntityId()
-
-	if snapshotLastCheckpointId > lastId {
-		return snapshotLastCheckpointId, true, nil
+	lastId, foundInMdbx, err := s.EntityStore.LastEntityId(ctx)
+	if err != nil {
+		return lastId, foundInMdbx, err
 	}
-
-	return lastId, ok, err
+	if foundInMdbx { // found in MDBX return immediately
+		return lastId, foundInMdbx, err
+	}
+	return s.LastFrozenEntityId()
 }
 
 func (s *CheckpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Checkpoint, bool, error) {
@@ -503,9 +499,9 @@ func (s *CheckpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 	return nil, false, fmt.Errorf("checkpoint %d: %w", id, ErrCheckpointNotFound)
 }
 
-func (s *CheckpointSnapshotStore) LastFrozenEntityId() uint64 {
+func (s *CheckpointSnapshotStore) LastFrozenEntityId() (uint64, bool, error) {
 	if s.snapshots == nil {
-		return 0
+		return 0, false, nil
 	}
 
 	tx := s.snapshots.ViewType(s.SnapType())
@@ -513,7 +509,7 @@ func (s *CheckpointSnapshotStore) LastFrozenEntityId() uint64 {
 	segments := tx.Segments
 
 	if len(segments) == 0 {
-		return 0
+		return 0, false, nil
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
@@ -528,12 +524,12 @@ func (s *CheckpointSnapshotStore) LastFrozenEntityId() uint64 {
 	}
 
 	if lastSegment == nil {
-		return 0
+		return 0, false, nil
 	}
 
 	index := lastSegment.Src().Index()
 
-	return index.BaseDataID() + index.KeyCount() - 1
+	return index.BaseDataID() + index.KeyCount() - 1, true, nil
 }
 
 func (s *CheckpointSnapshotStore) LastEntity(ctx context.Context) (*Checkpoint, bool, error) {
