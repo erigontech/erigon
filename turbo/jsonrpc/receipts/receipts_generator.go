@@ -151,6 +151,25 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
 
+	var receiptFromDB, receipt, cachedReceipt *types.Receipt
+	var firstLogIndex uint32
+	var cumGasUsed uint64
+	var foundInCache, foundInCacheV2 bool
+
+	defer func() {
+		if dbg.Enabled(ctx) {
+			log.Info("[dbg] ReceiptGenerator.GetReceipt",
+				"txNum", txNum,
+				"txHash", txnHash.String(),
+				"blockNum", blockNum,
+				"firstLogIndex", firstLogIndex,
+				"nil receipt in db", receiptFromDB == nil,
+				"cache?", foundInCache,
+				"cachev2?", foundInCacheV2,
+				"cachedReceipt", cachedReceipt)
+		}
+	}()
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	receiptFromDB, ok, err := rawdb.ReadReceiptCache(tx, blockNum, blockHash, uint32(index), txnHash)
 	if err != nil {
@@ -161,14 +180,24 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
-		return receipts[index], nil
+		foundInCache = true
+		cachedReceipt = receipts[index]
+		return cachedReceipt, nil
 	}
 
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
 		if receipt.BlockHash == blockHash { // elegant way to handle reorgs
+			if dbg.Enabled(ctx) {
+				log.Info("[dbg] ReceiptGenerator.GetReceipt",
+					"postExec", true, "blockHashMatch", true, "receipt", receipt)
+			}
 			return receipt, nil
+		}
+		if dbg.Enabled(ctx) {
+			log.Info("[dbg] ReceiptGenerator.GetReceipt",
+				"postExec", true, "blockHashMatch", false)
 		}
 		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
@@ -179,18 +208,17 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		foundInCacheV2 = true
 		g.addToCacheReceipt(txnHash, receiptFromDB)
 		return receiptFromDB, nil
 	}
-
-	var receipt *types.Receipt
 
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
 	if err != nil {
 		return nil, err
 	}
 
-	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+	cumGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -223,14 +251,28 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB)
 	}
+	if dbg.Enabled(ctx) {
+		log.Info("[dbg] ReceiptGenerator.GetReceipt",
+			"execedReceipt", true, "receipt", receipt)
+	}
 	return receipt, nil
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
 
+	var receiptsFromDB types.Receipts
+	var err error
+	defer func() {
+		if dbg.Enabled(ctx) {
+			log.Info("[dbg] ReceiptGenerator.GetReceipts",
+				"blockNum", block.NumberU64(),
+				"nil receipts in db", receiptsFromDB == nil)
+		}
+	}()
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block)
+	receiptsFromDB, err = rawdb.ReadReceiptsCache(tx, block)
 	if err != nil {
 		return nil, err
 	}
