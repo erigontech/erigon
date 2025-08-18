@@ -438,12 +438,15 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 				enc = nil
 			}
 		}
-	} else {
+		if err != nil {
+			return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+		}
+	}
+	if enc == nil {
 		enc, step, err = sdc.getter.GetLatest(d, plainKey)
 	}
-
 	if err != nil {
-		return nil, 0, fmt.Errorf("readDomain %q: failed to read latest storage (latest=%t): %w", d, sdc.limitReadAsOfTxNum == 0, err)
+		return nil, 0, fmt.Errorf("readDomain %q: %w", d, err)
 	}
 	return enc, step, nil
 }
