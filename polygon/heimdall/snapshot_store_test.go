@@ -33,7 +33,7 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	createTestBorEventSegmentFile(t, 0, 5_000, 132, dir, logger)
 	createTestSegmentFile(t, 0, 5_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
-	defer borRoSnapshots.Close()
+	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
@@ -55,7 +55,7 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
-	defer borRoSnapshots.Close()
+	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
@@ -85,7 +85,7 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	err := dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
-	defer borRoSnapshots.Close()
+	t.Cleanup(borRoSnapshots.Close)
 	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
@@ -112,7 +112,7 @@ func TestHeimdallStoreEntity(t *testing.T) {
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
-	defer borRoSnapshots.Close()
+	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
@@ -144,7 +144,7 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
-	defer borRoSnapshots.Close()
+	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
@@ -171,7 +171,7 @@ func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
-	defer borRoSnapshots.Close()
+	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
 
@@ -198,7 +198,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 	segFileName := filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name))
 	c, err := seg.NewCompressor(context.Background(), "test", segFileName, dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
-	defer c.Close()
+	t.Cleanup(c.Close)
 	c.DisableFsync()
 	// use from and to to determine which spans go inside this .seg file from the spansForTesting
 	// it is not a requirement, but a handy convention for testing purposes
@@ -224,7 +224,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 		LeafSize:   recsplit.DefaultLeafSize,
 	}, logger)
 	require.NoError(t, err)
-	defer idx.Close()
+	t.Cleanup(idx.Close)
 	idx.DisableFsync()
 	getter := d.MakeGetter()
 	//
@@ -257,7 +257,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, sp
 		require.NoError(t, err)
 		err = idx.Build(context.Background())
 		require.NoError(t, err)
-		defer idx.Close()
+		t.Cleanup(idx.Close)
 	}
 }
 
@@ -274,7 +274,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 		logger,
 	)
 	require.NoError(t, err)
-	defer compressor.Close()
+	t.Cleanup(compressor.Close)
 	compressor.DisableFsync()
 	data := make([]byte, length.Hash+length.BlockNum+8)
 	binary.BigEndian.PutUint64(data[length.Hash+length.BlockNum:length.Hash+length.BlockNum+8], eventId)
@@ -293,7 +293,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 		logger,
 	)
 	require.NoError(t, err)
-	defer idx.Close()
+	t.Cleanup(idx.Close)
 	idx.DisableFsync()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
