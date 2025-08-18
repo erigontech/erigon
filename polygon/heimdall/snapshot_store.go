@@ -219,7 +219,7 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 
 	lastSpanIdInSnapshots, found, err := s.LastFrozenEntityId()
 	if err != nil {
-		return nil, false, errors.New("could not load last span id in snapshots")
+		return nil, false, fmt.Errorf("could not load last span id in snapshots: %w", err)
 	}
 
 	if !found || id > lastSpanIdInSnapshots { // the span with this id is in MDBX and not in snapshots
