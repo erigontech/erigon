@@ -195,7 +195,7 @@ test-short: test-erigon-lib-short
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all
 	@{ \
-		$(GOTEST) --timeout 60m -v -coverprofile=coverage-test-all.out > run.log 2>&1; \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \
