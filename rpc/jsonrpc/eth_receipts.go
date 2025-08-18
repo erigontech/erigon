@@ -509,6 +509,14 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	cnt, err := tx.Count(kv.ReceiptDomain.String())
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("LAL before non bor receipts count", "count", cnt)
+
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		bnh, _ := numberOrHash.Hash()
@@ -539,6 +547,13 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	log.Debug("LAL result1 len", "len", len(result))
+
+	cnt, err = tx.Count(kv.ReceiptDomain.String())
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("LAL before GenerateBorReceipt count", "count", cnt)
 
 	if chainConfig.Bor != nil {
 		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)

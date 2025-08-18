@@ -45,6 +45,13 @@ func NewBorGenerator(blockReader services.FullBlockReader,
 // GenerateBorReceipt generates the receipt for state sync transactions of a block
 func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx, block *types.Block,
 	msgs []*types.Message, chainConfig *chain.Config) (*types.Receipt, error) {
+	cnt, err := tx.Count(kv.ReceiptDomain.String())
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("LAL GenerateBorReceipt count", "count", cnt)
+
 	if receipt, ok := g.receiptCache.Get(block.Hash()); ok {
 		return receipt, nil
 	}
@@ -65,12 +72,6 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return nil, err
 	}
 
-	cnt, err := tx.Count(kv.ReceiptDomain.String())
-	if err != nil {
-		return nil, err
-	}
-
-	log.Debug("LAL GenerateBorReceipt count", "count", cnt)
 	log.Debug("LAL GenerateBorReceipt logIdxAfterTx", "logIdxAfterTx", logIdxAfterTx)
 
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
