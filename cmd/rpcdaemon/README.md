@@ -173,7 +173,7 @@ to test the RPC.
 
 ### Debugging
 
-To print more detailed logs for 1 request - add `--rpc.dbg.single=true` flag. Then can send HTTP header `"dbg: true"`:
+To print more detailed logs for 1 request - add `--http.dbg.single=true` flag. Then can send HTTP header `"dbg: true"`:
 
 ```
 curl -X POST -H "dbg: true" -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id":1}' localhost:8545
