@@ -138,3 +138,11 @@ func mismatchingUnlock(m dsl.Matcher) {
 		Report(`Did you mean $mu.RUnlock()?
 			Rules are in ./rules.go file.`)
 }
+
+func forbidOsRemove(m dsl.Matcher) {
+	m.Match(
+		`os.Remove($*_)`,
+		`os.RemoveAll($*_)`,
+	).
+		Report(`Don't call os.Remove/RemoveAll directly; use dir.RemoveFile/RemoveAll instead (erigon-lib/common/dir)`)
+}
