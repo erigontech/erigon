@@ -314,9 +314,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	{ // Now can open all files
-		if err := agg.ReloadSalt(); err != nil {
-			return err
-		}
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
