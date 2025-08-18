@@ -183,6 +183,17 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 
 	fmt.Printf("UPDATE_PRIORITY(observe_span(newProducers)):  validatorset=%+v\n", newProducers)
 
+	sprintNum := t.borConfig.CalculateSprintNumber(newSpan.StartBlock)
+	oldValset, cacheHit := t.recentSelections.Get(sprintNum)
+
+	// there is already a selection for this sprint number, but we observed a new span
+	// for the same sprint number. This is due to a span rotation in the same sprint.
+	// Hence, we need to invalidate the cache, so that we don't see stale producer set.
+	if cacheHit {
+		t.logger.Debug("CACHE HIT: invalidating cache because of new validator set due to span rotation", "oldValset", oldValset, "newValset", newSpan)
+		t.recentSelections.Remove(sprintNum)
+	}
+
 	err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
 	if err != nil {
 		return err

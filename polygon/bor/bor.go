@@ -1087,7 +1087,7 @@ func (c *Bor) checkAndCommitSpan(header *types.Header, syscall consensus.SystemC
 		return fmt.Errorf("GetCurrentSpan: %w", err)
 	}
 
-	fmt.Printf("CURRENT_SPAN = %+v\n", currentSpan)
+	// fmt.Printf("CURRENT_SPAN = %+v\n", currentSpan)
 
 	// Whenever `checkAndCommitSpan` is called for the first time, during the start of 'technically'
 	// second sprint, we need the 0th as well as the 1st span. The contract returns an empty
