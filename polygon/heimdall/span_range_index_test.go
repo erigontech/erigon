@@ -21,7 +21,7 @@ type spanRangeIndexTest struct {
 
 func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 	tmpDir := t.TempDir()
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(t.Context())
 	logger := log.New()
 
 	db, err := mdbx.New(kv.HeimdallDB, logger).
@@ -34,7 +34,7 @@ func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 
 	index := NewSpanRangeIndex(polygoncommon.AsDatabase(db), kv.BorSpansIndex)
 
-	t.Cleanup(db.Close)
+	t.Cleanup(func() { db.Close(); cancel() })
 
 	return spanRangeIndexTest{
 		index:  index,
