@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -390,15 +391,29 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		//non-accede and exclusive mode - to apply create new tables if need.
-		cfg := dbCfg(kv.ChainDB, chaindata).RemoveFlags(mdbx.Accede).Exclusive(true)
-		db, err := openDB(cfg, true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+		dbPaths := map[kv.Label]string{kv.ChainDB: chaindata}
+		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
+		// (see kv/tables.go).
+		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
+		if exists, err := dir.FileExist(consensus); err == nil && exists {
+			dbPaths[kv.ConsensusDB] = consensus
+		} else {
+			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
+			if exists, err := dir.FileExist(consensus); err == nil && exists {
+				dbPaths[kv.ConsensusDB] = consensus
+			}
 		}
-		defer db.Close()
-		// Nothing to do, migrations will be applied automatically
+		for dbLabel, dbPath := range dbPaths {
+			//non-accede and exclusive mode - to apply create new tables if need.
+			cfg := dbCfg(dbLabel, dbPath).RemoveFlags(mdbx.Accede).Exclusive(true)
+			db, err := openDB(cfg, true, logger)
+			if err != nil {
+				logger.Error("Opening DB", "error", err)
+				return
+			}
+			defer db.Close()
+			// Nothing to do, migrations will be applied automatically
+		}
 	},
 }
 

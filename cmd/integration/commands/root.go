@@ -88,7 +88,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 }
 
 func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
-	if opts.GetLabel() != kv.ChainDB {
+	if opts.GetLabel() != kv.ChainDB && opts.GetLabel() != kv.ConsensusDB {
 		panic(opts.GetLabel())
 	}
 
