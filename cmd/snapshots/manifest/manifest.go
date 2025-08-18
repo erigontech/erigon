@@ -22,7 +22,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,11 +31,12 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 

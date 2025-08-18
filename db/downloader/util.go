@@ -36,15 +36,15 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // TODO: Update this list, or pull from common location (central manifest or canonical multi-file torrent).
@@ -119,7 +119,7 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !skipSeedableCheck && !snaptype.E3Seedable(name) {
+		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -325,7 +325,7 @@ func (d *Downloader) addTorrentSpec(
 	ts *torrent.TorrentSpec,
 	name string,
 ) (t *torrent.Torrent, first bool, err error) {
-	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
+	ts.ChunkSize = downloadercfg.NetworkChunkSize
 	ts.Trackers = nil // to reduce mutex contention - see `afterAdd`
 	ts.Webseeds = nil
 	ts.DisallowDataDownload = true
@@ -334,12 +334,18 @@ func (d *Downloader) addTorrentSpec(
 	// completion data? We might want to clobber any piece completion and force the client to accept
 	// what we provide, assuming we trust our own metainfo generation more.
 	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
-	ts.DisableInitialPieceCheck = !d.cfg.ManualDataVerification
+	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
 	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
 	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	t, first, err = d.torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return
+	}
+	// This is rough, but we intend to download everything added to completion, so this is a good
+	// time to start the clock. We shouldn't just do it on Torrent.DownloadAll because we might also
+	// need to fetch the metainfo (source).
+	if !t.Complete().Bool() {
+		d.setStartTime()
 	}
 	g.MakeMapIfNil(&d.torrentsByName)
 	hadOld := g.MapInsert(d.torrentsByName, name, t).Ok
@@ -351,6 +357,7 @@ func (d *Downloader) afterAdd() {
 	for _, t := range d.torrentClient.Torrents() {
 		// add webseed first - otherwise opts will be ignored
 		t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+		// Should be disabled by no download rate or the disable trackers flag.
 		t.AddTrackers(Trackers)
 		t.AllowDataDownload()
 		t.AllowDataUpload()

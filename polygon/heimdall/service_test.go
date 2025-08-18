@@ -34,11 +34,11 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 )
@@ -193,7 +193,10 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	})
 
 	suite.eg.Go(func() error {
-		return suite.service.Run(suite.ctx)
+		defer suite.cancel()
+		err := suite.service.Run(suite.ctx)
+		require.ErrorIs(suite.T(), err, context.Canceled)
+		return err
 	})
 
 	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)

@@ -4,20 +4,20 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/snaptype"
-	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 type Merger struct {
@@ -100,7 +100,7 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 			withoutExt := f[:len(f)-len(ext)]
 			_ = dir.RemoveFile(withoutExt + ".idx")
 			_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
+			isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
 			if isTxnType {
 				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 				_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
@@ -185,18 +185,16 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			}
 		}
 
-		for _, t := range snapTypes {
-			if len(toMerge[t.Enum()]) == 0 {
-				continue
+		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earliear can make sense.
+		toMergeFileNames := make([]string, 0, 16)
+		for _, segments := range toMerge {
+			for _, segment := range segments {
+				toMergeFileNames = append(toMergeFileNames, segment.FilePaths(snapDir)...)
 			}
-			toMergeFilePaths := make([]string, 0, len(toMerge[t.Enum()]))
-			for _, f := range toMerge[t.Enum()] {
-				toMergeFilePaths = append(toMergeFilePaths, f.FilePath())
-			}
-			if onDelete != nil {
-				if err := onDelete(toMergeFilePaths); err != nil {
-					return err
-				}
+		}
+		if onDelete != nil {
+			if err := onDelete(toMergeFileNames); err != nil {
+				return fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}
 	}

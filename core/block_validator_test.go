@@ -23,11 +23,11 @@ import (
 	"context"
 	"testing"
 
-	libchain "github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/kv"
+	libchain "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/stagedsync"

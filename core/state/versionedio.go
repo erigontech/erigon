@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/heimdalr/dag"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/heimdalr/dag"
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type ReadSource int

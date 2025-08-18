@@ -22,7 +22,6 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,23 +32,24 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 
-	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/config3"
+	datadir2 "github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
+	chain2 "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/types"
@@ -453,7 +453,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = genesis.Config.ChainName
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot.Tracer().Hooks}
@@ -738,7 +738,8 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	var receipts types.Receipts
 	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()
-	rules := chainConfig.Rules(blockNum, block.Time())
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), engine, nil, chainConfig)
+	rules := blockContext.Rules(chainConfig)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)

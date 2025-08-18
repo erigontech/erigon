@@ -24,8 +24,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -35,7 +35,7 @@ import (
 type Sync struct {
 	cfg             ethconfig.Sync
 	unwindPoint     *uint64 // used to run stages
-	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
+	prevUnwindPoint *uint64 // used to get value from outside staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
 	posTransition   *uint64
 
@@ -80,7 +80,7 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s, CurrentSyncCycleInfo{initialCycle, firstCycle}}
 }
 
-// Get the current prune status from the DB
+// PruneStageState Get the current prune status from the DB
 func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB, initialCycle bool) (*PruneState, error) {
 	var pruneProgress uint64
 	var err error
@@ -208,23 +208,34 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 }
 
 func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
-	unwindStages := make([]*Stage, len(stagesList))
-	for i, stageIndex := range unwindOrder {
-		for _, s := range stagesList {
-			if s.ID == stageIndex {
-				unwindStages[i] = s
-				break
-			}
+	stageMap := make(map[stages.SyncStage]*Stage, len(stagesList))
+	for _, s := range stagesList {
+		stageMap[s.ID] = s
+	}
+
+	// on non-Polygon chains, WitnessProcessing stage is not run
+	var filteredUnwindOrder UnwindOrder
+	for _, stageIndex := range unwindOrder {
+		if _, exists := stageMap[stageIndex]; exists {
+			filteredUnwindOrder = append(filteredUnwindOrder, stageIndex)
 		}
 	}
-	pruneStages := make([]*Stage, len(stagesList))
-	for i, stageIndex := range pruneOrder {
-		for _, s := range stagesList {
-			if s.ID == stageIndex {
-				pruneStages[i] = s
-				break
-			}
+
+	var filteredPruneOrder PruneOrder
+	for _, stageIndex := range pruneOrder {
+		if _, exists := stageMap[stageIndex]; exists {
+			filteredPruneOrder = append(filteredPruneOrder, stageIndex)
 		}
+	}
+
+	unwindStages := make([]*Stage, len(filteredUnwindOrder))
+	for i, stageIndex := range filteredUnwindOrder {
+		unwindStages[i] = stageMap[stageIndex]
+	}
+
+	pruneStages := make([]*Stage, len(filteredPruneOrder))
+	for i, stageIndex := range filteredPruneOrder {
+		pruneStages[i] = stageMap[stageIndex]
 	}
 
 	logPrefixes := make([]string, len(stagesList))
@@ -478,7 +489,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	return hasMore, nil
 }
 
-// Run pruning for stages as per the defined pruning order, if enabled for that stage
+// RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
@@ -500,7 +511,7 @@ func (s *Sync) PrintTimings() []interface{} {
 	var logCtx []interface{}
 	count := 0
 	for i := range s.timings {
-		if s.timings[i].took < 50*time.Millisecond {
+		if s.timings[i].took < 100*time.Millisecond {
 			continue
 		}
 		count++

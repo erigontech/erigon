@@ -43,31 +43,31 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/paths"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/version"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
-	_ "github.com/erigontech/erigon/db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
@@ -201,7 +201,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if cmd.Name() != "torrent_cat" {
 			logger = debug.SetupCobra(cmd, "downloader")
-			logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
@@ -243,12 +243,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"datadir", dirs.DataDir,
 		"ipv6-enabled", !disableIPV6,
 		"ipv4-enabled", !disableIPV4,
-		"download.rate", downloadRate.String(),
-		"upload.rate", uploadRate.String(),
+		"download.rate", downloadRateStr,
+		"upload.rate", uploadRateStr,
 		"webseed", webseeds,
 	)
 
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
+	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(webseeds)
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
@@ -330,7 +330,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	d.MainLoopInBackground(false)
+	// I'm kinda curious... but it was false before.
+	d.MainLoopInBackground(true)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)
@@ -553,7 +554,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 
-	files, err := downloader.SeedableFiles(dirs, chain, all)
+	files, err := downloader.SeedableFiles(dirs, chain, true)
 	if err != nil {
 		return err
 	}
