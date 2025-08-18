@@ -504,13 +504,26 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 // GetBlockReceipts - receipts for individual block
 func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error) {
+	xtx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer xtx.Rollback()
+
+	cnt, err := xtx.Count(kv.ReceiptDomain.String())
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("LAL before non bor non temooral receipts count", "count", cnt)
+
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	cnt, err := tx.Count(kv.ReceiptDomain.String())
+	cnt, err = tx.Count(kv.ReceiptDomain.String())
 	if err != nil {
 		return nil, err
 	}
