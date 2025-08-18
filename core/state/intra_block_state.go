@@ -478,10 +478,14 @@ func (sdb *IntraBlockState) GetNonce(addr common.Address) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
+		var nonce uint64
 		if stateObject != nil && !stateObject.deleted {
-			return stateObject.Nonce(), nil
+			nonce = stateObject.Nonce()
 		}
-		return 0, nil
+		if sdb.trace || dbg.TraceAccount(addr) {
+			fmt.Printf("%d (%d.%d) GetNonce %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, nonce)
+		}
+		return nonce, nil
 	}
 
 	nonce, _, _, err := versionedRead(sdb, addr, NoncePath, common.Hash{}, false, 0,
@@ -979,7 +983,7 @@ func (sdb *IntraBlockState) SetNonce(addr common.Address, nonce uint64) error {
 		return err
 	}
 
-	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, BalancePath, common.Hash{}))
+	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, NoncePath, common.Hash{}))
 	sdb.versionWritten(addr, NoncePath, common.Hash{}, stateObject.Nonce())
 	return nil
 }

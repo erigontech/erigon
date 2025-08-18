@@ -327,7 +327,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, *ch.account, &obj.data.Nonce, &ch.prev, &obj.original.Nonce, ch.wasCommited)
+		fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, *ch.account, obj.data.Nonce, &ch.prev, obj.original.Nonce, ch.wasCommited)
 	}
 	obj.setNonce(ch.prev)
 	if s.versionMap != nil {
@@ -367,8 +367,8 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
 		_, cs := printCode(obj.code)
 		_, ps := printCode(ch.prevcode)
-		fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %d, origHash: %d, prevCode: %s, commited: %v\n", tracePrefix,
-			*ch.account, obj.data.CodeHash, cs, ch.prevhash, &obj.original.CodeHash, ps, ch.wasCommited)
+		fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %x, origHash: %x, prevCode: %s, commited: %v\n", tracePrefix,
+			*ch.account, obj.data.CodeHash, cs, ch.prevhash, obj.original.CodeHash, ps, ch.wasCommited)
 	}
 	obj.setCode(ch.prevhash, ch.prevcode)
 	if s.versionMap != nil {
