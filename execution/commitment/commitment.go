@@ -994,7 +994,7 @@ func (t *Updates) initCollector() {
 			}
 
 			//t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
-			t.nibbles[i] = etl.NewCollector("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+			t.nibbles[i] = etl.NewCollector("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 			t.nibbles[i].SortAndFlushInBackground(true)
 		}
 		if t.etl != nil {
