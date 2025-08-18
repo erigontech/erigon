@@ -96,10 +96,6 @@ func (s *MdbxStore) Prepare(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (s *MdbxStore) DB() *polygoncommon.Database {
-	return s.db
-}
-
 func (s *MdbxStore) Close() {
 	s.db.Close()
 	s.checkpoints.Close()
