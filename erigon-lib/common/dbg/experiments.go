@@ -84,14 +84,14 @@ var (
 	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
-	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
+	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
-	TraceDeletion        = EnvBool("TRACE_DELETION", false)
+	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
