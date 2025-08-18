@@ -379,7 +379,7 @@ func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64)
 	return nil, false, nil
 }
 
-func (back *RemoteBackend) LastFrozenSpanId() uint64 {
+func (back *RemoteBackend) LastFrozenSpanId() (uint64, bool, error) {
 	panic("not implemented")
 }
 
