@@ -209,6 +209,10 @@ func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
 }
 
+func (br *BlockRetire) BorStore() (heimdall.Store, bridge.Store) {
+	return br.heimdallStore, br.bridgeStore
+}
+
 func (br *BlockRetire) Writer() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
