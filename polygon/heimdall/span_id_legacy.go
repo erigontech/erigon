@@ -17,6 +17,8 @@
 package heimdall
 
 import (
+	"errors"
+
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
@@ -27,7 +29,11 @@ const (
 	zerothSpanEnd = 255  // End block of 0th span
 )
 
-// SpanIdAt returns the corresponding span id for the given block number.
+var (
+	ErrSpanNotFound = errors.New("span not found")
+)
+
+// Deprecated: SpanIdAt returns the corresponding span id for the given block number.
 func SpanIdAt(blockNum uint64) SpanId {
 	if blockNum > zerothSpanEnd {
 		return SpanId(1 + (blockNum-zerothSpanEnd-1)/spanLength)
@@ -35,7 +41,7 @@ func SpanIdAt(blockNum uint64) SpanId {
 	return 0
 }
 
-// SpanEndBlockNum returns the number of the last block in the given span.
+// Deprecated: SpanEndBlockNum returns the number of the last block in the given span.
 func SpanEndBlockNum(spanId SpanId) uint64 {
 	if spanId > 0 {
 		return uint64(spanId)*spanLength + zerothSpanEnd
@@ -43,7 +49,7 @@ func SpanEndBlockNum(spanId SpanId) uint64 {
 	return zerothSpanEnd
 }
 
-// IsBlockInLastSprintOfSpan returns true if a block num is within the last sprint of a span and false otherwise.
+// Deprecated: IsBlockInLastSprintOfSpan returns true if a block num is within the last sprint of a span and false otherwise.
 func IsBlockInLastSprintOfSpan(blockNum uint64, config *borcfg.BorConfig) bool {
 	spanNum := SpanIdAt(blockNum)
 	endBlockNum := SpanEndBlockNum(spanNum)
