@@ -11,6 +11,7 @@ import (
 
 const FlagDone = 0
 const FlagEstimate = 1
+const UnknownDep = -2
 
 type AccountPath int8
 
@@ -147,7 +148,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
-	res.depIdx = -1
+	res.depIdx = UnknownDep
 	res.incarnation = -1
 
 	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] {
@@ -159,7 +160,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 	}
 
 	var floor = func(i int) (key int, val *WriteCell) {
-		key = -1
+		key = UnknownDep
 		cells.Descend(i, func(k int, v *WriteCell) bool {
 			key = k
 			val = v
@@ -170,7 +171,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 
 	fk, fv := floor(txIdx - 1)
 
-	if fk != -1 && fv != nil {
+	if fk != UnknownDep && fv != nil {
 		switch fv.flag {
 		case FlagEstimate:
 			res.depIdx = fk
@@ -267,7 +268,7 @@ type Version struct {
 	Incarnation int
 }
 
-var UnknownVersion = Version{TxIndex: -1, Incarnation: -1}
+var UnknownVersion = Version{TxIndex: UnknownDep, Incarnation: -1}
 
 const (
 	MVReadResultDone       = 0
@@ -301,7 +302,7 @@ func (res *ReadResult) Version() Version {
 }
 
 func (mvr ReadResult) Status() int {
-	if mvr.depIdx != -1 {
+	if mvr.depIdx != UnknownDep {
 		if mvr.incarnation == -1 {
 			return MVReadResultDependency
 		} else {

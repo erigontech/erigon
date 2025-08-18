@@ -881,7 +881,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if readVersion != writtenVersion {
 					vv = state.VerionInvalid
-				} else if writtenVersion.TxIndex == -1 && tx-1 > be.validateTasks.maxComplete() {
+				} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
 					vv = state.VerionTooEarly
 				}
 
