@@ -26,21 +26,21 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -73,6 +73,8 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+
+	Rules() *chain.Rules
 
 	GasPool() *core.GasPool
 
@@ -226,6 +228,7 @@ type TxTask struct {
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
+	rules        *chain.Rules
 }
 
 type GenericTracer interface {
@@ -296,7 +299,7 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 		if t.signer == nil {
 			t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 		}
-		message, err := t.Tx().AsMessage(*t.signer, t.Header.BaseFee, t.Config.Rules(t.BlockNumber(), t.BlockTime()))
+		message, err := t.Tx().AsMessage(*t.signer, t.Header.BaseFee, t.Rules())
 
 		if err != nil {
 			return nil, err
@@ -345,6 +348,14 @@ func (t *TxTask) BlockGasLimit() uint64 {
 		return 0
 	}
 	return t.Header.GasLimit
+}
+
+func (t *TxTask) Rules() *chain.Rules {
+	if t.rules == nil {
+		t.rules = t.EvmBlockContext.Rules(t.Config)
+	}
+
+	return t.rules
 }
 
 func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
@@ -421,7 +432,7 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 			return err
 		}
 
-		evm.ResetBetweenBlocks(t.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, t.Config.Rules(t.BlockNumber(), t.BlockTime()))
+		evm.ResetBetweenBlocks(t.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, t.Rules())
 	}
 
 	return nil
@@ -440,7 +451,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 	ibs.SetTrace(txTask.Trace)
 
-	rules := chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime())
+	rules := txTask.Rules()
+
 	var err error
 	header := txTask.Header
 	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)

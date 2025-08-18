@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
@@ -464,10 +465,10 @@ func firstStepNotInFiles(tx kv.Tx, produce Produce) kv.Step {
 	ac := dbstate.AggTx(tx)
 	fromStep := kv.Step(math.MaxUint64)
 	if produce.ReceiptDomain {
-		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
+		fromStep = min(fromStep, kv.Step(ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()))
 	}
 	if produce.RCacheDomain {
-		fromStep = min(fromStep, ac.DbgDomain(kv.RCacheDomain).FirstStepNotInFiles())
+		fromStep = min(fromStep, kv.Step(ac.DbgDomain(kv.RCacheDomain).FirstStepNotInFiles()))
 	}
 	if produce.LogAddr {
 		fromStep = min(fromStep, ac.DbgII(kv.LogAddrIdx).FirstStepNotInFiles())

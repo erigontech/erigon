@@ -904,12 +904,12 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
+func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	txNumInFiles := at.TxNumsInFiles(entitySet...)
 	if txNumInFiles > 0 {
 		txNumInFiles--
 	}
-	return txNumInFiles / at.StepSize()
+	return kv.Step(txNumInFiles / at.StepSize())
 }
 
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {

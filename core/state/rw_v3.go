@@ -21,8 +21,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 

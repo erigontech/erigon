@@ -40,7 +40,9 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -1062,7 +1064,7 @@ func ExecV3(ctx context.Context,
 						blockUpdateCount += applyResult.stateUpdates.UpdateCount()
 						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false)
+							pe.cfg.chainConfig, applyResult.rules, false)
 						blockApplyCount += applyResult.stateUpdates.UpdateCount()
 						pe.rs.SetTrace(false)
 						if err != nil {
@@ -1256,12 +1258,12 @@ func ExecV3(ctx context.Context,
 		lastCommittedBlockNum = executor.(*serialExecutor).lastCommittedBlockNum
 	}
 
-	lastCommitedStep := uint64(lastCommittedTxNum) / doms.StepSize()
+	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
 
 	if lastFrozenStep := applyTx.(kv.TemporalRwTx).StepsInFiles(kv.CommitmentDomain); lastCommitedStep <= lastFrozenStep {
 		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
 			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommitedStep,
-			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*doms.StepSize())-1)
+			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
 		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
 	}

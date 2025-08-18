@@ -208,7 +208,7 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 func (tx *tx) AggTx() any       { return tx.aggtx }
 func (tx *tx) Agg() *Aggregator { return tx.db.agg }
 
-func (tx *tx) StepsInFiles(entitySet ...kv.Domain) uint64 {
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }
 

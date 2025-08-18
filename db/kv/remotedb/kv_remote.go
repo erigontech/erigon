@@ -238,11 +238,11 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                                 { panic("not implemented") }
-func (tx *tx) StepsInFiles(entitySet ...kv.Domain) uint64 { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx                  { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo                  { panic("not implemented") }
-func (tx *tx) CanUnwindToBlockNum() (uint64, error)       { panic("not implemented") }
+func (tx *tx) AggTx() any                                  { panic("not implemented") }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx                   { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo                   { panic("not implemented") }
+func (tx *tx) CanUnwindToBlockNum() (uint64, error)        { panic("not implemented") }
 func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
 	panic("not implemented")
 }

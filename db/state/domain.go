@@ -646,7 +646,9 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 }
 
-func (dt *DomainRoTx) FirstStepNotInFiles() uint64 { return dt.files.EndTxNum() / dt.aggStep }
+func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
+	return kv.Step(dt.files.EndTxNum() / dt.stepSize)
+}
 
 // Collation is the set of compressors created after aggregation
 type Collation struct {

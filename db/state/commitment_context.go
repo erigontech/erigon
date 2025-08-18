@@ -169,7 +169,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
-	var step uint64
+	var step kv.Step
 
 	state, step, err = sdc.mainTtx.Branch(keyCommitmentState)
 	if err != nil {

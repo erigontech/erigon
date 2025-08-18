@@ -739,7 +739,7 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
 }
 
-func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) uint64 {
+func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return m.db.(kv.TemporalTx).StepsInFiles(entitySet...)
 }
 

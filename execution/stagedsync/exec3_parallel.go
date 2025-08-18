@@ -11,16 +11,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/execution/chain"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
@@ -120,7 +119,6 @@ type blockResult struct {
 
 type txResult struct {
 	blockNum     uint64
-	blockTime    uint64
 	txNum        uint64
 	gasUsed      int64
 	receipts     []*types.Receipt
@@ -128,6 +126,7 @@ type txResult struct {
 	traceFroms   map[common.Address]struct{}
 	traceTos     map[common.Address]struct{}
 	stateUpdates state.StateUpdates
+	rules        *chain.Rules
 }
 
 type execTask struct {
@@ -181,7 +180,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	if task.IsBlockEnd() || txIndex < 0 {
 		if txTask.Config.IsByzantium(blockNum) {
-			ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
+			ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
 		}
 		return nil, nil
 	}
@@ -238,7 +237,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	vm.SetTrace(false)
 
 	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(txTask.Config.Rules(blockNum, txTask.BlockTime()), stateWriter)
+		ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
 	}
 
 	receipt, err := result.CreateReceipt(prevReceipt)
@@ -994,7 +993,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				applyResult.receipts = append(applyResult.receipts, txResult.Receipt)
 			}
 
-			applyResult.blockTime = txTask.BlockTime()
+			applyResult.rules = txTask.Rules()
 			applyResult.logs = append(applyResult.logs, txResult.Logs...)
 			maps.Copy(applyResult.traceFroms, txResult.TraceFroms)
 			maps.Copy(applyResult.traceTos, txResult.TraceTos)
@@ -1389,7 +1388,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 						stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
-						if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
+						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
 
@@ -1409,7 +1408,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					blockExecutor.applyResults <- &txResult{
 						blockNum:     blockResult.BlockNum,
 						txNum:        blockResult.lastTxNum,
-						blockTime:    blockResult.BlockTime,
+						rules:        result.Rules(),
 						stateUpdates: stateUpdates,
 						logs:         result.Logs,
 						traceFroms:   result.TraceFroms,
