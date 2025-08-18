@@ -1558,13 +1558,11 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	var allBorSnapshots *heimdall.RoSnapshots
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
-	var heimdallMdbxStore *heimdall.MdbxStore
 
 	if chainConfig.Bor != nil {
-		heimdallMdbxStore = heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency))
 		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
-		heimdallStore = heimdall.NewSnapshotStore(heimdallMdbxStore, allBorSnapshots)
+		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
