@@ -897,6 +897,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 					return err
 				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
 			}
 		} else {
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -904,6 +909,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					txc = wrap.NewTxContainer(tx, txc.Doms)
 					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 						return err
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
 					}
 				}
 				return nil
