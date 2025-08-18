@@ -361,6 +361,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 	return nil
 }
 
+// Len returns the number of items currently in the buffer
+func (c *Collector) Len() int {
+	if c.buf == nil {
+		return 0
+	}
+	return c.buf.Len()
+}
+
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
 	if k == nil {

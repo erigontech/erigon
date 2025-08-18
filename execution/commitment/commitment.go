@@ -937,7 +937,6 @@ func ParseCommitmentMode(s string) Mode {
 
 type Updates struct {
 	hasher keyHasher
-	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
 	etl    *etl.Collector            // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	mode   Mode
@@ -969,7 +968,6 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		mode:   m,
 	}
 	if t.mode == ModeDirect {
-		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
@@ -979,8 +977,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
-	if t.mode == ModeDirect && t.keys == nil {
-		t.keys = make(map[string]struct{})
+	if t.mode == ModeDirect && t.etl != nil {
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
@@ -1021,7 +1018,10 @@ func (t *Updates) Mode() Mode { return t.mode }
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
-		return uint64(len(t.keys))
+		if t.etl != nil {
+			return uint64(t.etl.Len())
+		}
+		return 0
 	case ModeUpdate:
 		return uint64(t.tree.Len())
 	default:
@@ -1120,15 +1120,13 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 }
 
 func (t *Updates) Close() {
-	if t.keys != nil {
-		clear(t.keys)
-	}
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
 	}
 	if t.etl != nil {
 		t.etl.Close()
+		t.etl = nil
 	}
 	if t.sortPerNibble {
 		for i := 0; i < len(t.nibbles); i++ {
@@ -1143,8 +1141,6 @@ func (t *Updates) Close() {
 func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
-		clear(t.keys)
-
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return fn(k, v, nil)
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1177,8 +1173,6 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
