@@ -80,6 +80,14 @@ func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 		return err
 	}
 
+	err = s.buildSpanIndexFromSnapshots(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SpanSnapshotStore) buildSpanIndexFromSnapshots(ctx context.Context) error {
 	rangeIndex := s.RangeIndex()
 	rangeIndexer, ok := rangeIndex.(RangeIndexer)
 	if !ok {
@@ -95,7 +103,7 @@ func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 
 	lastSpanIdInIndex, ok, err := rangeIndex.Lookup(ctx, lastBlockNumInIndex)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	if !ok { // index table is empty
@@ -115,11 +123,7 @@ func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 		}
 	}
 	// fill the index walking backwards from
-	err = s.snapshotsReverseForEach(updateSpanIndexFunc)
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.snapshotsReverseForEach(updateSpanIndexFunc)
 }
 
 // Walk each span in the snapshots from last to first and apply function f as long as no error or stop condition is encountered
