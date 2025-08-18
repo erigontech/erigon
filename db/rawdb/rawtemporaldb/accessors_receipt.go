@@ -40,7 +40,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	}
 
 	if ok {
-		log.Debug("LAL found CumulativeGasUsedInBlockKey", txNum)
+		log.Debug("LAL found CumulativeGasUsedInBlockKey", "txNum", txNum, "v", v)
 	}
 
 	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, txNum)
@@ -52,7 +52,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	}
 
 	if ok {
-		log.Debug("LAL found CumulativeBlobGasUsedInBlockKey", txNum)
+		log.Debug("LAL found CumulativeBlobGasUsedInBlockKey", "txNum", txNum, "v", v)
 	}
 
 	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, LogIndexAfterTxKey, txNum)
@@ -64,7 +64,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	}
 
 	if ok {
-		log.Debug("LAL found LogIndexAfterTxKey", txNum)
+		log.Debug("LAL found LogIndexAfterTxKey", "txNum", txNum, "v", v)
 	}
 
 	return
