@@ -268,16 +268,19 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 
 func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
-
-	snapshotLastId, found, err2 := s.LastFrozenEntityId()
-	if err2 != nil {
-		return 0, false, err2
+	if err != nil {
+		return lastId, false, err
 	}
-	if found && snapshotLastId > lastId {
+
+	snapshotLastId, foundInSnaps, err := s.LastFrozenEntityId()
+	if err != nil {
+		return 0, false, err
+	}
+	if foundInSnaps && snapshotLastId > lastId {
 		return snapshotLastId, true, nil
 	}
 
-	return lastId, ok, err
+	return lastId, ok, nil
 }
 
 func (s *SpanSnapshotStore) LastEntity(ctx context.Context) (*Span, bool, error) {
