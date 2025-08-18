@@ -538,6 +538,8 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, true))
 	}
 
+	log.Debug("LAL result1 len", "len", len(result))
+
 	if chainConfig.Bor != nil {
 		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
@@ -553,6 +555,8 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, true))
 		}
 	}
+
+	log.Debug("LAL result2 len", "len", len(result))
 
 	return result, nil
 }
