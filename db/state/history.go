@@ -1142,11 +1142,17 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
+
+	log.Debug("LAL seekInFiles not found")
+
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
 		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.aggregationStep)
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.filenameBase, histTxNum/ht.h.aggregationStep, histTxNum/ht.h.aggregationStep)
 	}
+
+	log.Debug("LAL historyItem found", "item", historyItem.Fullpath(), "txNum", txNum)
+
 	reader := ht.statelessIdxReader(historyItem.i)
 	if reader.Empty() {
 		return nil, false, nil
@@ -1156,6 +1162,9 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
+
+	log.Debug("LAL offset found", "txNum", txNum, "offset", offset)
+
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
 	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
@@ -1192,13 +1201,18 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 		return nil, false, nil
 	}
 
+	log.Debug("LAL HistorySeek")
+
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err
 	}
 	if ok {
+		log.Debug("LAL HistorySeek found in files", "txNum", txNum)
 		return v, true, nil
 	}
+
+	log.Debug("LAL HistorySeek not found in files", "txNum", txNum)
 
 	return ht.historySeekInDB(key, txNum, roTx)
 }
