@@ -315,15 +315,23 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	const ecRecoverInputLength = 128
 
 	input = common.RightPadBytes(input, ecRecoverInputLength)
-	// "input" is (hash, v, r, s), each 32 bytes
+	// "input" is (hash, w, r, s), each 32 bytes
 	// but for ecrecover we want (r, s, v)
+	// where w = v + 27, v ∈ {0, 1}
 
-	r := new(uint256.Int).SetBytes(input[64:96])
-	s := new(uint256.Int).SetBytes(input[96:128])
-	v := input[63] - 27
+	var w uint256.Int
+	var r uint256.Int
+	var s uint256.Int
+	w.SetBytes(input[32:64])
+	r.SetBytes(input[64:96])
+	s.SetBytes(input[96:128])
+	if w.LtUint64(27) || w.GtUint64(28) {
+		return nil, nil
+	}
+	v := byte(w.Uint64() - 27)
 
 	// tighter sig s values input homestead only apply to txn sigs
-	if !allZero(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
+	if !crypto.TransactionSignatureIsValid(v, &r, &s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
