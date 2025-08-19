@@ -489,9 +489,12 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	}
 
 	header := getData(input, 0, 3*32)
-	baseLen256 := new(uint256.Int).SetBytes32(header[0:32])
-	expLen256 := new(uint256.Int).SetBytes32(header[32:64])
-	modLen256 := new(uint256.Int).SetBytes32(header[64:96])
+	var baseLen256 uint256.Int
+	var expLen256 uint256.Int
+	var modLen256 uint256.Int
+	baseLen256.SetBytes32(header[0:32])
+	expLen256.SetBytes32(header[32:64])
+	modLen256.SetBytes32(header[64:96])
 	lenLimit := uint64(math.MaxUint32)
 
 	// If base or mod is bigger than uint32, the gas cost will be huge.
