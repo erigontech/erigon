@@ -3,6 +3,8 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"go/format"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"gopkg.in/yaml.v3"
@@ -43,7 +45,18 @@ func GenerateSchemaVersions(yamlPath, outPath string) error {
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(outPath, buf.Bytes(), 0o644)
+
+	return writeGoFile(outPath, buf.Bytes())
+}
+
+func writeGoFile(path string, src []byte) error {
+	formatted, err := format.Source(src)
+	if err != nil {
+		// at least keep original if format failing
+		log.Warn("failed to format generated code", "err", err)
+		return os.WriteFile(path, src, 0644)
+	}
+	return os.WriteFile(path, formatted, 0644)
 }
 
 /* ---------- Helpers ---------- */

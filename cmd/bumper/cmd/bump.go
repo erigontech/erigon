@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/db/state"
 	"github.com/spf13/cobra"
 
