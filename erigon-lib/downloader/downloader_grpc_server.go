@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -29,6 +28,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -102,29 +102,39 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 	return &emptypb.Empty{}, nil
 }
 
-// Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (*emptypb.Empty, error) {
-	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
+	{
+		var names []string
+		for _, relPath := range request.Paths {
+			if filepath.IsAbs(relPath) {
+				return nil, fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %s, please use filepath.Rel(dirs.Snap, filePath)", relPath)
+			}
+			names = append(names, relPath)
+		}
+		s.d.logger.Debug("[snapshots] Downloader.Delete", "files", names)
+	}
+
 	torrents := s.d.torrentClient.Torrents()
 	for _, name := range request.Paths {
 		if name == "" {
-			return nil, errors.New("field 'path' is required")
+			log.Warn("[snapshots] empty torrent", "name", name, "stack", dbg.Stack())
+			continue
 		}
+
+	InnerLoop:
 		for _, t := range torrents {
 			select {
 			case <-t.GotInfo():
-				continue
 			default:
+				continue
 			}
 			if t.Name() == name {
 				t.Drop()
-				break
+				break InnerLoop
 			}
 		}
 
-		fPath := filepath.Join(s.d.SnapDir(), name)
-		_ = dir.RemoveFile(fPath)
-		s.d.torrentFS.Delete(name)
+		_ = s.d.torrentFS.Delete(name)
 	}
 	return &emptypb.Empty{}, nil
 }
