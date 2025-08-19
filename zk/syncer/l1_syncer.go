@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	batchWorkers = 2
+	batchWorkers = 4
 )
 
 var errorShortResponseLT32 = fmt.Errorf("response too short to contain hash data")
@@ -99,9 +99,9 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
-		logsChan:            make(chan []ethTypes.Log),
-		logsChanProgress:    make(chan string),
-		doneChan:            make(chan struct{}, 10),
+		logsChan:            make(chan []ethTypes.Log, 10),
+		logsChanProgress:    make(chan string, 1),
+		doneChan:            make(chan struct{}, 1),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
 		headersCache:        sync.Map{},
@@ -167,7 +167,6 @@ func (s *L1Syncer) GetDoneChan() <-chan struct{} {
 }
 
 func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
-	log.Info("RunQueryBlocks", "lastCheckedBlock", lastCheckedBlock)
 	//if already started, don't start another thread
 	if s.isSyncStarted.Load() {
 		log.Info("L1 syncer already started, skipping")
@@ -193,7 +192,6 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 
 		for {
 			if s.flagStop.Load() {
-				log.Info("L1 syncer flagStop is set, stopping the thread")
 				return
 			}
 
@@ -202,7 +200,6 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 				log.Error("Error getting latest L1 block", "err", err)
 			} else {
 				if latestL1Block > s.lastCheckedL1Block.Load() {
-					log.Info("L1 syncer is downloading: true")
 					s.isDownloading.Store(true)
 					if err := s.queryBlocks(); err != nil {
 						log.Error("Error querying blocks", "err", err)
@@ -212,10 +209,7 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 				}
 			}
 
-			log.Info("L1 syncer is downloading: false")
 			s.isDownloading.Store(false)
-
-			log.Info("Writing to doneChan to signal completion of L1 syncer")
 			s.doneChan <- struct{}{}
 			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
@@ -379,7 +373,7 @@ func (s *L1Syncer) queryBlocks() error {
 	log.Info("GetHighestSequence", "startBlock", startBlock)
 
 	// define the blocks we're going to fetch up front
-	fetches := make([]fetchJob, 0)
+	fetches := make([]fetchJob, 0, (s.latestL1Block-startBlock)/s.blockRange+1)
 	low := startBlock
 	for {
 		high := low + s.blockRange
@@ -436,7 +430,6 @@ loop:
 			complete++
 			if res.Error != nil {
 				err = res.Error
-				log.Info("============ Error in L1 syncer job result, breaking loop ======", "err", err)
 				break loop
 			}
 			progress += res.Size
@@ -445,7 +438,6 @@ loop:
 			}
 
 			if complete == len(fetches) {
-				log.Info("All fetch jobs completed", "progress", progress, "aimingFor", aimingFor)
 				// we've got all the results we need
 				break loop
 			}

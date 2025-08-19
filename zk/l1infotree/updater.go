@@ -317,7 +317,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 				}
 				receivedAnyLogs = true
 				lastActivity = time.Now()
-				log.Info(fmt.Sprintf("[%s] Received %d logs", logPrefix, len(logs)))
 				allLogs = append(allLogs, logs...)
 				for _, lg := range logs {
 					workerPool.AddTask(NewL1InfoTask(lg, u.syncer))
@@ -428,7 +427,6 @@ drain:
 
 	var tree *L1InfoTree
 	if len(allLogs) > 0 {
-		log.Info(fmt.Sprintf("[%s] Checking for L1 info tree updates, logs count: %v", logPrefix, len(allLogs)), "len(indexUpdateMap)", len(indexUpdateMap))
 		tree, err = InitialiseL1InfoTree(hermezDb)
 		if err != nil {
 			return 0, fmt.Errorf("InitialiseL1InfoTree: %w", err)
@@ -505,10 +503,6 @@ drain:
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
-	if tree != nil {
-		log.Info(fmt.Sprintf("[%s] L1 Info Tree updates processed", logPrefix), "count", processed, "latestIndex", u.latestUpdate.Index, "latestRoot", tree.currentRoot)
-	}
-
 	return processed, nil
 }
 
@@ -548,7 +542,8 @@ func (u *Updater) HandleL1InfoTreeUpdate(hermezDb *hermez_db.HermezDb, tree *L1I
 }
 
 func (u *Updater) RollbackL1InfoTree(hermezDb *hermez_db.HermezDb, tx kv.RwTx) error {
-	log.Info("Rolling back L1 Info Tree", "progress", u.progress)
+	log.Debug("Rolling back L1 Info Tree", "progress", u.progress)
+
 	// unexpected confirmedIndex means we missed a leaf somewhere so we need to rollback our data and start re-syncing
 	confirmedIndex, confirmedL1BlockNumber, err := hermezDb.GetConfirmedL1InfoTreeUpdate()
 	if err != nil {
@@ -604,7 +599,7 @@ func (u *Updater) RollbackL1InfoTree(hermezDb *hermez_db.HermezDb, tx kv.RwTx) e
 		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
-	log.Info("L1 Info Tree rollback complete", "progress", u.progress, "confirmedIndex", confirmedIndex, "confirmedL1BlockNumber", confirmedL1BlockNumber)
+	log.Debug("L1 Info Tree rollback complete", "progress", u.progress, "confirmedIndex", confirmedIndex, "confirmedL1BlockNumber", confirmedL1BlockNumber)
 
 	return nil
 }
