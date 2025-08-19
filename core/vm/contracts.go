@@ -565,7 +565,6 @@ var (
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	// TODO: This can be done without any allocation.
 	header := getData(input, 0, 3*32)
-
 	baseLen256 := new(uint256.Int).SetBytes32(header[0:32])
 	expLen256 := new(uint256.Int).SetBytes32(header[32:64])
 	modLen256 := new(uint256.Int).SetBytes32(header[64:96])
