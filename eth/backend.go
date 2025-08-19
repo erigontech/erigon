@@ -536,7 +536,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
 			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
-			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
+			sentryClient, err := direct.NewSentryClientDirect(protocol, server, stack.Config().P2P.EnableWitProtocol)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create sentry client: %w", err)
+			}
+			sentries = append(sentries, sentryClient)
 		}
 
 		go func() {

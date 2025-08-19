@@ -32,13 +32,35 @@ import (
 )
 
 const (
-	ETH65 = 65
-	ETH66 = 66
 	ETH67 = 67
 	ETH68 = 68
 
 	WIT0 = 1
 )
+
+// protocolToUint converts sentryproto.Protocol enum to eth p2p protocol version
+func protocolToUint(proto sentryproto.Protocol) uint {
+	switch proto {
+	case sentryproto.Protocol_ETH67:
+		return ETH67
+	case sentryproto.Protocol_ETH68:
+		return ETH68
+	default:
+		return 0 // ok to return since constructor errors out if protocol is not found
+	}
+}
+
+// uintToProtocol converts eth p2p protocol version to sentryproto.Protocol enum
+func uintToProtocol(version uint) (sentryproto.Protocol, error) {
+	switch version {
+	case ETH67:
+		return sentryproto.Protocol_ETH67, nil
+	case ETH68:
+		return sentryproto.Protocol_ETH68, nil
+	default:
+		return 0, fmt.Errorf("unsupported protocol version: %d", version)
+	}
+}
 
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient
 type SentryClient interface {
@@ -69,7 +91,7 @@ func NewSentryClientRemote(client sentryproto.SentryClient) *SentryClientRemote 
 func (c *SentryClientRemote) Protocol() uint {
 	c.RLock()
 	defer c.RUnlock()
-	return ETH65 + uint(c.protocol)
+	return protocolToUint(c.protocol)
 }
 
 func (c *SentryClientRemote) Ready() bool {
@@ -95,7 +117,6 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
 		c.protocol = reply.Protocol
 		c.sideProtocols = nil // Reset side protocols
-		// Only add WIT0 if it's supported in the reply
 		if reply.SideProtocols != nil {
 			for _, s := range reply.SideProtocols {
 				if s == sentryproto.Protocol_WIT0 {
@@ -143,23 +164,23 @@ type SentryClientDirect struct {
 	sideProtocols []sentryproto.Protocol
 }
 
-func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer) *SentryClientDirect {
-	return NewSentryClientDirectWithSideProtocols(protocol, sentryServer, true)
-}
-
-func NewSentryClientDirectWithSideProtocols(protocol uint, sentryServer sentryproto.SentryServer, enableWitness bool) *SentryClientDirect {
+func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer, enableWitness bool) (*SentryClientDirect, error) {
+	protocolEnum, err := uintToProtocol(protocol)
+	if err != nil {
+		return nil, err
+	}
 	client := &SentryClientDirect{
 		server:   sentryServer,
-		protocol: sentryproto.Protocol(protocol - ETH65),
+		protocol: protocolEnum,
 	}
 	if enableWitness {
 		client.sideProtocols = []sentryproto.Protocol{sentryproto.Protocol_WIT0}
 	}
-	return client
+	return client, nil
 }
 
 func (c *SentryClientDirect) Protocol() uint {
-	return uint(c.protocol) + ETH65
+	return protocolToUint(c.protocol)
 }
 func (c *SentryClientDirect) Ready() bool       { return true }
 func (c *SentryClientDirect) MarkDisconnected() {}
