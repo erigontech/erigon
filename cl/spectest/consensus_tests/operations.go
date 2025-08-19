@@ -406,7 +406,7 @@ func operationConsolidationRequestHandler(t *testing.T, root fs.FS, c spectest.T
 	return nil
 }
 
-func operationDepositRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+func operationDepositRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
 	require.NoError(t, err)
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
@@ -437,7 +437,7 @@ func operationDepositRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	return nil
 }
 
-func operationWithdrawalRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+func operationWithdrawalRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
 	require.NoError(t, err)
 	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
