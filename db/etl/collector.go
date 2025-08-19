@@ -176,7 +176,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	}
 
 	bucket := toBucket
-
 	var cursor kv.RwCursor
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
 	var lastKey []byte
@@ -250,6 +249,12 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
+	co, err := db.Count(toBucket)
+	if err != nil {
+		return err
+	}
+	c.logger.Info("[dbg_collector]", "toBucket", toBucket, "count", co)
+
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
 	return nil
 }
