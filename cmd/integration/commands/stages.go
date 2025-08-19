@@ -403,6 +403,15 @@ var cmdRunMigrations = &cobra.Command{
 				dbPaths[kv.ConsensusDB] = consensus
 			}
 		}
+		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
+		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
+		if exists, err := dir.Exist(heimdall); err == nil && exists {
+			dbPaths[kv.HeimdallDB] = heimdall
+		}
+		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
+		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
+			dbPaths[kv.PolygonBridgeDB] = polygonBridge
+		}
 		for dbLabel, dbPath := range dbPaths {
 			//non-accede and exclusive mode - to apply create new tables if need.
 			cfg := dbCfg(dbLabel, dbPath).RemoveFlags(mdbx.Accede).Exclusive(true)
