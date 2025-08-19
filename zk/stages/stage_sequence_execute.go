@@ -507,7 +507,7 @@ func sequencingBatchStep(
 
 				txSender, ok := transaction.GetSender()
 				if !ok {
-					signer := types.MakeSigner(cfg.chainConfig, executionAt, 0)
+					signer := types.MakeSigner(cfg.chainConfig, executionAt, header.Time)
 					sender, err := signer.Sender(transaction)
 					if err != nil {
 						log.Warn("[extractTransaction] Failed to recover sender from transaction, skipping and removing from pool",
