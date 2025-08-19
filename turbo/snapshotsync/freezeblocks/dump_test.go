@@ -256,7 +256,7 @@ func TestDump(t *testing.T) {
 
 			logger := log.New()
 
-			tmpDir, snapDir := t.TempDir(), t.TempDir()
+			tmpDir, snapDir := m.Dirs.Tmp, m.Dirs.Snap
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
