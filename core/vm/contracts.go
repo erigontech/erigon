@@ -319,19 +319,16 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	// but for ecrecover we want (r, s, v)
 	// where w = v + 27, v ∈ {0, 1}
 
-	var w uint256.Int
-	var r uint256.Int
-	var s uint256.Int
-	w.SetBytes(input[32:64])
-	r.SetBytes(input[64:96])
-	s.SetBytes(input[96:128])
+	w := new(uint256.Int).SetBytes(input[32:64])
+	r := new(uint256.Int).SetBytes(input[64:96])
+	s := new(uint256.Int).SetBytes(input[96:128])
 	if w.LtUint64(27) || w.GtUint64(28) {
 		return nil, nil
 	}
 	v := byte(w.Uint64() - 27)
 
 	// tighter sig s values input homestead only apply to txn sigs
-	if !crypto.TransactionSignatureIsValid(v, &r, &s, true /* allowPreEip2s */) {
+	if !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
@@ -566,16 +563,12 @@ var (
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
-	var baseLen256 uint256.Int
-	var expLen256 uint256.Int
-	var modLen256 uint256.Int
-
 	// TODO: This can be done without any allocation.
 	header := getData(input, 0, 3*32)
 
-	baseLen256.SetBytes32(header[0:32])
-	expLen256.SetBytes32(header[32:64])
-	modLen256.SetBytes32(header[64:96])
+	baseLen256 := new(uint256.Int).SetBytes32(header[0:32])
+	expLen256 := new(uint256.Int).SetBytes32(header[32:64])
+	modLen256 := new(uint256.Int).SetBytes32(header[64:96])
 
 	if c.osaka {
 		// EIP-7823: Set upper bounds for MODEXP
