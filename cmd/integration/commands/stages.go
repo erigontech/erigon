@@ -218,7 +218,7 @@ var cmdStageCustomTrace = &cobra.Command{
 	},
 }
 
-var cmdStagePatriciaTrie = &cobra.Command{
+var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "commitment_rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -230,7 +230,7 @@ var cmdStagePatriciaTrie = &cobra.Command{
 		}
 		defer db.Close()
 
-		if err := stagePatriciaTrie(db, cmd.Context(), logger); err != nil {
+		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -488,17 +488,18 @@ func init() {
 	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
-	withConfig(cmdStagePatriciaTrie)
-	withDataDir(cmdStagePatriciaTrie)
-	withReset(cmdStagePatriciaTrie)
-	withBlock(cmdStagePatriciaTrie)
-	withUnwind(cmdStagePatriciaTrie)
-	withPruneTo(cmdStagePatriciaTrie)
-	withIntegrityChecks(cmdStagePatriciaTrie)
-	withChain(cmdStagePatriciaTrie)
-	withHeimdall(cmdStagePatriciaTrie)
-	withChaosMonkey(cmdStagePatriciaTrie)
-	rootCmd.AddCommand(cmdStagePatriciaTrie)
+	withConfig(cmdCommitmentRebuild)
+	withDataDir(cmdCommitmentRebuild)
+	withReset(cmdCommitmentRebuild)
+	withSqueeze(cmdCommitmentRebuild)
+	withBlock(cmdCommitmentRebuild)
+	withUnwind(cmdCommitmentRebuild)
+	withPruneTo(cmdCommitmentRebuild)
+	withIntegrityChecks(cmdCommitmentRebuild)
+	withChain(cmdCommitmentRebuild)
+	withHeimdall(cmdCommitmentRebuild)
+	withChaosMonkey(cmdCommitmentRebuild)
+	rootCmd.AddCommand(cmdCommitmentRebuild)
 
 	withConfig(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
@@ -978,7 +979,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	return nil
 }
 
-func stagePatriciaTrie(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return reset2.Reset(ctx, db, stages.Execution)
@@ -995,7 +996,7 @@ func stagePatriciaTrie(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg); err != nil {
+	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
 		return err
 	}
 	return nil
