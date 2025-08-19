@@ -605,15 +605,15 @@ func (sd *SharedDomains) LogMetrics() []any {
 	defer sd.metrics.RUnlock()
 
 	if readCount := sd.metrics.cacheReadCount; readCount > 0 {
-		metrics = append(metrics, "cache", readCount, "cdur", sd.metrics.cacheReadDuration/time.Duration(readCount))
+		metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(sd.metrics.cacheReadDuration/time.Duration(readCount), 0))
 	}
 
 	if readCount := sd.metrics.dbReadCount; readCount > 0 {
-		metrics = append(metrics, "db", readCount, "dbdur", sd.metrics.dbReadDuration/time.Duration(readCount))
+		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.dbReadDuration/time.Duration(readCount), 0))
 	}
 
 	if readCount := sd.metrics.fileReadCount; readCount > 0 {
-		metrics = append(metrics, "files", readCount, "fdur", sd.metrics.dbReadDuration/time.Duration(readCount))
+		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.dbReadDuration/time.Duration(readCount), 0))
 	}
 
 	return metrics
@@ -629,15 +629,15 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 		var metrics []any
 
 		if readCount := dm.cacheReadCount; readCount > 0 {
-			metrics = append(metrics, "cache", readCount, "cdur", dm.cacheReadDuration/time.Duration(readCount))
+			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(dm.cacheReadDuration/time.Duration(readCount), 0))
 		}
 
 		if readCount := dm.dbReadCount; readCount > 0 {
-			metrics = append(metrics, "db", readCount, "dbdur", dm.dbReadDuration/time.Duration(readCount))
+			metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(dm.dbReadDuration/time.Duration(readCount), 0))
 		}
 
 		if readCount := dm.fileReadCount; readCount > 0 {
-			metrics = append(metrics, "files", readCount, "fdur", dm.dbReadDuration/time.Duration(readCount))
+			metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(dm.dbReadDuration/time.Duration(readCount), 0))
 		}
 
 		if len(metrics) > 0 {
