@@ -220,7 +220,7 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) ReloadSalt() error {
+func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {
 		return err
@@ -311,6 +311,9 @@ func (a *Aggregator) DisableAllDependencies() {
 func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	if err := a.reloadSalt(); err != nil {
+		return err
+	}
 	if err := a.openFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -360,11 +363,8 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 }
 
 func (a *Aggregator) WaitForFiles() {
-	for {
-		select {
-		case <-a.WaitForBuildAndMerge(a.ctx):
-			return
-		}
+	for range a.WaitForBuildAndMerge(a.ctx) {
+		// The loop will exit when the channel is closed
 	}
 }
 

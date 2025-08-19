@@ -31,7 +31,7 @@ func (v VisibleFiles) String() string {
 	if len(v) == 0 {
 		return ""
 	}
-	var fileNames []string
+	fileNames := make([]string, 0, len(v))
 	for _, f := range v {
 		_, fname := filepath.Split(f.Fullpath())
 		fileNames = append(fileNames, fname)
