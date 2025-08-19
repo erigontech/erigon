@@ -179,29 +179,32 @@ func (s *Service) SynchronizeMilestones(ctx context.Context) (*Milestone, bool, 
 }
 
 func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
-	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
+    s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
 
-	lastSpan, ok, err := s.store.Spans().LastEntity(ctx)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return s.synchronizeSpans(ctx)
-	}
+    lastSpan, ok, err := s.store.Spans().LastEntity(ctx)
+    if err != nil {
+        return err
+    }
+    if !ok {
+        s.logger.Debug(heimdallLogPrefix("synchronizing because last span not found"), "blockNum", blockNum)
+        return s.synchronizeSpans(ctx)
+    }
 
-	lastProducerSelection, ok, err := s.store.SpanBlockProducerSelections().LastEntity(ctx)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return s.synchronizeSpans(ctx)
-	}
+    lastProducerSelection, ok, err := s.store.SpanBlockProducerSelections().LastEntity(ctx)
+    if err != nil {
+        return err
+    }
+    if !ok {
+        s.logger.Debug(heimdallLogPrefix("synchronizing because last producer selection not found"), "blockNum", blockNum)
+        return s.synchronizeSpans(ctx)
+    }
 
-	if lastSpan.EndBlock < blockNum || lastProducerSelection.EndBlock < blockNum {
-		return s.synchronizeSpans(ctx)
-	}
-
-	return nil
+    if lastSpan.EndBlock < blockNum || lastProducerSelection.EndBlock < blockNum {
+        s.logger.Debug(heimdallLogPrefix("synchronizing because last span or producer selection is behind"), "blockNum", blockNum, "lastSpan", lastSpan, "lastProducerSlection", lastProducerSelection)
+        return s.synchronizeSpans(ctx)
+    }
+    s.logger.Debug(heimdallLogPrefix("no need to synchronize"), "blockNum", blockNum, "lastSpan", lastSpan)
+    return nil
 }
 
 func (s *Service) synchronizeSpans(ctx context.Context) error {
