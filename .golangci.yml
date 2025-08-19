@@ -21,7 +21,6 @@ linters:
     - prealloc
     - reassign
     - spancheck
-    - unconvert
     - wastedassign
     - govet
   disable:
@@ -46,6 +45,7 @@ linters:
     - sqlclosecheck
     - zerologlint
     - rowserrcheck
+    - unconvert # This linter usually failing on CI. But benefits of this linter are very small - and auto-fixable.
   settings:
     goconst:
       min-len: 2

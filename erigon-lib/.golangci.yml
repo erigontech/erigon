@@ -28,7 +28,6 @@ linters:
     - reassign
     - spancheck
     - thelper
-    - unconvert
     - wastedassign
     - govet
   disable:
@@ -48,6 +47,7 @@ linters:
     - rowserrcheck
     - sqlclosecheck
     - zerologlint
+    - unconvert # This linter usually failing on CI. But benefits of this linter are very small - and auto-fixable.
   settings:
     goconst:
       min-len: 2
