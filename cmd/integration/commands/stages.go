@@ -1002,14 +1002,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 }
 
 func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	//dirs := datadir.New(datadirCli)
-	//if reset {
-	//	return reset2.Reset(ctx, db, stages.Execution)
-	//}
-	//
-	//br, _ := blocksIO(db, logger)
-	//cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
-
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -1042,6 +1034,12 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		}
 		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
+
+	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
+	if err != nil {
+		return fmt.Errorf("failed to check commitment: %w", err)
+	}
+	fmt.Printf("\n%s", str)
 
 	return nil
 }
