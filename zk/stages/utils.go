@@ -2,6 +2,7 @@ package stages
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,12 +12,15 @@ import (
 
 	"net/url"
 
+	"strconv"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv"
+	stages "github.com/erigontech/erigon/eth/stagedsync"
 	db2 "github.com/erigontech/erigon/smt/pkg/db"
 	jsonClient "github.com/erigontech/erigon/zkevm/jsonrpc/client"
 	jsonTypes "github.com/erigontech/erigon/zkevm/jsonrpc/types"
-	"strconv"
 )
 
 const (
@@ -189,4 +193,18 @@ func trimHexAndHandleUint64Result(res jsonTypes.Response) (uint64, error) {
 	}
 
 	return decoded, nil
+}
+
+func getExecutionAt(ctx context.Context, tx kv.Tx, db kv.RwDB, s *stages.StageState) (uint64, error) {
+	t := tx
+	if t == nil {
+		temp, err := db.BeginRw(ctx)
+		if err != nil {
+			return 0, err
+		}
+		defer temp.Rollback()
+		t = temp
+	}
+
+	return s.ExecutionAt(t)
 }

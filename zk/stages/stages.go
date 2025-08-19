@@ -3,9 +3,10 @@ package stages
 import (
 	"context"
 	"fmt"
+	"math/big"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"math/big"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -409,12 +410,20 @@ func DefaultZkStages(
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    false,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if chainCfg.IsPmtEnabled(s.BlockNumber) {
+				// we need to check where we will be processing the intermediate hashes "to" in order to determine if we should use the SMT or PMT
+				// the current stage height doesn't reveal this detail.  We don't know where we will be in the stage loop at this
+				// point so we need to check for and open a short lived connection to support this lookup
+				executionAt, err := getExecutionAt(ctx, txc.Tx, zkInterHashesCfg.db, s)
+				if err != nil {
+					return err
+				}
+
+				if chainCfg.IsPmtEnabled(executionAt) {
 					_, err := stages.SpawnIntermediateHashesStage(s, u, txc.Tx, trieConfigRPC(zkInterHashesCfg), ctx, logger)
 					return err
 				}
 
-				_, err := SpawnZkIntermediateHashesStage(s, u, txc.Tx, zkInterHashesCfg, ctx)
+				_, err = SpawnZkIntermediateHashesStage(s, u, txc.Tx, zkInterHashesCfg, ctx)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
