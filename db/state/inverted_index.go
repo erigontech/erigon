@@ -92,8 +92,7 @@ type iiCfg struct {
 	Compression   seg.FileCompression // compression type for inverted index keys and values
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
-	Accessors  Accessors
-	standalone bool
+	Accessors Accessors
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -364,7 +363,7 @@ type InvertedIndexBufferedWriter struct {
 	stepSize   uint64
 	txNumBytes [8]byte
 	name       kv.InvertedIdx
-	standalone bool
+	noValues   bool
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -387,7 +386,7 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if w.standalone {
+	if w.noValues {
 		return w.index.Collect(indexKey, w.txNumBytes[:])
 	}
 
@@ -399,7 +398,7 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 		return nil
 	}
 
-	if w.standalone {
+	if w.noValues {
 		if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
@@ -438,10 +437,10 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 		indexTable:     iit.ii.valuesTable,
 
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys:  etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
-		standalone: iit.ii.standalone,
+		indexKeys: etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
+		noValues:  iit.ii.valuesTable == "",
 	}
-	if w.standalone {
+	if w.noValues {
 		w.index = etl.NewCollectorWithAllocator(iit.ii.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace)
 		w.index.SortAndFlushInBackground(true)
 	}

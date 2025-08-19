@@ -49,11 +49,11 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
-	indexTable := "Index"
+	//indexTable := "Index"
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
+			keysTable: kv.TableCfgItem{Flags: kv.DupSort},
+			//		indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
 			kv.TblPruningProgress: kv.TableCfgItem{},
 		}
 	}).MustOpen()
@@ -62,10 +62,9 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	cfg := iiCfg{
 		salt: new(atomic.Pointer[uint32]),
 		dirs: dirs, filenameBase: "inv",
-		keysTable:   keysTable,
-		valuesTable: indexTable,
-		version:     IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart},
-		standalone:  true,
+		keysTable: keysTable,
+		//valuesTable: indexTable,
+		version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart},
 	}
 	cfg.salt.Store(&salt)
 	cfg.Accessors = AccessorHashMap
