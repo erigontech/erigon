@@ -2642,6 +2642,21 @@ func HexTrieExtractStateRoot(enc []byte) ([]byte, error) {
 	return root.hash[:], nil
 }
 
+func HexTrieStateToShortString(enc []byte) (string, error) {
+	if len(enc) < 18 {
+		return "", fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)
+	}
+	txn := binary.BigEndian.Uint64(enc)
+	bn := binary.BigEndian.Uint64(enc[8:])
+	sl := binary.BigEndian.Uint16(enc[16:18])
+
+	var s state
+	if err := s.Decode(enc[18 : 18+sl]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", bn, txn, s.Root), nil
+}
+
 func HexTrieStateToString(enc []byte) (string, error) {
 	if len(enc) < 18 {
 		return "", fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)
