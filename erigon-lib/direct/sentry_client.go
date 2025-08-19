@@ -51,8 +51,9 @@ type SentryClient interface {
 type SentryClientRemote struct {
 	sentryproto.SentryClient
 	sync.RWMutex
-	protocol sentryproto.Protocol
-	ready    bool
+	protocol      sentryproto.Protocol
+	sideProtocols []sentryproto.Protocol
+	ready         bool
 }
 
 var _ SentryClient = (*SentryClientRemote)(nil) // compile-time interface check
@@ -93,6 +94,16 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	switch reply.Protocol {
 	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
 		c.protocol = reply.Protocol
+		c.sideProtocols = nil // Reset side protocols
+		// Only add WIT0 if it's supported in the reply
+		if reply.SideProtocols != nil {
+			for _, s := range reply.SideProtocols {
+				if s == sentryproto.Protocol_WIT0 {
+					c.sideProtocols = append(c.sideProtocols, sentryproto.Protocol_WIT0)
+					break
+				}
+			}
+		}
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
@@ -104,8 +115,12 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentryproto.Stat
 }
 
 func (c *SentryClientRemote) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
+	c.RLock()
+	allProtocols := append([]sentryproto.Protocol{c.protocol}, c.sideProtocols...)
+	c.RUnlock()
+
 	in = &sentryproto.MessagesRequest{
-		Ids: filterIds(in.Ids, c.protocol),
+		Ids: filterIds(in.Ids, allProtocols),
 	}
 	return c.SentryClient.Messages(ctx, in, opts...)
 }
@@ -123,15 +138,29 @@ func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentryproto.Peer
 // SentryClientDirect implements SentryClient interface by connecting the instance of the client directly with the corresponding
 // instance of SentryServer
 type SentryClientDirect struct {
-	server   sentryproto.SentryServer
-	protocol sentryproto.Protocol
+	server        sentryproto.SentryServer
+	protocol      sentryproto.Protocol
+	sideProtocols []sentryproto.Protocol
 }
 
 func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer) *SentryClientDirect {
-	return &SentryClientDirect{protocol: sentryproto.Protocol(protocol - ETH65), server: sentryServer}
+	return NewSentryClientDirectWithSideProtocols(protocol, sentryServer, true)
 }
 
-func (c *SentryClientDirect) Protocol() uint    { return uint(c.protocol) + ETH65 }
+func NewSentryClientDirectWithSideProtocols(protocol uint, sentryServer sentryproto.SentryServer, enableWitness bool) *SentryClientDirect {
+	client := &SentryClientDirect{
+		server:   sentryServer,
+		protocol: sentryproto.Protocol(protocol - ETH65),
+	}
+	if enableWitness {
+		client.sideProtocols = []sentryproto.Protocol{sentryproto.Protocol_WIT0}
+	}
+	return client
+}
+
+func (c *SentryClientDirect) Protocol() uint {
+	return uint(c.protocol) + ETH65
+}
 func (c *SentryClientDirect) Ready() bool       { return true }
 func (c *SentryClientDirect) MarkDisconnected() {}
 
@@ -182,8 +211,9 @@ func (c *SentryClientDirect) PeerById(ctx context.Context, in *sentryproto.PeerB
 // -- start Messages
 
 func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
+	allProtocols := append([]sentryproto.Protocol{c.protocol}, c.sideProtocols...)
 	in = &sentryproto.MessagesRequest{
-		Ids: filterIds(in.Ids, c.protocol),
+		Ids: filterIds(in.Ids, allProtocols),
 	}
 	ch := make(chan *inboundMessageReply, 16384)
 	streamServer := &SentryMessagesStreamS{ch: ch, ctx: ctx}
@@ -325,14 +355,13 @@ func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, op
 	return c.server.NodeInfo(ctx, in)
 }
 
-func filterIds(in []sentryproto.MessageId, protocol sentryproto.Protocol) (filtered []sentryproto.MessageId) {
+func filterIds(in []sentryproto.MessageId, protocols []sentryproto.Protocol) (filtered []sentryproto.MessageId) {
 	for _, id := range in {
-		if _, ok := libsentry.ProtoIds[protocol][id]; ok {
-			filtered = append(filtered, id)
-		} else if _, ok := libsentry.ProtoIds[sentryproto.Protocol_WIT0][id]; ok {
-			// Allow witness messages through ETH protocol clients
-			filtered = append(filtered, id)
-		} else {
+		for _, protocol := range protocols {
+			if _, ok := libsentry.ProtoIds[protocol][id]; ok {
+				filtered = append(filtered, id)
+				break
+			}
 		}
 	}
 	return filtered
