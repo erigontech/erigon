@@ -558,39 +558,39 @@ var (
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
+	var baseLen256 uint256.Int
+	var expLen256 uint256.Int
+	var modLen256 uint256.Int
+
 	// TODO: This can be done without any allocation.
 	header := getData(input, 0, 3*32)
-	var (
-		baseLen = binary.BigEndian.Uint64(header[32-8 : 32])
-		expLen  = binary.BigEndian.Uint64(header[64-8 : 64])
-		modLen  = binary.BigEndian.Uint64(header[96-8 : 96])
 
-		// 32 - 8 bytes are truncated in the Uint64 conversion above
-		baseLenHighBitsAreZero = allZero(header[0 : 32-8])
-		expLenHighBitsAreZero  = allZero(header[32 : 64-8])
-		modLenHighBitsAreZero  = allZero(header[64 : 96-8])
-	)
+	baseLen256.SetBytes32(header[0:32])
+	expLen256.SetBytes32(header[32:64])
+	modLen256.SetBytes32(header[64:96])
+
 	if c.osaka {
 		// EIP-7823: Set upper bounds for MODEXP
-		if !baseLenHighBitsAreZero || baseLen > 1024 {
+		if baseLen256.GtUint64(1024) {
 			return nil, errModExpBaseLengthTooLarge
 		}
-		if !expLenHighBitsAreZero || expLen > 1024 {
+		if expLen256.GtUint64(1024) {
 			return nil, errModExpExponentLengthTooLarge
 		}
-		if !modLenHighBitsAreZero || modLen > 1024 {
+		if modLen256.GtUint64(1024) {
 			return nil, errModExpModulusLengthTooLarge
 		}
 	}
 
 	// Handle a special case when mod length is zero
-	if modLen == 0 && modLenHighBitsAreZero {
+	if modLen256.IsZero() {
 		return []byte{}, nil
 	}
 
-	if !baseLenHighBitsAreZero || !expLenHighBitsAreZero || !modLenHighBitsAreZero {
-		return nil, ErrOutOfGas
-	}
+	// The conversion doesn't overflow because the gas would be too high otherwise
+	baseLen := baseLen256.Uint64()
+	expLen := expLen256.Uint64()
+	modLen := modLen256.Uint64()
 
 	if len(input) > 96 {
 		input = input[96:]
