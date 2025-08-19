@@ -8,7 +8,6 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"gopkg.in/yaml.v3"
-	"math"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -17,8 +16,8 @@ import (
 /* ---------- YAML ---------- */
 
 type pair struct {
-	Current float64 `yaml:"current"`
-	Min     float64 `yaml:"min"`
+	Current Version `yaml:"current"`
+	Min     Version `yaml:"min"`
 }
 
 type domainSection map[string]pair        // kv, bt, …
@@ -61,10 +60,8 @@ func writeGoFile(path string, src []byte) error {
 
 /* ---------- Helpers ---------- */
 
-func versLit(f float64) string {
-	maj := int(f)
-	min := int(math.Round((f - float64(maj)) * 10))
-	return fmt.Sprintf("version.Version{%d, %d}", maj, min)
+func versLit(v Version) string {
+	return fmt.Sprintf("version.Version{%d, %d}", v.Major, v.Minor)
 }
 
 func goStruct(dom string) string {

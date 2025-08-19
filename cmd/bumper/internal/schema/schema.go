@@ -1,27 +1,24 @@
 package schema
 
 import (
-	"fmt"
-	"math"
+	"github.com/erigontech/erigon/db/snaptype"
+	"gopkg.in/yaml.v3"
 	"os"
 	"sort"
-
-	"gopkg.in/yaml.v3"
 )
 
 type TwoVers struct {
-	Current float64 `yaml:"current"`
-	Min     float64 `yaml:"min"`
+	Current snaptype.Version `yaml:"current"`
+	Min     snaptype.Version `yaml:"min"`
 }
 
-// Force "1.0" style floats.
 func (v TwoVers) MarshalYAML() (any, error) {
 	n := &yaml.Node{Kind: yaml.MappingNode}
 	n.Content = []*yaml.Node{
 		{Kind: yaml.ScalarNode, Value: "current"},
-		{Kind: yaml.ScalarNode, Tag: "!!float", Value: fmt.Sprintf("%.1f", Round1(v.Current))},
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: v.Current.String()},
 		{Kind: yaml.ScalarNode, Value: "min"},
-		{Kind: yaml.ScalarNode, Tag: "!!float", Value: fmt.Sprintf("%.1f", Round1(v.Min))},
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: v.Min.String()},
 	}
 	return n, nil
 }
@@ -68,5 +65,3 @@ func Cats(s Schema) []string {
 	sort.Strings(cs)
 	return cs
 }
-
-func Round1(x float64) float64 { return math.Round(x*10) / 10 }

@@ -2,9 +2,9 @@ package tui
 
 import (
 	"errors"
+	"github.com/erigontech/erigon/db/version"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -29,6 +29,11 @@ type col int
 const (
 	cCurrent col = iota
 	cMin
+)
+
+const (
+	major = "major"
+	minor = "minor"
 )
 
 type rowRef struct {
@@ -149,12 +154,12 @@ func (m *model) rebuildRight() {
 	for _, it := range list {
 		v := m.get(name, it.part, it.key)
 		st := "ok"
-		if v.Min > v.Current {
+		if v.Min.Greater(v.Current) {
 			st = "min>cur"
 		}
 		trows = append(trows, table.Row{
 			it.part, it.key,
-			fmt1(v.Current), fmt1(v.Min), st,
+			v.Current.String(), v.Min.String(), st,
 		})
 		m.rows = append(m.rows, rowRef{cat: name, part: it.part, key: it.key})
 	}
@@ -165,10 +170,10 @@ func (m *model) refreshRight() {
 	rows := m.right.Rows()
 	for i, r := range m.rows {
 		v := m.get(r.cat, r.part, r.key)
-		rows[i][2] = fmt1(v.Current)
-		rows[i][3] = fmt1(v.Min)
+		rows[i][2] = v.Current.String()
+		rows[i][3] = v.Min.String()
 		st := "ok"
-		if v.Min > v.Current {
+		if v.Min.Greater(v.Current) {
 			st = "min>cur"
 		}
 		rows[i][4] = st
@@ -207,8 +212,6 @@ func (m *model) set(cat, part, key string, fn func(*schema.TwoVers)) {
 	}
 	m.cur[cat] = c
 }
-
-func fmt1(f float64) string { return strconv.FormatFloat(schema.Round1(f), 'f', 1, 64) }
 
 func (m *model) updateStatus() {
 	base := filepath.Base(m.file)
@@ -259,8 +262,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch k {
 			case "enter":
 				txt := strings.TrimSpace(m.editor.Value())
-				val, err := strconv.ParseFloat(strings.ReplaceAll(txt, ",", "."), 64)
-				if err != nil || val < 0 {
+				ver, err := version.ParseVersion(strings.ReplaceAll(txt, ",", "."))
+				if err != nil {
 					m.err = errors.New("bad number")
 					return m, nil
 				}
@@ -268,9 +271,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if r >= 0 && r < len(m.rows) {
 					row := m.rows[r]
 					if m.edit == cCurrent {
-						m.set(row.cat, row.part, row.key, func(v *schema.TwoVers) { v.Current = schema.Round1(val) })
+						m.set(row.cat, row.part, row.key, func(v *schema.TwoVers) { v.Current = ver })
 					} else {
-						m.set(row.cat, row.part, row.key, func(v *schema.TwoVers) { v.Min = schema.Round1(val) })
+						m.set(row.cat, row.part, row.key, func(v *schema.TwoVers) { v.Min = ver })
 					}
 				}
 				m.refreshRight()
@@ -344,10 +347,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.beginEdit()
 			return m, nil
 		case ".":
-			m.bump(0.1)
+			m.bump(minor)
 			return m, nil
 		case "M":
-			m.bump(1.0)
+			m.bump(major)
 			return m, nil
 		}
 	}
@@ -361,9 +364,9 @@ func (m *model) beginEdit() {
 	}
 	row := m.rows[r]
 	v := m.get(row.cat, row.part, row.key)
-	cur := fmt1(v.Current)
+	cur := v.Current.String()
 	if m.edit == cMin {
-		cur = fmt1(v.Min)
+		cur = v.Min.String()
 	}
 	m.editor.SetValue(cur)
 	m.editor.CursorEnd()
@@ -421,12 +424,17 @@ func (m *model) View() string {
 	return body
 }
 
-func (m *model) bump(d float64) {
+func (m *model) bump(mode string) {
 	r := m.right.Cursor()
 	if r >= 0 && r < len(m.rows) {
 		row := m.rows[r]
 		m.set(row.cat, row.part, row.key, func(v *schema.TwoVers) {
-			v.Current = schema.Round1(v.Current + d)
+			switch mode {
+			case minor:
+				v.Current = v.Current.BumpMinor()
+			case major:
+				v.Current = v.Current.BumpMajor()
+			}
 		})
 		m.refreshRight()
 	}
@@ -479,7 +487,7 @@ func eqGroup(x, y schema.Group) bool {
 		if !ok {
 			return false
 		}
-		if fmt1(vx.Current) != fmt1(vy.Current) || fmt1(vx.Min) != fmt1(vy.Min) {
+		if !vx.Current.Eq(vy.Current) || !vx.Min.Eq(vy.Min) {
 			return false
 		}
 	}
