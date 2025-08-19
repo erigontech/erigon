@@ -2,12 +2,13 @@ package blob_storage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
 	"sync"
+
+	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -16,12 +17,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/spf13/afero"
-)
-
-const (
-	// subdivisionSlot = 10_000
-	mutexSize = 64
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/data_column_storage_mock.go -package=mock_services . DataColumnStorage
@@ -52,6 +47,7 @@ func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clpara
 		beaconChainConfig: beaconChainConfig,
 		ethClock:          ethClock,
 		slotsKept:         slotsKept,
+		emitters:          emitters,
 	}
 	return impl
 }
@@ -101,9 +97,7 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 	defer s.lock.RUnlock()
 	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	fh, err := s.fs.Open(filepath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 	defer fh.Close()
