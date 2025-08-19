@@ -249,11 +249,15 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	co, err := db.Count(toBucket)
-	if err != nil {
-		return err
+	if db != nil {
+		co, err := db.Count(toBucket)
+		if err != nil {
+			return err
+		}
+		c.logger.Info("[dbg_collector]", "toBucket", toBucket, "count", co)
+	} else {
+		c.logger.Info("[dbg_collector]", "toBucket", toBucket, "db", "nil")
 	}
-	c.logger.Info("[dbg_collector]", "toBucket", toBucket, "count", co)
 
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
 	return nil
