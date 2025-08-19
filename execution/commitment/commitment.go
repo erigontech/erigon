@@ -1004,6 +1004,7 @@ func (t *Updates) initCollector() {
 			t.etl.Close()
 			t.etl = nil
 		}
+		t.totalKeys = 0
 		return
 	}
 
@@ -1011,10 +1012,11 @@ func (t *Updates) initCollector() {
 		t.etl.Close()
 		t.etl = nil
 	}
+	t.totalKeys = 0
+
 	//t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
-	t.totalKeys = 0
 }
 
 func (t *Updates) Mode() Mode { return t.mode }
@@ -1022,10 +1024,7 @@ func (t *Updates) Mode() Mode { return t.mode }
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
-		if t.etl != nil {
-			return uint64(t.totalKeys)
-		}
-		return 0
+		return uint64(t.totalKeys)
 	case ModeUpdate:
 		return uint64(t.tree.Len())
 	default:
@@ -1132,6 +1131,7 @@ func (t *Updates) Close() {
 	if t.etl != nil {
 		t.etl.Close()
 		t.etl = nil
+		t.initCollector() //TODO: rename .Close() to .Reset()?
 	}
 	if t.sortPerNibble {
 		for i := 0; i < len(t.nibbles); i++ {
