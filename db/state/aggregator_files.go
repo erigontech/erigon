@@ -117,6 +117,9 @@ func (mf MergedFilesV3) FilePaths(relative string) (fPaths []string) {
 	}
 
 	for _, ii := range mf.iis {
+		if ii == nil {
+			continue
+		}
 		fPaths = append(fPaths, ii.FilePaths(relative)...)
 	}
 	return fPaths
