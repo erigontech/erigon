@@ -507,9 +507,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 	if tx == nil {
 		return nil, 0, fmt.Errorf("sd.GetLatest: unexpected nil tx")
 	}
-	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k, tx)
-	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
@@ -632,8 +629,13 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 	return nil
 }
 
-func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
-func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+func toStringZeroCopy(v []byte) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return unsafe.String(&v[0], len(v))
+}
+func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func AggTx(tx kv.Tx) *AggregatorRoTx {
 	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
