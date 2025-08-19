@@ -980,7 +980,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
-	if t.mode == ModeDirect && t.etl != nil {
+	if t.mode == ModeDirect && t.etl == nil {
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
