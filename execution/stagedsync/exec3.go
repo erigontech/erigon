@@ -60,22 +60,27 @@ var (
 	mxExecRepeats      = metrics.NewCounter(`exec_repeats`)   //nolint
 	mxExecTriggers     = metrics.NewCounter(`exec_triggers`)  //nolint
 	mxExecTransactions = metrics.NewCounter(`exec_txns`)
+	mxExecTxnPerBlock  = metrics.NewGauge(`exec_txns_per_block`)
+	mxExecGasPerTxn    = metrics.NewGauge(`exec_gas_per_transaction`)
+	mxExecBlocks       = metrics.NewGauge("exec_blocks")
+	mxExecCPUs         = metrics.NewGauge("exec_cpus")
 	mxExecGas          = metrics.NewCounter(`exec_gas`)
 	mxExecMgas         = metrics.NewGauge(`exec_mgas`)
-	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 
-	mxExecBlockReadDuration    = metrics.NewGauge("exec_block_dur")
-	mxExecTaskReadDuration     = metrics.NewGauge("exec_task_dur")
-	mxExecReadDuration         = metrics.NewGauge("exec_read_dur")
-	mxExecAccountReadDuration  = metrics.NewGauge("exec_account_read_dur")
-	mxExecStoreageReadDuration = metrics.NewGauge("exec_storage_read_dur")
-	mxExecCodeReadDuration     = metrics.NewGauge("exec_code_read_dur")
+	mxExecBlockDuration = metrics.NewGauge("exec_block_dur")
+
+	mxExecTxnDuration             = metrics.NewGauge("exec_txn_dur")
+	mxExecTxnExecDuration         = metrics.NewGauge("exec_txn_exec_dur")
+	mxExecTxnReadDuration         = metrics.NewGauge("exec_txn_read_dur")
+	mxExecTxnAccountReadDuration  = metrics.NewGauge("exec_txn_account_read_dur")
+	mxExecTxnStoreageReadDuration = metrics.NewGauge("exec_txn_storage_read_dur")
+	mxExecTxnCodeReadDuration     = metrics.NewGauge("exec_txn_code_read_dur")
 
 	mxExecReadRate        = metrics.NewGauge("exec_read_rate")
-	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
 	mxExecAccountReadRate = metrics.NewGauge("exec_account_read_rate")
 	mxExecStorageReadRate = metrics.NewGauge("exec_storage_read_rate")
 	mxExecCodeReadRate    = metrics.NewGauge("exec_code_read_rate")
+	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
 )
 
 const (
@@ -195,6 +200,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	var avgAccountReadDur time.Duration
 	var avgStorageReadDur time.Duration
 	var avgCodeReadDur time.Duration
+	var avgTaskGas int64
 
 	if curActivations > 0 {
 		avgTaskDur = curTaskDur / time.Duration(curActivations)
@@ -204,17 +210,19 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		avgStorageReadDur = curStorageReadDur / time.Duration(curActivations)
 		avgCodeReadDur = curCodeReadDur / time.Duration(curActivations)
 
-		mxExecReadDuration.SetUint64(uint64(avgReadDur))
-		mxExecAccountReadDuration.SetUint64(uint64(avgAccountReadDur))
-		mxExecStoreageReadDuration.SetUint64(uint64(avgStorageReadDur))
-		mxExecCodeReadDuration.SetUint64(uint64(avgCodeReadDur))
+		mxExecTxnDuration.SetUint64(uint64(avgTaskDur))
+		mxExecTxnExecDuration.SetUint64(uint64(avgExecDur))
+		mxExecTxnReadDuration.SetUint64(uint64(avgReadDur))
+		mxExecTxnAccountReadDuration.SetUint64(uint64(avgAccountReadDur))
+		mxExecTxnStoreageReadDuration.SetUint64(uint64(avgStorageReadDur))
+		mxExecTxnCodeReadDuration.SetUint64(uint64(avgCodeReadDur))
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
 			execRatio = 100.0 * float64(avgExecDur) / float64(avgTaskDur)
 		}
 
-		avgTaskGas := curTaskGas / curActivations
+		avgTaskGas = curTaskGas / curActivations
 		avgTaskGasPerSec = int64(float64(avgTaskGas) / interval.Seconds())
 	}
 
@@ -270,6 +278,10 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		mxExecStorageReadRate.SetUint64(uint64(float64(te.taskExecMetrics.StorageReadCount.Load()) / interval.Seconds()))
 		mxExecCodeReadRate.SetUint64(uint64(float64(te.taskExecMetrics.CodeReadCount.Load()) / interval.Seconds()))
 
+		mxExecGasPerTxn.Set(float64(avgTaskGas))
+		mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
+		mxExecBlockDuration.Set(float64(avgBlockDur.Milliseconds()))
+
 		execVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
@@ -312,6 +324,12 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	}
 
 	executedGasSec := uint64(float64(te.executedGas.Load()-p.prevExecutedGas) / interval.Seconds())
+
+	if executedGas := te.executedGas.Load(); executedGas > 0 {
+		mxExecMgas.Set((float64(executedGasSec) / 1e6))
+		mxExecGas.Add(float64(executedGas))
+	}
+
 	var executedTxSec uint64
 
 	if uint64(te.lastExecutedTxNum.Load()) > p.prevExecutedTxNum {
@@ -319,6 +337,10 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	}
 	executedDiffBlocks := max(te.lastExecutedBlockNum.Load()-int64(p.prevExecutedBlockNum), 0)
 	executedDiffTxs := uint64(max(te.lastExecutedTxNum.Load()-int64(p.prevExecutedTxNum), 0))
+
+	mxExecBlocks.Add(float64(executedDiffBlocks))
+	mxExecTransactions.Add(float64(executedDiffTxs))
+	mxExecTxnPerBlock.Set(float64(executedDiffBlocks) / float64(executedDiffTxs))
 
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
 		executedDiffTxs, executedTxSec, executedGasSec, 0, execVals)
@@ -539,13 +561,6 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
 	totalGasUsed := uint64(0)
-	start := time.Now()
-	defer func() {
-		if totalGasUsed > 0 {
-			mxExecMgas.Set((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds())
-			mxExecGas.Add(float64(totalGasUsed))
-		}
-	}()
 
 	useExternalTx := txc.Tx != nil
 	var applyTx kv.RwTx
@@ -845,7 +860,6 @@ func ExecV3(ctx context.Context,
 				}
 
 				uncommittedGas = se.executedGas.Load() - int64(se.committedGas)
-				mxExecBlocks.Add(1)
 
 				if !continueLoop {
 					return nil

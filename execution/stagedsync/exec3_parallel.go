@@ -1161,14 +1161,32 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) LogExecuted() {
 	pe.progress.LogExecuted(pe.rs.StateV3, pe)
+	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
+		pe.logger.Info(fmt.Sprintf("[%s] domains", pe.logPrefix), domainMetrics...)
+	}
+	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
+		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
+	}
 }
 
 func (pe *parallelExecutor) LogCommitted(commitStart time.Time, stepsInDb float64) {
 	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb)
+	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
+		pe.logger.Info(fmt.Sprintf("[%s] domains", pe.logPrefix), domainMetrics...)
+	}
+	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
+		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
+	}
 }
 
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
+	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
+		pe.logger.Info(fmt.Sprintf("[%s] domains", pe.logPrefix), domainMetrics...)
+	}
+	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
+		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
+	}
 }
 
 func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *StageState, applyTx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, error) {

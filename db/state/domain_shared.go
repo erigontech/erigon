@@ -65,6 +65,26 @@ type dataWithPrevStep struct {
 	prevStep kv.Step
 }
 
+type SharedDomainsMetrics struct {
+	sync.RWMutex
+	cacheReadCount    int64
+	cacheReadDuration time.Duration
+	dbReadCount       int64
+	dbReadDuration    time.Duration
+	fileReadCount     int64
+	fileReadDuration  time.Duration
+	domainMetrics     map[kv.Domain]*domainMetrics
+}
+
+type domainMetrics struct {
+	cacheReadCount    int64
+	cacheReadDuration time.Duration
+	dbReadCount       int64
+	dbReadDuration    time.Duration
+	fileReadCount     int64
+	fileReadDuration  time.Duration
+}
+
 type SharedDomains struct {
 	sdCtx *SharedDomainsCommitmentContext
 
@@ -88,6 +108,7 @@ type SharedDomains struct {
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
+	metrics                   SharedDomainsMetrics
 }
 
 type HasAgg interface {
@@ -99,6 +120,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
+		metrics: SharedDomainsMetrics{domainMetrics: map[kv.Domain]*domainMetrics{}},
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -518,14 +540,112 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
+	start := time.Now()
 	if v, prevStep, ok := sd.get(domain, k); ok {
+		sd.metrics.Lock()
+		sd.metrics.cacheReadCount++
+		readDuration := time.Since(start)
+		sd.metrics.cacheReadDuration += readDuration
+		if dm, ok := sd.metrics.domainMetrics[domain]; ok {
+			dm.cacheReadCount++
+			dm.cacheReadDuration += readDuration
+		} else {
+			sd.metrics.domainMetrics[domain] = &domainMetrics{
+				cacheReadCount:    1,
+				cacheReadDuration: readDuration,
+			}
+		}
+		sd.metrics.Unlock()
 		return v, prevStep, nil
 	}
 	v, step, err = tx.(kv.TemporalTx).GetLatest(domain, k)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
+
+	if stepsInFiles := tx.(kv.TemporalTx).StepsInFiles(domain); step > stepsInFiles {
+		sd.metrics.Lock()
+		sd.metrics.dbReadCount++
+		readDuration := time.Since(start)
+		sd.metrics.dbReadDuration += readDuration
+		if dm, ok := sd.metrics.domainMetrics[domain]; ok {
+			dm.dbReadCount++
+			dm.dbReadDuration += readDuration
+		} else {
+			sd.metrics.domainMetrics[domain] = &domainMetrics{
+				dbReadCount:    1,
+				dbReadDuration: readDuration,
+			}
+		}
+		sd.metrics.Unlock()
+	} else {
+		sd.metrics.Lock()
+		sd.metrics.fileReadCount++
+		readDuration := time.Since(start)
+		sd.metrics.fileReadDuration += time.Since(start)
+		if dm, ok := sd.metrics.domainMetrics[domain]; ok {
+			dm.fileReadCount++
+			dm.fileReadDuration += readDuration
+		} else {
+			sd.metrics.domainMetrics[domain] = &domainMetrics{
+				fileReadCount:    1,
+				fileReadDuration: readDuration,
+			}
+		}
+		sd.metrics.Unlock()
+	}
+
 	return v, step, nil
+}
+
+func (sd *SharedDomains) LogMetrics() []any {
+	var metrics []any
+
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
+
+	if readCount := sd.metrics.cacheReadCount; readCount > 0 {
+		metrics = append(metrics, "cache", readCount, "cdur", sd.metrics.cacheReadDuration/time.Duration(readCount))
+	}
+
+	if readCount := sd.metrics.dbReadCount; readCount > 0 {
+		metrics = append(metrics, "db", readCount, "dbdur", sd.metrics.dbReadDuration/time.Duration(readCount))
+	}
+
+	if readCount := sd.metrics.fileReadCount; readCount > 0 {
+		metrics = append(metrics, "files", readCount, "fdur", sd.metrics.dbReadDuration/time.Duration(readCount))
+	}
+
+	return metrics
+}
+
+func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
+	var domainMetrics = map[kv.Domain][]any{}
+
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
+
+	for domain, dm := range sd.metrics.domainMetrics {
+		var metrics []any
+
+		if readCount := dm.cacheReadCount; readCount > 0 {
+			metrics = append(metrics, "cache", readCount, "cdur", dm.cacheReadDuration/time.Duration(readCount))
+		}
+
+		if readCount := dm.dbReadCount; readCount > 0 {
+			metrics = append(metrics, "db", readCount, "dbdur", dm.dbReadDuration/time.Duration(readCount))
+		}
+
+		if readCount := dm.fileReadCount; readCount > 0 {
+			metrics = append(metrics, "files", readCount, "fdur", dm.dbReadDuration/time.Duration(readCount))
+		}
+
+		if len(metrics) > 0 {
+			domainMetrics[domain] = metrics
+		}
+	}
+
+	return domainMetrics
 }
 
 // DomainPut

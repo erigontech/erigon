@@ -263,7 +263,7 @@ func (rw *Worker) Run() (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("exec3.Worker panic: %s, %s", rec, dbg.Stack())
-			rw.logger.Warn("Worger failed", "err", err)
+			rw.logger.Warn("Worker failed", "err", err)
 		}
 	}()
 
