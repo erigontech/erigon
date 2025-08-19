@@ -97,7 +97,7 @@ func (i *txSpanRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) er
 	return tx.Put(i.table, key[:], valuePair[:])
 }
 
-// Returns max span.Id such that span.StartBlock <= blockNum && span.EndBlock <= blockNum
+// Returns max span.Id such that span.StartBlock <= blockNum &&  blockNum <= span.EndBlock
 func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
