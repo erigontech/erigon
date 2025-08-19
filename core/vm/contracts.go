@@ -610,6 +610,23 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case base.Cmp(common.Big1) == 0:
 		// If base == 1 (and mod > 1), then the result is 1
 		v = common.Big1.Bytes()
+	case base.IsUint64() && mod.IsUint64():
+		// big.Exp() has significant overhead for single-word base/mod.
+		// Fallback to this exponentiation algorithm using native division
+		// for computing modular multiplication.
+		// TODO: This fallback can be removed once Fusaka hits Mainnet.
+		mod64 := mod.Uint64()
+		base64 := base.Uint64() % mod64
+		res := uint64(1)
+		for i := exp.BitLen(); i > 0; i-- {
+			h, l := bits.Mul64(res, res)
+			_, res = bits.Div64(h, l, mod64)
+			if exp.Bit(i-1) != 0 {
+				h, l = bits.Mul64(res, base64)
+				_, res = bits.Div64(h, l, mod64)
+			}
+		}
+		v = base.SetUint64(res).Bytes()
 	default:
 		v = base.Exp(base, exp, mod).Bytes()
 	}
