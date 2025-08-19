@@ -2654,7 +2654,11 @@ func HexTrieStateToShortString(enc []byte) (string, error) {
 	if err := s.Decode(enc[18 : 18+sl]); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("block: %d txn: %d rootHash: %x", bn, txn, s.Root), nil
+	root := new(cell)
+	if err := root.Decode(s.Root); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", bn, txn, root.hash[:]), nil
 }
 
 func HexTrieStateToString(enc []byte) (string, error) {
