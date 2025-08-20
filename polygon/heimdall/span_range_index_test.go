@@ -21,7 +21,7 @@ type spanRangeIndexTest struct {
 
 func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 	tmpDir := t.TempDir()
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 	logger := log.New()
 
 	db, err := mdbx.New(kv.HeimdallDB, logger).
