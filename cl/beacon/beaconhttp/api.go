@@ -116,7 +116,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				endpointError.WriteTo(w)
 			} else {
 				// Failsafe: If the error is nil, write a generic 500 error
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				NewEndpointError(http.StatusInternalServerError, errors.New("Internal Server Error")).WriteTo(w)
 			}
 			return
 		}
