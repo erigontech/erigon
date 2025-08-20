@@ -120,7 +120,7 @@ jobs:
         run: .\wmake.ps1 all
 
       - name: Test
-        run: .\wmake.ps1 test
+        run: .\wmake.ps1 all
 
       - name: Test erigon-lib
         run: cd erigon-lib && make test-no-fuzz
