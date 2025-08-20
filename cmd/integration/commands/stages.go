@@ -512,6 +512,7 @@ func init() {
 	withBlock(cmdStagePatriciaTrie)
 	withUnwind(cmdStagePatriciaTrie)
 	withPruneTo(cmdStagePatriciaTrie)
+	withConcurrentCommitment(cmdStagePatriciaTrie)
 	withIntegrityChecks(cmdStagePatriciaTrie)
 	withChain(cmdStagePatriciaTrie)
 	withHeimdall(cmdStagePatriciaTrie)
