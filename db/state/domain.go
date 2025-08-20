@@ -107,6 +107,10 @@ type domainCfg struct {
 	version DomainVersionTypes
 }
 
+func (d domainCfg) Tables() []string {
+	return []string{d.valuesTable, d.hist.valuesTable, d.hist.iiCfg.keysTable, d.hist.iiCfg.valuesTable}
+}
+
 func (d domainCfg) GetVersions() VersionTypes {
 	return VersionTypes{
 		Domain: &d.version,

@@ -477,15 +477,9 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	return false, false, nil
 }
 
-func doRmStateSnapshots(cliCtx *cli.Context) error {
-	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer l.Unlock()
-
-	removeLatest := cliCtx.Bool("latest")
-
+// deleteStateSnapshots is the core logic for removing state snapshots.
+// It takes all necessary parameters, making it usable by both CLI and programmatic callers.
+func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
@@ -556,9 +550,8 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	toRemove := make(map[string]snaptype.FileInfo)
-	if cliCtx.IsSet("domain") {
+	if len(domainNames) > 0 {
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
-		domainNames := cliCtx.StringSlice("domain")
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
 			if err != nil {
@@ -576,11 +569,9 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 		files = domainFiles
 	}
-	if cliCtx.IsSet("step") || removeLatest {
-		steprm := cliCtx.String("step")
-
+	if stepRange != "" || removeLatest {
 		var minS, maxS uint64
-		if steprm != "" {
+		if stepRange != "" {
 			parseStep := func(step string) (uint64, uint64, error) {
 				var from, to uint64
 				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
@@ -589,7 +580,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				return from, to, nil
 			}
 			var err error
-			minS, maxS, err = parseStep(steprm)
+			minS, maxS, err = parseStep(stepRange)
 			if err != nil {
 				return err
 			}
@@ -597,6 +588,10 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		promptExit := func(s string) (exitNow bool) {
+			if !promptUserBeforeDelete {
+				return false
+			}
+
 		AllowPruneSteps:
 			fmt.Printf("\n%s", s)
 			var ans uint8
@@ -649,6 +644,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				}
 			}
 		}
+
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
 				toRemove[res.Path] = res
@@ -669,6 +665,21 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
+}
+
+func doRmStateSnapshots(cliCtx *cli.Context) error {
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
+
+	removeLatest := cliCtx.Bool("latest")
+	stepRange := cliCtx.String("step")
+	domainNames := cliCtx.StringSlice("domain")
+	promptUser := true // CLI should always prompt the user
+
+	return DeleteStateSnapshots(dirs, removeLatest, promptUser, stepRange, domainNames...)
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
