@@ -210,12 +210,12 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		avgStorageReadDur = curStorageReadDur / time.Duration(curActivations)
 		avgCodeReadDur = curCodeReadDur / time.Duration(curActivations)
 
-		mxExecTxnDuration.SetUint64(uint64(avgTaskDur))
-		mxExecTxnExecDuration.SetUint64(uint64(avgExecDur))
-		mxExecTxnReadDuration.SetUint64(uint64(avgReadDur))
-		mxExecTxnAccountReadDuration.SetUint64(uint64(avgAccountReadDur))
-		mxExecTxnStoreageReadDuration.SetUint64(uint64(avgStorageReadDur))
-		mxExecTxnCodeReadDuration.SetUint64(uint64(avgCodeReadDur))
+		mxExecTxnDuration.SetUint64(uint64(avgTaskDur.Microseconds()))
+		mxExecTxnExecDuration.SetUint64(uint64(avgExecDur.Microseconds()))
+		mxExecTxnReadDuration.SetUint64(uint64(avgReadDur.Microseconds()))
+		mxExecTxnAccountReadDuration.SetUint64(uint64(avgAccountReadDur.Microseconds()))
+		mxExecTxnStoreageReadDuration.SetUint64(uint64(avgStorageReadDur.Microseconds()))
+		mxExecTxnCodeReadDuration.SetUint64(uint64(avgCodeReadDur.Microseconds()))
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
@@ -274,9 +274,9 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 		mxExecReadRate.SetUint64(curReadRate)
 		mxExecWriteRate.SetUint64(curWriteRate)
-		mxExecAccountReadRate.SetUint64(uint64(float64(te.taskExecMetrics.AccountReadCount.Load()) / interval.Seconds()))
-		mxExecStorageReadRate.SetUint64(uint64(float64(te.taskExecMetrics.StorageReadCount.Load()) / interval.Seconds()))
-		mxExecCodeReadRate.SetUint64(uint64(float64(te.taskExecMetrics.CodeReadCount.Load()) / interval.Seconds()))
+		mxExecAccountReadRate.SetUint64(uint64(float64(curAccountReadCount) / interval.Seconds()))
+		mxExecStorageReadRate.SetUint64(uint64(float64(curStorageReadCount) / interval.Seconds()))
+		mxExecCodeReadRate.SetUint64(uint64(float64(curCodeReadCount) / interval.Seconds()))
 
 		mxExecGasPerTxn.Set(float64(avgTaskGas))
 		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
@@ -288,11 +288,11 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
-			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec)),
+			"tgas/s", common.PrettyCounter(curTaskGasPerSec),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", common.Round(avgTaskDur, 0).String(),
-			"exec", fmt.Sprintf("%dµs(%.2f%%)", avgExecDur.Microseconds(), execRatio),
-			"read", fmt.Sprintf("%dµs(%.2f%%),a=%dµs,s=%dµs,c=%dµs", avgReadDur.Microseconds(), readRatio, avgAccountReadDur.Microseconds(), avgStorageReadDur.Microseconds(), avgCodeReadDur.Microseconds()),
+			"exec", fmt.Sprintf("%v(%.2f%%)", common.Round(avgExecDur,0), execRatio),
+			"read", fmt.Sprintf("%v(%.2f%%),a=%v,s=%v,c=%v", common.Round(avgReadDur, 0), readRatio, common.Round(avgAccountReadDur,0), common.Round(avgStorageReadDur,0), common.Round(avgCodeReadDur,0)),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", fmt.Sprintf("%s,a=%s,s=%s,c=%s", common.PrettyCounter(curReadCount), common.PrettyCounter(curAccountReadCount),
 				common.PrettyCounter(curStorageReadCount), common.PrettyCounter(curCodeReadCount)),
