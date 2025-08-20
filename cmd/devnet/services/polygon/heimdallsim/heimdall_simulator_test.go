@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -46,6 +47,10 @@ func createFiles(dataDir string) error {
 	destPath := filepath.Join(dataDir)
 	err := os.MkdirAll(destPath, 0755)
 	if err != nil {
+		return err
+	}
+
+	if _, err = snaptype.LoadSalt(dataDir, true); err != nil {
 		return err
 	}
 
