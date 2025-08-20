@@ -2198,8 +2198,12 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 // reorgs
 func (p *TxPool) Run(ctx context.Context) error {
 	defer p.logger.Info("[txpool] stopped")
-	defer p.lastSeenCond.Broadcast() // to unblock .best() wait on cond
 	defer p.poolDB.Close()
+	defer func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast() // to unblock .best() wait on cond
+		p.lock.Unlock()
+	}()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()
 
