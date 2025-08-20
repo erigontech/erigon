@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -65,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -208,6 +210,27 @@ var cmdStageCustomTrace = &cobra.Command{
 		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
 
 		if err := stageCustomTrace(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdPrintCommitment = &cobra.Command{
+	Use:   "print_commitment",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := printCommitment(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -519,6 +542,13 @@ func init() {
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
 	rootCmd.AddCommand(cmdCommitmentRebuild)
+
+	withConfig(cmdPrintCommitment)
+	withDataDir(cmdPrintCommitment)
+	withChain(cmdPrintCommitment)
+	//withHeimdall(cmdPrintCommitment)
+	//withChaosMonkey(cmdPrintCommitment)
+	rootCmd.AddCommand(cmdPrintCommitment)
 
 	withConfig(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
@@ -992,6 +1022,49 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
+
+	// disable hard alignment; allowing commitment and storage/account to have
+	// different visibleFiles
+	agg.DisableAllDependencies()
+
+	acRo := agg.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
+	defer acRo.Close()
+	defer acRo.MadvNormal().DisableReadAhead()
+
+	commitmentFiles := acRo.Files(kv.CommitmentDomain)
+	fmt.Printf("Commitment files: %d\n", len(commitmentFiles))
+	for _, f := range commitmentFiles {
+		name := filepath.Base(f.Fullpath())
+		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
+		rootNodePrefix := []byte("state")
+		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
+		if err != nil {
+			return fmt.Errorf("failed to get root node from files: %w", err)
+		}
+		rootString, err := commitment.HexTrieStateToShortString(rootNode)
+		if err != nil {
+			return fmt.Errorf("failed to extract state root from root node: %w", err)
+		}
+		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
+	}
+
+	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
+	if err != nil {
+		return fmt.Errorf("failed to check commitment: %w", err)
+	}
+	fmt.Printf("\n%s", str)
 
 	return nil
 }
