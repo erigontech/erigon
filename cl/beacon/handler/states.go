@@ -623,7 +623,10 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 		}
 	}
 
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingWithdrawals).
+		WithHeader("Eth-Consensus-Version", version.String()).
+		WithVersion(version).
 		WithOptimistic(isOptimistic).
 		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
