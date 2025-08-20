@@ -324,7 +324,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	s.RegisterSpanObserver(func(span *Span) {
-		s.spanBlockProducersTracker.ObserveSpanAsync(span)
+		s.spanBlockProducersTracker.ObserveSpanAsync(ctx, span)
 	})
 
 	milestoneObserver := s.RegisterMilestoneObserver(func(milestone *Milestone) {

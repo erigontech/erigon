@@ -353,7 +353,7 @@ func (r *RemoteBlockReader) LastSpanId(_ context.Context, _ kv.Tx) (uint64, bool
 	panic("not implemented")
 }
 
-func (r *RemoteBlockReader) LastFrozenSpanId() uint64 {
+func (r *RemoteBlockReader) LastFrozenSpanId() (uint64, bool, error) {
 	panic("not implemented")
 }
 
@@ -1504,9 +1504,9 @@ func (r *BlockReader) LastFrozenEventBlockNum() uint64 {
 	return r.borBridgeStore.LastFrozenEventBlockNum()
 }
 
-func (r *BlockReader) LastFrozenSpanId() uint64 {
+func (r *BlockReader) LastFrozenSpanId() (uint64, bool, error) {
 	if r.heimdallStore == nil {
-		return 0
+		return 0, false, nil
 	}
 
 	return r.heimdallStore.Spans().LastFrozenEntityId()
@@ -1581,9 +1581,9 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uin
 	}).WithTx(tx).Entity(ctx, checkpointId)
 }
 
-func (r *BlockReader) LastFrozenCheckpointId() uint64 {
+func (r *BlockReader) LastFrozenCheckpointId() (uint64, bool, error) {
 	if r.heimdallStore == nil {
-		return 0
+		return 0, false, nil
 	}
 
 	return r.heimdallStore.Checkpoints().LastFrozenEntityId()

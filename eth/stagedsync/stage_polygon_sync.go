@@ -472,8 +472,12 @@ func (s polygonSyncStageCheckpointStore) LastEntityId(ctx context.Context) (uint
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageCheckpointStore) LastFrozenEntityId() uint64 {
+func (s polygonSyncStageCheckpointStore) LastFrozenEntityId() (uint64, bool, error) {
 	return s.checkpointStore.LastFrozenEntityId()
+}
+
+func (s polygonSyncStageCheckpointStore) RangeIndex() heimdall.RangeIndex {
+	return s.checkpointStore.RangeIndex()
 }
 
 func (s polygonSyncStageCheckpointStore) LastEntity(ctx context.Context) (*heimdall.Checkpoint, bool, error) {
@@ -596,8 +600,12 @@ func (s polygonSyncStageMilestoneStore) LastEntityId(ctx context.Context) (uint6
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageMilestoneStore) LastFrozenEntityId() uint64 {
+func (s polygonSyncStageMilestoneStore) LastFrozenEntityId() (uint64, bool, error) {
 	return s.milestoneStore.LastFrozenEntityId()
+}
+
+func (s polygonSyncStageMilestoneStore) RangeIndex() heimdall.RangeIndex {
+	return s.milestoneStore.RangeIndex()
 }
 
 func (s polygonSyncStageMilestoneStore) LastEntity(ctx context.Context) (*heimdall.Milestone, bool, error) {
@@ -716,8 +724,12 @@ func (s polygonSyncStageSpanStore) LastEntityId(ctx context.Context) (id uint64,
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageSpanStore) LastFrozenEntityId() (id uint64) {
+func (s polygonSyncStageSpanStore) LastFrozenEntityId() (uint64, bool, error) {
 	return s.spanStore.LastFrozenEntityId()
+}
+
+func (s polygonSyncStageSpanStore) RangeIndex() heimdall.RangeIndex {
+	return s.spanStore.RangeIndex()
 }
 
 func (s polygonSyncStageSpanStore) LastEntity(ctx context.Context) (*heimdall.Span, bool, error) {
@@ -837,8 +849,12 @@ func (s polygonSyncStageSbpsStore) SnapType() snaptype.Type {
 	return nil
 }
 
-func (s polygonSyncStageSbpsStore) LastFrozenEntityId() uint64 {
+func (s polygonSyncStageSbpsStore) LastFrozenEntityId() (uint64, bool, error) {
 	return s.spanStore.LastFrozenEntityId()
+}
+
+func (s polygonSyncStageSbpsStore) RangeIndex() heimdall.RangeIndex {
+	return s.spanStore.RangeIndex()
 }
 
 func (s polygonSyncStageSbpsStore) LastEntity(ctx context.Context) (*heimdall.SpanBlockProducerSelection, bool, error) {
