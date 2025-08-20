@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -61,11 +62,11 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	// Override the fields of specified contracts before execution.
 	if overrides != nil {
-		if err := overrides.Override(state); err != nil {
+		if err := overrides.Override(ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -99,7 +100,13 @@ func DoCall(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
+
+	if chainConfig.IsArbitrum() {
+		message := types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.FeeCap(), msg.TipCap(), msg.Data(), msg.AccessList(), false, true, msg.MaxFeePerBlobGas())
+		message.Tx, _ = args.ToTransaction(gasCap, baseFee)
+		evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(ibs), message)
+	}
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
