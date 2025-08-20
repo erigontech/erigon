@@ -36,6 +36,8 @@ const (
 	ETH66 = 66
 	ETH67 = 67
 	ETH68 = 68
+
+	WIT0 = 1
 )
 
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient
@@ -323,6 +325,10 @@ func filterIds(in []sentryproto.MessageId, protocol sentryproto.Protocol) (filte
 	for _, id := range in {
 		if _, ok := libsentry.ProtoIds[protocol][id]; ok {
 			filtered = append(filtered, id)
+		} else if _, ok := libsentry.ProtoIds[sentryproto.Protocol_WIT0][id]; ok {
+			// Allow witness messages through ETH protocol clients
+			filtered = append(filtered, id)
+		} else {
 		}
 	}
 	return filtered
