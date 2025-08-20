@@ -20,15 +20,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"math"
 	"os"
 	"path"
 	"time"
 
-	"google.golang.org/grpc/credentials"
-
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"google.golang.org/grpc/credentials"
 
 	"golang.org/x/sync/semaphore"
 
@@ -39,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/handler"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
@@ -76,11 +79,6 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon/cl/clparams"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -288,7 +286,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:                       config.CaplinDiscoveryAddr,
 		Port:                         int(config.CaplinDiscoveryPort),
@@ -328,7 +326,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
-	dataColumnSidecarService := services.NewDataColumnSidecarService(beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage)
+	dataColumnSidecarService := services.NewDataColumnSidecarService(beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, false)
@@ -440,6 +438,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,
+			columnStorage,
 			csn,
 			validatorParameters,
 			attestationProducer,
