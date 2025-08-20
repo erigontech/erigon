@@ -150,7 +150,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	// Initialize salt if it doesn't exist
 	if !fexists {
 		if !genNew {
-			logger.Info("not generating new salt file as genNew=false")
+			logger.Debug("not generating new state-salt file as genNew=false")
 			// Using nil salt for now, actual value should be injected when salt file is downloaded
 			return nil, nil
 		}
