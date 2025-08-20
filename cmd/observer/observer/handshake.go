@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/p2p"
@@ -224,6 +225,7 @@ func Handshake(
 	}
 
 	// try reading eth69 status message
+	log.Trace("handshake error, trying eth/69 handshake", "err", err)
 	var statusMessage69 StatusMessage69
 	if err := readMessage(conn, 16+eth.StatusMsg, HandshakeErrorIDStatusDecode, &statusMessage69); err != nil {
 		return &helloMessage, nil, err
