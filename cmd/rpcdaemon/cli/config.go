@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -619,31 +620,39 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	go func() {
 		if !remoteKv.EnsureVersionCompatibility() {
 			rootCancel()
+			return
 		}
 		if !remoteEth.EnsureVersionCompatibility() {
 			rootCancel()
+			return
 		}
 		if mining != nil && !miningService.EnsureVersionCompatibility() {
 			rootCancel()
+			return
 		}
-		if !txPoolService.EnsureVersionCompatibility() {
+		if slices.Contains(cfg.API, "txpool") && !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
+			return
 		}
 		cc, err := readChainConfigFromDB(context.Background(), remoteKv)
 		if err != nil {
 			logger.Error("Failed to read remote chain config", "err", err)
 			rootCancel()
+			return
 		}
 		if cc.Bor != nil && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
 			rootCancel()
+			return
 		}
 		if cc.Bor != nil && remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
 			rootCancel()
+			return
 		}
 		if remoteCE != nil {
 			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote consensus engine", "err", err)
 				rootCancel()
+				return
 			}
 		}
 	}()
