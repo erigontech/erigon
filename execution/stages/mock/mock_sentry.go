@@ -295,7 +295,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db := temporaltest.NewTestDB(tb, dirs)
 
-	if _, err := snaptype.LoadSalt(dirs.Snap, true); err != nil {
+	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
 		panic(err)
 	}
 
