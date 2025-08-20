@@ -57,14 +57,14 @@ import (
 
 var (
 	mxExecStepsInDB    = metrics.NewGauge(`exec_steps_in_db`) //nolint
-	mxExecRepeats      = metrics.NewCounter(`exec_repeats`)   //nolint
-	mxExecTriggers     = metrics.NewCounter(`exec_triggers`)  //nolint
+	mxExecRepeats      = metrics.NewGauge(`exec_repeats`)     //nolint
+	mxExecTriggers     = metrics.NewGauge(`exec_triggers`)    //nolint
 	mxExecTransactions = metrics.NewCounter(`exec_txns`)
 	mxExecTxnPerBlock  = metrics.NewGauge(`exec_txns_per_block`)
 	mxExecGasPerTxn    = metrics.NewGauge(`exec_gas_per_transaction`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 	mxExecCPUs         = metrics.NewGauge("exec_cpus")
-	mxExecGas          = metrics.NewCounter(`exec_gas`)
+	mxExecGas          = metrics.NewGauge(`exec_gas`)
 	mxExecMgas         = metrics.NewGauge(`exec_mgas`)
 
 	mxExecBlockDuration = metrics.NewGauge("exec_block_dur")
@@ -300,8 +300,8 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"wrt/s", common.PrettyCounter(curWriteRate),
 		}
 
-		mxExecRepeats.AddInt(repeats)
-		mxExecTriggers.AddInt(int(execCount))
+		mxExecRepeats.SetInt(repeats)
+		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount
 		p.prevAbortCount = abortCount
@@ -327,7 +327,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 	if executedGas := te.executedGas.Load(); executedGas > 0 {
 		mxExecMgas.Set((float64(executedGasSec) / 1e6))
-		mxExecGas.Add(float64(executedGas))
+		mxExecGas.Set(float64(executedGasSec))
 	}
 
 	var executedTxSec uint64
