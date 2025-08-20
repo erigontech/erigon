@@ -471,8 +471,8 @@ var ConsensusTables = append([]string{
 },
 	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
 )
-var HeimdallTables = []string{}
-var PolygonBridgeTables = []string{}
+var HeimdallTables = ChaindataTables
+var PolygonBridgeTables = ChaindataTables
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
