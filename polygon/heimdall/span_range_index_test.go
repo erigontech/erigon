@@ -126,112 +126,7 @@ func TestSpanRangeIndexNonOverlappingSpans(t *testing.T) {
 	}
 }
 
-// func TestSpanRangeIndexOverlappingSpans(t *testing.T) {
-// 	t.Parallel()
-// 	test := newSpanRangeIndexTest(t)
-// 	ctx := test.ctx
-
-// 	// span data that is irregular, containing possible span rotations
-// 	var spans = []Span{
-// 		Span{
-// 			Id:         0,
-// 			StartBlock: 0,
-// 			EndBlock:   999,
-// 		},
-// 		Span{
-// 			Id:         1,
-// 			StartBlock: 5,
-// 			EndBlock:   1999,
-// 		},
-// 		Span{
-// 			Id:         2,
-// 			StartBlock: 1988,
-// 			EndBlock:   2999,
-// 		},
-// 		Span{
-// 			Id:         3,
-// 			StartBlock: 3000,
-// 			EndBlock:   3999,
-// 		},
-// 		Span{
-// 			Id:         4,
-// 			StartBlock: 3500,
-// 			EndBlock:   4999,
-// 		},
-// 		Span{
-// 			Id:         5,
-// 			StartBlock: 5000,
-// 			EndBlock:   5999,
-// 		},
-// 		Span{
-// 			Id:         6,
-// 			StartBlock: 5500,
-// 			EndBlock:   6999,
-// 		},
-// 		Span{
-// 			Id:         7,
-// 			StartBlock: 7000,
-// 			EndBlock:   7999,
-// 		},
-// 		Span{
-// 			Id:         8,
-// 			StartBlock: 7001,
-// 			EndBlock:   8999,
-// 		},
-// 		Span{
-// 			Id:         9,
-// 			StartBlock: 7002,
-// 			EndBlock:   9999,
-// 		},
-// 	}
-
-// 	for _, span := range spans {
-// 		spanId := span.RawId()
-// 		r := ClosedRange{Start: span.StartBlock, End: span.EndBlock}
-// 		require.NoError(t, test.index.Put(ctx, r, spanId))
-// 	}
-
-// 	// expected blockNum -> spanId lookups
-// 	expectedLookupVals := map[uint64]uint64{
-// 		0:    0,
-// 		1:    0,
-// 		4:    0,
-// 		5:    1,
-// 		999:  1,
-// 		100:  1,
-// 		1988: 2,
-// 		1999: 2,
-// 		3200: 3,
-// 		3500: 4,
-// 		3600: 4,
-// 		3988: 4,
-// 		5200: 5,
-// 		5900: 6,
-// 		6501: 6,
-// 		7000: 7,
-// 		7001: 8,
-// 		7002: 9,
-// 		8000: 9,
-// 		8998: 9,
-// 		9000: 9,
-// 		9998: 9,
-// 		9999: 9,
-// 	}
-
-// 	for blockNum, expectedId := range expectedLookupVals {
-// 		actualId, found, err := test.index.Lookup(ctx, blockNum)
-// 		require.NoError(t, err)
-// 		require.True(t, found)
-// 		assert.Equal(t, expectedId, actualId)
-// 	}
-
-// 	// additional test cases for out of range lookups
-// 	_, _, err := test.index.Lookup(ctx, 12000)
-// 	require.Error(t, err)
-
-// }
-
-func TestSpanRangeIndexComplicatedSpans(t *testing.T) {
+func TestSpanRangeIndexSpanRotation(t *testing.T) {
 	t.Parallel()
 	test := newSpanRangeIndexTest(t)
 	ctx := test.ctx
@@ -244,12 +139,12 @@ func TestSpanRangeIndexComplicatedSpans(t *testing.T) {
 			EndBlock:   999,
 		},
 		Span{
-			Id:         1,
+			Id:         1, // new span announced
 			StartBlock: 1000,
 			EndBlock:   1999,
 		},
 		Span{
-			Id:         2,
+			Id:         2, // span rotation
 			StartBlock: 5,
 			EndBlock:   1999,
 		},
@@ -283,7 +178,7 @@ func TestSpanRangeIndexComplicatedSpans(t *testing.T) {
 
 }
 
-func TestSpanRangeIndexMoreComplicatedSpans(t *testing.T) {
+func TestSpanRangeIndexComplicatedSpanRotations(t *testing.T) {
 	t.Parallel()
 	test := newSpanRangeIndexTest(t)
 	ctx := test.ctx
@@ -325,25 +220,30 @@ func TestSpanRangeIndexMoreComplicatedSpans(t *testing.T) {
 			StartBlock: 11,
 			EndBlock:   1999,
 		},
-		Span{ // new span announced
+		Span{ // new span announced, this will have duplicate StartBlock
 			Id:         7,
-			StartBlock: 1000,
+			StartBlock: 2000,
 			EndBlock:   2999,
 		},
-		Span{ // new span announced
+		Span{ // span rotation
 			Id:         8,
-			StartBlock: 3000,
+			StartBlock: 3100,
 			EndBlock:   4999,
 		},
 		Span{ // span rotation
 			Id:         9,
-			StartBlock: 1005,
-			EndBlock:   4999,
+			StartBlock: 4600,
+			EndBlock:   5999,
+		},
+		Span{ // span rotation
+			Id:         10,
+			StartBlock: 5400,
+			EndBlock:   6999,
 		},
 		Span{ // new span announced
-			Id:         10,
-			StartBlock: 5000,
-			EndBlock:   5999,
+			Id:         11,
+			StartBlock: 7000,
+			EndBlock:   7999,
 		},
 	}
 
@@ -355,12 +255,18 @@ func TestSpanRangeIndexMoreComplicatedSpans(t *testing.T) {
 
 	// expected blockNum -> spanId lookups
 	expectedLookupVals := map[uint64]uint64{
+		3:    0,
+		4:    2,
+		5:    3,
+		6:    4,
 		7:    4,
-		9:    4,
+		12:   6,
 		11:   6,
 		100:  6,
-		1000: 7,
-		4000: 9,
+		1000: 6,
+		2000: 7,
+		3101: 8,
+		4800: 9,
 	}
 
 	for blockNum, expectedId := range expectedLookupVals {
@@ -371,6 +277,65 @@ func TestSpanRangeIndexMoreComplicatedSpans(t *testing.T) {
 
 	}
 }
+
+func TestSpanRangeIndexEvenMoreComplicatedSpanRotations(t *testing.T) {
+	t.Parallel()
+	test := newSpanRangeIndexTest(t)
+	ctx := test.ctx
+
+	// span data that is irregular, containing possible span rotations
+	var spans = []Span{
+		Span{
+			Id:         7,
+			StartBlock: 1000,
+			EndBlock:   2999,
+		},
+		Span{
+			Id:         8,
+			StartBlock: 3000, // new span announced
+			EndBlock:   4999,
+		},
+		Span{
+			Id:         9, // span rotation
+			StartBlock: 1005,
+			EndBlock:   4999,
+		},
+		Span{
+			Id:         10, // new span announced
+			StartBlock: 5000,
+			EndBlock:   6999,
+		},
+		Span{
+			Id:         11, // span rotation
+			StartBlock: 4997,
+			EndBlock:   6999,
+		},
+	}
+
+	for _, span := range spans {
+		spanId := span.RawId()
+		r := ClosedRange{Start: span.StartBlock, End: span.EndBlock}
+		require.NoError(t, test.index.Put(ctx, r, spanId))
+	}
+
+	// expected blockNum -> spanId lookups
+	expectedLookupVals := map[uint64]uint64{
+		1000: 7,
+		3500: 9,
+		4000: 9,
+		4996: 9,
+		5000: 11,
+	}
+
+	for blockNum, expectedId := range expectedLookupVals {
+		actualId, found, err := test.index.Lookup(ctx, blockNum)
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, expectedId, actualId, "Lookup(blockNum=%d) returned %d instead of %d", blockNum, actualId, expectedId)
+
+	}
+}
+
 func TestSpanRangeIndexSingletonLookup(t *testing.T) {
 	t.Parallel()
 	test := newSpanRangeIndexTest(t)

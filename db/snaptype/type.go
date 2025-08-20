@@ -71,7 +71,7 @@ func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32,
 var saltMap = map[string]uint32{}
 var saltLock sync.RWMutex
 
-func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
+func LoadSalt(baseDir string, autoCreate bool) (uint32, error) {
 	// issue: https://github.com/erigontech/erigon/issues/14300
 	// NOTE: The salt value from this is read after snapshot stage AND the value is not
 	// cached before snapshot stage (which downloads salt-blocks.txt too), and therefore
@@ -83,6 +83,9 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 	}
 
 	if !exists {
+		if !autoCreate {
+			return 0, errors.New("salt file not found + autoCreate disabled")
+		}
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
@@ -120,7 +123,7 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 		return salt, nil
 	}
 
-	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
+	salt, err := LoadSalt(baseDir, false)
 	if err != nil {
 		return 0, err
 	}
