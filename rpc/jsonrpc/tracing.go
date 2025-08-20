@@ -495,7 +495,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 		stateReader, err = rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader) // in this special case we can just set transactionIndex = 0 and query blockNum instead of blockNum-1
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
 	}
 
 	if err != nil {

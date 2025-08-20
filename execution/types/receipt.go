@@ -148,9 +148,9 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, buf.Bytes())
 }
 
-// EncodeRLPNoBloom implements rlp.Encoder for post-eth/69 messages, and flattens the consensus fields of a receipt
+// EncodeRLP69 implements rlp.Encoder for post-eth/69 messages, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
-func (r Receipt) EncodeRLPNoBloom(w io.Writer) error {
+func (r Receipt) EncodeRLP69(w io.Writer) error {
 	data := &receiptRLP69{r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
@@ -571,7 +571,7 @@ func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transaction
 
 func (rs *Receipts) EncodeRLP69(w io.Writer) error {
 	for _, receipt := range *rs {
-		if err := receipt.EncodeRLPNoBloom(w); err != nil {
+		if err := receipt.EncodeRLP69(w); err != nil {
 			return err
 		}
 	}

@@ -222,7 +222,7 @@ func (pi *PeerInfo) MinBlock() uint64 {
 func (pi *PeerInfo) SetNewMinBlock(newMinBlock uint64) {
 	for {
 		oldMinBlock := atomic.LoadUint64(&pi.minBlock)
-		if atomic.CompareAndSwapUint64(&pi.height, oldMinBlock, newMinBlock) {
+		if atomic.CompareAndSwapUint64(&pi.minBlock, oldMinBlock, newMinBlock) {
 			break
 		}
 	}
