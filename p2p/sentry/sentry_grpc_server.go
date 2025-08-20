@@ -608,6 +608,8 @@ func runWitPeer(
 			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
 		}
 
+		log.Info("got witness message", "id", msg.Code)
+
 		switch msg.Code {
 		case wit.GetWitnessMsg | wit.WitnessMsg:
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
@@ -621,6 +623,7 @@ func runWitPeer(
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessMsg:
 			// add hashes to peer
+			log.Info("[wit] got witness")
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
@@ -635,6 +638,7 @@ func runWitPeer(
 
 			// send to client to add witness to db
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
+				log.Info("[wit] got witness, no subs")
 				continue
 			}
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
@@ -774,7 +778,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			}
 
 			// handshake is successful
-			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
+			logger.Info("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
 
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))

@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 )
 
@@ -384,6 +385,7 @@ func filterIds(in []sentryproto.MessageId, protocols []sentryproto.Protocol) (fi
 				break
 			}
 		}
+		log.Info("Dropped message", "id", id)
 	}
 	return filtered
 }
