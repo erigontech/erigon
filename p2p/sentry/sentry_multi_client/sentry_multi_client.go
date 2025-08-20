@@ -135,7 +135,7 @@ func (cs *MultiClient) RecvMessageLoop(
 }
 
 func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
-	frequency := 384 * time.Second // one epoch
+	frequency := cs.ChainConfig.EpochDuration()
 
 	headerInDB := func() bool {
 		var done bool
