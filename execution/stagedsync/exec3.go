@@ -88,6 +88,30 @@ const (
 	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind
 )
 
+func resetExecGauges() {
+	mxExecStepsInDB.Set(0)
+	mxExecRepeats.Set(0)
+	mxExecTriggers.Set(0)
+	mxExecTxnPerBlock.Set(0)
+	mxExecGasPerTxn.Set(0)
+	mxExecBlocks.Set(0)
+	mxExecCPUs.Set(0)
+	mxExecMGasSec.Set(0)
+	mxTaskMgasSec.Set(0)
+	mxExecBlockDuration.Set(0)
+	mxExecTxnDuration.Set(0)
+	mxExecTxnExecDuration.Set(0)
+	mxExecTxnReadDuration.Set(0)
+	mxExecTxnAccountReadDuration.Set(0)
+	mxExecTxnStoreageReadDuration.Set(0)
+	mxExecTxnCodeReadDuration.Set(0)
+	mxExecReadRate.Set(0)
+	mxExecAccountReadRate.Set(0)
+	mxExecStorageReadRate.Set(0)
+	mxExecCodeReadRate.Set(0)
+	mxExecWriteRate.Set(0)
+}
+
 func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
 	now := time.Now()
 	return &Progress{
@@ -291,8 +315,8 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"tgas/s", common.PrettyCounter(curTaskGasPerSec),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", common.Round(avgTaskDur, 0).String(),
-			"exec", fmt.Sprintf("%v(%.2f%%)", common.Round(avgExecDur,0), execRatio),
-			"read", fmt.Sprintf("%v(%.2f%%),a=%v,s=%v,c=%v", common.Round(avgReadDur, 0), readRatio, common.Round(avgAccountReadDur,0), common.Round(avgStorageReadDur,0), common.Round(avgCodeReadDur,0)),
+			"exec", fmt.Sprintf("%v(%.2f%%)", common.Round(avgExecDur, 0), execRatio),
+			"read", fmt.Sprintf("%v(%.2f%%),a=%v,s=%v,c=%v", common.Round(avgReadDur, 0), readRatio, common.Round(avgAccountReadDur, 0), common.Round(avgStorageReadDur, 0), common.Round(avgCodeReadDur, 0)),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", fmt.Sprintf("%s,a=%s,s=%s,c=%s", common.PrettyCounter(curReadCount), common.PrettyCounter(curAccountReadCount),
 				common.PrettyCounter(curStorageReadCount), common.PrettyCounter(curCodeReadCount)),
@@ -666,6 +690,7 @@ func ExecV3(ctx context.Context,
 	defer logEvery.Stop()
 	flushEvery := time.NewTicker(2 * time.Second)
 	defer flushEvery.Stop()
+	defer resetExecGauges()
 
 	var executor executor
 	var executorContext context.Context
@@ -930,6 +955,8 @@ func ExecV3(ctx context.Context,
 						break
 					}
 
+					resetExecGauges()
+
 					var (
 						commitStart   = time.Now()
 						pruneDuration time.Duration
@@ -1122,6 +1149,9 @@ func ExecV3(ctx context.Context,
 						if !dbg.DiscardCommitment() {
 							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxExecBlockNum ||
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+
+								resetExecGauges()
+								
 								if dbg.TraceApply && dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
 								}
