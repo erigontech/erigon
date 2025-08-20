@@ -100,6 +100,7 @@ func init() {
 
 	c = configCopy(c)
 	c.ConstantinopleBlock = big.NewInt(0)
+	c.PetersburgBlock = big.NewInt(10000000)
 	Forks["Constantinople"] = c
 
 	c = configCopy(c)
