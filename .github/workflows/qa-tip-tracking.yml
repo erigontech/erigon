@@ -69,12 +69,12 @@ jobs:
 
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then
-          echo "Pre-sync test completed successfully"
-          echo "::notice::Downgrade & tip-tracking pre-sync test completed successfully"
+          echo "Pre-sync step completed successfully"
+          echo "::notice::Pre-sync step completed successfully"
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
         else
-          echo "Pre-sync test encountered an error"
-          echo "::error::Downgrade & tip-tracking pre-sync test encountered an error"
+          echo "Pre-sync step encountered an error"
+          echo "::error::Pre-sync step encountered an error"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           exit 1
         fi
