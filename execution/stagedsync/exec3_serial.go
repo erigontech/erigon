@@ -119,7 +119,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 
 			se.txCount++
 			se.gasUsed += result.ExecutionResult.GasUsed
-			mxExecGas.Add(float64(result.ExecutionResult.GasUsed))
 			mxExecTransactions.Add(1)
 
 			if txTask.Tx() != nil {

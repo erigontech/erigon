@@ -64,8 +64,8 @@ var (
 	mxExecGasPerTxn    = metrics.NewGauge(`exec_gas_per_transaction`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 	mxExecCPUs         = metrics.NewGauge("exec_cpus")
-	mxExecGas          = metrics.NewGauge(`exec_gas`)
-	mxExecMgas         = metrics.NewGauge(`exec_mgas`)
+	mxExecMGasSec      = metrics.NewGauge(`exec_mgas_sec`)
+	mxTaskMgasSec      = metrics.NewGauge(`exec_task_mgas_sec`)
 
 	mxExecBlockDuration = metrics.NewGauge("exec_block_dur")
 
@@ -279,6 +279,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		mxExecCodeReadRate.SetUint64(uint64(float64(te.taskExecMetrics.CodeReadCount.Load()) / interval.Seconds()))
 
 		mxExecGasPerTxn.Set(float64(avgTaskGas))
+		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
 		mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
 		mxExecBlockDuration.Set(float64(avgBlockDur.Milliseconds()))
 
@@ -287,7 +288,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
-			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
+			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec)),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", common.Round(avgTaskDur, 0).String(),
 			"exec", fmt.Sprintf("%dµs(%.2f%%)", avgExecDur.Microseconds(), execRatio),
@@ -326,8 +327,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	executedGasSec := uint64(float64(te.executedGas.Load()-p.prevExecutedGas) / interval.Seconds())
 
 	if executedGas := te.executedGas.Load(); executedGas > 0 {
-		mxExecMgas.Set((float64(executedGasSec) / 1e6))
-		mxExecGas.Set(float64(executedGasSec))
+		mxExecMGasSec.Set((float64(executedGasSec) / 1e6))
 	}
 
 	var executedTxSec uint64
