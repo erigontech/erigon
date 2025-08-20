@@ -36,8 +36,8 @@ Param(
         "sentry",
         "state",
         "test-short",
-        "test-all",
-        "test-all-race",
+        "test",
+        "test-race",
         "txpool",
         "all"
     )]
@@ -545,7 +545,7 @@ if ($BuildTarget -eq "db-tools") {
     } else {
         Write-Host "`n Tests completed"
     }
-} elseif ($BuildTarget -eq "test-all-race") {
+} elseif ($BuildTarget -eq "test-race") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
     $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m -race ./..."
