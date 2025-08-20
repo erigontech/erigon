@@ -99,13 +99,13 @@ func init() {
 	Forks["ByzantiumToConstantinopleAt5"] = c
 
 	c = configCopy(c)
-	c.ConstantinopleBlock = big.NewInt(0)
-	c.PetersburgBlock = big.NewInt(10000000)
-	Forks["Constantinople"] = c
-
-	c = configCopy(c)
 	c.PetersburgBlock = big.NewInt(5)
 	Forks["ByzantiumToConstantinopleFixAt5"] = c
+
+	c = configCopy(c)
+	c.ConstantinopleBlock = big.NewInt(0)
+	c.PetersburgBlock = nil
+	Forks["Constantinople"] = c
 
 	c = configCopy(c)
 	c.PetersburgBlock = big.NewInt(0)
