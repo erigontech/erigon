@@ -25,7 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -150,7 +150,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	// Initialize salt if it doesn't exist
 	if !fexists {
 		if !genNew {
-			logger.Info("not generating new salt file as genNew=false")
+			logger.Debug("not generating new state-salt file as genNew=false")
 			// Using nil salt for now, actual value should be injected when salt file is downloaded
 			return nil, nil
 		}
@@ -220,7 +220,7 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) ReloadSalt() error {
+func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {
 		return err
@@ -311,6 +311,9 @@ func (a *Aggregator) DisableAllDependencies() {
 func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	if err := a.reloadSalt(); err != nil {
+		return err
+	}
 	if err := a.openFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -360,11 +363,8 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 }
 
 func (a *Aggregator) WaitForFiles() {
-	for {
-		select {
-		case <-a.WaitForBuildAndMerge(a.ctx):
-			return
-		}
+	for range a.WaitForBuildAndMerge(a.ctx) {
+		// The loop will exit when the channel is closed
 	}
 }
 
@@ -1113,7 +1113,7 @@ func (as *AggregatorPruneStat) String() string {
 		names = append(names, k)
 	}
 
-	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+	slices.Sort(names)
 
 	var sb strings.Builder
 	for _, d := range names {
@@ -1126,7 +1126,7 @@ func (as *AggregatorPruneStat) String() string {
 	for k := range as.Indices {
 		names = append(names, k)
 	}
-	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+	slices.Sort(names)
 
 	for _, d := range names {
 		v, ok := as.Indices[d]
