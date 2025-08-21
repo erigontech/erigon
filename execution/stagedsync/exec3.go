@@ -82,6 +82,42 @@ var (
 	mxExecStorageReadRate = metrics.NewGauge("exec_storage_read_rate")
 	mxExecCodeReadRate    = metrics.NewGauge("exec_code_read_rate")
 	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
+
+	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
+	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
+	mxExecDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="all"}`)
+	mxExecDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="all"}`)
+	mxExecDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="all"}`)
+	mxExecDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="all"}`)
+	mxExecDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="all"}`)
+	mxExecDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="all"}`)
+
+	mxExecAccountDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="account"}`)
+	mxExecAccountDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="account"}`)
+	mxExecAccountDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="account"}`)
+	mxExecAccountDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="account"}`)
+	mxExecAccountDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="account"}`)
+	mxExecAccountDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="account"}`)
+	mxExecAccountDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="account"}`)
+	mxExecAccountDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="account"}`)
+
+	mxExecStorageDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="storage"}`)
+	mxExecStorageDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="storage"}`)
+	mxExexStorageDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="storage"}`)
+	mxExecStorageDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="storage"}`)
+	mxExecStorageDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="storage"}`)
+	mxExecStorageDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="storage"}`)
+	mxExecStorageDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="storage"}`)
+	mxExecStorageDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="storage"}`)
+
+	mxExecCodeDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="code"}`)
+	mxExecCodeDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="code"}`)
+	mxExexCodeDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="code"}`)
+	mxExecCodeDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="code"}`)
+	mxExecCodeDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="code"}`)
+	mxExecCodeDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="code"}`)
+	mxExecCodeDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="code"}`)
+	mxExecCodeDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="code"}`)
 )
 
 const (
@@ -111,6 +147,38 @@ func resetExecGauges() {
 	mxExecStorageReadRate.Set(0)
 	mxExecCodeReadRate.Set(0)
 	mxExecWriteRate.Set(0)
+	mxExecDomainReads.Set(0)
+	mxExecDomainReadDuration.Set(0)
+	mxExecDomainCacheReads.Set(0)
+	mxExecDomainCacheReadDuration.Set(0)
+	mxExecDomainDbReads.Set(0)
+	mxExecDomainDbReadDuration.Set(0)
+	mxExecDomainFileReads.Set(0)
+	mxExecDomainFileReadDuration.Set(0)
+	mxExecAccountDomainReads.Set(0)
+	mxExecAccountDomainReadDuration.Set(0)
+	mxExecAccountDomainCacheReads.Set(0)
+	mxExecAccountDomainCacheReadDuration.Set(0)
+	mxExecAccountDomainDbReads.Set(0)
+	mxExecAccountDomainDbReadDuration.Set(0)
+	mxExecAccountDomainFileReads.Set(0)
+	mxExecAccountDomainFileReadDuration.Set(0)
+	mxExecStorageDomainReads.Set(0)
+	mxExecStorageDomainReadDuration.Set(0)
+	mxExexStorageDomainCacheReads.Set(0)
+	mxExecStorageDomainCacheReadDuration.Set(0)
+	mxExecStorageDomainDbReads.Set(0)
+	mxExecStorageDomainDbReadDuration.Set(0)
+	mxExecStorageDomainFileReads.Set(0)
+	mxExecStorageDomainFileReadDuration.Set(0)
+	mxExecCodeDomainReads.Set(0)
+	mxExecCodeDomainReadDuration.Set(0)
+	mxExexCodeDomainCacheReads.Set(0)
+	mxExecCodeDomainCacheReadDuration.Set(0)
+	mxExecCodeDomainDbReads.Set(0)
+	mxExecCodeDomainDbReadDuration.Set(0)
+	mxExecCodeDomainFileReads.Set(0)
+	mxExecCodeDomainFileReadDuration.Set(0)
 }
 
 func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
@@ -1175,11 +1243,24 @@ func ExecV3(ctx context.Context,
 								commitProgress := make(chan *commitment.CommitProgress, 100)
 
 								go func() {
-									for progress := range commitProgress {
-										done := float64(progress.KeyIndex) / float64(progress.UpdateCount)
-										fmt.Println(progress.KeyIndex, progress.UpdateCount, done,
-											"uc gas", common.PrettyCounter(uncommittedGas),
-											"done gas", common.PrettyCounter(uint64(done*float64(uncommittedGas))))
+									logEvery := time.NewTicker(20 * time.Second)
+									defer logEvery.Stop()
+									var lastProgress commitment.CommitProgress
+									for {
+										select {
+										case <-ctx.Done():
+											return
+										case progress, ok := <-commitProgress:
+											if !ok {
+												return
+											}
+											lastProgress = *progress
+										case <-logEvery.C:
+											done := float64(lastProgress.KeyIndex) / float64(lastProgress.UpdateCount)
+											fmt.Println(lastProgress.KeyIndex, lastProgress.UpdateCount, done,
+												"uc gas", common.PrettyCounter(uncommittedGas),
+												"done gas", common.PrettyCounter(uint64(done*float64(uncommittedGas))))
+										}
 									}
 								}()
 
