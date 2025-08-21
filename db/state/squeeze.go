@@ -401,7 +401,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
 		//shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(totalKeys/keysPerStep)))), 128))
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 128))
+		shardStepsSize := kv.Step(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))))
 		//shardStepsSize := kv.Step(uint64(math.Pow(2, math.Log2(float64(totalKeys/keysPerStep)))))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
