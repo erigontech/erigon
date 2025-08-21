@@ -388,6 +388,16 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 			}),
 		},
+		{
+			Name:        "compareIdx",
+			Action:      doCompareIdx,
+			Description: "compares to accessors (recsplit) files",
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{Name: "first", Required: true},
+				&cli.PathFlag{Name: "second", Required: true},
+				&cli.BoolFlag{Name: "skip-size-check", Required: false, Value: false},
+			}),
+		},
 	},
 }
 
@@ -1449,7 +1459,17 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
+		var keysSize, valsSize datasize.ByteSize
+		g := src.MakeGetter()
+		for g.HasNext() {
+			k, _ := g.Next(nil)
+			keysSize += datasize.ByteSize(len(k))
+			if g.HasNext() {
+				v, _ := g.Next(nil)
+				valsSize += datasize.ByteSize(len(v))
+			}
+		}
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HR(), "keys_size", keysSize.HR(), "vals_size", valsSize.HR(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HR(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
 	} else if strings.HasSuffix(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
@@ -1484,7 +1504,7 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 		defer idx.Close()
 		total, offsets, ef, golombRice, existence, layer1 := idx.Sizes()
-		log.Info("meta", "sz_total", total.HumanReadable(), "sz_offsets", offsets.HumanReadable(), "sz_double_ef", ef.HumanReadable(), "sz_golombRice", golombRice.HumanReadable(), "sz_existence", existence.HumanReadable(), "sz_l1", layer1.HumanReadable(), "keys_count", idx.KeyCount(), "leaf_size", idx.LeafSize(), "bucket_size", idx.BucketSize(), "enums", idx.Enums())
+		log.Info("meta", "sz_total", total.HR(), "sz_offsets", offsets.HR(), "sz_double_ef", ef.HR(), "sz_golombRice", golombRice.HR(), "sz_existence", existence.HR(), "sz_l1", layer1.HR(), "keys_count", idx.KeyCount(), "leaf_size", idx.LeafSize(), "bucket_size", idx.BucketSize(), "enums", idx.Enums())
 	}
 	return nil
 }
@@ -2202,6 +2222,93 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		log.Error("error while serving an Erigon node", "err", err)
 	}
 	return err
+}
+
+func doCompareIdx(cliCtx *cli.Context) error {
+	// doesn't compare exact hashes offset,
+	// only sizes, counts, offsets, and ordinal lookups.
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+
+	cmpFn := func(f, s uint64, msg string) {
+		if f != s {
+			panic(fmt.Sprintf("different %s -- first: %d, second: %d", msg, f, s))
+		}
+	}
+
+	first := cliCtx.Path("first")
+	second := cliCtx.Path("second")
+	doSizeCheck := !cliCtx.Bool("skip-size-check")
+
+	if doSizeCheck {
+		fileInfo1, err := os.Stat(first)
+		if err != nil {
+			return err
+		}
+		fileInfo2, err := os.Stat(second)
+		if err != nil {
+			return err
+		}
+		cmpFn(uint64(fileInfo1.Size()), uint64(fileInfo2.Size()), "file_sizes")
+	}
+
+	firstIdx := recsplit.MustOpen(first)
+	secondIdx := recsplit.MustOpen(second)
+	defer firstIdx.Close()
+	defer secondIdx.Close()
+
+	cmpFn(firstIdx.KeyCount(), secondIdx.KeyCount(), "key_count")
+	cmpFn(firstIdx.BaseDataID(), secondIdx.BaseDataID(), "base_data_id")
+
+	if doSizeCheck {
+		cmpFn(uint64(firstIdx.LeafSize()), uint64(secondIdx.LeafSize()), "leaf_size")
+		cmpFn(uint64(firstIdx.BucketSize()), uint64(secondIdx.BucketSize()), "bucket_size")
+
+		total1, offsets1, ef1, golombRice1, existence1, layer11 := firstIdx.Sizes()
+		total2, offsets2, ef2, golombRice2, existence2, layer12 := secondIdx.Sizes()
+		cmpFn(total1.Bytes(), total2.Bytes(), "total")
+		cmpFn(offsets1.Bytes(), offsets2.Bytes(), "offset")
+		cmpFn(ef1.Bytes(), ef2.Bytes(), "ef")
+		cmpFn(golombRice1.Bytes(), golombRice2.Bytes(), "golombRice")
+		cmpFn(existence1.Bytes(), existence2.Bytes(), "existence")
+		cmpFn(layer11.Bytes(), layer12.Bytes(), "layer1")
+	}
+
+	firstOffsets := firstIdx.ExtractOffsets()
+	secondOffsets := secondIdx.ExtractOffsets()
+
+	for k := range firstOffsets {
+		_, ok := secondOffsets[k]
+		if !ok {
+			logger.Error("offset not found in second file")
+			return nil
+		}
+	}
+
+	for k := range secondOffsets {
+		_, ok := firstOffsets[k]
+		if !ok {
+			logger.Error("offset not found in first file")
+			return nil
+		}
+	}
+
+	if firstIdx.Enums() != secondIdx.Enums() {
+		logger.Error("enums value don't match", "first", firstIdx.Enums(), "second", secondIdx.Enums())
+		return nil
+	}
+
+	if firstIdx.Enums() {
+		for i := uint64(0); i < firstIdx.KeyCount(); i++ {
+			off1, off2 := firstIdx.OrdinalLookup(i), secondIdx.OrdinalLookup(i)
+			cmpFn(off1, off2, fmt.Sprintf("offset_ordinal_%d", i))
+		}
+	}
+
+	logger.Info("two files are identical")
+	return nil
 }
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {

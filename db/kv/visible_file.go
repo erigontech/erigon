@@ -1,5 +1,10 @@
 package kv
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 type VisibleFile interface {
 	Fullpath() string
 	StartRootNum() uint64
@@ -20,4 +25,16 @@ func (v VisibleFiles) EndRootNum() uint64 {
 		return 0
 	}
 	return v[len(v)-1].EndRootNum()
+}
+
+func (v VisibleFiles) String() string {
+	if len(v) == 0 {
+		return ""
+	}
+	fileNames := make([]string, 0, len(v))
+	for _, f := range v {
+		_, fname := filepath.Split(f.Fullpath())
+		fileNames = append(fileNames, fname)
+	}
+	return strings.Join(fileNames, ",")
 }
