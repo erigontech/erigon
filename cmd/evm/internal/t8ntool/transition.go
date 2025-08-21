@@ -696,7 +696,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
+	root, err := domains.ComputeCommitment(context.Background(), true, blockNum, txNum, "", nil)
 	if err != nil {
 		return nil, err
 	}

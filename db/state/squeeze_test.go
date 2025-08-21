@@ -77,7 +77,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "", nil)
 			require.NoError(tb, err)
 			require.NotEmpty(tb, rh)
 		}
@@ -111,7 +111,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 
 	var blockNum uint64
 	// get latest commited root
-	latestRoot, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "")
+	latestRoot, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
@@ -146,7 +146,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	// check if the commitment is the same
-	root, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "")
+	root, err := domains.ComputeCommitment(context.Background(), false, blockNum, 0, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)

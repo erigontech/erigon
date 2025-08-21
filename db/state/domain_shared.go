@@ -97,6 +97,7 @@ type SharedDomains struct {
 	estSize           int
 	trace             bool //nolint
 	commitmentCapture bool
+	commitProgress    chan *commitment.CommitProgress
 	//walLock sync.RWMutex
 
 	muMaps  sync.RWMutex
@@ -120,7 +121,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
-		metrics: SharedDomainsMetrics{domainMetrics: map[kv.Domain]*domainMetrics{}},
+		metrics:        SharedDomainsMetrics{domainMetrics: map[kv.Domain]*domainMetrics{}},
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()

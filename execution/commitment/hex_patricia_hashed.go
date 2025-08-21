@@ -2185,7 +2185,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2250,6 +2250,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			return fmt.Errorf("followAndUpdate: %w", err)
 		}
 		ki++
+		if progress != nil {
+			progress <- &CommitProgress{
+				KeyIndex:    ki,
+				UpdateCount: updatesCount,
+			}
+		}
 		return nil
 	})
 	if err != nil {

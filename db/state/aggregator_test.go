@@ -394,7 +394,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
+			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "", nil)
 			require.NoError(t, err)
 		}
 
@@ -521,7 +521,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
-	_, err = domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+	_, err = domains.ComputeCommitment(ctx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 
 	err = domains.Flush(context.Background(), tx)
@@ -772,7 +772,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, tx kv.Tx
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "")
+			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			t.Logf("commitment %x txn=%d", rh, txNum)
 		}
@@ -1333,7 +1333,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -1382,7 +1382,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)
@@ -1431,7 +1431,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)

@@ -210,7 +210,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
+				_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "", nil)
 				require.NoError(t, err)
 			}
 

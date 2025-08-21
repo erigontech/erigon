@@ -543,7 +543,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		sd.SetTxNum(base + uint64(len(receipts)) + 1)
 		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+uint64(len(receipts))+1))
 
-		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
+		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
 		require.NoError(err)
 
 		require.NoError(sd.Flush(ctx, tx))

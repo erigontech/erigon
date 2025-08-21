@@ -54,8 +54,10 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 		getter: sd.AsGetter(tx),
 		putter: sd.AsPutDel(tx),
 
-		stepSize: sd.StepSize(),
+		stepSize:       sd.StepSize(),
+		commitProgress: sd.commitProgress,
 	}
+
 	ctx.mainTtx = trieCtx
 	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
@@ -109,7 +111,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, txNum uint64, logPrefix string) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -127,6 +129,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
+
 	sdc.patriciaTrie.SetTrace(sdc.trace)
 	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.trace)
 	if sdc.sharedDomains.commitmentCapture {
@@ -137,7 +140,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	sdc.Reset()
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +397,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, true, blockNum, txNum, "rebuild commit")
+	return sdc.ComputeCommitment(ctx, true, blockNum, txNum, "rebuild commit", nil)
 }
 
 type TrieContext struct {
@@ -405,6 +408,7 @@ type TrieContext struct {
 
 	limitReadAsOfTxNum uint64
 	stepSize           uint64
+	commitProgress     chan *commitment.CommitProgress
 	withHistory        bool // if true, do not use history reader and limit to domain files only
 	trace              bool
 }

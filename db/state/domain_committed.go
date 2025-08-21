@@ -93,8 +93,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	return nil
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix, commitProgress)
 	return
 }
 

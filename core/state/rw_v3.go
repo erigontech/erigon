@@ -215,7 +215,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, true, blockNum, txNum, fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()))
+		_, err := rs.domains.ComputeCommitment(ctx, true, blockNum, txNum, fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
 		if err != nil {
 			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}

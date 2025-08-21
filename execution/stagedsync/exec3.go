@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/types"
@@ -252,6 +253,8 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 	curTaskGasPerSec := int64(float64(curTaskGas) / interval.Seconds())
 
+	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas)
+
 	switch ex.(type) {
 	case *parallelExecutor:
 		execCount := uint64(te.execCount.Load())
@@ -367,7 +370,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	mxExecTxnPerBlock.Set(float64(executedDiffBlocks) / float64(executedDiffTxs))
 
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
-		executedDiffTxs, executedTxSec, executedGasSec, 0, execVals)
+		executedDiffTxs, executedTxSec, executedGasSec, uncommitedGas, 0, execVals)
 
 	p.prevExecTime = currentTime
 
@@ -411,7 +414,7 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 	committedDiffBlocks := max(int64(te.lastCommittedBlockNum)-int64(p.prevCommittedBlockNum), 0)
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
-		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, stepsInDb, nil)
+		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, nil)
 
 	p.prevCommitTime = currentTime
 
@@ -462,11 +465,11 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 	}
 	diffBlocks := max(int64(lastBlockNum)-int64(p.initialBlockNum), 0)
 
-	p.log("done", suffix, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, stepsInDb, nil)
+	p.log("done", suffix, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, 0, stepsInDb, nil)
 }
 
 func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
-	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, stepsInDb float64, extraVals []interface{}) {
+	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []interface{}) {
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -494,6 +497,12 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		vals = append(vals, []interface{}{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
 			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(config3.DefaultStepSize)),
+		}...)
+	}
+
+	if uncommitedGas > 0 {
+		vals = append(vals, []interface{}{
+			"ucgas", common.PrettyCounter(uncommitedGas),
 		}...)
 	}
 
@@ -799,7 +808,7 @@ func ExecV3(ctx context.Context,
 					start := time.Now()
 					executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 					// First compute and commit the progress done so far
-					if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
+					if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix(), nil); err != nil {
 						return err
 					}
 					computeCommitmentDuration += time.Since(start)
@@ -895,7 +904,7 @@ func ExecV3(ctx context.Context,
 					if dbg.TraceBlock(blockNum) {
 						se.doms.SetTrace(true, false)
 					}
-					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
+					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix(), nil)
 					se.doms.SetTrace(false, false)
 
 					if err != nil {
@@ -1151,7 +1160,7 @@ func ExecV3(ctx context.Context,
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 
 								resetExecGauges()
-								
+
 								if dbg.TraceApply && dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
 								}
@@ -1162,7 +1171,20 @@ func ExecV3(ctx context.Context,
 									trace = true
 								}
 								pe.doms.SetTrace(trace, !dbg.BatchCommitments)
-								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix)
+
+								commitProgress := make(chan *commitment.CommitProgress, 100)
+
+								go func() {
+									for progress := range commitProgress {
+										done := float64(progress.KeyIndex) / float64(progress.UpdateCount)
+										fmt.Println(progress.KeyIndex, progress.UpdateCount, done,
+											"uc gas", common.PrettyCounter(uncommittedGas),
+											"done gas", common.PrettyCounter(uint64(done*float64(uncommittedGas))))
+									}
+								}()
+
+								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
+								close(commitProgress)
 								captured := pe.doms.SetTrace(false, false)
 								if err != nil {
 									return err
@@ -1491,7 +1513,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, times, errors.New("tx is not a temporal tx")
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix())
+	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {

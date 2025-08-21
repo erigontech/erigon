@@ -541,7 +541,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, blockNum, tx
 		}
 	}
 	collectionSpent := time.Since(sf)
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, txNum, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, blockNum, txNum, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}

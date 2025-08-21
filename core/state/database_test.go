@@ -1367,7 +1367,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	rh1, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
+	rh1, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	//t.Logf("stateRoot %x", rh1)
 
@@ -1386,7 +1386,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
-	rh2, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
+	rh2, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	require.NotEqual(t, rh1, rh2)
 }
@@ -1461,7 +1461,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	r2, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
+	r2, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 
@@ -1476,7 +1476,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	r2, err = sd.ComputeCommitment(context.Background(), true, 1, 2, "")
+	r2, err = sd.ComputeCommitment(context.Background(), true, 1, 2, "", nil)
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 }
