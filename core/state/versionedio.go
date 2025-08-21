@@ -364,8 +364,7 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 
 	cmpMap := map[common.Address]map[AccountKey]struct{}{}
 
-	for i := 0; i < len(cmpSet); i++ {
-		vw := cmpSet[i]
+	for _, vw := range cmpSet {
 		keys, ok := cmpMap[vw.Address]
 		if !ok {
 			keys = map[AccountKey]struct{}{}
@@ -576,7 +575,6 @@ type VersionedIO struct {
 	inputs     []versionedReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
 	outputsSet []map[common.Address]map[AccountKey]struct{}
-	allOutputs []VersionedWrites // entire write sets in MVHashMap. allOutputs should always be a parent set of outputs
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
@@ -607,13 +605,6 @@ func (io *VersionedIO) WriteSet(txnIdx int) VersionedWrites {
 		return nil
 	}
 	return io.outputs[txnIdx+1]
-}
-
-func (io *VersionedIO) AllWriteSet(txnIdx int) VersionedWrites {
-	if len(io.allOutputs) <= txnIdx+1 {
-		return nil
-	}
-	return io.allOutputs[txnIdx+1]
 }
 
 func (io *VersionedIO) WriteCount() (count int64) {
@@ -665,7 +656,6 @@ func NewVersionedIO(numTx int) *VersionedIO {
 		inputs:     make([]versionedReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
 		outputsSet: make([]map[common.Address]map[AccountKey]struct{}, numTx+1),
-		allOutputs: make([]VersionedWrites, numTx+1),
 	}
 }
 
@@ -697,15 +687,6 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 		}
 		keys[AccountKey{v.Path, v.Key}] = struct{}{}
 	}
-}
-
-func (io *VersionedIO) RecordAllWrites(txVersion Version, output VersionedWrites) {
-	txId := txVersion.TxIndex
-
-	if len(io.allOutputs) <= txId+1 {
-		io.allOutputs = append(io.allOutputs, make([]VersionedWrites, txId+2-len(io.allOutputs))...)
-	}
-	io.allOutputs[txId+1] = output
 }
 
 type DAG struct {
@@ -744,7 +725,7 @@ func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {
 		}
 
 		for j := i - 1; j >= 0; j-- {
-			txFrom := deps.allOutputs[j]
+			txFrom := deps.outputs[j]
 
 			if HasReadDep(txFrom, txTo.readSet) {
 				var txFromId string
@@ -805,7 +786,7 @@ func GetDep(deps *VersionedIO) map[int]map[int]bool {
 		newDependencies[i] = map[int]bool{}
 
 		for j := 0; j <= i-1; j++ {
-			txFrom := deps.allOutputs[j]
+			txFrom := deps.outputs[j]
 
 			newDependencies = depsHelper(newDependencies, txFrom, txTo.readSet, i, j)
 		}

@@ -798,31 +798,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	} else {
 		txVersion := res.Version()
-		tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-
-		var trace bool
-		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
-			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
-			be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
-				fmt.Println(tracePrefix, "RD", vr.String())
-				return true
-			})
-			for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
-				fmt.Println(tracePrefix, "WRT", vw.String())
-			}
-		}
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
 
 		if res.Version().Incarnation == 0 {
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
-			be.blockIO.RecordAllWrites(txVersion, res.TxOut)
 		} else {
-			if res.TxOut.HasNewWrite(be.blockIO.AllWriteSet(txVersion.TxIndex)) {
-				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
-			}
+			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 
-			prevWrite := be.blockIO.AllWriteSet(txVersion.TxIndex)
+			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
 			// Remove entries that were previously written but are no longer written
 
@@ -837,14 +821,32 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				keys[state.AccountKey{Path: w.Path, Key: w.Key}] = struct{}{}
 			}
 
-			for _, v := range prevWrite {
+			for _, v := range prevWrites {
 				if _, ok := cmpMap[v.Address][state.AccountKey{Path: v.Path, Key: v.Key}]; !ok {
+					hasWriteChange = true
 					be.versionMap.Delete(v.Address, v.Path, v.Key, txVersion.TxIndex, true)
 				}
 			}
 
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
-			be.blockIO.RecordAllWrites(txVersion, res.TxOut)
+
+			if hasWriteChange {
+				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+			}
+		}
+
+		tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
+
+		var trace bool
+		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
+			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
+			be.blockIO.ReadSet(txVersion.TxIndex).Scan(func(vr *state.VersionedRead) bool {
+				fmt.Println(tracePrefix, "RD", vr.String())
+				return true
+			})
+			for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
+				fmt.Println(tracePrefix, "WRT", vw.String())
+			}
 		}
 
 		be.validateTasks.pushPending(tx)
