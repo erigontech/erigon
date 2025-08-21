@@ -9,12 +9,14 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -366,7 +368,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
 
 	start := time.Now()
-	defer func() { logger.Info("[commitment_rebuild] done", "duration", time.Since(start)) }()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 
 	originalCommitmentValuesTransform := a.commitmentValuesTransform
 
@@ -446,9 +449,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				if !keyIter.HasNext() {
 					return false, nil
 				}
-				if processed%1_000_000 == 0 {
-					logger.Info(fmt.Sprintf("[commitment_rebuild] progressing domain keys %.1fm/%.1fm (%2.f%%) %x",
-						float64(processed)/1_000_000, float64(totalKeys)/1_000_000, float64(processed)/float64(totalKeys)*100, k))
+				if processed%1_000 == 0 {
+					select {
+					case <-logEvery.C:
+						logger.Info(fmt.Sprintf("[commitment_rebuild] progressing keys %.1fm/%.1fm (%2.f%%) %x",
+							float64(processed)/1_000_000, float64(totalKeys)/1_000_000, float64(processed)/float64(totalKeys)*100, k))
+					default:
+					}
 				}
 				k, _, err := keyIter.Next()
 				if err != nil {
@@ -479,6 +486,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(lastTxnumInShard, true) // this helps to read state from correct file during commitment
 
+			tShard := time.Now()
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, blockNum, domains.TxNum(), rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
@@ -490,7 +498,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, err
 			}
 			logger.Info(fmt.Sprintf("[commitment_rebuild] shard %d-%d of range %s finished (%d%%)", shardFrom, shardTo, r.String("", a.StepSize()), processed*100/totalKeys),
-				"keys", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)))
+				"keys", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)), "took", tShard)
 
 			domains.Close()
 
@@ -518,8 +526,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			rhx = hex.EncodeToString(rebuiltCommit.RootHash)
 			latestRoot = rebuiltCommit.RootHash
 		}
+
+		var m runtime.MemStats
+		dbg.ReadMemStats(&m)
 		logger.Info("[rebuild_commitment] finished range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
-			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
+			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 		a.commitmentValuesTransform = false
 		for {
@@ -534,7 +545,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		a.commitmentValuesTransform = originalCommitmentValuesTransform // disable only while merging, to squeeze later. If enabled in Scheme, must be enabled while computing commitment to correctly dereference keys
 
 	}
-	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 	a.commitmentValuesTransform = originalCommitmentValuesTransform
 	//if a.commitmentValuesTransform {
