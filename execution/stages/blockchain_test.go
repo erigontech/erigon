@@ -1095,7 +1095,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(tx)
-			theAddr = crypto.CreateAddress(bankAddress, nonce)
+			theAddr = types.CreateAddress(bankAddress, nonce)
 		case 1:
 			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), *signer, bankKey)
 			require.NoError(t, err)
@@ -1485,7 +1485,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	}...)
 
 	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
@@ -1807,7 +1807,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}...)
 
 	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
 		Config: libchain.TestChainConfig,
@@ -2010,7 +2010,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}...)
 
 	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
