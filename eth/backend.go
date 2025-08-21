@@ -419,7 +419,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporalDb
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
 		return nil, err
 	}
 
@@ -1470,13 +1470,12 @@ func (s *Ethereum) setUpSnapDownloader(
 	ctx context.Context,
 	nodeCfg *nodecfg.Config,
 	downloaderCfg *downloadercfg.Cfg,
-	cc *chain.Config,
 ) (err error) {
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
 			return
 		}
 		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(frozenFileNames) == 0 {
@@ -1493,7 +1492,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			s.logger.Warn("[snapshots] downloader.Add", "err", err)
 		}
 	}, func(deletedFiles []string) {
-		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
 			return
 		}
 		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(deletedFiles) == 0 {
