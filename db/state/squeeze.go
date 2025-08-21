@@ -497,7 +497,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			if err != nil {
 				return nil, err
 			}
-			logger.Info(fmt.Sprintf("[commitment_rebuild] shard %d-%d of range %s finished (%d%%)", shardFrom, shardTo, r.String("", a.StepSize()), processed*100/totalKeys),
+			logger.Info(fmt.Sprintf("[commitment_rebuild] finished shard %d-%d (range %s)", shardFrom, shardTo, r.String("", a.StepSize())),
 				"keys", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)), "took", tShard)
 
 			domains.Close()
