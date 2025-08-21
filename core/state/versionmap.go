@@ -319,9 +319,9 @@ func (v VersionValidity) String() string {
 	switch v {
 	case VersionValid:
 		return "valid"
-	case VerionInvalid:
+	case VersionInvalid:
 		return "invalid"
-	case VerionTooEarly:
+	case VersionTooEarly:
 		return "too early"
 	default:
 		return "unknown"
@@ -330,11 +330,11 @@ func (v VersionValidity) String() string {
 
 const (
 	VersionValid VersionValidity = iota
-	VerionInvalid
-	VerionTooEarly
+	VersionInvalid
+	VersionTooEarly
 )
 
-func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(readVersion, writeVersion Version) VersionValidity) (valid VersionValidity) {
+func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	valid = VersionValid
 
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
@@ -343,15 +343,15 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 			switch rr.Status() {
 			case MVReadResultDone:
 				if vr.Source != MapRead {
-					valid = VerionInvalid
+					valid = VersionInvalid
 				} else {
 					valid = checkVersion(vr.Version, rr.Version())
 				}
 			case MVReadResultDependency:
-				valid = VerionInvalid
+				valid = VersionInvalid
 			case MVReadResultNone:
 				if vr.Source != StorageRead {
-					valid = VerionInvalid
+					valid = VersionInvalid
 				} else {
 					valid = checkVersion(vr.Version, vr.Version)
 				}
@@ -359,8 +359,13 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 				panic(fmt.Errorf("should not happen - undefined vm read status: %v", rr.Status()))
 			}
 
-			if versionMap.trace {
-				fmt.Println("RD", vr.Address, AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
+			if versionMap.trace || (traceInvalid && valid == VersionInvalid) {
+				if len(tracePrefix) > 0 {
+					tracePrefix = tracePrefix + "  RD"
+				} else {
+					tracePrefix = "RD"
+				}
+				fmt.Println(tracePrefix, vr.Address, AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
 					switch rr.Status() {
 					case MVReadResultDone:
 						return "done"

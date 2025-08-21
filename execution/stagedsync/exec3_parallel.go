@@ -875,34 +875,33 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		tx := toValidate[i]
 		txVersion := be.tasks[tx].Task.Version()
 
-		be.versionMap.SetTrace(dbg.TraceTransactionIO)
-		validity := state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
-			func(readVersion, writtenVersion state.Version) state.VersionValidity {
-				vv := state.VersionValid
-
-				if readVersion != writtenVersion {
-					vv = state.VerionInvalid
-				} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
-					vv = state.VerionTooEarly
-				}
-
-				return vv
-			})
-		be.versionMap.SetTrace(false)
-
-		if validity == state.VerionTooEarly {
-			cntInvalid++
-			continue
-		}
-
-		valid := be.skipCheck[tx] || validity == state.VersionValid
-
 		var trace bool
 		var tracePrefix string
 
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 		}
+
+		validity := state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
+			func(readVersion, writtenVersion state.Version) state.VersionValidity {
+				vv := state.VersionValid
+
+				if readVersion != writtenVersion {
+					vv = state.VersionInvalid
+				} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
+					vv = state.VersionTooEarly
+				}
+
+				return vv
+			}, trace, tracePrefix)
+		be.versionMap.SetTrace(false)
+
+		if validity == state.VersionTooEarly {
+			cntInvalid++
+			continue
+		}
+
+		valid := be.skipCheck[tx] || validity == state.VersionValid
 
 		be.versionMap.SetTrace(trace)
 		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
@@ -1121,8 +1120,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1] {
 								return state.VersionValid
 							}
-							return state.VerionInvalid
-						}) != state.VersionValid) {
+							return state.VersionInvalid
+						}, false, "") != state.VersionValid) {
 				be.execTasks.pushPending(nextTx)
 				continue
 			}
