@@ -552,13 +552,6 @@ func init() {
 	//withChaosMonkey(cmdPrintCommitment)
 	rootCmd.AddCommand(cmdPrintCommitment)
 
-	withConfig(cmdPrintCommitment)
-	withDataDir(cmdPrintCommitment)
-	withChain(cmdPrintCommitment)
-	//withHeimdall(cmdPrintCommitment)
-	//withChaosMonkey(cmdPrintCommitment)
-	rootCmd.AddCommand(cmdPrintCommitment)
-
 	withConfig(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
