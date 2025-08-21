@@ -187,7 +187,6 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 }
 func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
-func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
 func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
@@ -262,7 +261,7 @@ func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.
 func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
-func (db *DB) OnFilesChange(f kv.OnFilesChange) { panic("not implemented") }
+func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}

@@ -450,7 +450,6 @@ type TemporalDebugTx interface {
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
-	ReloadSalt() error
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
@@ -697,5 +696,5 @@ type Closer interface {
 
 type OnFilesChange func(frozenFileNames []string)
 type SnapshotNotifier interface {
-	OnFilesChange(f OnFilesChange)
+	OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
 }
