@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -42,10 +43,14 @@ var events2 []byte
 //go:embed testdata/v1.0-000000-000500-borspans.seg
 var spans []byte
 
-func createFiles(dataDir string) error {
+func createFiles(dataDir string, logger log.Logger) error {
 	destPath := filepath.Join(dataDir)
 	err := os.MkdirAll(destPath, 0755)
 	if err != nil {
+		return err
+	}
+
+	if _, err = snaptype.LoadSalt(dataDir, true, logger); err != nil {
 		return err
 	}
 
@@ -75,7 +80,7 @@ func setup(t *testing.T, ctx context.Context, iterations []uint64) *heimdallsim.
 	// logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
 
-	err := createFiles(dataDir)
+	err := createFiles(dataDir, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

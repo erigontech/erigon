@@ -33,7 +33,7 @@ var (
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
-	reset, noCommit              bool
+	reset, noCommit, squeeze     bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string
@@ -111,6 +111,10 @@ func withUnwindEvery(cmd *cobra.Command) {
 
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
+}
+
+func withSqueeze(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&reset, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
 }
 
 func withBucket(cmd *cobra.Command) {
