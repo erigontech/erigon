@@ -300,6 +300,9 @@ func ValidateHeaderTime(
 		return err
 	}
 
+	proposer := validatorSet.(*valset.ValidatorSet).GetProposer()
+	fmt.Printf("VALIDATE_HEADER_TIME: blockNum=%d , blockHash=%x, signer=%x, proposer=%x succession=%d\n", header.Number.Uint64(), header.Hash(), signer, proposer, succession)
+
 	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
 	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
 		if header.Time > uint64(now.Unix()) {
