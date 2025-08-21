@@ -687,7 +687,8 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 		return err
 	}
 
-	d.integrateDirtyFiles(static, txnFrom, txnTo)
+	// d.integrateDirtyFiles(static, txnFrom, txnTo)
+	d.integrateDirtyFiles(static, uint64(stepFrom)*d.stepSize, uint64(stepTo)*d.stepSize)
 	// d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	return nil
 }
