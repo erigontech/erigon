@@ -53,8 +53,6 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 		roTtx:  tx,
 		getter: sd.AsGetter(tx),
 		putter: sd.AsPutDel(tx),
-
-		stepSize: sd.StepSize(),
 	}
 	ctx.mainTtx = trieCtx
 	ctx.patriciaTrie.ResetContext(trieCtx)
@@ -392,7 +390,6 @@ type TrieContext struct {
 	txNum  uint64
 
 	limitReadAsOfTxNum uint64
-	stepSize           uint64
 	withHistory        bool // if true, do not use history reader and limit to domain files only
 	trace              bool
 }

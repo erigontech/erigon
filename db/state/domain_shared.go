@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -65,6 +66,12 @@ type dataWithPrevStep struct {
 	prevStep kv.Step
 }
 
+type Features struct {
+	NoReadsAfterWrite bool // Client doesn't plan to read its own writes on given Domain. Enable to reduce RAM usage.
+	//NoMonotonicReads bool // "read >= previous read verson"
+	//RangeQueries bool // Client plan `IteratePrefix` on given Domain. Enable to use `sorted-map`: but lower perf.
+}
+
 type SharedDomains struct {
 	sdCtx *SharedDomainsCommitmentContext
 
@@ -78,15 +85,19 @@ type SharedDomains struct {
 	trace    bool //nolint
 	//walLock sync.RWMutex
 
-	muMaps  sync.RWMutex
-	domains [kv.DomainLen]map[string]dataWithPrevStep
-	storage *btree2.Map[string, dataWithPrevStep]
+	muMaps   sync.RWMutex
+	domains  [kv.DomainLen]map[string]dataWithPrevStep
+	storage  *btree2.Map[string, dataWithPrevStep]
+	features [kv.DomainLen]Features
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
+	iiFeatures    []Features
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
+
+	commitmentETL *etl.Collector
 }
 
 type HasAgg interface {
@@ -103,9 +114,12 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	sd.stepSize = aggTx.StepSize()
 
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
+	sd.iiFeatures = make([]Features, len(aggTx.iis))
 
+	//TODO: move to client-side
 	for id, ii := range aggTx.iis {
 		sd.iiWriters[id] = ii.NewWriter()
+		sd.iiFeatures[id].NoReadsAfterWrite = true
 	}
 
 	for id, d := range aggTx.d {
@@ -125,6 +139,10 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	}
 
 	return sd, nil
+}
+
+func (sd *SharedDomains) NoReadsAfterWrites(domain kv.Domain) {
+	sd.features[domain].NoReadsAfterWrite = true
 }
 
 type temporalPutDel struct {
@@ -217,6 +235,10 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
+	if sd.features[domain].NoReadsAfterWrite {
+		return
+	}
+
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
