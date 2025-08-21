@@ -35,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -504,6 +505,15 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		} else {
 			head.RequestsHash = &types.EmptyRequestsHash
 		}
+	}
+
+	fmt.Printf("g.Config=%v , g.Config.Bor=%v\n", g.Config, g.Config.Bor)
+	if g.Config != nil && g.Config.Bor != nil {
+		withdrawals = []*types.Withdrawal{}
+		head.BlobGasUsed = new(uint64)
+		head.ExcessBlobGas = new(uint64)
+		emptyHash := common.HexToHash("0x0")
+		head.ParentBeaconBlockRoot = &emptyHash
 	}
 
 	var root libcommon.Hash

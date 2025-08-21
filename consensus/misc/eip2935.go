@@ -21,7 +21,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
@@ -35,7 +34,7 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 		return err
 	}
 	if codeSize == 0 {
-		log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
+		// log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
 		return nil
 	}
 	headerNum := header.Number.Uint64()
