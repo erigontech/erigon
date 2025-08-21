@@ -497,7 +497,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			if err != nil {
 				return nil, err
 			}
-			logger.Info(fmt.Sprintf("[commitment_rebuild] shard %d-%d of range %s finished (%d%%)", shardFrom, shardTo, r.String("", a.StepSize()), processed*100/totalKeys),
+			logger.Info(fmt.Sprintf("[commitment_rebuild] finished shard %d-%d of range %s (%d%%)", shardFrom, shardTo, r.String("", a.StepSize()), processed*100/totalKeys),
 				"keys", fmt.Sprintf("%s/%s", common.PrettyCounter(processed), common.PrettyCounter(totalKeys)), "took", tShard)
 
 			domains.Close()
@@ -526,8 +526,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			rhx = hex.EncodeToString(rebuiltCommit.RootHash)
 			latestRoot = rebuiltCommit.RootHash
 		}
+
+		var m runtime.MemStats
+		dbg.ReadMemStats(&m)
 		logger.Info("[rebuild_commitment] finished range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
-			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
+			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 		a.commitmentValuesTransform = false
 		for {
