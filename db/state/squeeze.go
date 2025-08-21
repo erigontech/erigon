@@ -403,7 +403,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		//shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(totalKeys/keysPerStep)))), 128))
 		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 128))
 		//shardStepsSize := kv.Step(uint64(math.Pow(2, math.Log2(float64(totalKeys/keysPerStep)))))
-		fmt.Printf("[dbg] see8: %d %d %d %d\n", rangeFromTxNum, rangeToTxNum, shardFrom, shardTo)
+		fmt.Printf("[dbg] see8: %d %d %d %d, shardStepsSize=%d, stepsInShard=%d\n", rangeFromTxNum, rangeToTxNum, shardFrom, shardTo, shardStepsSize, stepsInShard)
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
