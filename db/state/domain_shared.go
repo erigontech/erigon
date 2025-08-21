@@ -67,7 +67,7 @@ type dataWithPrevStep struct {
 }
 
 type Features struct {
-	NoReadsAfterWrite bool // Client doesn't plan to read its own writes on given Domain. Enable to reduce RAM usage.
+	NoReadOwnWrites bool // Client doesn't plan to read its own writes on given Domain. Enable to reduce RAM usage.
 	//NoMonotonicReads bool // "read >= previous read verson"
 	//RangeQueries bool // Client plan `IteratePrefix` on given Domain. Enable to use `sorted-map`: but lower perf.
 }
@@ -119,7 +119,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	//TODO: move to client-side
 	for id, ii := range aggTx.iis {
 		sd.iiWriters[id] = ii.NewWriter()
-		sd.iiFeatures[id].NoReadsAfterWrite = true
+		sd.iiFeatures[id].NoReadOwnWrites = true
 	}
 
 	for id, d := range aggTx.d {
@@ -142,7 +142,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 }
 
 func (sd *SharedDomains) NoReadsAfterWrites(domain kv.Domain) {
-	sd.features[domain].NoReadsAfterWrite = true
+	sd.features[domain].NoReadOwnWrites = true
 }
 
 type temporalPutDel struct {
@@ -235,7 +235,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
-	if sd.features[domain].NoReadsAfterWrite {
+	if sd.features[domain].NoReadOwnWrites {
 		return
 	}
 

@@ -28,7 +28,6 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
