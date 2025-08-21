@@ -67,11 +67,11 @@ type dataWithPrevStep struct {
 
 type SharedDomainsMetrics struct {
 	sync.RWMutex
-	iometrics
-	domainMetrics map[kv.Domain]*iometrics
+	DomainIOMetrics
+	Domains map[kv.Domain]*DomainIOMetrics
 }
 
-type iometrics struct {
+type DomainIOMetrics struct {
 	CacheReadCount    int64
 	CacheReadDuration time.Duration
 	DbReadCount       int64
@@ -116,7 +116,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
-		metrics: SharedDomainsMetrics{domainMetrics: map[kv.Domain]*iometrics{}},
+		metrics: SharedDomainsMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}},
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -542,11 +542,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.CacheReadCount++
 		readDuration := time.Since(start)
 		sd.metrics.CacheReadDuration += readDuration
-		if dm, ok := sd.metrics.domainMetrics[domain]; ok {
+		if dm, ok := sd.metrics.Domains[domain]; ok {
 			dm.CacheReadCount++
 			dm.CacheReadDuration += readDuration
 		} else {
-			sd.metrics.domainMetrics[domain] = &iometrics{
+			sd.metrics.Domains[domain] = &DomainIOMetrics{
 				CacheReadCount:    1,
 				CacheReadDuration: readDuration,
 			}
@@ -564,11 +564,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.DbReadCount++
 		readDuration := time.Since(start)
 		sd.metrics.DbReadDuration += readDuration
-		if dm, ok := sd.metrics.domainMetrics[domain]; ok {
+		if dm, ok := sd.metrics.Domains[domain]; ok {
 			dm.DbReadCount++
 			dm.DbReadDuration += readDuration
 		} else {
-			sd.metrics.domainMetrics[domain] = &iometrics{
+			sd.metrics.Domains[domain] = &DomainIOMetrics{
 				DbReadCount:    1,
 				DbReadDuration: readDuration,
 			}
@@ -579,11 +579,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.FileReadCount++
 		readDuration := time.Since(start)
 		sd.metrics.FileReadDuration += time.Since(start)
-		if dm, ok := sd.metrics.domainMetrics[domain]; ok {
+		if dm, ok := sd.metrics.Domains[domain]; ok {
 			dm.FileReadCount++
 			dm.FileReadDuration += readDuration
 		} else {
-			sd.metrics.domainMetrics[domain] = &iometrics{
+			sd.metrics.Domains[domain] = &DomainIOMetrics{
 				FileReadCount:    1,
 				FileReadDuration: readDuration,
 			}
@@ -625,7 +625,7 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
 
-	for domain, dm := range sd.metrics.domainMetrics {
+	for domain, dm := range sd.metrics.Domains {
 		var metrics []any
 
 		if readCount := dm.CacheReadCount; readCount > 0 {

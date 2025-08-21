@@ -181,6 +181,118 @@ func resetExecGauges() {
 	mxExecCodeDomainFileReadDuration.Set(0)
 }
 
+func updateDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbstate.SharedDomainsMetrics, interval time.Duration) *dbstate.SharedDomainsMetrics {
+	metrics.RLock()
+	defer metrics.RUnlock()
+
+	if prevMetrics == nil {
+		prevMetrics = &dbstate.SharedDomainsMetrics{
+			Domains: map[kv.Domain]*dbstate.DomainIOMetrics{},
+		}
+	}
+
+	cacheReads := metrics.CacheReadCount - prevMetrics.CacheReadCount
+	cacheDuration := metrics.CacheReadDuration - prevMetrics.CacheReadDuration
+	dbReads := metrics.DbReadCount - prevMetrics.DbReadCount
+	dbDuration := metrics.DbReadDuration - prevMetrics.DbReadDuration
+	fileReads := metrics.FileReadCount - prevMetrics.FileReadCount
+	fileDuration := metrics.FileReadDuration - prevMetrics.FileReadDuration
+
+	mxExecDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
+	mxExecDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
+	mxExecDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+	mxExecDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+	mxExecDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
+	mxExecDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
+	mxExecDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+	mxExecDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
+
+	prevMetrics.DomainIOMetrics = metrics.DomainIOMetrics
+
+	if accountMetrics, ok := metrics.Domains[kv.AccountsDomain]; ok {
+		var prevAccountMetrics dbstate.DomainIOMetrics
+
+		if prev, ok := prevMetrics.Domains[kv.AccountsDomain]; ok {
+			prevAccountMetrics = *prev
+		}
+
+		cacheReads := accountMetrics.CacheReadCount - prevAccountMetrics.CacheReadCount
+		cacheDuration := accountMetrics.CacheReadDuration - prevAccountMetrics.CacheReadDuration
+		dbReads := accountMetrics.DbReadCount - prevAccountMetrics.DbReadCount
+		dbDuration := accountMetrics.DbReadDuration - prevAccountMetrics.DbReadDuration
+		fileReads := accountMetrics.FileReadCount - prevAccountMetrics.FileReadCount
+		fileDuration := accountMetrics.FileReadDuration - prevAccountMetrics.FileReadDuration
+
+		mxExecAccountDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
+		mxExecAccountDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
+		mxExecAccountDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecAccountDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+		mxExecAccountDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
+		mxExecAccountDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
+		mxExecAccountDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecAccountDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
+
+		prevAccountMetrics = *accountMetrics
+		prevMetrics.Domains[kv.AccountsDomain] = &prevAccountMetrics
+	}
+
+	if storageMetrics, ok := metrics.Domains[kv.StorageDomain]; ok {
+		var prevStorageMetrics dbstate.DomainIOMetrics
+
+		if prev, ok := prevMetrics.Domains[kv.StorageDomain]; ok {
+			prevStorageMetrics = *prev
+		}
+
+		cacheReads := storageMetrics.CacheReadCount - prevStorageMetrics.CacheReadCount
+		cacheDuration := storageMetrics.CacheReadDuration - prevStorageMetrics.CacheReadDuration
+		dbReads := storageMetrics.DbReadCount - prevStorageMetrics.DbReadCount
+		dbDuration := storageMetrics.DbReadDuration - prevStorageMetrics.DbReadDuration
+		fileReads := storageMetrics.FileReadCount - prevStorageMetrics.FileReadCount
+		fileDuration := storageMetrics.FileReadDuration - prevStorageMetrics.FileReadDuration
+
+		mxExecStorageDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
+		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
+		mxExexStorageDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecStorageDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+		mxExecStorageDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
+		mxExecStorageDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
+		mxExecStorageDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecStorageDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
+
+		prevStorageMetrics = *storageMetrics
+		prevMetrics.Domains[kv.StorageDomain] = &prevStorageMetrics
+	}
+
+	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok {
+		var prevCodeMetrics dbstate.DomainIOMetrics
+
+		if prev, ok := prevMetrics.Domains[kv.CodeDomain]; ok {
+			prevCodeMetrics = *prev
+		}
+
+		cacheReads := codeMetrics.CacheReadCount - prevCodeMetrics.CacheReadCount
+		cacheDuration := codeMetrics.CacheReadDuration - prevCodeMetrics.CacheReadDuration
+		dbReads := codeMetrics.DbReadCount - prevCodeMetrics.DbReadCount
+		dbDuration := codeMetrics.DbReadDuration - prevCodeMetrics.DbReadDuration
+		fileReads := codeMetrics.FileReadCount - prevCodeMetrics.FileReadCount
+		fileDuration := codeMetrics.FileReadDuration - prevCodeMetrics.FileReadDuration
+
+		mxExecCodeDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
+		mxExecCodeDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
+		mxExexCodeDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecCodeDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+		mxExecCodeDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
+		mxExecCodeDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
+		mxExecCodeDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecCodeDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
+
+		prevCodeMetrics = *codeMetrics
+		prevMetrics.Domains[kv.CodeDomain] = &prevCodeMetrics
+	}
+
+	return prevMetrics
+}
+
 func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
 	now := time.Now()
 	return &Progress{
@@ -229,9 +341,9 @@ type Progress struct {
 	prevCommittedTxNum      uint64
 	prevCommittedGas        int64
 	commitThreshold         uint64
-
-	logPrefix string
-	logger    log.Logger
+	prevDomainMetrics       *dbstate.SharedDomainsMetrics
+	logPrefix               string
+	logger                  log.Logger
 }
 
 func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
@@ -439,6 +551,8 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
 		executedDiffTxs, executedTxSec, executedGasSec, uncommitedGas, 0, execVals)
+
+	p.prevDomainMetrics = updateDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval)
 
 	p.prevExecTime = currentTime
 
