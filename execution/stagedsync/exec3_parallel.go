@@ -875,6 +875,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		tx := toValidate[i]
 		txVersion := be.tasks[tx].Task.Version()
 
+		be.versionMap.SetTrace(dbg.TraceTransactionIO)
 		validity := state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
 			func(readVersion, writtenVersion state.Version) state.VersionValidity {
 				vv := state.VersionValid
@@ -887,6 +888,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				return vv
 			})
+		be.versionMap.SetTrace(false)
 
 		if validity == state.VerionTooEarly {
 			cntInvalid++
