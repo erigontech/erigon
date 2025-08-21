@@ -449,14 +449,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				if !keyIter.HasNext() {
 					return false, nil
 				}
-				if processed%1_000 == 0 {
-					select {
-					case <-logEvery.C:
-						logger.Info(fmt.Sprintf("[commitment_rebuild] progressing keys %.1fm/%.1fm (%2.f%%) %x",
-							float64(processed)/1_000_000, float64(totalKeys)/1_000_000, float64(processed)/float64(totalKeys)*100, k))
-					default:
-					}
-				}
 				k, _, err := keyIter.Next()
 				if err != nil {
 					err = fmt.Errorf("CommitmentRebuild: keyIter.Next() %w", err)
