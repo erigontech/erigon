@@ -27,7 +27,7 @@ import (
 
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"

@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 // Send - does send concrete P2P messages to Sentry. Same as Fetch but for outbound traffic

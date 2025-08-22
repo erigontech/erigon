@@ -26,7 +26,7 @@ import (
 	"math/big"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -146,7 +146,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		t.lookupAccount(addr)
 	case op == vm.CREATE:
 		nonce, _ := t.env.IntraBlockState.GetNonce(caller)
-		addr := crypto.CreateAddress(caller, nonce)
+		addr := types.CreateAddress(caller, nonce)
 		t.lookupAccount(addr)
 		t.created[addr] = true
 	case stackLen >= 4 && op == vm.CREATE2:
@@ -159,7 +159,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		}
 		inithash := crypto.Keccak256(init)
 		salt := stackData[stackLen-4]
-		addr := crypto.CreateAddress2(caller, salt.Bytes32(), inithash)
+		addr := types.CreateAddress2(caller, salt.Bytes32(), inithash)
 		t.lookupAccount(addr)
 		t.created[addr] = true
 	}
@@ -172,7 +172,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 
 	if tx.GetTo() == nil {
 		t.create = true
-		t.to = crypto.CreateAddress(from, nounce)
+		t.to = types.CreateAddress(from, nounce)
 	} else {
 		t.to = *tx.GetTo()
 		t.create = false

@@ -19,7 +19,7 @@ package stateless
 import (
 	"io"
 
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 

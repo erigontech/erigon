@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 func TestV2HashBuilding(t *testing.T) {

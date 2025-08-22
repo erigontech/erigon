@@ -29,8 +29,8 @@ import (
 	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 

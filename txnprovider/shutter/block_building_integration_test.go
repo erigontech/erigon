@@ -303,9 +303,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	shutterConfig.ChainId = chainIdU256
 	shutterConfig.SecondsPerSlot = 1
 	shutterConfig.EncryptedGasLimit = 3 * 21_000 // max 3 simple encrypted transfers per block
-	shutterConfig.SequencerContractAddress = crypto.CreateAddress(contractDeployer, 0).String()
-	shutterConfig.KeyperSetManagerContractAddress = crypto.CreateAddress(contractDeployer, 1).String()
-	shutterConfig.KeyBroadcastContractAddress = crypto.CreateAddress(contractDeployer, 2).String()
+	shutterConfig.SequencerContractAddress = types.CreateAddress(contractDeployer, 0).String()
+	shutterConfig.KeyperSetManagerContractAddress = types.CreateAddress(contractDeployer, 1).String()
+	shutterConfig.KeyBroadcastContractAddress = types.CreateAddress(contractDeployer, 2).String()
 
 	ethConfig := ethconfig.Config{
 		Dirs: dirs,

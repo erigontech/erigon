@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -208,7 +207,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	contractAddr := crypto.CreateAddress(msg.From(), msg.Nonce())
+	contractAddr := types.CreateAddress(msg.From(), msg.Nonce())
 	if creationTx.GetTo() == nil && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
 		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.IsFree(), msg.MaxFeePerBlobGas())
