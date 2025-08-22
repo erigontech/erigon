@@ -1,4 +1,4 @@
-name: QA - RPC Integration Tests
+name: QA - RPC Integration Tests Latest
 
 on:
   workflow_dispatch:     # Run manually
@@ -27,13 +27,13 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, Ethereum, rpc-integration ] #####
+    runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 28800 # 8 hours
+      TOTAL_TIME_SECONDS: 900 # 15 minutes
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
@@ -46,7 +46,7 @@ jobs:
         run: |
           make clean
 
-      - name: Build Erigon RPCDaemon and integration
+      - name: Build Erigon and integration
         run: |
           make erigon integration
         working-directory: ${{ github.workspace }}
@@ -68,14 +68,14 @@ jobs:
           echo "Running migrations on datadir..."
           ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
 
-      - name: Run Erigon version and wait for sync (stabilization step)
+      - name: Run Erigon version and wait for sync 
         id: pre_test_step
         run: |
           set +e # Disable exit on error
         
           # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN ### Erigon con quali http.api 
+            ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR 60 $TOTAL_TIME_SECONDS Erigon3 $CHAIN 
         
           # Capture monitoring script exit status
           test_exit_status=$?
@@ -83,62 +83,6 @@ jobs:
           # Save the subsection reached status
           echo "test_executed=true" >> $GITHUB_OUTPUT
         
-          # Clean up Erigon process if it's still running
-          if kill -0 $ERIGON_PID 2> /dev/null; then
-            echo "Terminating Erigon"
-            kill $ERIGON_PID
-            wait $ERIGON_PID
-          fi
-          # Check test runner script exit status
-          if [ $test_exit_status -eq 0 ]; then
-            echo "Pre-sync step completed successfully"
-            echo "::notice::Pre-sync step completed successfully"
-            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-          else
-            echo "Pre-sync step encountered an error"
-            echo "::error::Pre-sync step encountered an error"
-            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-
-      - name: Run RpcDaemon
-        working-directory: ${{ github.workspace }}/build/bin
-        run: |
-          echo "Starting RpcDaemon..."
-          
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
-
-          RPC_DAEMON_PID=$!          
-          RPC_DAEMON_EXIT_STATUS=$?
-          echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
-          echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
-          
-          sleep 5
-          tail erigon.log
-          
-          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
-            echo "RpcDaemon failed to start"
-            echo "::error::Error detected during tests: RpcDaemon failed to start"
-            exit 1
-          fi
-          echo "RpcDaemon started"
-
-      - name: Wait for port 8545 to be opened
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 8545; then
-              echo "Port 8545 is open"
-              break
-            fi
-            echo "Waiting for port 8545 to open..."
-            sleep 10
-          done
-          if ! nc -z localhost 8545; then
-            echo "Port 8545 did not open in time"
-            echo "::error::Error detected during tests: Port 8545 did not open in time"
-            exit 1
-          fi
-
       - name: Run RPC Integration Tests
         id: test_step
         run: |
@@ -146,7 +90,7 @@ jobs:
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum.sh
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh
           
           set +e # Disable exit on error for test run
           ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh ${{ runner.workspace }} $TEST_RESULT_DIR
@@ -164,17 +108,18 @@ jobs:
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Stop Erigon RpcDaemon
+      - name: Stop Erigon 
         if: always()
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
-          if [ -n "$RPC_DAEMON_PID" ] && kill -0 $RPC_DAEMON_PID 2> /dev/null; then
-            echo "RpcDaemon stopping..."
-            kill $RPC_DAEMON_PID
-            echo "RpcDaemon stopped"
+          if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
+            echo "Erigon stopping..."
+            kill $ERIGON_PID
+            wait $ERIGON_PID
+            echo "Erigon stopped"
           else
-            echo "RpcDaemon has already terminated"
+            echo "Erigon has already terminated"
           fi
 
       - name: Restore Erigon Chaindata Directory
