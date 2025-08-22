@@ -68,8 +68,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
 		txNum = maxTx + 1
-		domains.SetTxNum(txNum)
-		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, maxTx+1, nil, 0)
+		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
 		require.NoError(t, err)
 		break
 	}
@@ -159,7 +158,6 @@ Loop:
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		domains.SetTxNum(txNum)
 		for accs := 0; accs < 256; accs++ {
 			acc := accounts3.Account{
 				Nonce:       txNum,
@@ -265,11 +263,11 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	}
 	addr := acc(1)
 	for i := uint64(0); i < stepSize; i++ {
-		domains.SetTxNum(i)
-		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), i, nil, 0); err != nil {
+		txNum := i
+		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil, 0); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), i, nil, 0); err != nil {
+		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), txNum, nil, 0); err != nil {
 			panic(err)
 		}
 	}

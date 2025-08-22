@@ -81,7 +81,6 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite, otherMaxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 
@@ -239,7 +238,6 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	// each key changes value on every txNum which is multiple of the key
 	//var maxWrite, otherMaxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 
@@ -367,7 +365,6 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	// each key changes value on every txNum which is multiple of the key
 	//var maxWrite, otherMaxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 
@@ -634,7 +631,6 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, tx kv.Tx
 
 func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, tx kv.Tx, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
 	t.Helper()
-	domains.SetTxNum(txNum)
 
 	getKey := func() ([]byte, bool) {
 		r := rnd.IntN(100)

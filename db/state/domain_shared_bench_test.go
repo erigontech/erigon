@@ -14,18 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package state_test
 
 import (
 	"context"
 	"encoding/binary"
+	"sort"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state"
+	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
@@ -38,7 +43,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(rwTx, log.New())
+	domains, err := state.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -123,7 +128,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(rwTx, log.New())
+	domains, err := state.NewSharedDomains(rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -153,4 +158,95 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 			require.NoError(b, err)
 		}
 	})
+}
+
+type upd struct {
+	txNum uint64
+	value []byte
+}
+
+func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string]map[string][]upd {
+	tb.Helper()
+
+	doms := make(map[string]map[string][]upd)
+	r := newRnd(31)
+
+	accs := make(map[string][]upd)
+	stor := make(map[string][]upd)
+	if keyLimit == 1 {
+		key1 := generateRandomKey(r, keySize1)
+		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
+		doms["accounts"] = accs
+		return doms
+	}
+
+	for i := uint64(0); i < keyLimit/2; i++ {
+		key1 := generateRandomKey(r, keySize1)
+		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
+		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
+		stor[key2] = generateArbitraryValueUpdates(r, totalTx, keyTxsLimit, 32)
+	}
+	doms["accounts"] = accs
+	doms["storage"] = stor
+
+	return doms
+}
+func generateRandomKey(r *rndGen, size uint64) string {
+	return string(generateRandomKeyBytes(r, size))
+}
+
+func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
+	key := make([]byte, size)
+	r.Read(key)
+	return key
+}
+
+func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
+	updates := make([]upd, 0)
+	usedTxNums := make(map[uint64]bool)
+
+	for i := uint64(0); i < keyTxsLimit; i++ {
+		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
+		jitter := r.IntN(10e7)
+		acc := accounts3.Account{
+			Nonce:       i,
+			Balance:     *uint256.NewInt(i*10e4 + uint64(jitter)),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		value := accounts3.SerialiseV3(&acc)
+
+		updates = append(updates, upd{txNum: txNum, value: value})
+		usedTxNums[txNum] = true
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	return updates
+}
+
+func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
+	updates := make([]upd, 0)
+	usedTxNums := make(map[uint64]bool)
+	//maxStorageSize := 24 * (1 << 10) // limit on contract code
+
+	for i := uint64(0); i < keyTxsLimit; i++ {
+		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
+
+		value := make([]byte, r.IntN(int(maxSize)))
+		r.Read(value)
+
+		updates = append(updates, upd{txNum: txNum, value: value})
+		usedTxNums[txNum] = true
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	return updates
+}
+func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+	txNum := uint64(r.IntN(int(maxTxNum)))
+	for usedTxNums[txNum] {
+		txNum = uint64(r.IntN(int(maxTxNum)))
+	}
+
+	return txNum
 }
