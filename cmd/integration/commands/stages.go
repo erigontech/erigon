@@ -239,27 +239,6 @@ var cmdPrintCommitment = &cobra.Command{
 	},
 }
 
-var cmdPrintCommitment = &cobra.Command{
-	Use:   "print_commitment",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := printCommitment(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "commitment_rebuild",
 	Short: "",
@@ -1049,51 +1028,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
 		return err
-	}
-
-	return nil
-}
-
-func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	//dirs := datadir.New(datadirCli)
-	//if reset {
-	//	return reset2.Reset(ctx, db, stages.Execution)
-	//}
-	//
-	//br, _ := blocksIO(db, logger)
-	//cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
-
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	agg.PeriodicalyPrintProcessSet(ctx)
-
-	// disable hard alignment; allowing commitment and storage/account to have
-	// different visibleFiles
-	agg.DisableAllDependencies()
-
-	acRo := agg.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
-	defer acRo.Close()
-	defer acRo.MadvNormal().DisableReadAhead()
-
-	commitmentFiles := acRo.Files(kv.CommitmentDomain)
-	fmt.Printf("Commitment files: %d\n", len(commitmentFiles))
-	for _, f := range commitmentFiles {
-		name := filepath.Base(f.Fullpath())
-		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
-		rootNodePrefix := []byte("state")
-		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
-		if err != nil {
-			return fmt.Errorf("failed to get root node from files: %w", err)
-		}
-		rootString, err := commitment.HexTrieStateToShortString(rootNode)
-		if err != nil {
-			return fmt.Errorf("failed to extract state root from root node: %w", err)
-		}
-		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
 	}
 
 	return nil
