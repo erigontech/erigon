@@ -675,8 +675,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 	var removed uint64
 	for _, res := range toRemove {
-		if 
-    {
+		if dryRun {
 			fmt.Printf("[dry-run] rm %s\n", res.Path)
 			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
 			continue
