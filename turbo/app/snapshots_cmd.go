@@ -294,6 +294,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
@@ -428,6 +429,10 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 		return false, false, err
 	}
 	if ok {
+		_, err := os.Stat(kvi)
+		if err != nil {
+			return false, false, err
+		}
 		idx, err := recsplit.OpenIndex(kvi)
 		if err != nil {
 			return false, false, err
@@ -495,6 +500,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	defer l.Unlock()
 
 	removeLatest := cliCtx.Bool("latest")
+	dryRun := cliCtx.Bool("dry-run")
 
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -673,6 +679,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
+		if dryRun {
+			fmt.Printf("[dry-run] rm %s\n", res.Path)
+			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
+			continue
+		}
 		dir2.RemoveFile(res.Path)
 		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
