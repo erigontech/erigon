@@ -294,6 +294,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
@@ -388,6 +389,16 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 			}),
 		},
+		{
+			Name:        "compareIdx",
+			Action:      doCompareIdx,
+			Description: "compares to accessors (recsplit) files",
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{Name: "first", Required: true},
+				&cli.PathFlag{Name: "second", Required: true},
+				&cli.BoolFlag{Name: "skip-size-check", Required: false, Value: false},
+			}),
+		},
 	},
 }
 
@@ -418,6 +429,10 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 		return false, false, err
 	}
 	if ok {
+		_, err := os.Stat(kvi)
+		if err != nil {
+			return false, false, err
+		}
 		idx, err := recsplit.OpenIndex(kvi)
 		if err != nil {
 			return false, false, err
@@ -485,6 +500,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	defer l.Unlock()
 
 	removeLatest := cliCtx.Bool("latest")
+	dryRun := cliCtx.Bool("dry-run")
 
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -531,12 +547,13 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
+	doesRmCommitment := !cliCtx.IsSet("domain") || slices.Contains(cliCtx.StringSlice("domain"), "commitment")
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+		if doesRmCommitment && strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
 			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
@@ -662,6 +679,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
+		if dryRun {
+			fmt.Printf("[dry-run] rm %s\n", res.Path)
+			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
+			continue
+		}
 		dir2.RemoveFile(res.Path)
 		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
@@ -780,7 +802,24 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedCheck := integrity.Check(cliCtx.String("check"))
+	checkStr := cliCtx.String("check")
+	var requestedChecks []integrity.Check
+	if len(checkStr) > 0 {
+		for _, split := range strings.Split(checkStr, ",") {
+			requestedChecks = append(requestedChecks, integrity.Check(split))
+		}
+
+		for _, check := range requestedChecks {
+			if slices.Contains(integrity.AllChecks, check) || slices.Contains(integrity.NonDefaultChecks, check) {
+				continue
+			}
+
+			return fmt.Errorf("requested check %s not found", check)
+		}
+	} else {
+		requestedChecks = integrity.AllChecks
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -805,22 +844,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 
-	checks := append([]integrity.Check{}, integrity.AllChecks...)
-	nonDefaultCheck := requestedCheck != "" &&
-		!slices.Contains(integrity.AllChecks, requestedCheck) &&
-		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
-	if nonDefaultCheck {
-		checks = append(checks, integrity.NonDefaultChecks...)
-	}
-
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
-	found := false
-	for _, chk := range checks {
-		if requestedCheck != "" && requestedCheck != chk {
-			continue
-		}
-		found = true
+	for _, chk := range requestedChecks {
 		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
@@ -883,10 +909,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("not a valid check: %s", requestedCheck)
 	}
 
 	return nil
@@ -1033,7 +1055,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	for _, res := range accFiles {
 		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range kv.StateDomains {
+		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
 			newVersion := state.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
 			expectedFileName := strings.Replace(res.Name(), "accounts", snapType.String(), 1)
 			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
@@ -1141,11 +1163,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
+	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
 	for _, res := range accFiles {
-		viTypes := []string{"accounts", "storage", "code"}
-
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := state.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
@@ -1449,7 +1470,17 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
+		var keysSize, valsSize datasize.ByteSize
+		g := src.MakeGetter()
+		for g.HasNext() {
+			k, _ := g.Next(nil)
+			keysSize += datasize.ByteSize(len(k))
+			if g.HasNext() {
+				v, _ := g.Next(nil)
+				valsSize += datasize.ByteSize(len(v))
+			}
+		}
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HR(), "keys_size", keysSize.HR(), "vals_size", valsSize.HR(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HR(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
 	} else if strings.HasSuffix(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
@@ -1484,7 +1515,7 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 		defer idx.Close()
 		total, offsets, ef, golombRice, existence, layer1 := idx.Sizes()
-		log.Info("meta", "sz_total", total.HumanReadable(), "sz_offsets", offsets.HumanReadable(), "sz_double_ef", ef.HumanReadable(), "sz_golombRice", golombRice.HumanReadable(), "sz_existence", existence.HumanReadable(), "sz_l1", layer1.HumanReadable(), "keys_count", idx.KeyCount(), "leaf_size", idx.LeafSize(), "bucket_size", idx.BucketSize(), "enums", idx.Enums())
+		log.Info("meta", "sz_total", total.HR(), "sz_offsets", offsets.HR(), "sz_double_ef", ef.HR(), "sz_golombRice", golombRice.HR(), "sz_existence", existence.HR(), "sz_l1", layer1.HR(), "keys_count", idx.KeyCount(), "leaf_size", idx.LeafSize(), "bucket_size", idx.BucketSize(), "enums", idx.Enums())
 	}
 	return nil
 }
@@ -2202,6 +2233,93 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		log.Error("error while serving an Erigon node", "err", err)
 	}
 	return err
+}
+
+func doCompareIdx(cliCtx *cli.Context) error {
+	// doesn't compare exact hashes offset,
+	// only sizes, counts, offsets, and ordinal lookups.
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+
+	cmpFn := func(f, s uint64, msg string) {
+		if f != s {
+			panic(fmt.Sprintf("different %s -- first: %d, second: %d", msg, f, s))
+		}
+	}
+
+	first := cliCtx.Path("first")
+	second := cliCtx.Path("second")
+	doSizeCheck := !cliCtx.Bool("skip-size-check")
+
+	if doSizeCheck {
+		fileInfo1, err := os.Stat(first)
+		if err != nil {
+			return err
+		}
+		fileInfo2, err := os.Stat(second)
+		if err != nil {
+			return err
+		}
+		cmpFn(uint64(fileInfo1.Size()), uint64(fileInfo2.Size()), "file_sizes")
+	}
+
+	firstIdx := recsplit.MustOpen(first)
+	secondIdx := recsplit.MustOpen(second)
+	defer firstIdx.Close()
+	defer secondIdx.Close()
+
+	cmpFn(firstIdx.KeyCount(), secondIdx.KeyCount(), "key_count")
+	cmpFn(firstIdx.BaseDataID(), secondIdx.BaseDataID(), "base_data_id")
+
+	if doSizeCheck {
+		cmpFn(uint64(firstIdx.LeafSize()), uint64(secondIdx.LeafSize()), "leaf_size")
+		cmpFn(uint64(firstIdx.BucketSize()), uint64(secondIdx.BucketSize()), "bucket_size")
+
+		total1, offsets1, ef1, golombRice1, existence1, layer11 := firstIdx.Sizes()
+		total2, offsets2, ef2, golombRice2, existence2, layer12 := secondIdx.Sizes()
+		cmpFn(total1.Bytes(), total2.Bytes(), "total")
+		cmpFn(offsets1.Bytes(), offsets2.Bytes(), "offset")
+		cmpFn(ef1.Bytes(), ef2.Bytes(), "ef")
+		cmpFn(golombRice1.Bytes(), golombRice2.Bytes(), "golombRice")
+		cmpFn(existence1.Bytes(), existence2.Bytes(), "existence")
+		cmpFn(layer11.Bytes(), layer12.Bytes(), "layer1")
+	}
+
+	firstOffsets := firstIdx.ExtractOffsets()
+	secondOffsets := secondIdx.ExtractOffsets()
+
+	for k := range firstOffsets {
+		_, ok := secondOffsets[k]
+		if !ok {
+			logger.Error("offset not found in second file")
+			return nil
+		}
+	}
+
+	for k := range secondOffsets {
+		_, ok := firstOffsets[k]
+		if !ok {
+			logger.Error("offset not found in first file")
+			return nil
+		}
+	}
+
+	if firstIdx.Enums() != secondIdx.Enums() {
+		logger.Error("enums value don't match", "first", firstIdx.Enums(), "second", secondIdx.Enums())
+		return nil
+	}
+
+	if firstIdx.Enums() {
+		for i := uint64(0); i < firstIdx.KeyCount(); i++ {
+			off1, off2 := firstIdx.OrdinalLookup(i), secondIdx.OrdinalLookup(i)
+			cmpFn(off1, off2, fmt.Sprintf("offset_ordinal_%d", i))
+		}
+	}
+
+	logger.Info("two files are identical")
+	return nil
 }
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
