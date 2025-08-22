@@ -768,8 +768,6 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	keys := make([][]byte, txs)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
@@ -920,8 +918,6 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	var prev1, prev2 []byte
 	var txNum uint64
 	for txNum = uint64(1); txNum <= txs/2; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
@@ -953,8 +949,6 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	half := txs / 2
 	for txNum = txNum + 1; txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
 		prev, step, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
