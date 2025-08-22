@@ -1043,7 +1043,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	for _, res := range accFiles {
 		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range kv.StateDomains {
+		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
 			newVersion := state.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
 			expectedFileName := strings.Replace(res.Name(), "accounts", snapType.String(), 1)
 			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
@@ -1151,11 +1151,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
+	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
 	for _, res := range accFiles {
-		viTypes := []string{"accounts", "storage", "code"}
-
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := state.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
