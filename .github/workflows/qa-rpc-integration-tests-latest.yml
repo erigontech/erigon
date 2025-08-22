@@ -2,19 +2,19 @@ name: QA - RPC Integration Tests Latest
 
 on:
   workflow_dispatch:     # Run manually
-  push:
-    branches:
-      - main
-      - 'release/3.*'
-  pull_request:
-    branches:
-      - main
-      - 'release/3.*'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+#  push:
+#    branches:
+#      - main
+#      - 'release/3.*'
+#  pull_request:
+#    branches:
+#      - main
+#      - 'release/3.*'
+#    types:
+#      - opened
+#      - reopened
+#      - synchronize
+#      - ready_for_review
 
 
 jobs:
@@ -74,7 +74,7 @@ jobs:
         run: |
           set +e # Disable exit on error
         
-          # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes
+          # Launch the testbed Erigon instance & test its ability to maintain sync for a timeout 
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
             ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN 
         
@@ -84,6 +84,16 @@ jobs:
           # Save the subsection reached status
           echo "test_executed=true" >> $GITHUB_OUTPUT
         
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+             echo "Tip-tracking completed successfully"
+             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+             echo "Tip-tracking encountered an error test aborted"
+             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+             exit 1
+          fi
+
       - name: Run RPC Integration Tests
         id: test_step
         run: |
@@ -94,13 +104,12 @@ jobs:
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh
           
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh ${{ runner.workspace }} $TEST_RESULT_DIR $HOST_RUNNER_GETH_LATEST 
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh ${{ runner.workspace }} $TEST_RESULT_DIR $REFERENCE_SYSTEM_HOST_ADDRESS 
           test_exit_status=$? # Capture test runner script exit status
           set -e # Re-enable exit on error after test run
 
           echo "test_executed=true" >> $GITHUB_OUTPUT
 
-          echo
           if [ $test_exit_status -eq 0 ]; then
             echo "RPC tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
@@ -114,6 +123,7 @@ jobs:
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
+          #### Load ERIGON_PID
           if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
             echo "Erigon stopping..."
             kill $ERIGON_PID
