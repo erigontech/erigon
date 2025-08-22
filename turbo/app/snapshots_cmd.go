@@ -790,7 +790,24 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedCheck := integrity.Check(cliCtx.String("check"))
+	checkStr := cliCtx.String("check")
+	var requestedChecks []integrity.Check
+	if len(checkStr) > 0 {
+		for _, split := range strings.Split(checkStr, ",") {
+			requestedChecks = append(requestedChecks, integrity.Check(split))
+		}
+
+		for _, check := range requestedChecks {
+			if slices.Contains(integrity.AllChecks, check) || slices.Contains(integrity.NonDefaultChecks, check) {
+				continue
+			}
+
+			return fmt.Errorf("requested check %s not found", check)
+		}
+	} else {
+		requestedChecks = integrity.AllChecks
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -815,22 +832,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 
-	checks := append([]integrity.Check{}, integrity.AllChecks...)
-	nonDefaultCheck := requestedCheck != "" &&
-		!slices.Contains(integrity.AllChecks, requestedCheck) &&
-		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
-	if nonDefaultCheck {
-		checks = append(checks, integrity.NonDefaultChecks...)
-	}
-
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
-	found := false
-	for _, chk := range checks {
-		if requestedCheck != "" && requestedCheck != chk {
-			continue
-		}
-		found = true
+	for _, chk := range requestedChecks {
 		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
@@ -893,10 +897,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("not a valid check: %s", requestedCheck)
 	}
 
 	return nil
