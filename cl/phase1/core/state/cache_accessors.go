@@ -128,7 +128,7 @@ func (b *CachingBeaconState) ComputeCommittee(
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
 
-	if end > start {
+	if start > end {
 		panic(fmt.Sprintf("assert: underflow in ComputeCommittee, start: %d, end: %d, index: %d, count: %d, lenIndicies: %d", start, end, index, count, lenIndicies))
 	}
 	return shuffledIndicies[start:end], nil
