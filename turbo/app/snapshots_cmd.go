@@ -492,10 +492,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	return false, false, nil
 }
 
-func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete bool, stepRange string, domainNames ...string) error {
-	dryRun := cliCtx.Bool("dry-run")
-
-
+func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
@@ -699,9 +696,10 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	removeLatest := cliCtx.Bool("latest")
 	stepRange := cliCtx.String("step")
 	domainNames := cliCtx.StringSlice("domain")
+	dryRun := cliCtx.Bool("dry-run")
 	promptUser := true // CLI should always prompt the user
 
-	return DeleteStateSnapshots(dirs, removeLatest, promptUser, stepRange, domainNames...)
+	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
