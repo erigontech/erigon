@@ -266,7 +266,11 @@ func prepareForkId(lastBatch, executionAt uint64, hermezDb ForkDb, cfg SequenceB
 		return ppFork, nil
 	}
 
-	// iterate over the batch boundaries and find the latest fork that applies
+	// iterate over the batch boundaries and find the latest fork that applies - in the case of migrating an existing
+	// pessimistic network from type 2 to type 1 there is no fork history when we upgrade the RPC datadir to being the new sequencer,
+	// so the sequencer needs to write "something" here and we decided to do that from a flag which defaults to fork 12 to enable the most functionality.
+	// Because there is no history this fork update is written at the current batch number so here we need to check if the next batch is
+	// greater than or equal to the batch boundary and enable it.
 	for idx, batch := range allBatches {
 		if nextBatch >= batch {
 			latest = allForks[idx]
