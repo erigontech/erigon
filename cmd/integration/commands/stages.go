@@ -79,6 +79,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/app"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
@@ -535,6 +536,7 @@ func init() {
 	withReset(cmdCommitmentRebuild)
 	withSqueeze(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
+	withConcurrentCommitment(cmdCommitmentRebuild)
 	withUnwind(cmdCommitmentRebuild)
 	withPruneTo(cmdCommitmentRebuild)
 	withIntegrityChecks(cmdCommitmentRebuild)
@@ -1078,7 +1080,29 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
 
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+
+	// remove all existing state commitment snapshots
+	app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String())
+
+	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
+	sconf := dbstate.Schema.CommitmentDomain
+	for _, tn := range sconf.Tables() {
+		log.Info("Clearing", "table", tn)
+		if err := rwTx.ClearTable(tn); err != nil {
+			return fmt.Errorf("failed to clear table %s: %w", tn, err)
+		}
+	}
+	rwTx.Commit()
+
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
+		return fmt.Errorf("failed to re-open aggregator: %w", err)
+	}
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))

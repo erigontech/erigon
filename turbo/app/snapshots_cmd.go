@@ -294,6 +294,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
@@ -428,6 +429,10 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 		return false, false, err
 	}
 	if ok {
+		_, err := os.Stat(kvi)
+		if err != nil {
+			return false, false, err
+		}
 		idx, err := recsplit.OpenIndex(kvi)
 		if err != nil {
 			return false, false, err
@@ -487,15 +492,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	return false, false, nil
 }
 
-func doRmStateSnapshots(cliCtx *cli.Context) error {
-	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer l.Unlock()
-
-	removeLatest := cliCtx.Bool("latest")
-
+func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
@@ -541,12 +538,13 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
+	doesRmCommitment := len(domainNames) != 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+		if doesRmCommitment && strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
 			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
@@ -566,9 +564,8 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	toRemove := make(map[string]snaptype.FileInfo)
-	if cliCtx.IsSet("domain") {
+	if len(domainNames) > 0 {
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
-		domainNames := cliCtx.StringSlice("domain")
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
 			if err != nil {
@@ -586,11 +583,9 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 		files = domainFiles
 	}
-	if cliCtx.IsSet("step") || removeLatest {
-		steprm := cliCtx.String("step")
-
+	if stepRange != "" || removeLatest {
 		var minS, maxS uint64
-		if steprm != "" {
+		if stepRange != "" {
 			parseStep := func(step string) (uint64, uint64, error) {
 				var from, to uint64
 				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
@@ -599,7 +594,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				return from, to, nil
 			}
 			var err error
-			minS, maxS, err = parseStep(steprm)
+			minS, maxS, err = parseStep(stepRange)
 			if err != nil {
 				return err
 			}
@@ -607,6 +602,10 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		promptExit := func(s string) (exitNow bool) {
+			if !promptUserBeforeDelete {
+				return false
+			}
+
 		AllowPruneSteps:
 			fmt.Printf("\n%s", s)
 			var ans uint8
@@ -659,6 +658,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				}
 			}
 		}
+
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
 				toRemove[res.Path] = res
@@ -672,6 +672,11 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	var removed uint64
 	for _, res := range toRemove {
+		if dryRun {
+			fmt.Printf("[dry-run] rm %s\n", res.Path)
+			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
+			continue
+		}
 		dir2.RemoveFile(res.Path)
 		dir2.RemoveFile(res.Path + ".torrent")
 		removed++
@@ -679,6 +684,22 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
+}
+
+func doRmStateSnapshots(cliCtx *cli.Context) error {
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
+
+	removeLatest := cliCtx.Bool("latest")
+	stepRange := cliCtx.String("step")
+	domainNames := cliCtx.StringSlice("domain")
+	dryRun := cliCtx.Bool("dry-run")
+	promptUser := true // CLI should always prompt the user
+
+	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
@@ -790,7 +811,24 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedCheck := integrity.Check(cliCtx.String("check"))
+	checkStr := cliCtx.String("check")
+	var requestedChecks []integrity.Check
+	if len(checkStr) > 0 {
+		for _, split := range strings.Split(checkStr, ",") {
+			requestedChecks = append(requestedChecks, integrity.Check(split))
+		}
+
+		for _, check := range requestedChecks {
+			if slices.Contains(integrity.AllChecks, check) || slices.Contains(integrity.NonDefaultChecks, check) {
+				continue
+			}
+
+			return fmt.Errorf("requested check %s not found", check)
+		}
+	} else {
+		requestedChecks = integrity.AllChecks
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -815,22 +853,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 
-	checks := append([]integrity.Check{}, integrity.AllChecks...)
-	nonDefaultCheck := requestedCheck != "" &&
-		!slices.Contains(integrity.AllChecks, requestedCheck) &&
-		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
-	if nonDefaultCheck {
-		checks = append(checks, integrity.NonDefaultChecks...)
-	}
-
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
-	found := false
-	for _, chk := range checks {
-		if requestedCheck != "" && requestedCheck != chk {
-			continue
-		}
-		found = true
+	for _, chk := range requestedChecks {
 		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
@@ -893,10 +918,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("not a valid check: %s", requestedCheck)
 	}
 
 	return nil
@@ -1043,7 +1064,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	for _, res := range accFiles {
 		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range kv.StateDomains {
+		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
 			newVersion := state.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
 			expectedFileName := strings.Replace(res.Name(), "accounts", snapType.String(), 1)
 			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
@@ -1151,11 +1172,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
+	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
 	for _, res := range accFiles {
-		viTypes := []string{"accounts", "storage", "code"}
-
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := state.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
