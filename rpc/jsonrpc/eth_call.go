@@ -818,7 +818,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 			args.Nonce = (*hexutil.Uint64)(&nonce)
 		}
-		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
+		to = types.CreateAddress(*args.From, uint64(*args.Nonce))
 	}
 
 	if args.From == nil {
