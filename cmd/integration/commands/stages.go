@@ -1086,7 +1086,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	// remove all existing state commitment snapshots
-	app.DeleteStateSnapshots(dirs, false, true, "0-999999", kv.CommitmentDomain.String())
+	app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String())
 
 	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
 	sconf := dbstate.Schema.CommitmentDomain
