@@ -431,29 +431,25 @@ var cmdRunMigrations = &cobra.Command{
 		// (see openSnapshotOnce in allSnapshots below).
 		migrateDB(kv.ChainDB, chaindata)
 
-		dbPaths := map[kv.Label]string{}
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
 		// (see kv/tables.go).
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
-			dbPaths[kv.ConsensusDB] = consensus
+			migrateDB(kv.ConsensusDB, consensus)
 		} else {
 			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
 			if exists, err := dir.Exist(consensus); err == nil && exists {
-				dbPaths[kv.ConsensusDB] = consensus
+				migrateDB(kv.ConsensusDB, consensus)
 			}
 		}
 		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
 		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
 		if exists, err := dir.Exist(heimdall); err == nil && exists {
-			dbPaths[kv.HeimdallDB] = heimdall
+			migrateDB(kv.HeimdallDB, heimdall)
 		}
 		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
 		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
-			dbPaths[kv.PolygonBridgeDB] = polygonBridge
-		}
-		for dbLabel, dbPath := range dbPaths {
-			migrateDB(dbLabel, dbPath)
+			migrateDB(kv.PolygonBridgeDB, polygonBridge)
 		}
 	},
 }
