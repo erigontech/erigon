@@ -29,8 +29,6 @@ testTxEIP1559() {
     local OUTPUT
     OUTPUT=$(cast send "$TO" \
         --value "$VALUE" \
-        --gas-price "$MAX_FEE" \
-        --priority-gas-price "$PRIORITY_FEE" \
         --gas-limit "$GAS_LIMIT" \
         --private-key "$PRIVATE_KEY" \
         --rpc-url "$RPC_URL" --json | jq -r '.status')
@@ -157,7 +155,6 @@ testEIP3529() {
     # read GAS_USED1 STATUS < <(cast send "$CONTRACT_ADDR" \
     RESPONSE=$(cast send "$CONTRACT_ADDR" \
         "setVal(uint256)" "1" \
-        --legacy \
         --rpc-url "$RPC_URL" \
         --private-key "$PRIVATE_KEY" \
         --gas-limit 100000 \
@@ -178,7 +175,6 @@ testEIP3529() {
     echo "Step 2: clearVal() → val goes 1→0 (should refund 4 000 under EIP-3529)"
     RESPONSE=$(cast send "$CONTRACT_ADDR" \
         "clearVal()" "" \
-        --legacy \
         --rpc-url "$RPC_URL" \
         --private-key "$PRIVATE_KEY" \
         --gas-limit 100000 \
