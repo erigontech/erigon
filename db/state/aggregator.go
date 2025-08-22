@@ -221,9 +221,9 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) ForceEnableCommValTransformForTests() {
-	a.commitmentValuesTransform = true
-	a.d[kv.CommitmentDomain].replaceKeysInValues = true
+func (a *Aggregator) ForceCommitmentValTransformForTests(v bool) {
+	a.commitmentValuesTransform = v
+	a.d[kv.CommitmentDomain].replaceKeysInValues = v
 }
 
 func (a *Aggregator) reloadSalt() error {

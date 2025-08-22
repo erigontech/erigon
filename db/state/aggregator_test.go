@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -50,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1469,149 +1467,6 @@ func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
 type testAggConfig struct {
 	stepSize                         uint64
 	disableCommitmentBranchTransform bool
-}
-
-func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
-	tb.Helper()
-	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
-	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
-
-	// build files out of db
-	err := agg.BuildFiles(uint64(txCount))
-	require.NoError(tb, err)
-	return db, agg
-}
-func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
-	tb.Helper()
-	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	db := wrapDbWithCtx(_db, agg)
-
-	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
-	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
-
-	ctx := context.Background()
-	//agg.logger = log.Root().New()
-
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	rwTx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(tb, err)
-	defer rwTx.Rollback()
-
-	domains, err := NewSharedDomains(rwTx, log.New())
-	require.NoError(tb, err)
-	defer domains.Close()
-
-	keys, vals := generateInputData(tb, length.Addr, 5, txCount)
-	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
-
-	var txNum, blockNum uint64
-	for i := 0; i < len(vals); i++ {
-		txNum = uint64(i)
-		domains.SetTxNum(txNum)
-
-		for j := 0; j < len(keys); j++ {
-			acc := accounts.Account{
-				Nonce:       uint64(i),
-				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    common.Hash{},
-				Incarnation: 0,
-			}
-			buf := accounts.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
-			require.NoError(tb, err)
-
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
-			require.NoError(tb, err)
-		}
-		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
-			require.NoError(tb, err)
-			require.NotEmpty(tb, rh)
-		}
-	}
-
-	err = domains.Flush(context.Background(), rwTx)
-	require.NoError(tb, err)
-	domains.Close() // closes ac
-
-	require.NoError(tb, rwTx.Commit())
-
-	return db, agg
-}
-
-func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
-		stepSize:                         10,
-		disableCommitmentBranchTransform: false,
-	})
-
-	var rootInFiles []byte
-	var fPaths []string
-
-	{
-		db := wrapDbWithCtx(_db, agg)
-
-		tx, err := db.BeginTemporalRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		ac := AggTx(tx)
-
-		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, keyCommitmentState, math.MaxUint64)
-		require.True(t, ok)
-		rootInFiles, err = commitment.HexTrieExtractStateRoot(stateVal)
-		require.NoError(t, err)
-
-		for _, f := range ac.Files(kv.CommitmentDomain) {
-			fPaths = append(fPaths, f.Fullpath())
-		}
-		tx.Rollback()
-		agg.Close()
-	}
-
-	agg = testAgg(t, _db, agg.Dirs(), agg.StepSize(), log.New())
-	db := wrapDbWithCtx(_db, agg)
-
-	// now clean all commitment files along with related db buckets
-	rwTx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	buckets, err := rwTx.ListTables()
-	require.NoError(t, err)
-	for _, b := range buckets {
-		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
-			//size, err := rwTx.BucketSize(b)
-			//require.NoError(t, err)
-			//t.Logf("cleaned table %s: %d keys", b, size)
-
-			err = rwTx.ClearTable(b)
-			require.NoError(t, err)
-		}
-	}
-	require.NoError(t, rwTx.Commit())
-
-	for _, fn := range fPaths {
-		if strings.Contains(fn, kv.CommitmentDomain.String()) {
-			require.NoError(t, dir.RemoveFile(fn))
-			//t.Logf("removed file %s", filepath.Base(fn))
-		}
-	}
-	err = agg.OpenFolder()
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger, true)
-	require.NoError(t, err)
-	require.NotEmpty(t, finalRoot)
-	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
-
-	require.Equal(t, rootInFiles, finalRoot[:])
 }
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
