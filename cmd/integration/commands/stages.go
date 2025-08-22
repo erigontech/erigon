@@ -39,6 +39,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/migrations"
@@ -66,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -217,7 +218,28 @@ var cmdStageCustomTrace = &cobra.Command{
 	},
 }
 
-var cmdStagePatriciaTrie = &cobra.Command{
+var cmdPrintCommitment = &cobra.Command{
+	Use:   "print_commitment",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := printCommitment(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "commitment_rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -229,7 +251,7 @@ var cmdStagePatriciaTrie = &cobra.Command{
 		}
 		defer db.Close()
 
-		if err := stagePatriciaTrie(db, cmd.Context(), logger); err != nil {
+		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -392,15 +414,38 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		//non-accede and exclusive mode - to apply create new tables if need.
-		cfg := dbCfg(kv.ChainDB, chaindata).RemoveFlags(mdbx.Accede).Exclusive(true)
-		db, err := openDB(cfg, true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+		dbPaths := map[kv.Label]string{kv.ChainDB: chaindata}
+		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
+		// (see kv/tables.go).
+		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
+		if exists, err := dir.Exist(consensus); err == nil && exists {
+			dbPaths[kv.ConsensusDB] = consensus
+		} else {
+			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
+			if exists, err := dir.Exist(consensus); err == nil && exists {
+				dbPaths[kv.ConsensusDB] = consensus
+			}
 		}
-		defer db.Close()
-		// Nothing to do, migrations will be applied automatically
+		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
+		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
+		if exists, err := dir.Exist(heimdall); err == nil && exists {
+			dbPaths[kv.HeimdallDB] = heimdall
+		}
+		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
+		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
+			dbPaths[kv.PolygonBridgeDB] = polygonBridge
+		}
+		for dbLabel, dbPath := range dbPaths {
+			//non-accede and exclusive mode - to apply create new tables if need.
+			cfg := dbCfg(dbLabel, dbPath).RemoveFlags(mdbx.Accede).Exclusive(true)
+			db, err := openDB(cfg, true, logger)
+			if err != nil {
+				logger.Error("Opening DB", "error", err)
+				return
+			}
+			defer db.Close()
+			// Nothing to do, migrations will be applied automatically
+		}
 	},
 }
 
@@ -485,17 +530,25 @@ func init() {
 	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
-	withConfig(cmdStagePatriciaTrie)
-	withDataDir(cmdStagePatriciaTrie)
-	withReset(cmdStagePatriciaTrie)
-	withBlock(cmdStagePatriciaTrie)
-	withUnwind(cmdStagePatriciaTrie)
-	withPruneTo(cmdStagePatriciaTrie)
-	withIntegrityChecks(cmdStagePatriciaTrie)
-	withChain(cmdStagePatriciaTrie)
-	withHeimdall(cmdStagePatriciaTrie)
-	withChaosMonkey(cmdStagePatriciaTrie)
-	rootCmd.AddCommand(cmdStagePatriciaTrie)
+	withConfig(cmdCommitmentRebuild)
+	withDataDir(cmdCommitmentRebuild)
+	withReset(cmdCommitmentRebuild)
+	withSqueeze(cmdCommitmentRebuild)
+	withBlock(cmdCommitmentRebuild)
+	withUnwind(cmdCommitmentRebuild)
+	withPruneTo(cmdCommitmentRebuild)
+	withIntegrityChecks(cmdCommitmentRebuild)
+	withChain(cmdCommitmentRebuild)
+	withHeimdall(cmdCommitmentRebuild)
+	withChaosMonkey(cmdCommitmentRebuild)
+	rootCmd.AddCommand(cmdCommitmentRebuild)
+
+	withConfig(cmdPrintCommitment)
+	withDataDir(cmdPrintCommitment)
+	withChain(cmdPrintCommitment)
+	//withHeimdall(cmdPrintCommitment)
+	//withChaosMonkey(cmdPrintCommitment)
+	rootCmd.AddCommand(cmdPrintCommitment)
 
 	withConfig(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
@@ -973,7 +1026,50 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	return nil
 }
 
-func stagePatriciaTrie(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
+
+	// disable hard alignment; allowing commitment and storage/account to have
+	// different visibleFiles
+	agg.DisableAllDependencies()
+
+	acRo := agg.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
+	defer acRo.Close()
+	defer acRo.MadvNormal().DisableReadAhead()
+
+	commitmentFiles := acRo.Files(kv.CommitmentDomain)
+	fmt.Printf("Commitment files: %d\n", len(commitmentFiles))
+	for _, f := range commitmentFiles {
+		name := filepath.Base(f.Fullpath())
+		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
+		rootNodePrefix := []byte("state")
+		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
+		if err != nil {
+			return fmt.Errorf("failed to get root node from files: %w", err)
+		}
+		rootString, err := commitment.HexTrieStateToShortString(rootNode)
+		if err != nil {
+			return fmt.Errorf("failed to extract state root from root node: %w", err)
+		}
+		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
+	}
+
+	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
+	if err != nil {
+		return fmt.Errorf("failed to check commitment: %w", err)
+	}
+	fmt.Printf("\n%s", str)
+
+	return nil
+}
+
+func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return reset2.Reset(ctx, db, stages.Execution)
@@ -990,7 +1086,7 @@ func stagePatriciaTrie(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg); err != nil {
+	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
 		return err
 	}
 	return nil
@@ -1106,10 +1202,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			err = fmt.Errorf("aggregator init: %w", err)
 			return
 		}
-		if err = _aggSingleton.ReloadSalt(); err != nil {
-			err = fmt.Errorf("aggregator ReloadSalt: %w", err)
-			return
-		}
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
@@ -1143,15 +1235,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			return nil
 		})
 
-		g.Go(func() error {
-			ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-			mtime := time.Time{}
-			if er == nil {
-				mtime = ls.ModTime()
-			}
-			logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-			return nil
-		})
 		if err = g.Wait(); err != nil {
 			return
 		}

@@ -159,16 +159,16 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
 
-func (d *Domain) kvFilePath(fromStep, toStep kv.Step) string {
+func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.version.DataKV.String(), d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) kviAccessorFilePath(fromStep, toStep kv.Step) string {
+func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.version.AccessorKVI.String(), d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep kv.Step) string {
+func (d *Domain) kvExistenceIdxNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.version.AccessorKVEI.String(), d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) kvBtAccessorFilePath(fromStep, toStep kv.Step) string {
+func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.version.AccessorBT.String(), d.filenameBase, fromStep, toStep))
 }
 
@@ -703,7 +703,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		mxCollateTook.ObserveDuration(started)
 	}()
 
-	coll.valuesPath = d.kvFilePath(stepFrom, stepTo)
+	coll.valuesPath = d.kvNewFilePath(stepFrom, stepTo)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
@@ -819,7 +819,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		}
 	}()
 
-	coll.valuesPath = d.kvFilePath(step, step+1)
+	coll.valuesPath = d.kvNewFilePath(step, step+1)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
@@ -993,21 +993,21 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorFilePath(stepFrom, stepTo))
+		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(stepFrom, stepTo))
 		if err != nil {
 			return StaticFiles{}, err
 		}
 	}
 
 	if d.Accessors.Has(AccessorBTree) {
-		btPath := d.kvBtAccessorFilePath(stepFrom, stepTo)
+		btPath := d.kvBtAccessorNewFilePath(stepFrom, stepTo)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
 	if d.Accessors.Has(AccessorExistence) {
-		fPath := d.kvExistenceIdxFilePath(stepFrom, stepTo)
+		fPath := d.kvExistenceIdxNewFilePath(stepFrom, stepTo)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
@@ -1095,21 +1095,21 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorFilePath(step, step+1))
+		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(step, step+1))
 		if err != nil {
 			return StaticFiles{}, err
 		}
 	}
 
 	if d.Accessors.Has(AccessorBTree) {
-		btPath := d.kvBtAccessorFilePath(step, step+1)
+		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
 	if d.Accessors.Has(AccessorExistence) {
-		fPath := d.kvExistenceIdxFilePath(step, step+1)
+		fPath := d.kvExistenceIdxNewFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
@@ -1132,7 +1132,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 }
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
-	idxPath := d.kviAccessorFilePath(fromStep, toStep)
+	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Version:            1,
 		Enums:              false,
@@ -1157,7 +1157,15 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		return []string{d.kvBtAccessorFilePath(fromStep, toStep), d.kvExistenceIdxFilePath(fromStep, toStep)}
+		exF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvExistenceIdxFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		btF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvBtAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return []string{btF, exF}
 	})
 }
 
@@ -1170,13 +1178,17 @@ func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		return []string{d.kviAccessorFilePath(fromStep, toStep)}
+		fPath, _, _, err := version.FindFilesWithVersionsByPattern(d.kviAccessorFilePathMask(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return []string{fPath}
 	})
 	//return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep uint64) []string {
 	//	var files []string
 	//	if d.Accessors.Has(AccessorHashMap) {
-	//		files = append(files, d.kviAccessorFilePath(fromStep, toStep))
-	//		files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
+	//		files = append(files, d.kviAccessorNewFilePath(fromStep, toStep))
+	//		files = append(files, d.kvExistenceIdxNewFilePath(fromStep, toStep))
 	//	}
 	//	return files
 	//})
@@ -1193,7 +1205,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 
 		g.Go(func() error {
 			fromStep, toStep := kv.Step(item.startTxNum/d.stepSize), kv.Step(item.endTxNum/d.stepSize)
-			idxPath := d.kvBtAccessorFilePath(fromStep, toStep)
+			idxPath := d.kvBtAccessorNewFilePath(fromStep, toStep)
 			if err := BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
@@ -1400,7 +1412,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	}
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		if maxTxNum != math.MaxUint64 && maxTxNum > dt.files[i].endTxNum || dt.files[i].startTxNum > maxTxNum { // skip partially matched files
+		if maxTxNum != math.MaxUint64 && (dt.files[i].startTxNum > maxTxNum || maxTxNum > dt.files[i].endTxNum) { // (maxTxNum > dt.files[i].endTxNum || dt.files[i].startTxNum > maxTxNum) { // skip partially matched files
+			//fmt.Printf("getLatestFromFiles: skipping file %d %s, maxTxNum=%d, startTxNum=%d, endTxNum=%d\n", i, dt.files[i].src.decompressor.FileName(), maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum)
 			continue
 		}
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)

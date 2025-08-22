@@ -50,8 +50,6 @@ import (
 var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
-		ProhibitNewDownloadsLock,
-		ProhibitNewDownloadsLock2,
 		ResetStageTxnLookup,
 	},
 	kv.TxPoolDB: {},
