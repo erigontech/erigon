@@ -1071,7 +1071,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
-		for _, snapType := range kv.StateDomains {
+		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
 			schemaVersionMinSup := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
@@ -1165,14 +1165,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
+	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
 	for _, res := range accFiles {
-		viTypes := []string{"accounts", "storage", "code"}
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := libstate.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
