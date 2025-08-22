@@ -195,27 +195,26 @@ func finaliseBlock(
 	batchContext.sdb.eridb.OpenBatch(quit)
 
 	// this is actually the interhashes stage
-	now := time.Now()
+	startTime := time.Now()
 	var newRoot common.Hash
-	commitment := "smt"
-	if batchContext.cfg.zk.UsingPMT() {
-		commitment = "pmt"
-		logger := log.New()
-		if err = stagedsync.HashStateFromTo(batchContext.s.LogPrefix(), batchContext.sdb.tx, batchContext.cfg.hashStateCfg, newHeader.Number.Uint64()-1, newHeader.Number.Uint64(), batchContext.ctx, logger); err != nil {
+	var commitmentToLog string
+	if batchContext.cfg.chainConfig.IsPmtEnabled(newHeader.Number.Uint64()) {
+		commitmentToLog = "pmt"
+		if err = stagedsync.HashStateFromTo(batchContext.s.LogPrefix(), batchContext.sdb.tx, batchContext.cfg.hashStateCfg, newHeader.Number.Uint64()-1, newHeader.Number.Uint64(), batchContext.ctx, log.Root()); err != nil {
 			return nil, err
 		}
 
-		newRoot, err = stagedsync.IncrementIntermediateHashes(batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, thisBlockNumber, trieConfigSequencer(batchContext.cfg.intersCfg), common.Hash{}, quit, logger)
+		newRoot, err = stagedsync.IncrementIntermediateHashes(batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, thisBlockNumber, trieConfigSequencer(batchContext.cfg.intersCfg), common.Hash{}, quit, log.Root())
 	} else {
-		newRoot, err = zkIncrementIntermediateHashes(batchContext.ctx, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, batchContext.sdb.eridb, batchContext.sdb.smt, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
+		commitmentToLog = "smt"
+		newRoot, err = zkIncrementIntermediateHashes_v2_Forwards(batchContext.ctx, batchContext.cfg.dirs.Tmp, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
 	}
 	if err != nil {
 		batchContext.sdb.eridb.RollbackBatch()
 		return nil, err
 	}
 
-	elapsed := time.Since(now)
-	log.Info(fmt.Sprintf("[%s] IncrementIntermediateHashes finished newRoot: %s", batchContext.s.LogPrefix(), newRoot.String()), "took", elapsed, "commitment", commitment)
+	log.Info(fmt.Sprintf("[%s] IncrementIntermediateHashes finished newRoot: %s", batchContext.s.LogPrefix(), newRoot.String()), "from", newHeader.Number.Uint64()-1, "to", newHeader.Number.Uint64(), "took", time.Since(startTime), "commitment", commitmentToLog)
 
 	if err = batchContext.sdb.eridb.CommitBatch(); err != nil {
 		return nil, err

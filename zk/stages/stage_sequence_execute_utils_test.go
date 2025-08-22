@@ -164,7 +164,7 @@ func Test_PrepareForkId_DuringRecovery(t *testing.T) {
 			allForks:   []uint64{1, 2, 3},
 			allBatches: []uint64{1, 2, 3},
 			batchForks: map[uint64]uint64{1: 1},
-			expected:   2,
+			expected:   3,
 		},
 		"with gaps": {
 			lastBatch:  22,
@@ -202,7 +202,7 @@ func Test_PrepareForkId_DuringRecovery(t *testing.T) {
 				}()
 			}
 
-			forkId, err := prepareForkId(test.lastBatch, 1, forkDbMock, SequenceBlockCfg{zk: &ethconfig.Zk{Commitment: ethconfig.CommitmentSMT}})
+			forkId, err := prepareForkId(test.lastBatch, 1, forkDbMock, SequenceBlockCfg{zk: &ethconfig.Zk{}})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

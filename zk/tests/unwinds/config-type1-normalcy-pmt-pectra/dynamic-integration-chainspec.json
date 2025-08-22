@@ -19,7 +19,7 @@
   "shanghaiTime": 0,
   "cancunTime": 0,
   "normalcyBlock": 0,
+  "pmtEnabledBlock": 0,
   "pragueTime": 0,
-  "type1": true,
   "ethash": {}
 }

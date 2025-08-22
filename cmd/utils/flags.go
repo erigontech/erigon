@@ -20,6 +20,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/erigontech/erigon/core/types"
 	"math/big"
 	"path/filepath"
 	"runtime"
@@ -132,6 +133,10 @@ var (
 	OverrideLondonBlockFlag = flags.BigFlag{
 		Name:  "override.londonblock",
 		Usage: "Manually specify the block for london fork",
+	}
+	OverridePmtEnabledBlockFlag = flags.BigFlag{
+		Name:  "override.pmtenabledblock",
+		Usage: "Manually specify the block for the PMT enabled",
 	}
 	TrustedSetupFile = cli.StringFlag{
 		Name:  "trusted-setup-file",
@@ -943,10 +948,10 @@ var (
 		Usage: "Exclude zkevm flags from startup logging on zkevm flags.",
 		Value: cli.NewStringSlice("zkevm.l1-rpc-url"),
 	}
-	Commitment = cli.StringFlag{
-		Name:  "zkevm.initial-commitment",
-		Usage: "Values { smt | pmt }. Default, smt.",
-		Value: "smt",
+	SimultaneousPmtAndSmt = cli.BoolFlag{
+		Name:  "zkevm.simultaneous-pmt-and-smt",
+		Usage: "Build the PMT as a standalone tree. To be used for promoting the SMT to PMT. Only available on RPC nodes.",
+		Value: false,
 	}
 	InjectGers = cli.BoolFlag{
 		Name:  "zkevm.inject-gers",
@@ -2519,11 +2524,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		genesis.GasLimit = dConf.GasLimit
 		genesis.Difficulty = big.NewInt(dConf.Difficulty)
 		genesis.HonourChainspec = ctx.Bool(HonourChainspec.Name)
-		commitment := ethconfig.Commitment(ctx.String(Commitment.Name))
-		if !commitment.IsValid() {
-			panic(fmt.Sprintf("Invalid commitment: %s. Must be one of: %s", ctx.String(Commitment.Name), ethconfig.ValidCommitments()))
-		}
-		genesis.Type1 = commitment.IsType1()
 
 		cfg.Genesis = genesis
 
@@ -2570,21 +2570,31 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	}
 
+	cfg.GenesisOverrides = &types.GenesisOverrides{}
+
 	if ctx.IsSet(OverridePragueFlag.Name) {
-		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
-		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
+		cfg.GenesisOverrides.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
+		cfg.TxPool.OverridePragueTime = cfg.GenesisOverrides.OverridePragueTime
 	}
+
 	if ctx.IsSet(OverrideCancunFlag.Name) {
-		cfg.OverrideCancunTime = flags.GlobalBig(ctx, OverrideCancunFlag.Name)
+		cfg.GenesisOverrides.OverrideCancunTime = flags.GlobalBig(ctx, OverrideCancunFlag.Name)
 	}
+
 	if ctx.IsSet(OverrideNormalcyBlockFlag.Name) {
-		cfg.OverrideNormalcyBlock = flags.GlobalBig(ctx, OverrideNormalcyBlockFlag.Name)
+		cfg.GenesisOverrides.OverrideNormalcyBlock = flags.GlobalBig(ctx, OverrideNormalcyBlockFlag.Name)
 	}
+
 	if ctx.IsSet(OverrideLondonBlockFlag.Name) {
-		cfg.OverrideLondonBlock = flags.GlobalBig(ctx, OverrideLondonBlockFlag.Name)
+		cfg.GenesisOverrides.OverrideLondonBlock = flags.GlobalBig(ctx, OverrideLondonBlockFlag.Name)
 	}
+
 	if ctx.IsSet(OverrideShanghaiTimeFlag.Name) {
-		cfg.OverrideShanghaiTime = flags.GlobalBig(ctx, OverrideShanghaiTimeFlag.Name)
+		cfg.GenesisOverrides.OverrideShanghaiTime = flags.GlobalBig(ctx, OverrideShanghaiTimeFlag.Name)
+	}
+
+	if ctx.IsSet(OverridePmtEnabledBlockFlag.Name) {
+		cfg.GenesisOverrides.OverridePmtEnabledBlock = flags.GlobalBig(ctx, OverridePmtEnabledBlockFlag.Name)
 	}
 
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {

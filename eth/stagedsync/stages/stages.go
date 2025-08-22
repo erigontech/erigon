@@ -29,24 +29,25 @@ import (
 type SyncStage string
 
 var (
-	Snapshots           SyncStage = "Snapshots"   // Snapshots
-	Headers             SyncStage = "Headers"     // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	BorHeimdall         SyncStage = "BorHeimdall" // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
-	BlockHashes         SyncStage = "BlockHashes" // Headers Number are written, fills blockHash => number bucket
-	Bodies              SyncStage = "Bodies"      // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders             SyncStage = "Senders"     // "From" recovered from signatures, bodies re-written
-	DataStream          SyncStage = "DataStream"
-	Execution           SyncStage = "Execution"   // Executing each block w/o buildinf a trie
-	Translation         SyncStage = "Translation" // Translation each marked for translation contract (from EVM to TEVM)
-	VerkleTrie          SyncStage = "VerkleTrie"
-	IntermediateHashes  SyncStage = "IntermediateHashesV3" // Generate intermediate hashes, calculate the state root hash
-	HashState           SyncStage = "HashState"            // Apply Keccak256 to all the keys in the state
-	AccountHistoryIndex SyncStage = "AccountHistoryIndex"  // Generating history index for accounts
-	StorageHistoryIndex SyncStage = "StorageHistoryIndex"  // Generating history index for storage
-	LogIndex            SyncStage = "LogIndex"             // Generating logs index (from receipts)
-	CallTraces          SyncStage = "CallTraces"           // Generating call traces index
-	TxLookup            SyncStage = "TxLookup"             // Generating transactions lookup index
-	Finish              SyncStage = "Finish"               // Nominal stage after all other stages
+	Snapshots                    SyncStage = "Snapshots"   // Snapshots
+	Headers                      SyncStage = "Headers"     // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BorHeimdall                  SyncStage = "BorHeimdall" // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
+	BlockHashes                  SyncStage = "BlockHashes" // Headers Number are written, fills blockHash => number bucket
+	Bodies                       SyncStage = "Bodies"      // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders                      SyncStage = "Senders"     // "From" recovered from signatures, bodies re-written
+	DataStream                   SyncStage = "DataStream"
+	Execution                    SyncStage = "Execution"   // Executing each block w/o buildinf a trie
+	Translation                  SyncStage = "Translation" // Translation each marked for translation contract (from EVM to TEVM)
+	VerkleTrie                   SyncStage = "VerkleTrie"
+	IntermediateHashes           SyncStage = "IntermediateHashesV3"         // Generate intermediate hashes, calculate the state root hash
+	IntermediateHashesStandalone SyncStage = "IntermediateHashesStandalone" // Generate intermediate hashes, calculate the state root hash in standalone mode (no check root)
+	HashState                    SyncStage = "HashState"                    // Apply Keccak256 to all the keys in the state
+	AccountHistoryIndex          SyncStage = "AccountHistoryIndex"          // Generating history index for accounts
+	StorageHistoryIndex          SyncStage = "StorageHistoryIndex"          // Generating history index for storage
+	LogIndex                     SyncStage = "LogIndex"                     // Generating logs index (from receipts)
+	CallTraces                   SyncStage = "CallTraces"                   // Generating call traces index
+	TxLookup                     SyncStage = "TxLookup"                     // Generating transactions lookup index
+	Finish                       SyncStage = "Finish"                       // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningBorHeimdall SyncStage = "MiningBorHeimdall"

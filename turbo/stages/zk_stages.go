@@ -87,7 +87,9 @@ func NewDefaultZkStages(ctx context.Context,
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, cfg.Sync, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
-		runInTestMode)
+		runInTestMode,
+		cfg.Genesis.Config,
+	)
 }
 
 // NewSequencerZkStages creates stages for a zk sequencer
@@ -165,5 +167,6 @@ func NewSequencerZkStages(ctx context.Context,
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
 		hashStateCfg,
 		runInTestMode,
+		cfg.Genesis.Config,
 	)
 }

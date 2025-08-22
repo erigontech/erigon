@@ -75,7 +75,7 @@ func SpawnStageWitness(
 		log.Info(fmt.Sprintf("[%s] skipping -- sequencer", logPrefix))
 		return nil
 	}
-	if cfg.zkCfg.UsingPMT() {
+	if cfg.chainConfig.IsPmtEnabled(s.BlockNumber) {
 		log.Info(fmt.Sprintf("[%s] skipping -- using PMT", logPrefix))
 		return nil
 	}

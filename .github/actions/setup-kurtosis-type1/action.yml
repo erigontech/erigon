@@ -79,7 +79,7 @@ runs:
         sed -i '/zkevm.datastream-version:/d' ./templates/cdk-erigon/config.yml
         sed -i 's/zkevm\.disable-virtual-counters: false/zkevm.disable-virtual-counters: true/' ./templates/cdk-erigon/config.yml
         sed -i '$a\zkevm.honour-chainspec: true' ./templates/cdk-erigon/config.yml
-        sed -i '$a\zkevm.initial-commitment: pmt' ./templates/cdk-erigon/config.yml
+        sed -i 's/"pmtEnabledBlock": [0-9]\+/"pmtEnabledBlock": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"londonBlock": [0-9]\+/"londonBlock": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"normalcyBlock": [0-9]\+/"normalcyBlock": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"shanghaiTime": [0-9]\+/"shanghaiTime": 0/' ./templates/cdk-erigon/chainspec.json

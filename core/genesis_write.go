@@ -71,16 +71,16 @@ import (
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, nil, nil, nil, nil, tmpDir, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overridePragueTime, overrideCancunTime, overrideNormalcyBlock, overrideLondonBlock, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrides *types.GenesisOverrides, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overridePragueTime, overrideCancunTime, overrideNormalcyBlock, overrideLondonBlock, overrideShanghaiTime, tmpDir, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrides, tmpDir, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -91,7 +91,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime, overrideCancunTime, overrideNormalcyBlock, overrideLondonBlock, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrides *types.GenesisOverrides, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
@@ -103,20 +103,22 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime, o
 	}
 
 	applyOverrides := func(config *chain.Config) {
-		if overridePragueTime != nil {
-			config.PragueTime = overridePragueTime
-		}
-		if overrideCancunTime != nil {
-			config.CancunTime = overrideCancunTime
-		}
-		if overrideNormalcyBlock != nil {
-			config.NormalcyBlock = overrideNormalcyBlock
-		}
-		if overrideLondonBlock != nil {
-			config.LondonBlock = overrideLondonBlock
-		}
-		if overrideShanghaiTime != nil {
-			config.ShanghaiTime = overrideShanghaiTime
+		if overrides != nil {
+			if overrides.OverridePragueTime != nil {
+				config.PragueTime = overrides.OverridePragueTime
+			}
+			if overrides.OverrideNormalcyBlock != nil {
+				config.NormalcyBlock = overrides.OverrideNormalcyBlock
+			}
+			if overrides.OverrideLondonBlock != nil {
+				config.LondonBlock = overrides.OverrideLondonBlock
+			}
+			if overrides.OverrideShanghaiTime != nil {
+				config.ShanghaiTime = overrides.OverrideShanghaiTime
+			}
+			if overrides.OverridePmtEnabledBlock != nil {
+				config.PmtEnabledBlock = overrides.OverridePmtEnabledBlock
+			}
 		}
 	}
 
@@ -621,10 +623,16 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
 
-		if g.Config != nil {
-			g.Config.Type1 = g.Type1
+		usingPmt := g.Config.PmtEnabledBlock != nil && g.Config.PmtEnabledBlock.Cmp(head.Number) <= 0
+		normalcy := g.Config.NormalcyBlock != nil && g.Config.NormalcyBlock.Cmp(head.Number) <= 0
+
+		if usingPmt && !normalcy {
+			// Normalcy is required for PMT.
+			panic("PMT is enabled, but normalcy is not set")
 		}
-		statedb.SetType1(g.Type1)
+
+		type1 := usingPmt && normalcy
+		statedb.SetIsType1(type1)
 
 		hasConstructorAllocation := false
 		for _, account := range g.Alloc {
@@ -668,7 +676,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 
-			if !g.Type1 {
+			if !type1 {
 				ro, err = processAccount(sparseTree, ro, &account, addr)
 				if err != nil {
 					return
@@ -679,7 +687,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			return
 		}
 
-		if g.Type1 {
+		if type1 {
 			if root, err = trie.CalcRoot("genesis", tx); err != nil {
 				return
 			}

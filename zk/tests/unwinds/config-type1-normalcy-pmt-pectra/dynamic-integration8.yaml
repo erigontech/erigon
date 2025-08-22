@@ -36,4 +36,3 @@ zkevm.default-gas-price: 1000000000
 zkevm.l1-cache-enabled: false
 
 zkevm.honour-chainspec: true
-zkevm.initial-commitment: pmt
