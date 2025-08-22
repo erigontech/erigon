@@ -62,7 +62,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		if start > end {
 			panic(fmt.Sprintf("assert: underflow in GetActiveValidatorsIndices, i: %d, start: %d, end: %d, epoch: %d", i, start, end, epoch))
 		}
-		if end-start > 10_000 {
+		if end-start > 40_000 {
 			log.Warn("[dbg] GetActiveValidatorsIndices", "alloc", end-start)
 		}
 		indiciesShards[i] = make([]uint64, 0, end-start)
@@ -128,6 +128,9 @@ func (b *CachingBeaconState) ComputeCommittee(
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
 
+	if end > start {
+		panic(fmt.Sprintf("assert: underflow in ComputeCommittee, start: %d, end: %d, index: %d, count: %d, lenIndicies: %d", start, end, index, count, lenIndicies))
+	}
 	return shuffledIndicies[start:end], nil
 }
 
