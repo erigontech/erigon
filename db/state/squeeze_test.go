@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -46,7 +47,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *sta
 // wrapDbWithCtx - deprecated copy of kv_temporal.go - visible only in tests
 // need to move non-unit-tests to own package
 func wrapDbWithCtx(db kv.RwDB, ctx *state.Aggregator) kv.TemporalRwDB {
-	v, err := New(db, ctx)
+	v, err := temporal.New(db, ctx)
 	if err != nil {
 		panic(err)
 	}
