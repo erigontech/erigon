@@ -76,7 +76,6 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
-			domains.SetTxNum(txNum)
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(0),
@@ -193,7 +192,6 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
-			domains.SetTxNum(txNum)
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(txNum * 1e6),

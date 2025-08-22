@@ -100,8 +100,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	// 5. delete same key. commitment should be the same
 	txNum = maxTx + 1
-	domains.SetTxNum(txNum)
-	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, maxTx+1, nil, 0)
+	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
 	require.NoError(t, err)
 
 	resultHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "")
@@ -421,7 +420,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		domains.SetTxNum(txNum)
 		for accs := 0; accs < accounts; accs++ {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),

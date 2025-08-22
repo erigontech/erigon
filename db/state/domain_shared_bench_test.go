@@ -59,7 +59,6 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	var txNum, blockNum uint64
 	for i := uint64(0); i < maxTx; i++ {
 		txNum = i
-		domains.SetTxNum(txNum)
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, i)
 		for j := 0; j < len(keys); j++ {
@@ -145,7 +144,6 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 		for key, upd := range d {
 			for _, u := range upd {
 				txNum = u.txNum
-				domains.SetTxNum(txNum)
 				err := domains.DomainPut(fom, rwTx, []byte(key), u.value, txNum, nil, 0)
 				require.NoError(b, err)
 			}

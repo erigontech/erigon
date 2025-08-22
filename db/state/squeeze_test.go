@@ -381,7 +381,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	var txNum, blockNum uint64
 	for i := uint64(1); i <= txs; i++ {
 		txNum = i
-		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		n, err := rnd.Read(addr)
@@ -488,7 +487,6 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	blockNum := uint64(0)
 	for i = 0; i < len(vals); i++ {
 		txNum := uint64(i)
-		domains.SetTxNum(txNum)
 		if i == 3 {
 			domains.SetChangesetAccumulator(changesetAt3)
 		}
@@ -534,14 +532,12 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}
 	err = rwTx.Unwind(ctx, pruneFrom, &diffs)
-	domains.SetTxNum(pruneFrom)
 	//err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
 	for i = int(pruneFrom); i < len(vals); i++ {
 		txNum := uint64(i)
-		domains.SetTxNum(txNum)
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts.Account{
@@ -585,12 +581,10 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
 	}
 	err = rwTx.Unwind(context.Background(), pruneFrom, &diffs)
-	domains.SetTxNum(pruneFrom)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
 		txNum := uint64(i)
-		domains.SetTxNum(txNum)
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts.Account{
