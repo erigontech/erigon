@@ -63,7 +63,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 			panic(fmt.Sprintf("assert: underflow in GetActiveValidatorsIndices, i: %d, start: %d, end: %d, epoch: %d", i, start, end, epoch))
 		}
 		if end-start > 40_000 {
-			log.Warn("[dbg] GetActiveValidatorsIndices", "alloc", end-start)
+			log.Warn("[dbg] GetActiveValidatorsIndices", "alloc", end-start, "start", start, "end", end, "epoch", epoch)
 		}
 		indiciesShards[i] = make([]uint64, 0, end-start)
 		workerID := i
