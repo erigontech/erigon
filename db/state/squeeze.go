@@ -303,28 +303,6 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	return nil
 }
 
-func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {
-	a := rwDb.(HasAgg).Agg().(*Aggregator)
-
-	rwTx, err := rwDb.BeginTemporalRw(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer rwTx.Rollback()
-
-	domains, err := NewSharedDomains(rwTx, log.New())
-	if err != nil {
-		return "", err
-	}
-	rootHash, err := domains.sdCtx.Trie().RootHash()
-	if err != nil {
-		return "", err
-	}
-	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, commitmentValuesTransform enabled %t\n", a.StepSize(), a.commitmentValuesTransform)
-	return s, nil
-}
-
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
@@ -402,7 +380,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
 		//shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(totalKeys/keysPerStep)))), 128))
-		shardStepsSize := kv.Step(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 128))
 		//shardStepsSize := kv.Step(uint64(math.Pow(2, math.Log2(float64(totalKeys/keysPerStep)))))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
@@ -440,12 +418,15 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)
 			}
 		}
-		roTx.Rollback()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
 				if !keyIter.HasNext() {
 					return false, nil
+				}
+				if processed%1_000_000 == 0 {
+					logger.Info(fmt.Sprintf("[commitment_rebuild] progressing domain keys %.1fm/%.1fm (%2.f%%) %x",
+						float64(processed)/1_000_000, float64(totalKeys)/1_000_000, float64(processed)/float64(totalKeys)*100, k))
 				}
 				k, _, err := keyIter.Next()
 				if err != nil {
@@ -507,6 +488,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			rangeToTxNum += uint64(shardStepsSize) * a.StepSize()
 		}
 
+		roTx.Rollback()
 		keyIter.Close()
 
 		totalKeysCommitted += processed
@@ -535,10 +517,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		a.commitmentValuesTransform = originalCommitmentValuesTransform // disable only while merging, to squeeze later. If enabled in Scheme, must be enabled while computing commitment to correctly dereference keys
 
 	}
-
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
 
 	a.commitmentValuesTransform = originalCommitmentValuesTransform
 	//if a.commitmentValuesTransform {
