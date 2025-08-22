@@ -529,7 +529,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(tx)
-			contractAddr = crypto.CreateAddress(bankAddress, nonce)
+			contractAddr = types.CreateAddress(bankAddress, nonce)
 		case 1:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(1)), *signer, bankKey)
 			require.NoError(t, err)

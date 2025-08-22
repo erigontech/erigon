@@ -27,9 +27,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 type encodingBuf [32]byte
