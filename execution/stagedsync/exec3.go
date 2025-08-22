@@ -950,7 +950,7 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
-	var uncommittedGas int64
+	var uncommitedGas int64
 	var b *types.Block
 
 	var readAhead chan uint64
@@ -1075,7 +1075,7 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				uncommittedGas = se.executedGas.Load() - int64(se.committedGas)
+				uncommitedGas = se.executedGas.Load() - int64(se.committedGas)
 
 				if !continueLoop {
 					return nil
@@ -1167,8 +1167,8 @@ func ExecV3(ctx context.Context,
 
 					se.lastCommittedBlockNum = b.NumberU64()
 					se.lastCommittedTxNum = inputTxNum
-					se.committedGas += uncommittedGas
-					uncommittedGas = 0
+					se.committedGas += uncommitedGas
+					uncommitedGas = 0
 
 					timeStart := time.Now()
 
@@ -1258,7 +1258,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		var lastBlockResult blockResult
-		var uncommittedGas int64
+		var uncommitedGas int64
 		var flushPending bool
 
 		execErr = func() error {
@@ -1287,7 +1287,7 @@ func ExecV3(ctx context.Context,
 				case applyResult := <-applyResults:
 					switch applyResult := applyResult.(type) {
 					case *txResult:
-						uncommittedGas += applyResult.gasUsed
+						uncommitedGas += applyResult.gasUsed
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 							pe.rs.SetTrace(true)
@@ -1372,8 +1372,8 @@ func ExecV3(ctx context.Context,
 										case <-logEvery.C:
 											done := float64(lastProgress.KeyIndex) / float64(lastProgress.UpdateCount)
 											fmt.Println(lastProgress.KeyIndex, lastProgress.UpdateCount, done,
-												"uc gas", common.PrettyCounter(uncommittedGas),
-												"done gas", common.PrettyCounter(uint64(done*float64(uncommittedGas))))
+												"uc gas", common.PrettyCounter(uncommitedGas),
+												"done gas", common.PrettyCounter(uint64(done*float64(uncommitedGas))))
 										}
 									}
 								}()
@@ -1407,8 +1407,8 @@ func ExecV3(ctx context.Context,
 
 								pe.lastCommittedBlockNum = lastBlockResult.BlockNum
 								pe.lastCommittedTxNum = lastBlockResult.lastTxNum
-								pe.committedGas += uncommittedGas
-								uncommittedGas = 0
+								pe.committedGas += uncommitedGas
+								uncommitedGas = 0
 							}
 						}
 
@@ -1486,8 +1486,8 @@ func ExecV3(ctx context.Context,
 			se := executor.(*serialExecutor)
 			se.lastCommittedBlockNum = b.NumberU64()
 			se.lastCommittedTxNum = inputTxNum
-			se.committedGas += uncommittedGas
-			uncommittedGas = 0
+			se.committedGas += uncommitedGas
+			uncommitedGas = 0
 
 			commitStart := time.Now()
 			stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
