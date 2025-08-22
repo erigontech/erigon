@@ -368,8 +368,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
 
 	start := time.Now()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
 
 	originalCommitmentValuesTransform := a.commitmentValuesTransform
 
