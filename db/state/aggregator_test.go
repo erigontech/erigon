@@ -1245,20 +1245,27 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
 	tb.Helper()
-	require, logger := require.New(tb), log.New()
+	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	salt, err := GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(err)
-	agg, err := NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(err)
-	tb.Cleanup(agg.Close)
-	err = agg.OpenFolder()
-	require.NoError(err)
-	agg.DisableFsync()
+	agg := testAgg(tb, db, dirs, aggStep, logger)
+	err := agg.OpenFolder()
+	require.NoError(tb, err)
 	return db, agg
+}
+
+func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *Aggregator {
+	tb.Helper()
+
+	salt, err := GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(tb, err)
+	agg, err := NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
+	require.NoError(tb, err)
+	tb.Cleanup(agg.Close)
+	agg.DisableFsync()
+	return agg
 }
 
 // generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
@@ -1542,25 +1549,33 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
 	})
-	db := wrapDbWithCtx(_db, agg)
 
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	ac := AggTx(tx)
+	var rootInFiles []byte
+	var fPaths []string
 
-	// collect latest root from each available file
-	stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, keyCommitmentState, math.MaxUint64)
-	require.True(t, ok)
-	rootInFiles, err := commitment.HexTrieExtractStateRoot(stateVal)
-	require.NoError(t, err)
+	{
+		db := wrapDbWithCtx(_db, agg)
 
-	fPaths := []string{}
-	for _, f := range ac.Files(kv.CommitmentDomain) {
-		fPaths = append(fPaths, f.Fullpath())
+		tx, err := db.BeginTemporalRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		ac := AggTx(tx)
+
+		// collect latest root from each available file
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, keyCommitmentState, math.MaxUint64)
+		require.True(t, ok)
+		rootInFiles, err = commitment.HexTrieExtractStateRoot(stateVal)
+		require.NoError(t, err)
+
+		for _, f := range ac.Files(kv.CommitmentDomain) {
+			fPaths = append(fPaths, f.Fullpath())
+		}
+		tx.Rollback()
+		agg.Close()
 	}
-	tx.Rollback()
-	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
+
+	agg = testAgg(t, _db, agg.Dirs(), agg.StepSize(), log.New())
+	db := wrapDbWithCtx(_db, agg)
 
 	// now clean all commitment files along with related db buckets
 	rwTx, err := db.BeginRw(context.Background())

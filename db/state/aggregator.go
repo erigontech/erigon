@@ -210,7 +210,8 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesDelete = onDel
 }
 
-func (a *Aggregator) StepSize() uint64 { return a.stepSize }
+func (a *Aggregator) StepSize() uint64   { return a.stepSize }
+func (a *Aggregator) Dirs() datadir.Dirs { return a.dirs }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
