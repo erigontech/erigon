@@ -150,7 +150,7 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache),
+		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache, logger),
 		heimdallService,
 		bridgeService,
 		events.Events(),

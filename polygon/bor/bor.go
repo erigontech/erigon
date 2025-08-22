@@ -232,6 +232,10 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
+	// Since there is only one producer in veblop, we don't need to add producer delay and backup multiplier
+	if c.IsVeBlop(number) {
+		return delay
+	}
 	if c.IsSprintStart(number) {
 		delay = c.CalculateProducerDelay(number)
 	}
@@ -299,9 +303,6 @@ func ValidateHeaderTime(
 	if err != nil {
 		return err
 	}
-
-	proposer := validatorSet.(*valset.ValidatorSet).GetProposer()
-	fmt.Printf("VALIDATE_HEADER_TIME: blockNum=%d , blockHash=%x, signer=%x, proposer=%x succession=%d\n", header.Number.Uint64(), header.Hash(), signer, proposer, succession)
 
 	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
 	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
@@ -1095,11 +1096,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// check and commit span
-			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
-				c.logger.Error("[bor] committing span", "err", err)
-				return nil, types.Receipts{}, nil, err
+			// post VeBlop spans won't be committed to smart contract
+			if !c.config.IsVeBlop(header.Number.Uint64()) {
+				// check and commit span
+				if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
+					err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
+					c.logger.Error("[bor] committing span", "err", err)
+					return nil, types.Receipts{}, nil, err
+				}
 			}
 
 			// commit states
@@ -1162,11 +1166,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// check and commit span
-			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-				err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
-				c.logger.Error("[bor] committing span", "err", err)
-				return nil, nil, types.Receipts{}, nil, err
+			// Post VeBlop spans won't be commited to smart contract
+			if !c.config.IsVeBlop(header.Number.Uint64()) {
+				// check and commit span
+				if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
+					err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
+					c.logger.Error("[bor] committing span", "err", err)
+					return nil, nil, types.Receipts{}, nil, err
+				}
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall, logger, true); err != nil {

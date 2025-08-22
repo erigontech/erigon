@@ -207,11 +207,6 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, int, error) {
 	currentSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
 
-	// have we previously calculated the producers for the same sprint num (chain tip optimisation)
-	if selection, ok := t.recentSelections.Get(currentSprintNum); ok {
-		return selection.Producers.Copy(), 0, nil
-	}
-
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
 	spanId, ok, err := t.store.EntityIdFromBlockNum(ctx, blockNum)
 	if err != nil {
@@ -220,20 +215,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	if !ok {
 		return nil, 0, fmt.Errorf("could not get spanId from blockNum=%d", blockNum)
 	}
-	var prevSprintNum uint64
-	if currentSprintNum > 0 {
-		prevSprintNum = currentSprintNum - 1
-	}
-	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && SpanId(spanId) == selection.SpanId {
-		producersCopy := selection.Producers.Copy()
-		producersCopy.IncrementProposerPriority(1)
-		selectionCopy := selection
-		selectionCopy.Producers = producersCopy
-		t.recentSelections.Add(currentSprintNum, selectionCopy)
-		return producersCopy, 1, nil
-	}
 
-	// no recent selection that we can easily use, re-calculate from DB
 	producerSelection, ok, err := t.store.Entity(ctx, spanId)
 	if err != nil {
 		return nil, 0, err
@@ -255,7 +237,5 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
-
-	t.recentSelections.Add(currentSprintNum, *producerSelection)
 	return producers, increments, nil
 }
