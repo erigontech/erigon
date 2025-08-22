@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 //(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
