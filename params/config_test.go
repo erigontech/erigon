@@ -136,6 +136,23 @@ func TestGetBurntContract(t *testing.T) {
 	require.NotNil(t, addr)
 	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), *addr)
 
+	// Mumbai
+	addr = MumbaiChainConfig.GetBurntContract(22640000)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(22640000 + 1)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(41874000 - 1)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(41874000)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA"), *addr)
+	addr = MumbaiChainConfig.GetBurntContract(41874000 + 1)
+	require.NotNil(t, addr)
+	assert.Equal(t, common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA"), *addr)
+
 	// Amoy
 	addr = AmoyChainConfig.GetBurntContract(0)
 	require.NotNil(t, addr)
