@@ -207,7 +207,7 @@ func finaliseBlock(
 		newRoot, err = stagedsync.IncrementIntermediateHashes(batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, thisBlockNumber, trieConfigSequencer(batchContext.cfg.intersCfg), common.Hash{}, quit, log.Root())
 	} else {
 		commitmentToLog = "smt"
-		newRoot, err = zkIncrementIntermediateHashes(batchContext.ctx, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, batchContext.sdb.eridb, batchContext.sdb.smt, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
+		newRoot, err = zkIncrementIntermediateHashes_v2_Forwards(batchContext.ctx, batchContext.cfg.dirs.Tmp, batchContext.s.LogPrefix(), batchContext.s, batchContext.sdb.tx, newHeader.Number.Uint64()-1, newHeader.Number.Uint64())
 	}
 	if err != nil {
 		batchContext.sdb.eridb.RollbackBatch()
