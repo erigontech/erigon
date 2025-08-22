@@ -538,7 +538,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 	}
 
 	// Step 2: Process each candidate file (already parsed)
-	doesRmCommitment := !cliCtx.IsSet("domain") || slices.Contains(cliCtx.StringSlice("domain"), "commitment")
+	doesRmCommitment := len(domainNames) != 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
