@@ -1459,7 +1459,17 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
+		var keysSize, valsSize datasize.ByteSize
+		g := src.MakeGetter()
+		for g.HasNext() {
+			k, _ := g.Next(nil)
+			keysSize += datasize.ByteSize(len(k))
+			if g.HasNext() {
+				v, _ := g.Next(nil)
+				valsSize += datasize.ByteSize(len(v))
+			}
+		}
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HR(), "keys_size", keysSize.HR(), "vals_size", valsSize.HR(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HR(), "dict_words", src.DictWords(), "name", src.FileName(), "detected_compression_type", seg.DetectCompressType(src.MakeGetter()))
 	} else if strings.HasSuffix(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
@@ -1494,7 +1504,7 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 		defer idx.Close()
 		total, offsets, ef, golombRice, existence, layer1 := idx.Sizes()
-		log.Info("meta", "sz_total", total.HumanReadable(), "sz_offsets", offsets.HumanReadable(), "sz_double_ef", ef.HumanReadable(), "sz_golombRice", golombRice.HumanReadable(), "sz_existence", existence.HumanReadable(), "sz_l1", layer1.HumanReadable(), "keys_count", idx.KeyCount(), "leaf_size", idx.LeafSize(), "bucket_size", idx.BucketSize(), "enums", idx.Enums())
+		log.Info("meta", "sz_total", total.HR(), "sz_offsets", offsets.HR(), "sz_double_ef", ef.HR(), "sz_golombRice", golombRice.HR(), "sz_existence", existence.HR(), "sz_l1", layer1.HR(), "keys_count", idx.KeyCount(), "leaf_size", idx.LeafSize(), "bucket_size", idx.BucketSize(), "enums", idx.Enums())
 	}
 	return nil
 }
