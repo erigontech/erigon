@@ -381,6 +381,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	var txNum, blockNum uint64
 	for i := uint64(1); i <= txs; i++ {
 		txNum = i
+		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		n, err := rnd.Read(addr)
