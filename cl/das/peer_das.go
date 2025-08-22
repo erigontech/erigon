@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
@@ -22,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/p2p/enode"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
@@ -135,6 +136,10 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
 	if err != nil {
 		return false, err
+	}
+	if len(expectedCustodies) == 0 {
+		// this case is not reasonable due to empty node ID
+		return len(existingColumns) == int(d.beaconConfig.NumberOfColumns), nil
 	}
 	nowCustodies := map[cltypes.CustodyIndex]bool{}
 	for _, column := range existingColumns {

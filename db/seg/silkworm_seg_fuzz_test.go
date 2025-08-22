@@ -28,9 +28,10 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func makeSegFilePath(path string, suffix string) string {
@@ -102,7 +103,7 @@ func SegUnzip(path string) error {
 }
 
 func SegZipSilkworm(path string, cmdPath string) error {
-	cmd := exec.Command(cmdPath, "seg_zip", path)
+	cmd := exec.CommandContext(context.Background(), cmdPath, "seg_zip", path)
 	return cmd.Run()
 }
 
@@ -192,7 +193,7 @@ func copyFiles(sourceFilePaths []string, targetDirPath string) {
 		return
 	}
 	for _, path := range sourceFilePaths {
-		_ = exec.Command("cp", path, targetDirPath).Run()
+		_ = exec.CommandContext(context.Background(), "cp", path, targetDirPath).Run()
 	}
 }
 
