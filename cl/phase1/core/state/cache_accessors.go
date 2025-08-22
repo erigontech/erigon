@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
@@ -58,12 +57,6 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		end := (i + 1) * shardsJobSize
 		if i == numWorkers-1 || end > b.ValidatorLength() {
 			end = b.ValidatorLength()
-		}
-		if start > end {
-			panic(fmt.Sprintf("assert: underflow in GetActiveValidatorsIndices, i: %d, start: %d, end: %d, epoch: %d", i, start, end, epoch))
-		}
-		if end-start > 46_000 {
-			log.Warn("[dbg] GetActiveValidatorsIndices", "alloc", end-start, "start", start, "end", end, "epoch", epoch)
 		}
 		indiciesShards[i] = make([]uint64, 0, end-start)
 		workerID := i
