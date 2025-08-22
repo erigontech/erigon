@@ -5,6 +5,8 @@ set -e # Enable exit on error
 WORKSPACE="$1"
 # The result directory, no default because run_rpc_tests has it
 RESULT_DIR="$2"
+# The HOST_RUNNER that hosts the GETH on latest
+HOST_RUNNER_GETH_LATEST="$3"
 
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
@@ -23,4 +25,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.77.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.77.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "HOST_RUNNER_GETH_LATEST"
