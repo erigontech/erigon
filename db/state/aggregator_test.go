@@ -1550,15 +1550,14 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	ac := AggTx(tx)
 
 	// collect latest root from each available file
-	dt := ac.d[kv.CommitmentDomain]
-	fnames := []string{}
-	stateVal, ok, _, _, _ := dt.getLatestFromFiles(keyCommitmentState, math.MaxUint64)
+	stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, keyCommitmentState, math.MaxUint64)
 	require.True(t, ok)
 	rootInFiles, err := commitment.HexTrieExtractStateRoot(stateVal)
 	require.NoError(t, err)
 
-	for _, f := range dt.files {
-		fnames = append(fnames, f.src.decompressor.FilePath())
+	fPaths := []string{}
+	for _, f := range ac.Files(kv.CommitmentDomain) {
+		fPaths = append(fPaths, f.Fullpath())
 	}
 	tx.Rollback()
 	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
@@ -1582,7 +1581,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 	require.NoError(t, rwTx.Commit())
 
-	for _, fn := range fnames {
+	for _, fn := range fPaths {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, dir.RemoveFile(fn))
 			//t.Logf("removed file %s", filepath.Base(fn))
