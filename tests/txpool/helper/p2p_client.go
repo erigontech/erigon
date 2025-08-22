@@ -53,7 +53,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	cfg := &p2p.Config{
 		ListenAddr:      ":30307",
 		AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
-		ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
+		ProtocolVersion: []uint{direct.ETH69, direct.ETH68, direct.ETH67},
 		MaxPeers:        32,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
@@ -98,7 +98,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	}
 
 	grpcServer := sentry.NewGrpcServer(context.TODO(), nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, log.New())
-	sentry := direct.NewSentryClientDirect(direct.ETH68, grpcServer)
+	sentry := direct.NewSentryClientDirect(direct.ETH69, grpcServer)
 
 	_, err = sentry.SetStatus(context.TODO(), &sentryproto.StatusData{
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
