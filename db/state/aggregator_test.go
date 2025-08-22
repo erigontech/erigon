@@ -1548,19 +1548,16 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ac := AggTx(tx)
-	roots := make([]common.Hash, 0)
 
 	// collect latest root from each available file
 	dt := ac.d[kv.CommitmentDomain]
 	fnames := []string{}
-	for i, f := range dt.files {
-		stateVal, ok, _, _ := dt.getLatestFromFile(i, keyCommitmentState)
-		require.True(t, ok)
-		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
-		require.NoError(t, err)
+	stateVal, ok, _, _, _ := dt.getLatestFromFiles(keyCommitmentState, math.MaxUint64)
+	require.True(t, ok)
+	rootInFiles, err := commitment.HexTrieExtractStateRoot(stateVal)
+	require.NoError(t, err)
 
-		roots = append(roots, common.BytesToHash(rh))
-		//fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
+	for _, f := range dt.files {
 		fnames = append(fnames, f.src.decompressor.FilePath())
 	}
 	tx.Rollback()
@@ -1600,7 +1597,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NotEmpty(t, finalRoot)
 	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
 
-	require.Equal(t, roots[len(roots)-1][:], finalRoot[:])
+	require.Equal(t, rootInFiles, finalRoot[:])
 }
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {

@@ -220,3 +220,77 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.Equal(t, latestRoot, root)
 	require.NotEqual(t, empty.RootHash.Bytes(), root)
 }
+
+//
+//// by that key stored latest root hash and tree state
+//const keyCommitmentStateS = "state"
+//var keyCommitmentState = []byte(keyCommitmentStateS)
+//
+//func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+//	if testing.Short() {
+//		t.Skip()
+//	}
+//	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
+//		stepSize:                         10,
+//		disableCommitmentBranchTransform: false,
+//	})
+//	db := wrapDbWithCtx(_db, agg)
+//
+//	tx, err := db.BeginTemporalRw(context.Background())
+//	require.NoError(t, err)
+//	defer tx.Rollback()
+//	ac := state.AggTx(tx)
+//	roots := make([]common.Hash, 0)
+//
+//	// collect latest root from each available file
+//	dt := ac.d[kv.CommitmentDomain]
+//	fnames := []string{}
+//	for i, f := range dt.files {
+//		stateVal, ok, _, _ := dt.getLatestFromFile(i, keyCommitmentState)
+//		require.True(t, ok)
+//		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
+//		require.NoError(t, err)
+//
+//		roots = append(roots, common.BytesToHash(rh))
+//		//fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
+//		fnames = append(fnames, f.src.decompressor.FilePath())
+//	}
+//	tx.Rollback()
+//	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
+//
+//	// now clean all commitment files along with related db buckets
+//	rwTx, err := db.BeginRw(context.Background())
+//	require.NoError(t, err)
+//	defer rwTx.Rollback()
+//
+//	buckets, err := rwTx.ListTables()
+//	require.NoError(t, err)
+//	for _, b := range buckets {
+//		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
+//			//size, err := rwTx.BucketSize(b)
+//			//require.NoError(t, err)
+//			//t.Logf("cleaned table %s: %d keys", b, size)
+//
+//			err = rwTx.ClearTable(b)
+//			require.NoError(t, err)
+//		}
+//	}
+//	require.NoError(t, rwTx.Commit())
+//
+//	for _, fn := range fnames {
+//		if strings.Contains(fn, kv.CommitmentDomain.String()) {
+//			require.NoError(t, dir.RemoveFile(fn))
+//			//t.Logf("removed file %s", filepath.Base(fn))
+//		}
+//	}
+//	err = agg.OpenFolder()
+//	require.NoError(t, err)
+//
+//	ctx := context.Background()
+//	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(, true)
+//	require.NoError(t, err)
+//	require.NotEmpty(t, finalRoot)
+//	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
+//
+//	require.Equal(t, roots[len(roots)-1][:], finalRoot[:])
+//}
