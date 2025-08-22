@@ -547,6 +547,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	acRo.Close()
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	if !squeeze {
+		return latestRoot, nil
+	}
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
 
