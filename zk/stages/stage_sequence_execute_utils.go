@@ -268,7 +268,7 @@ func prepareForkId(lastBatch, executionAt uint64, hermezDb ForkDb, cfg SequenceB
 
 	// iterate over the batch boundaries and find the latest fork that applies
 	for idx, batch := range allBatches {
-		if nextBatch > batch {
+		if nextBatch >= batch {
 			latest = allForks[idx]
 		}
 	}
