@@ -220,6 +220,11 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
+func (a *Aggregator) ForceEnableCommValTransformForTests() {
+	a.commitmentValuesTransform = true
+	a.d[kv.CommitmentDomain].replaceKeysInValues = true
+}
+
 func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {

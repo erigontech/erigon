@@ -1459,6 +1459,81 @@ func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
 	return v
 }
 
+type testAggConfig struct {
+	stepSize                         uint64
+	disableCommitmentBranchTransform bool
+}
+
+func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
+	tb.Helper()
+	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
+	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
+
+	// build files out of db
+	err := agg.BuildFiles(uint64(txCount))
+	require.NoError(tb, err)
+	return db, agg
+}
+func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
+	tb.Helper()
+	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
+	db := wrapDbWithCtx(_db, agg)
+
+	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
+	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
+
+	ctx := context.Background()
+	//agg.logger = log.Root().New()
+
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+
+	rwTx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(tb, err)
+	defer rwTx.Rollback()
+
+	domains, err := NewSharedDomains(rwTx, log.New())
+	require.NoError(tb, err)
+	defer domains.Close()
+
+	keys, vals := generateInputData(tb, length.Addr, 5, txCount)
+	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
+
+	var txNum, blockNum uint64
+	for i := 0; i < len(vals); i++ {
+		txNum = uint64(i)
+		domains.SetTxNum(txNum)
+
+		for j := 0; j < len(keys); j++ {
+			acc := accounts.Account{
+				Nonce:       uint64(i),
+				Balance:     *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash:    common.Hash{},
+				Incarnation: 0,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
+			require.NoError(tb, err)
+
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
+			require.NoError(tb, err)
+		}
+		if uint64(i+1)%agg.StepSize() == 0 {
+			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			require.NoError(tb, err)
+			require.NotEmpty(tb, rh)
+		}
+	}
+
+	err = domains.Flush(context.Background(), rwTx)
+	require.NoError(tb, err)
+	domains.Close() // closes ac
+
+	require.NoError(tb, rwTx.Commit())
+
+	return db, agg
+}
+
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
