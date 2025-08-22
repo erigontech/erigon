@@ -17,18 +17,17 @@
 package downloader
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
@@ -173,57 +172,6 @@ func (tf *AtomicTorrentFS) load(fPath string) (*torrent.TorrentSpec, error) {
 	}
 	mi.AnnounceList = Trackers
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
-}
-
-const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
-
-// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-// After "download once" - Erigon will produce and seed new files
-// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (tf *AtomicTorrentFS) ProhibitNewDownloads(t string) error {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return tf.prohibitNewDownloads(t)
-}
-
-func (tf *AtomicTorrentFS) prohibitNewDownloads(t string) error {
-	// open or create file ProhibitNewDownloadsFileName
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
-	var prohibitedList []string
-	torrentListJsonBytes, err := io.ReadAll(f)
-	if err != nil {
-		return fmt.Errorf("read file: %w", err)
-	}
-	if len(torrentListJsonBytes) > 0 {
-		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return fmt.Errorf("unmarshal: %w", err)
-		}
-	}
-	if slices.Contains(prohibitedList, t) {
-		return nil
-	}
-	prohibitedList = append(prohibitedList, t)
-	f.Close()
-
-	// write new prohibited list by opening the file in truncate mode
-	f, err = os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_TRUNC|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open file for writing: %w", err)
-	}
-	defer f.Close()
-	prohibitedListJsonBytes, err := json.Marshal(prohibitedList)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	if _, err := f.Write(prohibitedListJsonBytes); err != nil {
-		return fmt.Errorf("write: %w", err)
-	}
-
-	return f.Sync()
 }
 
 func (tf *AtomicTorrentFS) nameToPath(name string) string {

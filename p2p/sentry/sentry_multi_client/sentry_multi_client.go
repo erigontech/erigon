@@ -899,7 +899,7 @@ func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.Inbou
 	bHash := query.Witness.Header().Hash()
 
 	var witBuf bytes.Buffer
-	if err := query.Witness.EncodeCompressed(&witBuf); err != nil {
+	if err := query.Witness.EncodeRLP(&witBuf); err != nil {
 		return fmt.Errorf("error in witness encoding: err: %w", err)
 	}
 

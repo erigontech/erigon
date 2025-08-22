@@ -71,7 +71,7 @@ func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32,
 var saltMap = map[string]uint32{}
 var saltLock sync.RWMutex
 
-func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
+func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, error) {
 	// issue: https://github.com/erigontech/erigon/issues/14300
 	// NOTE: The salt value from this is read after snapshot stage AND the value is not
 	// cached before snapshot stage (which downloads salt-blocks.txt too), and therefore
@@ -79,21 +79,25 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
 	exists, err := dir.FileExist(fpath)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if !exists {
+		if !autoCreate {
+			logger.Debug("snaptype salt file not found + autocreate disabled")
+			return nil, nil
+		}
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 	saltBytes, err := os.ReadFile(fpath)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if len(saltBytes) != 4 {
 		dir.MustExist(baseDir)
@@ -101,18 +105,19 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 
-	return binary.BigEndian.Uint32(saltBytes), nil
+	salt := binary.BigEndian.Uint32(saltBytes)
+	return &salt, nil
 
 }
 
 // GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
 // and existing indices have salt in metadata.
-func GetIndexSalt(baseDir string) (uint32, error) {
+func GetIndexSalt(baseDir string, logger log.Logger) (uint32, error) {
 	saltLock.RLock()
 	salt, ok := saltMap[baseDir]
 	saltLock.RUnlock()
@@ -120,10 +125,15 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 		return salt, nil
 	}
 
-	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
+	saltp, err := LoadSalt(baseDir, false, logger)
 	if err != nil {
 		return 0, err
 	}
+	if saltp == nil {
+		logger.Error("salt not found", "stack", dbg.Stack())
+		return 0, errors.New("salt not found in GetIndexSalt")
+	}
+	salt = *saltp
 
 	saltLock.Lock()
 	saltMap[baseDir] = salt
@@ -261,7 +271,7 @@ func (s snapType) Indexes() []Index {
 }
 
 func (s snapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	salt, err := GetIndexSalt(info.Dir())
+	salt, err := GetIndexSalt(info.Dir(), logger)
 
 	if err != nil {
 		return err

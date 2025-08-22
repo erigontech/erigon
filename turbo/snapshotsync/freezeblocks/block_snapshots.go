@@ -209,6 +209,10 @@ func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
 }
 
+func (br *BlockRetire) BorStore() (heimdall.Store, bridge.Store) {
+	return br.heimdallStore, br.bridgeStore
+}
+
 func (br *BlockRetire) Writer() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
@@ -297,11 +301,11 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
-	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots)
+	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots, onDelete)
 	return ok || merged, err
 }
 
-func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error) (merged bool, err error) {
+func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (merged bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
@@ -330,12 +334,12 @@ func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnap
 		}
 		return nil
 	}
-	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, nil); err != nil {
+	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete); err != nil {
 		return false, err
 	}
 
 	// remove old garbage files
-	if err = snapshots.RemoveOverlaps(); err != nil {
+	if err = snapshots.RemoveOverlaps(onDelete); err != nil {
 		return false, err
 	}
 	return
@@ -520,13 +524,13 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 	return nil
 }
-func (br *BlockRetire) RemoveOverlaps() error {
-	if err := br.snapshots().RemoveOverlaps(); err != nil {
+func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
+	if err := br.snapshots().RemoveOverlaps(onDelete); err != nil {
 		return err
 	}
 
 	if br.chainConfig.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(); err != nil {
+		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(onDelete); err != nil {
 			return err
 		}
 	}
@@ -849,7 +853,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, workers, lvl, logger, false)
 }
 
-// DumpHeaders - [from, to)
+// DumpHeadersRaw - [from, to)
 func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()

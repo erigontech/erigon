@@ -259,8 +259,30 @@ var (
 		version.V1_1_standart,
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
-				spanFrom := uint64(SpanIdAt(blockFrom))
-				spanTo := uint64(SpanIdAt(blockTo))
+				var spanFrom, spanTo uint64
+				err := db.View(ctx, func(tx kv.Tx) (err error) {
+					rangeIndex := NewTxSpanRangeIndex(db, kv.BorSpansIndex, tx)
+
+					spanIds, ok, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
+					if err != nil {
+						return err
+					}
+
+					if !ok {
+						return ErrHeimdallDataIsNotReady
+					}
+
+					if len(spanIds) > 0 {
+						spanFrom = spanIds[0]
+						spanTo = spanIds[len(spanIds)-1]
+					}
+
+					return nil
+				})
+
+				if err != nil {
+					return 0, err
+				}
 
 				logger.Debug("Extracting spans to snapshots", "blockFrom", blockFrom, "blockTo", blockTo, "spanFrom", spanFrom, "spanTo", spanTo)
 
@@ -275,8 +297,18 @@ var (
 					return err
 				}
 				defer d.Close()
-
-				baseSpanId := uint64(SpanIdAt(sn.From))
+				var baseSpanId = uint64(0)
+				getter := d.MakeGetter()
+				getter.Reset(0)
+				if getter.HasNext() {
+					firstSpanRaw, _ := getter.Next(nil) // first span in this .seg file
+					var firstSpan Span
+					err = json.Unmarshal(firstSpanRaw, &firstSpan)
+					if err != nil {
+						return err
+					}
+					baseSpanId = uint64(firstSpan.Id)
+				}
 
 				return buildValueIndex(ctx, sn, salt, d, baseSpanId, tmpDir, p, lvl, logger)
 			}),

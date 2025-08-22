@@ -1476,16 +1476,32 @@ func (s *Ethereum) setUpSnapDownloader(
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
-		if s.downloaderClient != nil && len(frozenFileNames) > 0 {
-			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
-			for _, fName := range frozenFileNames {
-				req.Items = append(req.Items, &protodownloader.AddItem{
-					Path: filepath.Join("history", fName),
-				})
-			}
-			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-				s.logger.Warn("[snapshots] notify downloader", "err", err)
-			}
+		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+			return
+		}
+		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(frozenFileNames) == 0 {
+			return
+		}
+
+		req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
+		for _, fName := range frozenFileNames {
+			req.Items = append(req.Items, &protodownloader.AddItem{
+				Path: fName,
+			})
+		}
+		if _, err := s.downloaderClient.Add(ctx, req); err != nil {
+			s.logger.Warn("[snapshots] downloader.Add", "err", err)
+		}
+	}, func(deletedFiles []string) {
+		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+			return
+		}
+		if s.config.Snapshot.NoDownloader || s.downloaderClient == nil || len(deletedFiles) == 0 {
+			return
+		}
+
+		if _, err := s.downloaderClient.Delete(ctx, &protodownloader.DeleteRequest{Paths: deletedFiles}); err != nil {
+			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
 		}
 	})
 
@@ -1554,6 +1570,9 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
 	salt, err := state.GetStateIndicesSalt(dirs, createNewSaltFileIfNeeded, logger)
 	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	if _, err := snaptype.LoadSalt(dirs.Snap, createNewSaltFileIfNeeded, logger); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	agg, err := state.NewAggregator2(ctx, dirs, config3.DefaultStepSize, salt, db, logger)

@@ -56,7 +56,7 @@ require (
 	github.com/go-quicktest/qt v1.101.0
 	github.com/go-stack/stack v1.8.1
 	github.com/go-test/deep v1.1.1
-	github.com/go-viper/mapstructure/v2 v2.3.0
+	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
