@@ -5,11 +5,13 @@ set -e # Enable exit on error
 if [ -z "$1" ] || [ -z "$2" ]; then
   echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR]"
   echo
-  echo "  CHAIN:          The chain identifier (possible values: mainnet, gnosis, polygon)"
-  echo "  RPC_VERSION:    The rpc-tests repository version or branch (e.g., v1.66.0, main)"
-  echo "  DISABLED_TESTS: Comma-separated list of disabled tests (optional, default: empty)"
-  echo "  WORKSPACE:      Workspace directory (optional, default: /tmp)"
-  echo "  RESULT_DIR:     Result directory (optional, default: empty)"
+  echo "  CHAIN:           The chain identifier (possible values: mainnet, gnosis, polygon)"
+  echo "  RPC_VERSION:     The rpc-tests repository version or branch (e.g., v1.66.0, main)"
+  echo "  DISABLED_TESTS:  Comma-separated list of disabled tests (optional, default: empty)"
+  echo "  WORKSPACE:       Workspace directory (optional, default: /tmp)"
+  echo "  RESULT_DIR:      Result directory (optional, default: empty)"
+  echo "  TESTS_TYPE:      Test type (optional, default: empty, possible values: latest or historical)"
+  echo "  REFERENCE_HOST:  IP Address of HOST (optional, default: empty)"
   echo
   exit 1
 fi
@@ -19,6 +21,27 @@ RPC_VERSION="$2"
 DISABLED_TESTS="$3"
 WORKSPACE="${4:-/tmp}"
 RESULT_DIR="$5"
+TESTS_ON_LATEST="$6"
+REFERENCE_HOST="$7"
+
+OPTIONAL_FLAGS=""
+
+# Check if REFERENCE_HOST is not empty (-n)
+if [ -n "$REFERENCE_HOST" ]; then
+    # If it's not empty, then check if TESTS_ON_LATEST is empty (-z)
+    if [ -z "$TESTS_ON_LATEST" ]; then
+        echo "Error: REFERENCE_HOST is set, but TESTS_ON_LATEST is empty."
+        exit 1 # Exit the script with an error code
+    fi
+fi
+
+if [ -n "$REFERENCE_HOST" ]; then
+    OPTIONAL_FLAGS+=" --verify-external-provider $REFERENCE_HOST"
+fi
+
+if [ "$TESTS_ON_LATEST" = "latest" ]; then
+    OPTIONAL_FLAGS+=" --tests-on-latest-block"
+fi
 
 echo "Setup the test execution environment..."
 
@@ -50,7 +73,7 @@ rm -rf ./"$CHAIN"/results/
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
-python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --exclude-api-list "$DISABLED_TESTS"
+python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --exclude-api-list "$DISABLED_TESTS" "$OPTIONAL_FLAGS"
 RUN_TESTS_EXIT_CODE=$?
 
 set -e # Re-enable exit on error after test run
