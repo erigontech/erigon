@@ -544,7 +544,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	acRo.Close()
 
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 	if !squeeze {
 		return latestRoot, nil
 	}
