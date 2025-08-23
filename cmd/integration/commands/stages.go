@@ -537,7 +537,6 @@ func init() {
 	withSqueeze(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
 	withConcurrentCommitment(cmdCommitmentRebuild)
-	withSqueeze(cmdCommitmentRebuild)
 	withUnwind(cmdCommitmentRebuild)
 	withPruneTo(cmdCommitmentRebuild)
 	withIntegrityChecks(cmdCommitmentRebuild)
