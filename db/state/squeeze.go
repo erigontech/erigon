@@ -442,6 +442,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)
 			}
 		}
+		roTx.Rollback()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
@@ -510,7 +511,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			rangeToTxNum += uint64(shardStepsSize) * a.StepSize()
 		}
 
-		roTx.Rollback()
 		keyIter.Close()
 
 		totalKeysCommitted += processed
