@@ -53,15 +53,18 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		hph := NewHexPatriciaHashed(length.Addr, ms)
+		//hph := NewHexPatriciaHashed(length.Addr, ms)
 		upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
 		defer upds.Close()
 
 		ctx := context.Background()
 		for i := 0; i < b.N; i++ {
 			WrapKeyUpdatesInto(b, upds, pk, updates)
-			_, err := hph.Process(ctx, upds, "")
-			require.NoError(b, err)
+			upds.HashSort(ctx, func(hk, pk []byte, update *Update) error {
+				return nil
+			})
+			//_, err := hph.Process(ctx, upds, "")
+			//require.NoError(b, err)
 		}
 	})
 

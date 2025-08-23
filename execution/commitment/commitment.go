@@ -974,14 +974,6 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	if t.mode == ModeDirect {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
-
-		t.touch2Ch = make(chan string, 1024)
-		t.g.Go(func() error {
-			for key := range t.keys { //TODO: handle ctx.Done()
-				t.touchPlainKeyDirect(key)
-			}
-			return nil
-		})
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
 	}
@@ -991,7 +983,6 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
-		t.touch2Ch = make(chan string, 1024)
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
@@ -1002,7 +993,13 @@ func (t *Updates) SetMode(m Mode) {
 
 func (t *Updates) initCollector() {
 	if t.mode == ModeDirect && t.touch2Ch == nil {
-		t.touch2Ch = make(chan string, 1024)
+		t.touch2Ch = make(chan string, 128)
+		t.g.Go(func() error {
+			for key := range t.touch2Ch { //TODO: handle ctx.Done()
+				t.touchPlainKeyDirect(key)
+			}
+			return nil
+		})
 	}
 
 	if t.sortPerNibble {
@@ -1167,7 +1164,7 @@ func (t *Updates) Close() {
 		t.etl.Close()
 	}
 	if t.touch2Ch != nil {
-		close(t.touch2Ch)
+		t.WaitTouches()
 		t.touch2Ch = nil
 	}
 	if t.sortPerNibble {
