@@ -32,7 +32,7 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	metricsFile = "./ericom"
 
 	rnd := rand.New(rand.NewSource(133777))
-	keysCount := rnd.Intn(100_0000)
+	keysCount := 1_000
 
 	// generate updates
 	b.Logf("keys count: %d", keysCount)
@@ -49,20 +49,20 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	err := ms.applyPlainUpdates(pk, updates)
 	require.NoError(b, err)
 
-	hph := NewHexPatriciaHashed(length.Addr, ms)
-	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
-	defer upds.Close()
+	b.Run("updates", func(b *testing.B) {
+		b.ResetTimer()
+		b.ReportAllocs()
 
-	b.ResetTimer()
+		hph := NewHexPatriciaHashed(length.Addr, ms)
+		upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, nil, nil)
+		defer upds.Close()
 
-	ctx := context.Background()
-	for i := 0; i < b.N; i++ {
-		if i+5 >= len(pk) {
-			i = 0
+		ctx := context.Background()
+		for i := 0; i < b.N; i++ {
+			WrapKeyUpdatesInto(b, upds, pk, updates)
+			_, err := hph.Process(ctx, upds, "")
+			require.NoError(b, err)
 		}
+	})
 
-		WrapKeyUpdatesInto(b, upds, pk[i:i+5], updates[i:i+5])
-		_, err := hph.Process(ctx, upds, "")
-		require.NoError(b, err)
-	}
 }

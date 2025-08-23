@@ -28,9 +28,9 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -944,6 +945,9 @@ type Updates struct {
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
+
+	touch2Ch chan string
+	g        errgroup.Group
 }
 
 // Should be called right after updates initialisation. Otherwise could lost some data
@@ -970,6 +974,14 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	if t.mode == ModeDirect {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
+
+		t.touch2Ch = make(chan string, 1024)
+		t.g.Go(func() error {
+			for key := range t.keys { //TODO: handle ctx.Done()
+				t.touchPlainKeyDirect(key)
+			}
+			return nil
+		})
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
 	}
@@ -979,6 +991,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
+		t.touch2Ch = make(chan string, 1024)
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
@@ -988,6 +1001,10 @@ func (t *Updates) SetMode(m Mode) {
 }
 
 func (t *Updates) initCollector() {
+	if t.mode == ModeDirect && t.touch2Ch == nil {
+		t.touch2Ch = make(chan string, 1024)
+	}
+
 	if t.sortPerNibble {
 		for i := 0; i < len(t.nibbles); i++ {
 			if t.nibbles[i] != nil {
@@ -1046,23 +1063,42 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
-		if _, ok := t.keys[key]; !ok {
-			keyBytes := toBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
-
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
-			t.keys[key] = struct{}{}
-		}
+		t.touch2Ch <- key
 	default:
 	}
+}
+func (t *Updates) touchPlainKeyDirect(key string) {
+	if _, ok := t.keys[key]; ok {
+		return
+	}
+	keyBytes := toBytesZeroCopy(key)
+	hashedKey := t.hasher(keyBytes)
+
+	var err error
+	if !t.sortPerNibble {
+		err = t.etl.Collect(hashedKey, keyBytes)
+	} else {
+		err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
+	}
+	if err != nil {
+		log.Warn("failed to collect updated key", "key", key, "err", err)
+	}
+	t.keys[key] = struct{}{}
+}
+
+func (t *Updates) WaitTouches() error {
+	switch t.mode {
+	case ModeUpdate:
+		// nothing to do
+	case ModeDirect:
+		close(t.touch2Ch)
+		if err := t.g.Wait(); err != nil {
+			return err
+		}
+		t.touch2Ch = nil
+	default:
+	}
+	return nil
 }
 
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
@@ -1130,6 +1166,10 @@ func (t *Updates) Close() {
 	if t.etl != nil {
 		t.etl.Close()
 	}
+	if t.touch2Ch != nil {
+		close(t.touch2Ch)
+		t.touch2Ch = nil
+	}
 	if t.sortPerNibble {
 		for i := 0; i < len(t.nibbles); i++ {
 			if t.nibbles[i] != nil {
@@ -1141,6 +1181,10 @@ func (t *Updates) Close() {
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
+	if err := t.WaitTouches(); err != nil {
+		return err
+	}
+
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
