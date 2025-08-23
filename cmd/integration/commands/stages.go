@@ -1089,9 +1089,12 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if err != nil {
 		return err
 	}
+	defer rwTx.Rollback()
 
 	// remove all existing state commitment snapshots
-	app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String())
+	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
+		return err
+	}
 
 	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
 	sconf := dbstate.Schema.CommitmentDomain
@@ -1101,7 +1104,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			return fmt.Errorf("failed to clear table %s: %w", tn, err)
 		}
 	}
-	rwTx.Commit()
+	if err := rwTx.Commit(); err != nil {
+		return err
+	}
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
