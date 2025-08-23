@@ -303,6 +303,28 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	return nil
 }
 
+func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {
+	a := rwDb.(HasAgg).Agg().(*Aggregator)
+
+	rwTx, err := rwDb.BeginTemporalRw(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer rwTx.Rollback()
+
+	domains, err := NewSharedDomains(rwTx, log.New())
+	if err != nil {
+		return "", err
+	}
+	rootHash, err := domains.sdCtx.Trie().RootHash()
+	if err != nil {
+		return "", err
+	}
+	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
+	s += fmt.Sprintf("[commitment] stepSize %d, commitmentValuesTransform enabled %t\n", a.StepSize(), a.commitmentValuesTransform)
+	return s, nil
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
@@ -420,6 +442,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)
 			}
 		}
+		roTx.Rollback()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
@@ -488,7 +511,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			rangeToTxNum += uint64(shardStepsSize) * a.StepSize()
 		}
 
-		roTx.Rollback()
 		keyIter.Close()
 
 		totalKeysCommitted += processed
