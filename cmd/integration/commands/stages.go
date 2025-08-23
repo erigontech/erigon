@@ -540,6 +540,7 @@ func init() {
 	withDataDir(cmdCommitmentRebuild)
 	withReset(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
+	withSqueeze(cmdCommitmentRebuild)
 	withConcurrentCommitment(cmdCommitmentRebuild)
 	withUnwind(cmdCommitmentRebuild)
 	withPruneTo(cmdCommitmentRebuild)
