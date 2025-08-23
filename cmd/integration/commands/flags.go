@@ -147,6 +147,9 @@ func withDataDir(cmd *cobra.Command) {
 func withConcurrentCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&state.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
 }
+func withSqueezeCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "squeeze commitment after rebuild")
+}
 
 func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
