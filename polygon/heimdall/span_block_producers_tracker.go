@@ -41,29 +41,32 @@ func newSpanBlockProducersTracker(
 	}
 
 	return &spanBlockProducersTracker{
-		logger:           logger,
-		borConfig:        borConfig,
-		store:            store,
-		recentSelections: recentSelectionsLru,
-		newSpans:         make(chan *Span),
-		idleSignal:       make(chan struct{}),
+		logger:              logger,
+		borConfig:           borConfig,
+		store:               store,
+		recentSelections:    recentSelectionsLru,
+		newSpans:            make(chan *Span),
+		idleSignal:          make(chan struct{}),
+		spanProcessedSignal: make(chan struct{}),
 	}
 }
 
 type spanBlockProducersTracker struct {
-	logger           log.Logger
-	borConfig        *borcfg.BorConfig
-	store            EntityStore[*SpanBlockProducerSelection]
-	recentSelections *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
-	newSpans         chan *Span
-	queued           atomic.Int32
-	idleSignal       chan struct{}
+	logger              log.Logger
+	borConfig           *borcfg.BorConfig
+	store               EntityStore[*SpanBlockProducerSelection]
+	recentSelections    *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
+	newSpans            chan *Span
+	queued              atomic.Int32
+	idleSignal          chan struct{}
+	spanProcessedSignal chan struct{} // signal that a new span was fully processed
 }
 
 func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 	t.logger.Info(heimdallLogPrefix("running span block producers tracker component"))
 
 	defer close(t.idleSignal)
+	defer close(t.spanProcessedSignal)
 	for {
 		select {
 		case <-ctx.Done():
@@ -72,6 +75,12 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 			err := t.ObserveSpan(ctx, newSpan)
 			if err != nil {
 				return err
+			}
+
+			// signal that the span was observed (non-blocking)
+			select {
+			case t.spanProcessedSignal <- struct{}{}:
+			default:
 			}
 
 			t.queued.Add(-1)
@@ -83,6 +92,23 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// Anticipates a new span to be observe and fully processed withing the given timeout period.
+// Returns true if a new span was processed, false if no new span was processed
+func (t *spanBlockProducersTracker) AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case _, ok := <-t.spanProcessedSignal:
+		if !ok {
+			return false, errors.New("spanProcessed channel was closed")
+		}
+		return true, nil
+
+	case <-time.After(timeout): // timeout
+	}
+	return false, nil
 }
 
 func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {

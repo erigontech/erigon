@@ -507,8 +507,8 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
-	fmt.Printf("g.Config=%v , g.Config.Bor=%v\n", g.Config, g.Config.Bor)
-	if g.Config != nil && g.Config.Bor != nil {
+	// these fields need to be overriden for Bor running in a kurtosis devnet
+	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == params.BorKurtosisDevnetChainId {
 		withdrawals = []*types.Withdrawal{}
 		head.BlobGasUsed = new(uint64)
 		head.ExcessBlobGas = new(uint64)

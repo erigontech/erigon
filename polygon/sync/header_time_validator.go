@@ -31,14 +31,14 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var VeBlopBlockTimeOut = 4 * time.Second // timeout for waiting for a new span in case main producer is down
-var RecentHeadersCapacity uint64 = 4096
+var VeBlopBlockTimeout = 4 * time.Second       // timeout for waiting for a new span in case main producer is down
+var DefaultRecentHeadersCapacity uint64 = 4096 // capacity of recent headers TTL cache
 
 type HeaderTimeValidator struct {
 	borConfig             *borcfg.BorConfig
 	signaturesCache       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recentVerifiedHeaders *ttlcache.Cache[libcommon.Hash, *types.Header]
-	blockProducersReader  blockProducersReader
+	blockProducersTracker blockProducersTracker
 	logger                log.Logger
 }
 
@@ -49,7 +49,7 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 	parent *types.Header,
 ) error {
 	headerNum := header.Number.Uint64()
-	producers, err := htv.blockProducersReader.Producers(ctx, headerNum)
+	producers, err := htv.blockProducersTracker.Producers(ctx, headerNum)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 	if err != nil {
 		return err
 	}
-	htv.logger.Debug("VALIDATING_HEADER_TIME:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers)
+	htv.logger.Debug("VALIDATING_HEADER_TIME:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers.ValidatorAddresses())
 
 	// VeBlop checks for new span if block signer is different from producer
 	if htv.borConfig.IsVeBlop(header.Number.Uint64()) {
@@ -70,16 +70,17 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 			return fmt.Errorf("needToWaitForNewSpan failed for blockNum=%d with %w", header.Number.Uint64(), err)
 		}
 		if shouldWaitForNewSpans && timeout > 0 {
-			// we just need to wait without triggering any explicit synchronization, since the span fetcher is fetching
-			// new spans every 1 second, which should be enough for the new spans to be observed
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(timeout): // no need to do anything yet, just wait
-
+			newSpanWasProcessed, err := htv.blockProducersTracker.AnticipateNewSpanWithTimeout(ctx, timeout)
+			if err != nil {
+				return err
 			}
-			// after giving enought time for new spans to be observed we can now calculate the updated producer set
-			producers, err = htv.blockProducersReader.Producers(ctx, headerNum)
+			if newSpanWasProcessed {
+				htv.logger.Info("[span-rotation] producer set was updated")
+			} else {
+				htv.logger.Info(fmt.Sprintf("[span-rotation] producer set was not updated within %.0f seconds", timeout.Seconds()))
+			}
+			// after giving enough time for new spans to be observed we can now calculate the updated producer set
+			producers, err = htv.blockProducersTracker.Producers(ctx, headerNum)
 			if err != nil {
 				return err
 			}
@@ -90,7 +91,7 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 		return err
 	}
 	// Header time has been validated, therefore save this header to TTL
-	htv.logger.Debug("VALIDATED_HEADER_TIME:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers)
+	htv.logger.Debug("VALIDATED_HEADER_TIME:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers.ValidatorAddresses())
 	htv.UpdateLatestVerifiedHeader(header)
 	return nil
 }
@@ -114,11 +115,11 @@ func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, paren
 	// the current producer has published a block, but it came too late(i.e. the parent has been evicted from the ttl cache)
 	if author == producer && author == parentAuthor && !htv.recentVerifiedHeaders.Has(header.ParentHash) { // (this could be due to a fork also)
 		htv.logger.Info("[span-rotation] need to wait for span rotation due to longer than expected block time from current producer", "blockNum", headerNum, "parentHeader", header.ParentHash, "author", author)
-		return true, 2 * time.Second, nil
+		return true, 2 * VeBlopBlockTimeout, nil
 	} else if author != parentAuthor && author != producer { // new author but not matching the producer for this block
 		htv.logger.Info("[span-rotation] need to wait for span rotation because the new author does not match the producer from current producer selection",
 			"blockNum", headerNum, "author", author, "producer", producer, "parentAuthor", parentAuthor)
-		return true, 2 * time.Second, nil // this situation has a short delay because the
+		return true, VeBlopBlockTimeout, nil // this situation has a short delay because the
 	}
 	return false, 0, nil
 

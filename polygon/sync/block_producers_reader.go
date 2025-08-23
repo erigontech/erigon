@@ -18,10 +18,16 @@ package sync
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type blockProducersReader interface {
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+}
+
+type blockProducersTracker interface {
+	blockProducersReader
+	AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error)
 }

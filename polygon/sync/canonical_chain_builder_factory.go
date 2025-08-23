@@ -33,26 +33,26 @@ type CanonicalChainBuilderFactory func(root *types.Header) *CanonicalChainBuilde
 func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
-	blockProducersReader blockProducersReader,
+	blockProducersTracker blockProducersTracker,
 	signaturesCache *lru.ARCCache[common.Hash, common.Address],
 	logger log.Logger,
 ) CanonicalChainBuilderFactory {
 	recentVerifiedHeaders := ttlcache.New[common.Hash, *types.Header](
-		ttlcache.WithTTL[common.Hash, *types.Header](VeBlopBlockTimeOut),
-		ttlcache.WithCapacity[common.Hash, *types.Header](RecentHeadersCapacity),
+		ttlcache.WithTTL[common.Hash, *types.Header](VeBlopBlockTimeout),
+		ttlcache.WithCapacity[common.Hash, *types.Header](DefaultRecentHeadersCapacity),
 		ttlcache.WithDisableTouchOnHit[common.Hash, *types.Header](),
 	)
 	difficultyCalculator := &DifficultyCalculator{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,
-		blockProducersReader: blockProducersReader,
+		blockProducersReader: blockProducersTracker,
 	}
 
 	headerTimeValidator := &HeaderTimeValidator{
 		borConfig:             borConfig,
 		signaturesCache:       signaturesCache,
 		recentVerifiedHeaders: recentVerifiedHeaders,
-		blockProducersReader:  blockProducersReader,
+		blockProducersTracker: blockProducersTracker,
 		logger:                logger,
 	}
 
