@@ -32,7 +32,7 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	metricsFile = "./ericom"
 
 	rnd := rand.New(rand.NewSource(133777))
-	keysCount := 1_000
+	keysCount := 10_000
 
 	// generate updates
 	b.Logf("keys count: %d", keysCount)

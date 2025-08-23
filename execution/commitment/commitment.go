@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -1060,14 +1061,14 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
-		t.touch2Ch <- key
+		if _, ok := t.keys[key]; !ok {
+			t.touch2Ch <- key
+			t.keys[key] = struct{}{}
+		}
 	default:
 	}
 }
 func (t *Updates) touchPlainKeyDirect(key string) {
-	if _, ok := t.keys[key]; ok {
-		return
-	}
 	keyBytes := toBytesZeroCopy(key)
 	hashedKey := t.hasher(keyBytes)
 
@@ -1080,10 +1081,11 @@ func (t *Updates) touchPlainKeyDirect(key string) {
 	if err != nil {
 		log.Warn("failed to collect updated key", "key", key, "err", err)
 	}
-	t.keys[key] = struct{}{}
 }
 
 func (t *Updates) WaitTouches() error {
+	fmt.Printf("Waiting touches (%d)\n", len(t.touch2Ch))
+	defer func(tt time.Time) { fmt.Printf("%s\n", time.Since(tt)) }(time.Now())
 	switch t.mode {
 	case ModeUpdate:
 		// nothing to do
