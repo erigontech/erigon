@@ -994,7 +994,7 @@ func (t *Updates) SetMode(m Mode) {
 
 func (t *Updates) initCollector() {
 	if t.mode == ModeDirect && t.touch2Ch == nil {
-		t.touch2Ch = make(chan string, 1024*10)
+		t.touch2Ch = make(chan string, 1024)
 		t.g.Go(func() error {
 			for key := range t.touch2Ch { //TODO: handle ctx.Done()
 				t.touchPlainKeyDirect(key)
