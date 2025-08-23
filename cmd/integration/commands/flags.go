@@ -114,7 +114,7 @@ func withReset(cmd *cobra.Command) {
 }
 
 func withSqueeze(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&reset, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
 }
 
 func withBucket(cmd *cobra.Command) {
