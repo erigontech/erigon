@@ -1,5 +1,23 @@
 # Bumper tool
 
+## Contents
+- [Bump](#bump)
+   - [If not a user then who?](#if-not-a-user-then-who)
+   - [Purpose of this tool](#purpose-of-this-tool)
+   - [Structure of bump](#structure-of-bump)
+   - [How to](#how-to)
+      - [TUI](#tui)
+      - [CLI](#cli)
+- [Rename](#rename)
+   - [Totally last warning](#totally-last-warning)
+   - [Purpose of this tool](#purpose-of-this-tool-1)
+   - [How to](#how-to-1)
+      - [Flags](#flags)
+      - [TUI](#tui-1)
+      - [CLI](#cli-1)
+- [Algorythm](#algorythm)
+- [FAQ](#faq)
+
 Here's a short guide for bumper: (If you are **user** it's better **never** use this tool w/o confidence, you could mess up your erigon)
 Anyway, if you've done something terrible and looking for troubleshooting:
 `git reset --hard v3.1.x` (or another version.)
@@ -60,7 +78,7 @@ versions.yaml • no changes • Ctrl+S=Save&Exit
 
 **NB!** In our project we have version guidelines, TL;DR:
 1. bump the **minor** version if only content changes.
-2. bump the **major** version if the format changes.
+2. bump the **major** version if an old version of erigon can't read a new file.
    After save tool would regenerate files `version_schema_gen.go` and `versions.yaml`. So after it the flow is over, enjoy!
 
 **P.S**
@@ -113,3 +131,7 @@ If you want to upgrade something:
 2. use bumper
 3. generate snapshots from scratch
 4. use renamer to ensure that you make snapshots follow your schema.
+
+## FAQ
+**Q:** I generated new files and forgot to increase a version — what to do?
+**A:** Use renamer and choose there only files that you definitely want to rename.
