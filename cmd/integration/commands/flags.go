@@ -114,7 +114,7 @@ func withReset(cmd *cobra.Command) {
 }
 
 func withSqueeze(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&reset, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
 }
 
 func withBucket(cmd *cobra.Command) {
@@ -146,9 +146,6 @@ func withDataDir(cmd *cobra.Command) {
 
 func withConcurrentCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&state.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
-}
-func withSqueezeCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "squeeze commitment after rebuild")
 }
 
 func withBatchSize(cmd *cobra.Command) {
