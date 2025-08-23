@@ -53,6 +53,7 @@ func (g *Reader) MadvNormal() MadvDisabler {
 func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
 func (g *Reader) FileName() string  { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
+	//TODO: use 2 internal buffers - so returned key survive 2 calls of Next
 	fl := CompressKeys
 	if g.nextValue {
 		fl = CompressVals

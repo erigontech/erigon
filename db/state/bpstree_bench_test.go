@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 )
 
-func BenchmarkBpsTreeSeek(t *testing.B) {
+func BenchmarkBpsTreeNext(t *testing.B) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 12_000_000, 256
@@ -48,4 +49,54 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 		c.Close()
 	}
 	t.ReportAllocs()
+}
+
+func BenchmarkBpsTreeSeek(b *testing.B) {
+	tmp := b.TempDir()
+	logger := log.New()
+	keyCount, M := 1_000_000, 256
+	b.Logf("N: %d, M: %d skip since shard <= %d", keyCount, M, DefaultBtreeStartSkip)
+	compressFlags := seg.CompressKeys | seg.CompressVals
+
+	dataPath := generateKV(b, tmp, 52, 180, keyCount, logger, 0)
+
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
+	buildBtreeIndex(b, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	require.NoError(b, err)
+	require.EqualValues(b, bt.KeyCount(), keyCount)
+	defer bt.Close()
+	defer kv.Close()
+
+	i := 16
+	b.Run(fmt.Sprintf("seek.%d", i), func(b *testing.B) {
+		b.ReportAllocs()
+
+		getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+		var key []byte
+		for k := 0; k < i; k++ {
+			key, _ = getter.Next(key[:0])
+		}
+
+		for i := 0; i < b.N; i++ {
+			c, _ := bt.Seek(getter, key)
+			c.Close()
+		}
+	})
+
+	b.Run(fmt.Sprintf("get.%d", i), func(b *testing.B) {
+		b.ReportAllocs()
+
+		getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+		var key []byte
+		for k := 0; k < i; k++ {
+			key, _ = getter.Next(key[:0])
+		}
+
+		for i := 0; i < b.N; i++ {
+			_, _, _, _, _ = bt.Get(key, getter)
+		}
+	})
+
 }
