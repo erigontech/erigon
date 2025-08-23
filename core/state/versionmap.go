@@ -365,18 +365,20 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 				} else {
 					tracePrefix = "RD"
 				}
-				fmt.Printf("%s %x %s, %d %s, %s (%d.%d)!=(%d.%d) %s\n", tracePrefix, vr.Address, AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
-					switch rr.Status() {
-					case MVReadResultDone:
-						return "done"
-					case MVReadResultDependency:
-						return "dependency"
-					case MVReadResultNone:
-						return "none"
-					default:
-						return "unknown"
-					}
-				}(), vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, rr.depIdx, rr.incarnation, valid)
+				fmt.Printf("%s %x %s, %d %s, %s (%d.%d)!=(%d.%d) %s\n", tracePrefix, vr.Address,
+					AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
+						switch rr.Status() {
+						case MVReadResultDone:
+							return "done"
+						case MVReadResultDependency:
+							return "dependency"
+						case MVReadResultNone:
+							return "none"
+						default:
+							return "unknown"
+						}
+					}(),
+					vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, rr.depIdx, rr.incarnation, valid)
 			}
 
 			return valid == VersionValid
