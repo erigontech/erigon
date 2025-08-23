@@ -365,7 +365,7 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, che
 				} else {
 					tracePrefix = "RD"
 				}
-				fmt.Printf("%s %x %s, %d %s, %s (%d.%d)!=(%d.%d) %s", tracePrefix, vr.Address, AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
+				fmt.Printf("%s %x %s, %d %s, %s (%d.%d)!=(%d.%d) %s\n", tracePrefix, vr.Address, AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
 					switch rr.Status() {
 					case MVReadResultDone:
 						return "done"
