@@ -453,7 +453,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 					fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
 				}
 
-				return pr.Val.(T), MapRead, vr.Version, nil
+				return pr.Val.(T), ReadSetRead, vr.Version, nil
 			}
 
 			if vr.Version.TxIndex > s.dep {
