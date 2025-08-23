@@ -1084,6 +1084,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if err != nil {
 		return err
 	}
+	defer rwTx.Rollback()
 
 	// remove all existing state commitment snapshots
 	app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String())
