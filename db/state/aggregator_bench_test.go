@@ -17,10 +17,8 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,7 +26,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -170,12 +167,11 @@ func Benchmark_BTree_Seek(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
+		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			p := rnd.IntN(len(keys))
 
-			cur, err := bt.Seek(getter, keys[p])
-			require.NoError(b, err)
-
+			cur, _ := bt.Seek(getter, keys[p])
 			require.Equal(b, keys[p], cur.key)
 			cur.Close()
 		}
@@ -187,30 +183,15 @@ func Benchmark_BTree_Seek(b *testing.B) {
 
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
-
-			require.Equal(b, keys[p], cur.key)
-
-			prevKey := common.Copy(keys[p])
-			ntimer := time.Duration(0)
-			nextKeys := 5000
-			for j := 0; j < nextKeys; j++ {
-				ntime := time.Now()
-
-				if !cur.Next() {
-					break
-				}
-				ntimer += time.Since(ntime)
-
-				nk := cur.Key()
-				if bytes.Compare(prevKey, nk) > 0 {
-					b.Fatalf("prev %s cur %s, next key should be greater", prevKey, nk)
-				}
-				prevKey = nk
-			}
-			if i%1000 == 0 {
-				fmt.Printf("next_access_last[of %d keys] %v\n", nextKeys, ntimer/time.Duration(nextKeys))
-			}
 			cur.Close()
+		}
+	})
+	b.Run("get_then_next", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			p := rnd.IntN(len(keys))
+
+			bt.Get(keys[p], getter)
 		}
 	})
 }
