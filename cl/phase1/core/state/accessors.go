@@ -124,6 +124,10 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 	wp := threading.NewParallelExecutor()
 	eligibleValidatorsShards := make([][]uint64, numThreads)
 	shardSize := b.ValidatorLength() / numThreads
+	if shardSize > 1000 {
+		log.Warn("[dbg] EligibleValidatorsIndicies alloc", "shardSize", shardSize, "len(eligibleValidatorsShards)", len(eligibleValidatorsShards))
+	}
+
 	for i := range eligibleValidatorsShards {
 		eligibleValidatorsShards[i] = make([]uint64, 0, shardSize)
 	}
