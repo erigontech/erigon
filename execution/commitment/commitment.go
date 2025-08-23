@@ -994,7 +994,7 @@ func (t *Updates) SetMode(m Mode) {
 
 func (t *Updates) initCollector() {
 	if t.mode == ModeDirect && t.touch2Ch == nil {
-		t.touch2Ch = make(chan string, 128)
+		t.touch2Ch = make(chan string, 1024*10)
 		t.g.Go(func() error {
 			for key := range t.touch2Ch { //TODO: handle ctx.Done()
 				t.touchPlainKeyDirect(key)
@@ -1009,7 +1009,6 @@ func (t *Updates) initCollector() {
 				t.nibbles[i].Close()
 				t.nibbles[i] = nil
 			}
-
 			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 			t.nibbles[i].SortAndFlushInBackground(true)
 		}
