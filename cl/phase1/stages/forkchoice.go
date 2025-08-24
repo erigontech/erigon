@@ -30,7 +30,19 @@ import (
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
-func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+func computeAndNotifyServicesOfNewForkChoice(tx kv.Tx, ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+	getEth1Hash := func(root common.Hash) common.Hash {
+		hash := cfg.forkChoice.GetEth1Hash(root)
+		if hash == (common.Hash{}) {
+			tx, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+			if err != nil {
+				panic(err)
+			}
+			hash = tx
+		}
+		return hash
+	}
+
 	if err = cfg.syncedData.ViewHeadState(func(prevHeadState *state.CachingBeaconState) error {
 		// Get the current head of the fork choice
 		headRoot, headSlot, err = cfg.forkChoice.GetHead(prevHeadState)
@@ -67,9 +79,9 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		// Run fork choice update with finalized checkpoint and head
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(headRoot), nil,
+			getEth1Hash(finalizedCheckpoint.Root),
+			getEth1Hash(justifiedCheckpoint.Root),
+			getEth1Hash(headRoot), nil,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)
 			return
@@ -351,15 +363,16 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		headRoot common.Hash
 		err      error
 	)
-	if headSlot, headRoot, err = computeAndNotifyServicesOfNewForkChoice(ctx, logger, cfg); err != nil {
-		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
-	}
 
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
+
+	if headSlot, headRoot, err = computeAndNotifyServicesOfNewForkChoice(ctx, logger, cfg); err != nil {
+		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
+	}
 	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg); err != nil {
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
