@@ -20,9 +20,11 @@ package config3
 const DefaultStepSize = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
 //const DefaultStepSize = 1_562_500 / 10
 
+const DefaultStepsInFrozenFile = 64
+
 // StepsInFrozenFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
-const StepsInFrozenFile = 64
+var StepsInFrozenFile uint64 = DefaultStepsInFrozenFile
 
 const EnableHistoryV4InTest = true
 
@@ -70,3 +72,7 @@ const (
 	// the freezer as the cutoff threshold and by clique as the snapshot trust limit.
 	FullImmutabilityThreshold = 5_000
 )
+
+func SetStepsInFrozenFile(steps uint64) {
+	StepsInFrozenFile = steps
+}
