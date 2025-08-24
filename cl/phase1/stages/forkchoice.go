@@ -370,7 +370,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	}
 	defer tx.Rollback()
 
-	if headSlot, headRoot, err = computeAndNotifyServicesOfNewForkChoice(ctx, logger, cfg); err != nil {
+	if headSlot, headRoot, err = computeAndNotifyServicesOfNewForkChoice(tx, ctx, logger, cfg); err != nil {
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg); err != nil {
