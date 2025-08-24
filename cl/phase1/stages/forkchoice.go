@@ -34,11 +34,11 @@ func computeAndNotifyServicesOfNewForkChoice(tx kv.Tx, ctx context.Context, logg
 	getEth1Hash := func(root common.Hash) common.Hash {
 		hash := cfg.forkChoice.GetEth1Hash(root)
 		if hash == (common.Hash{}) {
-			tx, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+			hashDB, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
 			if err != nil {
 				panic(err)
 			}
-			hash = tx
+			return hashDB
 		}
 		return hash
 	}
