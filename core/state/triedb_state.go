@@ -167,6 +167,9 @@ func (tds *TrieDbState) SetTrie(tr *trie.Trie) {
 	tds.t = tr
 }
 
+func (tds *TrieDbState) SetTrace(_ bool) {
+}
+
 func (tds *TrieDbState) SetResolveReads(rr bool) {
 	tds.resolveReads = rr
 }

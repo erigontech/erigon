@@ -81,6 +81,10 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 	}, nil
 }
 
+func (s *Stateless) SetTrace(trace bool) {
+	s.trace = trace
+}
+
 // SetBlockNr changes the block number associated with this
 func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr

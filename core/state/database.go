@@ -43,6 +43,8 @@ type StateReader interface {
 	ReadAccountCode(address common.Address) ([]byte, error)
 	ReadAccountCodeSize(address common.Address) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
+
+	SetTrace(bool)
 }
 
 type HistoricalStateReader interface {
@@ -131,3 +133,5 @@ func (*NoopReader) HasStorage(address common.Address) (bool, error)             
 func (*NoopReader) ReadAccountCode(address common.Address) ([]byte, error)        { return nil, nil }
 func (*NoopReader) ReadAccountCodeSize(address common.Address) (int, error)       { return 0, nil }
 func (*NoopReader) ReadAccountIncarnation(address common.Address) (uint64, error) { return 0, nil }
+
+func (*NoopReader) SetTrace(_ bool) {}

@@ -37,6 +37,8 @@ func NewCachedReader3(cache kvcache.CacheView, tx kv.TemporalTx) *CachedReader3 
 	return &CachedReader3{cache: cache, db: tx}
 }
 
+func (r *CachedReader3) SetTrace(_ bool) {}
+
 // ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, err := r.cache.Get(address[:])
