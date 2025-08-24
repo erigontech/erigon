@@ -684,7 +684,7 @@ var (
 	}
 	SnapStepsInFrozenFilesFlag = cli.Uint64Flag{
 		Name:  "snap.max-frozen-steps",
-		Usage: "Number of blocks per frozen snapshot file",
+		Usage: "Number of steps per frozen state snapshot file",
 		Value: config3.DefaultStepsInFrozenFile,
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
