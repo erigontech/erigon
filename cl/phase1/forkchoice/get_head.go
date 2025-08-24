@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sort"
 	"time"
@@ -134,6 +135,7 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	// If there is a long period of non-finality, we might lack blocks that are children of the justified checkpoint in memory.
 	// in that case, use a sufficiantly old block we have as the initial head.
 	if _, has := f.forkGraph.GetHeader(f.headHash); !has {
+		fmt.Println("warning: no header for justified checkpoint, using a fallback")
 		f.headHash, err = auxilliaryState.GetBlockRootAtSlot(auxilliaryState.Slot() - 16)
 		if err != nil {
 			return common.Hash{}, 0, errors.New("no slot for head is stored")
