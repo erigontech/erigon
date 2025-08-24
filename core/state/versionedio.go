@@ -211,8 +211,8 @@ func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap,
 	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
 }
 
-func (vr *versionedStateReader) SetTrace(trace bool) {
-	vr.stateReader.SetTrace(trace)
+func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
+	vr.stateReader.SetTrace(trace, tracePrefix)
 }
 
 func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {

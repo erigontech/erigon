@@ -162,7 +162,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
 
 	ibs.SetTrace(txTask.Trace)
-	rw.stateReader.SetTrace(txTask.Trace)
+	rw.stateReader.SetTrace(txTask.Trace, "")
 
 	rules := txTask.Rules()
 	header := txTask.Header

@@ -693,9 +693,10 @@ func (w *Writer) CreateContract(address common.Address) error {
 }
 
 type ReaderV3 struct {
-	txNum  uint64
-	trace  bool
-	getter kv.TemporalGetter
+	txNum       uint64
+	trace       bool
+	tracePrefix string
+	getter      kv.TemporalGetter
 }
 
 func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
@@ -708,7 +709,13 @@ func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 func (r *ReaderV3) DiscardReadList()      {}
 func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
 
-func (r *ReaderV3) SetTrace(trace bool) { r.trace = trace }
+func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
+	r.trace = trace
+	if tplen := len(tracePrefix); tplen > 0 && tracePrefix[tplen-1] != ' ' {
+		tracePrefix += " "
+	}
+	r.tracePrefix = tracePrefix
+}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, address[:])
@@ -727,7 +734,7 @@ func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Ac
 	}
 	if len(enc) == 0 {
 		if r.trace {
-			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, address, r.txNum)
 		}
 		return nil, nil, nil
 	}
@@ -737,10 +744,7 @@ func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Ac
 		return nil, nil, err
 	}
 	if r.trace {
-		if fmt.Sprintf("%x", address) == "b537ceaea048f8f1ac9f071ac628c5a3b2204403" {
-			fmt.Println("b537ceaea048f8f1ac9f071ac628c5a3b2204403")
-		}
-		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
 	return enc, &acc, nil
 }
@@ -757,19 +761,21 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
-	if r.trace {
-		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", composite[:], r.txNum)
-		} else {
-			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", composite[:], enc, r.txNum)
-		}
-	}
 
 	ok := enc != nil
 	var res uint256.Int
 	if ok {
 		(&res).SetBytes(enc)
 	}
+
+	if r.trace {
+		if enc == nil {
+			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d\n", r.tracePrefix, address, key, r.txNum)
+		} else {
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, address, key, res, r.txNum)
+		}
+	}
+
 	return res, ok, err
 }
 
@@ -779,7 +785,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 		return nil, err
 	}
 	if r.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
+		fmt.Printf("%sReadAccountCode [%x] => [%x], txNum: %d\n", r.tracePrefix, address, enc, r.txNum)
 	}
 	return enc, nil
 }
@@ -791,7 +797,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
 	}
 	size := len(enc)
 	if r.trace {
-		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
+		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, address, size, r.txNum)
 	}
 	return size, nil
 }
@@ -809,8 +815,8 @@ func NewBufferedReader(bufferedState *StateV3Buffered, reader *ReaderV3) StateRe
 	return &bufferedReader{reader: reader, bufferedState: bufferedState}
 }
 
-func (r *bufferedReader) SetTrace(trace bool) {
-	r.reader.trace = trace
+func (r *bufferedReader) SetTrace(trace bool, tracePrefix string) {
+	r.reader.SetTrace(trace, tracePrefix)
 }
 
 func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -825,12 +831,12 @@ func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Acco
 	if data != nil {
 		if data == &deleted {
 			if r.reader.trace {
-				fmt.Printf("ReadAccountData [%x] => [empty]\n", address)
+				fmt.Printf("%sReadAccountData (buf)[%x] => [empty]\n", r.reader.tracePrefix, address)
 			}
 			return nil, nil
 		}
 		if r.reader.trace {
-			fmt.Printf("ReadAccountData (buf) [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, data.Nonce, &data.Balance, data.CodeHash, r.reader.txNum)
+			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.reader.tracePrefix, address, data.Nonce, &data.Balance, data.CodeHash, r.reader.txNum)
 		}
 
 		result := *data
@@ -866,6 +872,9 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 
 	if ok {
 		if so.data == &deleted {
+			if r.reader.trace {
+				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty], txNum: %d\n", r.reader.tracePrefix, address, key, r.reader.txNum)
+			}
 			r.bufferedState.accountsMutex.RUnlock()
 			return uint256.Int{}, false, nil
 		}
@@ -874,6 +883,7 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 			item, ok := so.storage.Get(storageItem{key: key})
 
 			if ok {
+				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x], txNum: %d\n", r.reader.tracePrefix, address, key, r.reader.txNum)
 				r.bufferedState.accountsMutex.RUnlock()
 				return item.value, true, nil
 			}
