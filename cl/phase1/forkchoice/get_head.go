@@ -133,16 +133,8 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	f.headHash = justifiedCheckpoint.Root
 
 	// If there is a long period of non-finality, we might lack blocks that are children of the justified checkpoint in memory.
-	// in that case, use a sufficiantly old block we have as the initial head.
 	if h, has := f.forkGraph.GetHeader(f.headHash); !has || h.Slot <= lowestAvaiableSlot {
-		if auxilliaryState != nil {
-			f.headHash, err = auxilliaryState.GetBlockRootAtSlot(auxilliaryState.Slot() - 16)
-			if err != nil {
-				return common.Hash{}, 0, errors.New("no slot for head is stored")
-			}
-		} else {
-			f.headHash = f.lastExecutedBlockRoot
-		}
+		f.headHash = f.lastExecutedBlockRoot
 	}
 
 	blocks := f.getFilteredBlockTree(f.headHash)
