@@ -88,8 +88,11 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot        atomic.Value
-	headHash                 common.Hash
+	proposerBoostRoot atomic.Value
+	headHash          common.Hash
+
+	lastExecutedBlockRoot common.Hash
+
 	headSlot                 uint64
 	genesisTime              uint64
 	genesisValidatorsRoot    common.Hash
