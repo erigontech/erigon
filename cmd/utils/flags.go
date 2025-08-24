@@ -683,7 +683,7 @@ var (
 		Value: false,
 	}
 	SnapStepsInFrozenFilesFlag = cli.Uint64Flag{
-		Name:  "snap.frozen.steps",
+		Name:  "snap.max-frozen-steps",
 		Usage: "Number of blocks per frozen snapshot file",
 		Value: config3.DefaultStepsInFrozenFile,
 	}
