@@ -8,7 +8,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -275,11 +274,6 @@ func TestInitialiseL1InfoTree(t *testing.T) {
 }
 
 func TestCheckForInfoTreeUpdates(t *testing.T) {
-	// Force the logger to print everything
-	log.Root().SetHandler(
-		log.LvlFilterHandler(log.LvlDebug, log.StderrHandler),
-	)
-
 	testCases := []struct {
 		name              string
 		logs              []types.Log

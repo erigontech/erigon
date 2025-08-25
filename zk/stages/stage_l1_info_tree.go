@@ -86,8 +86,6 @@ func SpawnL1InfoTreeStage(
 		return fmt.Errorf("cfg.updater.WarmUp: %w", err)
 	}
 
-	// latestL1Block := cfg.updater.GetLatestL1Block()
-	// processedLogs, err := cfg.updater.CheckForInfoTreeUpdates(logPrefix, tx, cfg.updater.GetProgress(), latestL1Block)
 	processedLogs, err := cfg.updater.CheckForInfoTreeUpdates(logPrefix, tx)
 	if err != nil {
 		return fmt.Errorf("CheckForInfoTreeUpdates: %w", err)

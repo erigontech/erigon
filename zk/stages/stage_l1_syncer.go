@@ -186,7 +186,6 @@ Loop:
 		case progressMessage := <-progressMessageChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
 		case <-doneChan:
-			log.Info(fmt.Sprintf("[%s] Done channel received, exiting", logPrefix))
 			break Loop
 		case <-ctx.Done():
 			break Loop

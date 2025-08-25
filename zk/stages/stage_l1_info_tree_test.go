@@ -1,4 +1,4 @@
-// package stages
+package stages
 
 import (
 	"context"
@@ -218,7 +218,7 @@ func TestSpawnL1InfoTreeStage_HappyPath(t *testing.T) {
 	assert.Equal(t, env.blockNumber.Uint64(), progress)
 }
 
-func TestSpawnL1InfoTreeStage_UnhappyPath_SkipV1Log(t *testing.T) {
+func TestSpawnL1InfoTreeStage_SkipV1Log(t *testing.T) {
 	env := newStageEnv(t)
 
 	const n = 8
@@ -246,7 +246,7 @@ func TestSpawnL1InfoTreeStage_UnhappyPath_SkipV1Log(t *testing.T) {
 	assert.Equal(t, skippedTxIndex, len(leaves))
 }
 
-func TestSpawnL1InfoTreeStage_UnhappyPath_GetHeaderFails(t *testing.T) {
+func TestSpawnL1InfoTreeStage_GetHeaderFails(t *testing.T) {
 	env := newStageEnv(t)
 
 	logs := makeV1V2Pairs(t, 1, env.contracts[0], env.blockNumber.Uint64(), env.parentHash, env.blockTime)
@@ -261,12 +261,7 @@ func TestSpawnL1InfoTreeStage_UnhappyPath_GetHeaderFails(t *testing.T) {
 	require.Nil(t, err)
 }
 
-func TestSpawnL1InfoTreeStage_UnhappyPath_GetHeaderAlwaysFails(t *testing.T) {
-	// Force the logger to print everything
-	log.Root().SetHandler(
-		log.LvlFilterHandler(log.LvlDebug, log.StderrHandler),
-	)
-
+func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 
 	env := newStageEnv(t)
@@ -279,7 +274,7 @@ func TestSpawnL1InfoTreeStage_UnhappyPath_GetHeaderAlwaysFails(t *testing.T) {
 	require.Error(t, err) // will fail on timeout
 }
 
-func TestSpawnL1InfoTreeStage_UnhappyPath_FilterLogsFails(t *testing.T) {
+func TestSpawnL1InfoTreeStage_FilterLogsFails(t *testing.T) {
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 
 	env := newStageEnv(t)
@@ -287,14 +282,10 @@ func TestSpawnL1InfoTreeStage_UnhappyPath_FilterLogsFails(t *testing.T) {
 	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(nil, fmt.Errorf("filter logs error")).AnyTimes()
 
 	err := runStageOnce(t, env)
-	// require.Error(t, err)
 	require.Nil(t, err) // Though filter logs failed, it was retrying until a timeout, if timeout is less than max timeout for retries
 }
 
-func TestSpawnL1InfoTreeStage_UnhappyPath_GetHeadersFailsThenNextIterationOK(t *testing.T) {
-	log.Root().SetHandler(
-		log.LvlFilterHandler(log.LvlDebug, log.StderrHandler),
-	)
+func TestSpawnL1InfoTreeStage_GetHeadersFailsThenNextIterationOK(t *testing.T) {
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 
 	env := newStageEnv(t)

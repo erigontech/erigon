@@ -213,9 +213,8 @@ func (worker *L1InfoWorker) Start() {
 						// context canceled, don't requeue
 						return
 					case worker.taskChan <- task:
-						log.Debug("Requeued L1 info task", "logKey", res.logKey)
 					case <-time.After(10 * time.Second):
-						log.Info("Trying to requeue L1 info task", "logKey", res.logKey)
+						log.Debug("Trying to requeue L1 info task", "logKey", res.logKey)
 					}
 				})
 				continue
@@ -281,7 +280,10 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	hermezDb := hermez_db.NewHermezDb(tx)
 	logChan := u.syncer.GetLogsChan()
 	progressChan := u.syncer.GetProgressMessageChan()
+	// Signals that current log query is done
 	doneChan := u.syncer.GetDoneChan()
+	// Signals that no more logs will arrive
+	logsInputDone := make(chan struct{})
 
 	workerPool := NewL1InfoWorkerPool(u.ctx, runtime.NumCPU(), u.syncer)
 	workerPool.Start()
@@ -293,8 +295,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	// first get all the logs we need to process
 	allLogs := make([]types.Log, 0)
 
-	// Signals that no more logs will arrive
-	logsInputDone := make(chan struct{})
 	var tasksTotal atomic.Uint64
 	var tasksPending atomic.Uint64
 	var expectedUpdates uint64 = 0 // only V1 logs produce updates
@@ -310,7 +310,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 			select {
 			case <-logsInputDone:
 			default:
-				log.Info(fmt.Sprintf("[%s] Closing logsInputDone channel", logPrefix))
 				close(logsInputDone)
 			}
 		}()
@@ -333,11 +332,8 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 						expectedUpdates++
 					}
 				}
-				// tasksTotal += uint64(len(logs))
 
-				log.Info(fmt.Sprintf("[%s] Received %d logs", logPrefix, len(logs)), "tasksPending", tasksPending.Load(), "tasksTotal", tasksTotal.Load(), "stop", stop.Load())
 				if tasksPending.Load() == tasksTotal.Load() && stop.Load() {
-					log.Info(fmt.Sprintf("[%s] Stopping log processing in logChan read", logPrefix))
 					return
 				}
 
@@ -346,25 +342,22 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
 
 			case numLogs := <-doneChan:
-				log.Info(fmt.Sprintf("[%s] Done channel received", logPrefix), "numLogs", numLogs, "stop", stop.Load())
 				if !stop.Load() {
 					tasksTotal.Store(numLogs)
 					stop.Store(true)
 
-					// if numLogs == 0 && tasksTotal == 0 {
 					if numLogs == 0 {
 						// Do not stop the pool here; main loop will stop it after all tasks complete.
 						return
 					}
-					log.Info(fmt.Sprintf("[%s] Stopping log processing in doneChan read", logPrefix), "tasksTotal", tasksTotal.Load(), "tasksPending", tasksPending.Load())
+
 					if tasksPending.Load() == tasksTotal.Load() {
-						log.Info(fmt.Sprintf("[%s] All tasks done, exiting in doneChan", logPrefix))
 						return
 					}
 				}
 
 			case <-u.ctx.Done():
-				log.Info(fmt.Sprintf("[%s] Context canceled while receiving logs", logPrefix))
+				log.Debug(fmt.Sprintf("[%s] Context canceled while receiving logs", logPrefix))
 				return
 			}
 		}
@@ -379,7 +372,7 @@ drain:
 	for {
 		select {
 		case <-u.ctx.Done():
-			log.Info(fmt.Sprintf("[%s] Context canceled, exiting drain loop", logPrefix))
+			log.Debug(fmt.Sprintf("[%s] Context canceled, exiting drain loop", logPrefix))
 			break drain
 
 		case res := <-taskResChan:
@@ -397,17 +390,13 @@ drain:
 				indexUpdateMap[res.logKey] = res.l1InfoTreeUpdate
 			}
 
-			// if tasksDone >= tasksTotal && stop.Load() {
 			if tasksDone.Load() == tasksTotal.Load() && tasksDone.Load() == tasksPending.Load() && stop.Load() {
-				log.Info(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone.Load(), "tasksTotal", tasksTotal.Load())
 				break drain
 			}
 
 		case <-logsInputDone:
-			// log.Info(fmt.Sprintf("[%s] Logs input done", logPrefix), "tasksTotal", tasksTotal, "tasksDone", tasksDone)
 			// No more tasks will be added; wait until all current tasks are done.
 			if tasksDone.Load() == tasksTotal.Load() && tasksTotal.Load() == tasksPending.Load() {
-				log.Info(fmt.Sprintf("[%s] Logs input done, all tasks done, exiting", logPrefix), "tasksDone", tasksDone.Load(), "tasksTotal", tasksTotal.Load())
 				break drain
 			}
 
@@ -419,19 +408,12 @@ drain:
 					"tasksDone", tasksDone.Load(), "tasksTotal", tasksTotal.Load())
 				break drain
 			}
-			// case <-doneChan:
-			// 	if tasksDone >= tasksTotal {
-			// 		log.Debug(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone, "tasksTotal", tasksTotal)
-			// 		break drain
-			// 	}
 		}
 	}
 
 	// Stop workers and close result channel
 	workerPool.Stop()
 	workerPool.Wait()
-
-	log.Info(fmt.Sprintf("[%s] Finished processing logs", logPrefix), "tasksTotal", tasksTotal.Load(), "tasksDone", tasksDone.Load())
 
 	// Sanity check: indexUpdateMap should match expected V1 update count
 	if uint64(len(indexUpdateMap)) != expectedUpdates {
@@ -462,6 +444,7 @@ drain:
 
 	var tree *L1InfoTree
 	if len(allLogs) > 0 {
+		log.Info(fmt.Sprintf("[%s] Checking for L1 info tree updates, logs count:%v", logPrefix, len(allLogs)))
 		tree, err = InitialiseL1InfoTree(hermezDb)
 		if err != nil {
 			return 0, fmt.Errorf("InitialiseL1InfoTree: %w", err)
@@ -537,12 +520,6 @@ drain:
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, u.progress); err != nil {
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
 	}
-
-	if tree != nil && u.latestUpdate != nil {
-		log.Info(fmt.Sprintf("[%s] Processed %d logs", logPrefix, processed), "len(indexUpdateMap)", len(indexUpdateMap), "latestUpdate.Index", u.latestUpdate.Index, "root", tree.currentRoot)
-	}
-
-	log.Info(fmt.Sprintf("[%s] CheckForInfoTreeUpdates complete", logPrefix), "processed", processed, "totalLogs", len(allLogs), "progress", u.progress)
 
 	return processed, nil
 }
