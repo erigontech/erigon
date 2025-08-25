@@ -59,6 +59,7 @@ type Aggregator struct {
 	db       kv.RoDB
 	d        [kv.DomainLen]*Domain
 	iis      []*InvertedIndex
+	p        []*Pacs
 	dirs     datadir.Dirs
 	stepSize uint64
 

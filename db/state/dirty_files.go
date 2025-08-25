@@ -571,6 +571,84 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 	return nil
 }
 
+func (p *Pacs) openDirtyFiles() (err error) {
+	invalidFileItems := make([]*FilesItem, 0)
+	invalidFileItemsLock := sync.Mutex{}
+	p.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			fromStep, toStep := kv.Step(item.startTxNum/d.stepSize), kv.Step(item.endTxNum/d.stepSize)
+			if item.decompressor == nil {
+				fPathMask := p.dataFile(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					p.logger.Debug("[agg] Pacs.openDirtyFiles: FileExist err", "f", fName, "err", err)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !ok {
+					_, fName := filepath.Split(fPath)
+					p.logger.Debug("[agg] Pacs.openDirtyFiles: file does not exists", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
+				if fileVer.Less(p.version.DataV.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					versionTooLowPanic(fName, p.version.DataV)
+				}
+
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						p.logger.Debug("[agg] Pacs.openDirtyFiles", "err", err, "f", fName)
+					} else {
+						p.logger.Warn("[agg] Pacs.openDirtyFiles", "err", err, "f", fName)
+					}
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					// don't interrupt on error. other files may be good. but skip indices open.
+					continue
+				}
+			}
+
+			if item.index == nil {
+				fPathMask := p.accessorFile(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					p.logger.Warn("[agg] Pacs.openDirtyFiles", "err", err, "f", fName)
+				}
+				if ok {
+					if fileVer.Less(p.version.AccessorVI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, p.version.AccessorVI)
+					}
+					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						p.logger.Warn("[agg] Pacs.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+
+			return true
+		}
+	})
+
+	for _, item := range invalidFileItems {
+		item.closeFiles() // just close, not remove from disk
+		p.dirtyFiles.Delete(item)
+	}
+
+	return nil
+}
+
 // visibleFile is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
 // it's ok to store visibleFile in array
 type visibleFile struct {

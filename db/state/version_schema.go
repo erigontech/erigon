@@ -156,8 +156,14 @@ type IIVersionTypes struct {
 	AccessorEFI version.Versions
 }
 
+type PacsVersionTypes struct {
+	DataV      version.Versions
+	AccessorVI version.Versions
+}
+
 type VersionTypes struct {
 	Hist   *HistVersionTypes
 	Domain *DomainVersionTypes
 	II     *IIVersionTypes
+	Pacs   *PacsVersionTypes
 }

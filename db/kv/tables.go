@@ -756,6 +756,28 @@ const (
 	TracesToIdx   InvertedIdx = 9
 )
 
+const (
+	RCachePacs Pacs = 0
+)
+
+func (p Pacs) String() string {
+	switch p {
+	case RCachePacs:
+		return "rcache2"
+	default:
+		return "unknown value"
+	}
+}
+
+func String2Pacs(in string) Pacs {
+	switch in {
+	case "rcache2":
+		return RCachePacs
+	default:
+		panic("unknown pacs value: " + in)
+	}
+}
+
 func (idx InvertedIdx) String() string {
 	switch idx {
 	case AccountsHistoryIdx:

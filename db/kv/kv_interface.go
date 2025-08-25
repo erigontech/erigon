@@ -385,6 +385,7 @@ type (
 	Appendable  uint16
 	InvertedIdx uint16
 	ForkableId  uint16
+	Pacs        uint16
 )
 
 type TemporalGetter interface {
