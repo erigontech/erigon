@@ -12,20 +12,22 @@ import (
 
 var _ = (*logMarshaling)(nil)
 
+//easyjson:json
+type LogMarshal struct {
+	Address     common.Address `json:"address" gencodec:"required"`
+	Topics      []common.Hash  `json:"topics" gencodec:"required"`
+	Data        hexutil.Bytes  `json:"data" gencodec:"required"`
+	BlockNumber hexutil.Uint64 `json:"blockNumber"`
+	TxHash      common.Hash    `json:"transactionHash" gencodec:"required"`
+	TxIndex     hexutil.Uint   `json:"transactionIndex"`
+	BlockHash   common.Hash    `json:"blockHash"`
+	Index       hexutil.Uint   `json:"logIndex"`
+	Removed     bool           `json:"removed"`
+}
+
 // MarshalJSON marshals as JSON.
 func (l Log) MarshalJSON() ([]byte, error) {
-	type Log struct {
-		Address     common.Address `json:"address" gencodec:"required"`
-		Topics      []common.Hash  `json:"topics" gencodec:"required"`
-		Data        hexutil.Bytes  `json:"data" gencodec:"required"`
-		BlockNumber hexutil.Uint64 `json:"blockNumber"`
-		TxHash      common.Hash    `json:"transactionHash" gencodec:"required"`
-		TxIndex     hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   common.Hash    `json:"blockHash"`
-		Index       hexutil.Uint   `json:"logIndex"`
-		Removed     bool           `json:"removed"`
-	}
-	var enc Log
+	var enc LogMarshal
 	enc.Address = l.Address
 	enc.Topics = l.Topics
 	enc.Data = l.Data
@@ -38,20 +40,22 @@ func (l Log) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&enc)
 }
 
+//easyjson:json
+type LogUnmarshal struct {
+	Address     *common.Address `json:"address" gencodec:"required"`
+	Topics      []common.Hash   `json:"topics" gencodec:"required"`
+	Data        *hexutil.Bytes  `json:"data" gencodec:"required"`
+	BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+	TxHash      *common.Hash    `json:"transactionHash" gencodec:"required"`
+	TxIndex     *hexutil.Uint   `json:"transactionIndex"`
+	BlockHash   *common.Hash    `json:"blockHash"`
+	Index       *hexutil.Uint   `json:"logIndex"`
+	Removed     *bool           `json:"removed"`
+}
+
 // UnmarshalJSON unmarshals from JSON.
 func (l *Log) UnmarshalJSON(input []byte) error {
-	type Log struct {
-		Address     *common.Address `json:"address" gencodec:"required"`
-		Topics      []common.Hash   `json:"topics" gencodec:"required"`
-		Data        *hexutil.Bytes  `json:"data" gencodec:"required"`
-		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
-		TxHash      *common.Hash    `json:"transactionHash" gencodec:"required"`
-		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   *common.Hash    `json:"blockHash"`
-		Index       *hexutil.Uint   `json:"logIndex"`
-		Removed     *bool           `json:"removed"`
-	}
-	var dec Log
+	var dec LogUnmarshal
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}

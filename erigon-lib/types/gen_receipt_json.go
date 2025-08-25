@@ -13,23 +13,26 @@ import (
 
 var _ = (*receiptMarshaling)(nil)
 
+//easyjson:json
+type ReceiptMarshal struct {
+	Type              hexutil.Uint64 `json:"type,omitempty"`
+	PostState         hexutil.Bytes  `json:"root"`
+	Status            hexutil.Uint64 `json:"status"`
+	CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
+	Bloom             Bloom          `json:"logsBloom"         gencodec:"required"`
+	Logs              []*Log         `json:"logs"              gencodec:"required"`
+	TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
+	ContractAddress   common.Address `json:"contractAddress"`
+	GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
+	BlockHash         common.Hash    `json:"blockHash,omitempty"`
+	BlockNumber       *hexutil.Big   `json:"blockNumber,omitempty"`
+	TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
+}
+
 // MarshalJSON marshals as JSON.
 func (r Receipt) MarshalJSON() ([]byte, error) {
-	type Receipt struct {
-		Type              hexutil.Uint64 `json:"type,omitempty"`
-		PostState         hexutil.Bytes  `json:"root"`
-		Status            hexutil.Uint64 `json:"status"`
-		CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-		Bloom             Bloom          `json:"logsBloom"         gencodec:"required"`
-		Logs              []*Log         `json:"logs"              gencodec:"required"`
-		TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
-		ContractAddress   common.Address `json:"contractAddress"`
-		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
-		BlockHash         common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.Big   `json:"blockNumber,omitempty"`
-		TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
-	}
-	var enc Receipt
+
+	var enc ReceiptMarshal
 	enc.Type = hexutil.Uint64(r.Type)
 	enc.PostState = r.PostState
 	enc.Status = hexutil.Uint64(r.Status)
@@ -45,23 +48,25 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&enc)
 }
 
+//easyjson:json
+type ReceiptUnmarshal struct {
+	Type              *hexutil.Uint64 `json:"type,omitempty"`
+	PostState         *hexutil.Bytes  `json:"root"`
+	Status            *hexutil.Uint64 `json:"status"`
+	CumulativeGasUsed *hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
+	Bloom             *Bloom          `json:"logsBloom"         gencodec:"required"`
+	Logs              []*Log          `json:"logs"              gencodec:"required"`
+	TxHash            *common.Hash    `json:"transactionHash" gencodec:"required"`
+	ContractAddress   *common.Address `json:"contractAddress"`
+	GasUsed           *hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
+	BlockHash         *common.Hash    `json:"blockHash,omitempty"`
+	BlockNumber       *hexutil.Big    `json:"blockNumber,omitempty"`
+	TransactionIndex  *hexutil.Uint   `json:"transactionIndex"`
+}
+
 // UnmarshalJSON unmarshals from JSON.
 func (r *Receipt) UnmarshalJSON(input []byte) error {
-	type Receipt struct {
-		Type              *hexutil.Uint64 `json:"type,omitempty"`
-		PostState         *hexutil.Bytes  `json:"root"`
-		Status            *hexutil.Uint64 `json:"status"`
-		CumulativeGasUsed *hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-		Bloom             *Bloom          `json:"logsBloom"         gencodec:"required"`
-		Logs              []*Log          `json:"logs"              gencodec:"required"`
-		TxHash            *common.Hash    `json:"transactionHash" gencodec:"required"`
-		ContractAddress   *common.Address `json:"contractAddress"`
-		GasUsed           *hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
-		BlockHash         *common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.Big    `json:"blockNumber,omitempty"`
-		TransactionIndex  *hexutil.Uint   `json:"transactionIndex"`
-	}
-	var dec Receipt
+	var dec ReceiptUnmarshal
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}

@@ -41,6 +41,7 @@ require (
 	github.com/holiman/uint256 v1.3.2
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.18.0
+	github.com/mailru/easyjson v0.9.0
 	github.com/mattn/go-colorable v0.1.13
 	github.com/mattn/go-isatty v0.0.20
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
@@ -92,6 +93,7 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
+	github.com/josharian/intern v1.0.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.3 // indirect
 	github.com/lufia/plan9stats v0.0.0-20220913051719-115f729f3c8c // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
