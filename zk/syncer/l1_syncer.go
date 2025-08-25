@@ -74,7 +74,6 @@ type L1Syncer struct {
 
 	// atomic
 	isSyncStarted      atomic.Bool
-	isDownloading      atomic.Bool
 	lastCheckedL1Block atomic.Uint64
 	wgRunLoopDone      sync.WaitGroup
 	flagStop           atomic.Bool
@@ -83,6 +82,7 @@ type L1Syncer struct {
 	logsChan         chan []ethTypes.Log
 	logsChanProgress chan string
 	doneChan         chan struct{}
+	doneChanMtx      sync.RWMutex
 
 	highestBlockType string   // finalized, latest, safe
 	headersCache     sync.Map // map[uint64]*ethTypes.Header // cache for headers
@@ -101,7 +101,6 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		queryDelay:          queryDelay,
 		logsChan:            make(chan []ethTypes.Log, 10),
 		logsChanProgress:    make(chan string, 1),
-		doneChan:            make(chan struct{}, 1),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
 		headersCache:        sync.Map{},
@@ -121,10 +120,6 @@ func (s *L1Syncer) getNextEtherman() IEtherman {
 
 func (s *L1Syncer) IsSyncStarted() bool {
 	return s.isSyncStarted.Load()
-}
-
-func (s *L1Syncer) IsDownloading() bool {
-	return s.isDownloading.Load()
 }
 
 func (s *L1Syncer) GetLastCheckedL1Block() uint64 {
@@ -163,6 +158,8 @@ func (s *L1Syncer) GetProgressMessageChan() chan string {
 }
 
 func (s *L1Syncer) GetDoneChan() <-chan struct{} {
+	s.doneChanMtx.RLock()
+	defer s.doneChanMtx.RUnlock()
 	return s.doneChan
 }
 
@@ -173,10 +170,11 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 		return
 	}
 
+	s.resetDoneChannel()
+
 	s.isSyncStarted.Store(true)
 
 	// set it to true to catch the first cycle run case where the check can pass before the latest block is checked
-	s.isDownloading.Store(true)
 	s.lastCheckedL1Block.Store(lastCheckedBlock)
 
 	s.wgRunLoopDone.Add(1)
@@ -200,7 +198,6 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 				log.Error("Error getting latest L1 block", "err", err)
 			} else {
 				if latestL1Block > s.lastCheckedL1Block.Load() {
-					s.isDownloading.Store(true)
 					if err := s.queryBlocks(); err != nil {
 						log.Error("Error querying blocks", "err", err)
 					} else {
@@ -209,8 +206,7 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 				}
 			}
 
-			s.isDownloading.Store(false)
-			s.doneChan <- struct{}{}
+			s.resetDoneChannel()
 			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
 	}()
@@ -629,4 +625,14 @@ func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
 	}
 
 	return &logs[0], nil
+}
+
+func (s *L1Syncer) resetDoneChannel() {
+	s.doneChanMtx.Lock()
+	defer s.doneChanMtx.Unlock()
+
+	if s.doneChan != nil {
+		close(s.doneChan)
+	}
+	s.doneChan = make(chan struct{})
 }

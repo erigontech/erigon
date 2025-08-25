@@ -94,6 +94,7 @@ func SpawnL1SequencerSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
+	doneChan := cfg.syncer.GetDoneChan()
 
 Loop:
 	for {
@@ -184,11 +185,10 @@ Loop:
 			}
 		case progMsg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progMsg))
-		default:
-			if !cfg.syncer.IsDownloading() {
-				break Loop
-			}
-			time.Sleep(10 * time.Millisecond)
+		case <-doneChan:
+			break Loop
+		case <-ctx.Done():
+			break Loop
 		}
 	}
 

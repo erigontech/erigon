@@ -86,7 +86,7 @@ func TestSpawnL1InfoTreeStage(t *testing.T) {
 	EthermanMock.EXPECT().FilterLogs(gomock.Any(), filterQuery).Return(filteredLogs, nil).AnyTimes()
 
 	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 0, "latest", 0)
-	updater := l1infotree.NewUpdater(&ethconfig.Zk{}, l1Syncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, &ethconfig.Zk{
+	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{}, l1Syncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, &ethconfig.Zk{
 		L2RpcUrl: "http://127.0.0.1:8545",
 	}))
 	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, updater)

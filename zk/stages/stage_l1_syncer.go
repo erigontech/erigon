@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -27,12 +26,12 @@ import (
 type IL1Syncer interface {
 	// atomic
 	IsSyncStarted() bool
-	IsDownloading() bool
 	GetLastCheckedL1Block() uint64
 
 	// Channels
 	GetLogsChan() chan []ethTypes.Log
 	GetProgressMessageChan() chan string
+	GetDoneChan() <-chan struct{}
 
 	L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error)
 	GetBlock(number uint64) (*ethTypes.Block, error)
@@ -126,6 +125,7 @@ func SpawnStageL1Syncer(
 
 	logsChan := cfg.syncer.GetLogsChan()
 	progressMessageChan := cfg.syncer.GetProgressMessageChan()
+	doneChan := cfg.syncer.GetDoneChan()
 	highestVerification := types.L1BatchInfo{}
 
 	newVerificationsCount := 0
@@ -185,11 +185,10 @@ Loop:
 			}
 		case progressMessage := <-progressMessageChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
-		default:
-			if !cfg.syncer.IsDownloading() {
-				break Loop
-			}
-			time.Sleep(10 * time.Millisecond)
+		case <-doneChan:
+			break Loop
+		case <-ctx.Done():
+			break Loop
 		}
 	}
 

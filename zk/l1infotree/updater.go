@@ -27,7 +27,6 @@ type Syncer interface {
 	GetLogsChan() chan []types.Log
 	GetProgressMessageChan() chan string
 	GetDoneChan() <-chan struct{}
-	IsDownloading() bool
 	GetHeader(blockNumber uint64) (*types.Header, error)
 	L1QueryHeaders(logs []types.Log) (map[uint64]*types.Header, error)
 	StopQueryBlocks()
@@ -199,7 +198,7 @@ func (worker *L1InfoWorker) Start() {
 		case task := <-worker.taskChan:
 			res := task.Run()
 			if res.err != nil {
-				log.Info("Retrying L1 info task", "logKey", res.logKey, "error", res.err)
+				log.Debug("Retrying L1 info task", "logKey", res.logKey, "error", res.err)
 				// assume a transient error and try again
 				worker.waitGroup.Add(1)
 				time.AfterFunc(1*time.Second, func() {
@@ -210,9 +209,9 @@ func (worker *L1InfoWorker) Start() {
 						// context canceled, don't requeue
 						return
 					case worker.taskChan <- task:
-						log.Info("Requeued L1 info task", "logKey", res.logKey)
+						log.Debug("Requeued L1 info task", "logKey", res.logKey)
 					case <-time.After(10 * time.Second):
-						log.Warn("Trying to requeue L1 info task", "logKey", res.logKey)
+						log.Info("Trying to requeue L1 info task", "logKey", res.logKey)
 					}
 				})
 				continue
@@ -332,16 +331,12 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
 
 			case <-doneChan:
-				log.Info(fmt.Sprintf("[%s] Done receiving logs", logPrefix))
 				// Do not stop the pool here; main loop will stop it after all tasks complete.
 				return
 
 			case <-u.ctx.Done():
 				log.Info(fmt.Sprintf("[%s] Context canceled while receiving logs", logPrefix))
 				return
-
-			default:
-				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}()
@@ -379,7 +374,7 @@ drain:
 		case <-logsInputDone:
 			// No more tasks will be added; wait until all current tasks are done.
 			if tasksDone >= tasksTotal {
-				log.Info(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone, "tasksTotal", tasksTotal)
+				log.Debug(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone, "tasksTotal", tasksTotal)
 				break drain
 			}
 
@@ -387,8 +382,13 @@ drain:
 			// Avoid blocking forever when no logs/results are received.
 			if time.Since(lastActivity) > noActivityTimeout {
 				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, noActivityTimeout),
-					"receivedAnyLogs", receivedAnyLogs, "isDownloading", u.syncer.IsDownloading(),
+					"receivedAnyLogs", receivedAnyLogs,
 					"tasksDone", tasksDone, "tasksTotal", tasksTotal)
+				break drain
+			}
+		case <-doneChan:
+			if tasksDone >= tasksTotal {
+				log.Debug(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone, "tasksTotal", tasksTotal)
 				break drain
 			}
 		}

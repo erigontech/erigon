@@ -125,6 +125,7 @@ func SpawnSequencerL1BlockSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
+	doneChan := cfg.syncer.GetDoneChan()
 
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
@@ -225,11 +226,10 @@ LOOP:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
 		case <-logTicker.C:
 			log.Info(fmt.Sprintf("[%s] Syncing L1 blocks", logPrefix), "latest-batch", latestBatch)
-		default:
-			if !cfg.syncer.IsDownloading() {
-				break LOOP
-			}
-			time.Sleep(10 * time.Millisecond)
+		case <-doneChan:
+			break LOOP
+		case <-ctx.Done():
+			break LOOP
 		}
 	}
 
