@@ -596,7 +596,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	executedDiffTxs := uint64(max(te.lastExecutedTxNum.Load()-int64(p.prevExecutedTxNum), 0))
 
 	mxExecBlocks.Add(float64(executedDiffBlocks))
-	mxExecTransactions.Set(float64(executedDiffTxs))
+	mxExecTransactions.Set(float64(executedDiffTxs) / interval.Seconds())
 	mxExecTxnPerBlock.Set(float64(executedDiffBlocks) / float64(executedDiffTxs))
 
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
