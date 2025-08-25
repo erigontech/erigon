@@ -19,7 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [ sepolia, holesky, amoy, chiado ]  # Chain name as specified on the erigon command line
+        # chain: [ sepolia, holesky, amoy, chiado ]  # Chain name as specified on the erigon command line
+        chain: [ hoodi ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
