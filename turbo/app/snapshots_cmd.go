@@ -278,14 +278,13 @@ var snapshotCommand = cli.Command{
 			Name:   "reset",
 			Usage:  "Reset state to resumable initial sync",
 			Action: resetCliAction,
-			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
-			Flags: append(
-				slices.Clone(logging.Flags),
-				&utils.DataDirFlag,
-				&utils.ChainFlag,
+			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the
+			// environment variable? Followup: It would not go here, as it could modify behaviour in
+			// parent commands.
+			Flags: []cli.Flag{
 				&dryRunFlag,
 				&removeLocalFlag,
-			),
+			},
 		},
 		{
 			Name:    "rm-state-snapshots",

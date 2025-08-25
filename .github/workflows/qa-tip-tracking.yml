@@ -199,7 +199,7 @@ jobs:
     - name: Run the datadir downgrade procedure
       working-directory: ${{ github.workspace }}
       run: |
-        ./build/bin/erigon seg reset-to-old-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
+        ./build/bin/erigon --datadir $ERIGON_TESTBED_DATA_DIR snapshots reset-to-old-ver-format 
 
     - name: Print datadir contents after downgrade (for debugging)
       working-directory: ${{ github.workspace }}

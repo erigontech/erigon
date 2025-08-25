@@ -2130,5 +2130,10 @@ func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
 
 func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+	panic(fmt.Sprintf(
+		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+		filename,
+		version.MinSupported,
+		version.Current,
+	))
 }
