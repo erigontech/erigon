@@ -41,7 +41,7 @@ if [ -n "$REFERENCE_HOST" ]; then
     OPTIONAL_FLAGS+="-e $REFERENCE_HOST"
 fi
 
-if [ "$TESTS_ON_LATEST" = "latest" ]; then
+if [ "$TEST_TYPE" = "latest" ]; then
     OPTIONAL_FLAGS+=" --tests-on-latest-block"
     NUM_OF_RETRIES=3
 fi
