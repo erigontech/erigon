@@ -1,0 +1,188 @@
+name: QA - RPC Integration Tests Latest
+
+on:
+  workflow_dispatch:     # Run manually
+#  push:
+#    branches:
+#      - main
+#      - 'release/3.*'
+#  pull_request:
+#    branches:
+#      - main
+#      - 'release/3.*'
+#    types:
+#      - opened
+#      - reopened
+#      - synchronize
+#      - ready_for_review
+
+
+jobs:
+  mainnet-rpc-integ-tests:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
+    runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
+    env:
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      TRACKING_TIME_SECONDS: 60 # 1 minute
+      TOTAL_TIME_SECONDS: 900 # 15 minutes
+      HOST_RUNNER_GETH_LATEST: 57.180.55.78:8545
+      ERIGON_ASSERT: true
+      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+      CHAIN: mainnet
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Clean Erigon Build Directory
+        run: |
+          make clean
+
+      - name: Build Erigon and integration
+        run: |
+          make erigon integration
+        working-directory: ${{ github.workspace }}
+
+      - name: Pause the Erigon instance dedicated to db maintenance
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+      - name: Save Erigon Chaindata Directory
+        id: save_chaindata_step
+        run: |
+          rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
+          echo "Backup chaindata"
+          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+
+      - name: Run Migrations
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          echo "Running migrations on datadir..."
+          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
+
+      - name: Run Erigon version and wait for sync 
+        id: pre_test_step
+        run: |
+          set +e # Disable exit on error
+        
+          # Launch the testbed Erigon instance & test its ability to maintain sync for a timeout 
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN 
+        
+          # Capture monitoring script exit status
+          test_exit_status=$?
+        
+          # Save the subsection reached status
+          echo "test_executed=true" >> $GITHUB_OUTPUT
+        
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+             echo "Tip-tracking completed successfully"
+             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+             echo "Tip-tracking encountered an error test aborted"
+             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+             exit 1
+          fi
+
+      - name: Run RPC Integration Tests
+        id: test_step
+        run: |
+          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
+          echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
+
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh
+          
+          set +e # Disable exit on error for test run
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh ${{ runner.workspace }} $TEST_RESULT_DIR $REFERENCE_SYSTEM_HOST_ADDRESS 
+          test_exit_status=$? # Capture test runner script exit status
+          set -e # Re-enable exit on error after test run
+
+          echo "test_executed=true" >> $GITHUB_OUTPUT
+
+          if [ $test_exit_status -eq 0 ]; then
+            echo "RPC tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during RPC tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop Erigon 
+        if: always()
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          # the erigon pid is stored in /tmp/erigon.pid file
+          ERIGON_PID=$(cat /tmp/erigon.pid)
+          # Clean up rpcdaemon process if it's still running
+          if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
+            echo "Erigon stopping..."
+            kill $ERIGON_PID
+            wait $ERIGON_PID
+            echo "Erigon stopped"
+          else
+            echo "Erigon has already terminated"
+          fi
+
+      - name: Restore Erigon Chaindata Directory
+        if: ${{ always() }}
+        run: |
+          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
+          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          echo "Restore chaindata"
+          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+          fi
+
+      - name: Resume the Erigon instance dedicated to db maintenance
+        if: ${{ always() }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
+
+      - name: Upload test results
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ${{ env.TEST_RESULT_DIR }}
+
+      - name: Save test results
+        if: steps.test_step.outputs.test_executed == 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+        run: |
+          db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+          if [ -z "$db_version" ]; then
+            db_version="no-version"
+          fi
+          
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+
+      - name: Action to check failure condition
+        if: failure()
+        run: |
+          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+            echo "::error::Test not executed, workflow failed for infrastructure reasons"
+          fi
+          exit 1
+
+      - name: Action for Success
+        if: steps.test_step.outputs.TEST_RESULT == 'success'
+        run: echo "::notice::Tests completed successfully"
+
+      - name: Action for Failure
+        if: steps.test_step.outputs.TEST_RESULT != 'success'
+        run: |
+          echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
+          exit 1
+
