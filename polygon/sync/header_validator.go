@@ -60,3 +60,7 @@ func (hv *HeaderValidator) ValidateHeader(
 
 	return nil
 }
+
+func (hv *HeaderValidator) UpdateLatestVerifiedHeader(header *types.Header) {
+	hv.headerTimeValidator.UpdateLatestVerifiedHeader(header)
+}

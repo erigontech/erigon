@@ -53,6 +53,10 @@ var (
 	BorDevnetChainConfig  = readChainSpec("chainspecs/bor-devnet.json")
 )
 
+var (
+	BorKurtosisDevnetChainId uint64 = 4927
+)
+
 func init() {
 	chainspec.RegisterChain(networkname.Amoy, AmoyChainConfig, AmoyGenesisBlock(), AmoyGenesisHash, AmoyBootnodes, "")
 	chainspec.RegisterChain(networkname.BorMainnet, BorMainnetChainConfig, BorMainnetGenesisBlock(), BorMainnetGenesisHash, BorMainnetBootnodes,

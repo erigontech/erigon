@@ -45,6 +45,8 @@ func (v *mockHeaderValidator) ValidateHeader(_ context.Context, _ *types.Header,
 	return nil
 }
 
+func (v *mockHeaderValidator) UpdateLatestVerifiedHeader(header *types.Header) {}
+
 func makeRoot() *types.Header {
 	return &types.Header{
 		Number: big.NewInt(0),
