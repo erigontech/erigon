@@ -772,7 +772,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (
 		if enc == nil {
 			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d\n", r.tracePrefix, address, key, r.txNum)
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, address, key, res, r.txNum)
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, address, key, &res, r.txNum)
 		}
 	}
 
