@@ -62,6 +62,7 @@ import (
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -1582,6 +1583,13 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
+	forkableAgg := state.NewForkableAgg(ctx, dirs, db, logger)
+	rcacheForkable, err := forkables.NewRcacheForkable(snConfig.Downloader.SnapshotConfig.Preverified.Items, dirs, agg.StepSize(), logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
+
 	allSegmentsDownloadComplete, err := core.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
@@ -1596,7 +1604,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
-	temporalDb, err := temporal.New(db, agg)
+	temporalDb, err := temporal.New(db, agg, forkableAgg)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
