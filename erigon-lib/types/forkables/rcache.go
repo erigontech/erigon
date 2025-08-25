@@ -5,11 +5,10 @@ import (
 	"path"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/state"
 )
 
 var RcacheForkable kv.ForkableId = math.MaxUint16
