@@ -357,7 +357,6 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		)
 	}
 	if len(newConnectedHeaders) == 0 {
-		s.logger.Debug(syncLogPrefix("no headers were connected"))
 		return nil
 	}
 
