@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
 
 const (
@@ -98,7 +100,7 @@ func (msg *jsonrpcMessage) namespace() string {
 }
 
 func (msg *jsonrpcMessage) String() string {
-	b, _ := json.Marshal(msg)
+	b, _ := jsoniter.Marshal(msg)
 	return string(b)
 }
 
@@ -109,7 +111,7 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 }
 
 func (msg *jsonrpcMessage) response(result interface{}) *jsonrpcMessage {
-	enc, err := json.Marshal(result)
+	enc, err := jsoniter.Marshal(result)
 	if err != nil {
 		// TODO: wrap with 'internal server error'
 		return msg.errorResponse(err)
@@ -270,7 +272,7 @@ func (c *jsonCodec) closed() <-chan interface{} {
 func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 	if !isBatch(raw) {
 		msgs := []*jsonrpcMessage{{}}
-		err := json.Unmarshal(raw, &msgs[0])
+		err := jsoniter.Unmarshal(raw, &msgs[0])
 		if err != nil {
 			return nil, false, err
 		}
