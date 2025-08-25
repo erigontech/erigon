@@ -97,6 +97,7 @@ func (i *txSpanRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) er
 	return tx.Put(i.table, key[:], valuePair[:])
 }
 
+// Returns max span.Id such that span.StartBlock <= blockNum &&  blockNum <= span.EndBlock
 func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
@@ -104,12 +105,13 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 	}
 	defer cursor.Close()
 
+	// use Seek(blockNum) as the starting point for the search.
 	key := rangeIndexKey(blockNum)
 	startBlockRaw, valuePair, err := cursor.Seek(key[:])
 	if err != nil {
 		return 0, false, err
 	}
-	// seek not found, we check the last entry
+	// seek not found, check the last entry as the only candidate
 	if valuePair == nil {
 		// get latest then
 		lastStartBlockRaw, lastValuePair, err := cursor.Last()
@@ -131,33 +133,34 @@ func (i *txSpanRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64,
 
 	}
 
+	var lastSpanIdInRange = uint64(0)
 	currStartBlock := rangeIndexKeyParse(startBlockRaw)
-	// If currStartBlock == blockNum, then this span contains blockNum, and no need to do the .Prev() below
-	if currStartBlock == blockNum {
-		currSpanId, currEndBlock := rangeIndexValuePairParse(valuePair)
-		// sanityCheck
-		isInRange := blockNumInRange(blockNum, currStartBlock, currEndBlock)
-		if !isInRange {
-			return 0, false, fmt.Errorf("SpanIndexLookup(%d) returns Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, currSpanId, currStartBlock, currEndBlock, blockNum)
-		}
-		// happy case
-		return currSpanId, true, nil
+	currSpanId, currEndBlock := rangeIndexValuePairParse(valuePair)
+	isInRange := blockNumInRange(blockNum, currStartBlock, currEndBlock)
+	if isInRange { // cursor.Seek(blockNum) is in range
+		lastSpanIdInRange = currSpanId
 	}
 
-	// Prev should contain the appropriate span containing blockNum
-	prevStartBlockRaw, prevValuePair, err := cursor.Prev()
-	if err != nil {
-		return 0, false, err
+	for { // from this point walk backwards the table until the blockNum is out of range
+		prevStartBlockRaw, prevValuePair, err := cursor.Prev()
+		if err != nil {
+			return 0, false, err
+		}
+		// this could happen if we've walked all the way to the first entry in the table, and there is no more Prev()
+		if prevValuePair == nil {
+			break
+		}
+		prevStartBlock := rangeIndexKeyParse(prevStartBlockRaw)
+		prevSpanId, prevBlock := rangeIndexValuePairParse(prevValuePair)
+		isInRange := blockNumInRange(blockNum, prevStartBlock, prevBlock)
+		if !isInRange {
+			break // we have walked out of range, break to return current known lastSpanIdInRange
+		}
+		if isInRange && prevSpanId > lastSpanIdInRange { // a span in range with higher span id was found
+			lastSpanIdInRange = prevSpanId
+		}
 	}
-	prevStartBlock := rangeIndexKeyParse(prevStartBlockRaw)
-	spanId, endBlock := rangeIndexValuePairParse(prevValuePair)
-	// sanity check
-	isInRange := blockNumInRange(blockNum, prevStartBlock, endBlock)
-	if !isInRange {
-		return 0, false, fmt.Errorf("SpanIndexLookup(%d) returns Span{Id:%d, StartBlock:%d, EndBlock:%d } not containing blockNum=%d", blockNum, spanId, prevStartBlock, endBlock, blockNum)
-	}
-	// happy case
-	return spanId, true, nil
+	return lastSpanIdInRange, true, nil
 }
 
 // last key in the index

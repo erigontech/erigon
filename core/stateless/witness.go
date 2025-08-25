@@ -17,17 +17,13 @@
 package stateless
 
 import (
-	"bytes"
-	"compress/gzip"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -171,110 +167,4 @@ func (w *Witness) SetHeader(header *types.Header) {
 	if w != nil {
 		w.context = header
 	}
-}
-
-// CompressionConfig holds configuration for witness compression
-type CompressionConfig struct {
-	Enabled          bool // Enable/disable compression
-	Threshold        int  // Threshold in bytes. Only compress if witness is larger than this.
-	CompressionLevel int  // Gzip compression level (1-9)
-	UseDeduplication bool // Enable witness optimization
-}
-
-const compressionThreshold = 1 * 1024 * 1024
-
-func DefaultCompressionConfig() *CompressionConfig {
-	return &CompressionConfig{
-		Enabled:          true,
-		Threshold:        compressionThreshold,
-		CompressionLevel: gzip.BestSpeed,
-		UseDeduplication: true,
-	}
-}
-
-var globalCompressionConfig = DefaultCompressionConfig()
-
-// EncodeCompressed serializes a witness with optional compression.
-func (w *Witness) EncodeCompressed(wr io.Writer) error {
-	// First encode to RLP
-	var rlpBuf bytes.Buffer
-	if err := w.EncodeRLP(&rlpBuf); err != nil {
-		return err
-	}
-
-	rlpData := rlpBuf.Bytes()
-
-	// Only compress if enabled and the data is large enough to benefit from compression
-	if globalCompressionConfig.Enabled && len(rlpData) > globalCompressionConfig.Threshold {
-		// Compress the RLP data
-		var compressedBuf bytes.Buffer
-		gw, err := gzip.NewWriterLevel(&compressedBuf, globalCompressionConfig.CompressionLevel)
-		if err != nil {
-			return err
-		}
-
-		if _, err := gw.Write(rlpData); err != nil {
-			return err
-		}
-
-		if err := gw.Close(); err != nil {
-			return err
-		}
-
-		compressedData := compressedBuf.Bytes()
-
-		// Only use compression if it actually reduces size
-		if len(compressedData) < len(rlpData) {
-			// Write compression marker and compressed data
-			if _, err := wr.Write([]byte{0x01}); err != nil {
-				return err
-			}
-			_, err = wr.Write(compressedData)
-			return err
-		}
-	}
-
-	// Write uncompressed marker and original RLP data
-	if _, err := wr.Write([]byte{0x00}); err != nil {
-		return err
-	}
-	_, err := wr.Write(rlpData)
-	return err
-}
-
-// DecodeCompressed decodes a witness from compressed format.
-func (w *Witness) DecodeCompressed(data []byte) error {
-	if len(data) == 0 {
-		return errors.New("empty data")
-	}
-
-	// Check compression marker
-	compressed := data[0] == 0x01
-	witnessData := data[1:]
-
-	var rlpData []byte
-	if compressed {
-		// Decompress
-		gr, err := gzip.NewReader(bytes.NewReader(witnessData))
-		if err != nil {
-			return err
-		}
-		defer gr.Close()
-
-		var decompressedBuf bytes.Buffer
-		if _, err := io.Copy(&decompressedBuf, gr); err != nil {
-			return err
-		}
-		rlpData = decompressedBuf.Bytes()
-	} else {
-		rlpData = witnessData
-	}
-
-	// Decode the RLP data
-	var ext extWitness
-	if err := rlp.DecodeBytes(rlpData, &ext); err != nil {
-		return err
-	}
-
-	return w.fromExtWitness(&ext)
 }

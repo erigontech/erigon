@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	ptypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -70,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	stages2 "github.com/erigontech/erigon/execution/stages"
@@ -295,7 +295,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db := temporaltest.NewTestDB(tb, dirs)
 
-	if _, err := snaptype.LoadSalt(dirs.Snap, true); err != nil {
+	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
 		panic(err)
 	}
 

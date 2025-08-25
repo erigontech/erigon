@@ -43,12 +43,12 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -899,7 +899,7 @@ func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.Inbou
 	bHash := query.Witness.Header().Hash()
 
 	var witBuf bytes.Buffer
-	if err := query.Witness.EncodeCompressed(&witBuf); err != nil {
+	if err := query.Witness.EncodeRLP(&witBuf); err != nil {
 		return fmt.Errorf("error in witness encoding: err: %w", err)
 	}
 
