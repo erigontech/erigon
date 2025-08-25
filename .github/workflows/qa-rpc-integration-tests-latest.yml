@@ -34,7 +34,7 @@ jobs:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 60 # 1 minute
       TOTAL_TIME_SECONDS: 900 # 15 minutes
-      HOST_RUNNER_GETH_LATEST: 157.180.55.78
+      HOST_RUNNER_GETH_LATEST: 57.180.55.78:8545
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
