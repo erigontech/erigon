@@ -23,13 +23,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mailru/easyjson"
 
 	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -241,7 +242,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			buffer, _ := json.Marshal(answer)
+			buffer, _ := easyjson.Marshal(answer)
 			stream.Write(buffer)
 		}
 		if needWriteStream {
