@@ -113,7 +113,7 @@ func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, paren
 	}
 	headerNum := header.Number.Uint64()
 	// the current producer has published a block, but it came too late (i.e. the parent has been evicted from the ttl cache)
-	if author == producer && author == parentAuthor && !htv.recentVerifiedHeaders.Has(header.ParentHash) {
+	if author == producer && producer == parentAuthor && !htv.recentVerifiedHeaders.Has(header.ParentHash) {
 		htv.logger.Info("[span-rotation] need to wait for span rotation due to longer than expected block time from current producer", "blockNum", headerNum, "parentHeader", header.ParentHash, "author", author)
 		return true, VeBlopLongBlockTimeout, nil
 	} else if author != parentAuthor && author != producer { // new author but not matching the producer for this block
