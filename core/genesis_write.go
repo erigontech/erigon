@@ -352,6 +352,20 @@ func AmoyGenesisBlock() *types.Genesis {
 	}
 }
 
+// MumbaiGenesisBlock returns the Amoy network genesis block.
+func MumbaiGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.MumbaiChainConfig,
+		Nonce:      0,
+		Timestamp:  1558348305,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      readPrealloc("allocs/mumbai.json"),
+	}
+}
+
 // BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
 func BorMainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
@@ -652,6 +666,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HoodiGenesisBlock()
 	case networkname.Amoy:
 		return AmoyGenesisBlock()
+	case networkname.Mumbai:
+		return MumbaiGenesisBlock()
 	case networkname.BorMainnet:
 		return BorMainnetGenesisBlock()
 	case networkname.BorDevnet:
