@@ -108,7 +108,7 @@ type DecompressArenaSlice struct {
 	offset int
 }
 
-const poolBufCap = 8 * 1024 * 1024
+const poolBufCap = 128 * 1024
 
 var bufPool = sync.Pool{
 	New: func() interface{} {
@@ -145,7 +145,49 @@ func (c *DecompressArenaSlice) Allocate(size int) []byte {
 	c.offset += size
 	newOffset := (c.offset + Alignment - 1) / Alignment * Alignment
 	if newOffset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+		if c.mem != nil {
+			bufPool.Put(c.mem)
+		}
 		c.mem = bufPool.Get().([]byte)
+		c.offset = 0
+	}
+	return unsafe.Slice(&c.mem[low], size)
+	//return c.mem[low : low+size : low+size] // https://go.dev/ref/spec#Slicel_expressions
+}
+
+type DecompressArenaSlice2 struct {
+	mem    []byte
+	cap    int
+	offset int
+}
+
+func NewDecompressArenaSlice2(cap int) (*DecompressArenaSlice2, error) {
+	return &DecompressArenaSlice2{
+		cap: cap,
+	}, nil
+}
+
+func (c *DecompressArenaSlice2) Close() {
+	c.Free()
+}
+
+// Free idempotent, all allocated valued become invalid. Batch free arena
+func (c *DecompressArenaSlice2) Free() {
+	if c.mem != nil {
+		c.mem = nil
+	}
+}
+
+func (c *DecompressArenaSlice2) Allocate(size int) []byte {
+	if size >= AllocLimitOnArena {
+		return make([]byte, size)
+	}
+
+	low := c.offset
+	c.offset += size
+	newOffset := (c.offset + Alignment - 1) / Alignment * Alignment
+	if newOffset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+		c.mem = make([]byte, c.cap)
 		c.offset = 0
 	}
 	return unsafe.Slice(&c.mem[low], size)

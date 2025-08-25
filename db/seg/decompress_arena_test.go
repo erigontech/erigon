@@ -160,10 +160,10 @@ func BenchmarkDecompressArena(b *testing.B) {
 			a.Close()
 		}
 	})
-	b.Run("slice.64", func(b *testing.B) {
+	b.Run("slice", func(b *testing.B) {
 		b.ReportAllocs()
 		//arenaSize := 128 * 1024
-		arenaSize := 64 * 1024 * 1024
+		//arenaSize := 64 * 1024 * 1024
 
 		for i := 0; i < b.N; i++ {
 			a, err := NewDecompressArenaSlice(arenaSize)
@@ -176,6 +176,55 @@ func BenchmarkDecompressArena(b *testing.B) {
 			}
 			a.Close()
 		}
+	})
+	b.Run("slice2.64", func(b *testing.B) {
+		b.ReportAllocs()
+		//arenaSize := 128 * 1024
+		arenaSize := 64 * 1024
+
+		for i := 0; i < b.N; i++ {
+			a, err := NewDecompressArenaSlice2(arenaSize)
+			require.NoError(b, err)
+			for j := 0; j < iters; j++ {
+				size++
+				size--
+				k := a.Allocate(size)
+				_ = k
+			}
+			a.Close()
+		}
+	})
+	b.Run("slice2.32", func(b *testing.B) {
+		b.ReportAllocs()
+		arenaSize := 32 * 1024
+
+		for i := 0; i < b.N; i++ {
+			a, err := NewDecompressArenaSlice2(arenaSize)
+			require.NoError(b, err)
+			for j := 0; j < iters; j++ {
+				size++
+				size--
+				k := a.Allocate(size)
+				_ = k
+			}
+			a.Close()
+		}
+	})
+	b.Run("slice2.128.2", func(b *testing.B) {
+		b.ReportAllocs()
+		arenaSize := 128 * 1024
+		a, err := NewDecompressArenaSlice2(arenaSize)
+		require.NoError(b, err)
+
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < iters; j++ {
+				size++
+				size--
+				k := a.Allocate(size)
+				_ = k
+			}
+		}
+		a.Close()
 	})
 	b.Run("pool", func(b *testing.B) {
 		b.ReportAllocs()

@@ -3,9 +3,11 @@ package state
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/seg"
 )
@@ -48,4 +50,116 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 		c.Close()
 	}
 	t.ReportAllocs()
+}
+
+func Benchmark_BtreeIndex_Search(b *testing.B) {
+	logger := log.New()
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	tmp := b.TempDir()
+	defer dir.RemoveAll(tmp)
+	dataPath := "../../data/storage.256-288.kv"
+
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	comp := seg.CompressKeys | seg.CompressVals
+	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
+
+	M := 1024
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
+	require.NoError(b, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(b, err)
+	getter := seg.NewReader(kv.MakeGetter(), comp)
+
+	for i := 0; i < b.N; i++ {
+		p := rnd.IntN(len(keys))
+		cur, err := bt.Seek(getter, keys[p])
+		require.NoErrorf(b, err, "i=%d", i)
+		require.Equal(b, keys[p], cur.Key())
+		require.NotEmptyf(b, cur.Value(), "i=%d", i)
+		cur.Close()
+	}
+}
+
+func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
+	b.Helper()
+
+	logger := log.New()
+	tmp := b.TempDir()
+	b.Cleanup(func() { dir.RemoveAll(tmp) })
+
+	dataPath := generateKV(b, tmp, 52, 10, 1_000_000, logger, 0)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
+
+	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
+	require.NoError(b, err)
+	b.Cleanup(func() { bt.Close() })
+	b.Cleanup(func() { kv.Close() })
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(b, err)
+	return kv, bt, keys, dataPath
+}
+
+func Benchmark_BTree_Seek(b *testing.B) {
+	M := uint64(1024)
+	compress := seg.CompressNone
+	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only", func(b *testing.B) {
+		p := 8
+		for i := 0; i < b.N; i++ {
+			//p := rnd.IntN(len(keys))
+
+			cur, _ := bt.Seek(getter, keys[p])
+			cur.Close()
+		}
+	})
+	b.Run("get_only", func(b *testing.B) {
+		p := 8
+		for i := 0; i < b.N; i++ {
+			//p := rnd.IntN(len(keys))
+
+			bt.Get(keys[p], getter)
+		}
+	})
+
+	//rnd := newRnd(uint64(0))
+	//b.Run("seek_then_next", func(b *testing.B) {
+	//	for i := 0; i < b.N; i++ {
+	//		p := rnd.IntN(len(keys))
+	//
+	//		cur, err := bt.Seek(getter, keys[p])
+	//		require.NoError(b, err)
+	//
+	//		require.Equal(b, keys[p], cur.key)
+	//
+	//		prevKey := common.Copy(keys[p])
+	//		ntimer := time.Duration(0)
+	//		nextKeys := 5000
+	//		for j := 0; j < nextKeys; j++ {
+	//			ntime := time.Now()
+	//
+	//			if !cur.Next() {
+	//				break
+	//			}
+	//			ntimer += time.Since(ntime)
+	//
+	//			nk := cur.Key()
+	//			if bytes.Compare(prevKey, nk) > 0 {
+	//				b.Fatalf("prev %s cur %s, next key should be greater", prevKey, nk)
+	//			}
+	//			prevKey = nk
+	//		}
+	//		if i%1000 == 0 {
+	//			fmt.Printf("next_access_last[of %d keys] %v\n", nextKeys, ntimer/time.Duration(nextKeys))
+	//		}
+	//		cur.Close()
+	//	}
+	//})
 }
