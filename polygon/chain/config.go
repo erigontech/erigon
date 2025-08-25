@@ -66,6 +66,13 @@ var (
 		Config:      borDevnetChainConfig,
 		Genesis:     BorDevnetGenesisBlock(),
 	}
+	Mumbai = chainspec.Spec{
+		Name:        networkname.Mumbai,
+		GenesisHash: common.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7"),
+		Config:      mumbaiChainConfig,
+		Bootnodes:   mumbaiBootnodes,
+		Genesis:     MumbaiGenesisBlock(),
+	}
 )
 
 var (
