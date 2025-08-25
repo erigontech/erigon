@@ -37,8 +37,7 @@ if [ -n "$REFERENCE_HOST" ]; then
 fi
 
 if [ -n "$REFERENCE_HOST" ]; then
-    #OPTIONAL_FLAGS+="--verify-external-provider $REFERENCE_HOST"
-    OPTIONAL_FLAGS+="-e $REFERENCE_HOST"
+    OPTIONAL_FLAGS+="--verify-external-provider $REFERENCE_HOST"
 fi
 
 if [ "$TEST_TYPE" = "latest" ]; then
