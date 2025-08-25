@@ -182,7 +182,7 @@ func TestCreation(t *testing.T) {
 				{13996000, 0, ID{Hash: checksumToBytes(0x06cc1179), Next: 22640000}}, // First Berlin block
 				{22640000, 0, ID{Hash: checksumToBytes(0x9adf950e), Next: 41874000}}, // First London block
 				{41874000, 0, ID{Hash: checksumToBytes(0x0c015a91), Next: 45648608}}, // First Agra block
-				{45648608, 0, ID{Hash: checksumToBytes(0x0f2316c1), Next: 0}},        // First Napoli block
+				{45648608, 0, ID{Hash: checksumToBytes(0x0f2316c1), Next: 48467456}}, // First Napoli block
 			},
 		},
 		// Amoy test cases
