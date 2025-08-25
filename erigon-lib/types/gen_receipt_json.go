@@ -7,6 +7,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/mailru/easyjson/jwriter"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 )
@@ -45,7 +47,25 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.BlockHash = r.BlockHash
 	enc.BlockNumber = (*hexutil.Big)(r.BlockNumber)
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
-	return json.Marshal(&enc)
+	return enc.MarshalJSON()
+}
+
+// MarshalJSON marshals as JSON.
+func (r Receipt) MarshalEasyJSON(w *jwriter.Writer) {
+	var enc ReceiptMarshal
+	enc.Type = hexutil.Uint64(r.Type)
+	enc.PostState = r.PostState
+	enc.Status = hexutil.Uint64(r.Status)
+	enc.CumulativeGasUsed = hexutil.Uint64(r.CumulativeGasUsed)
+	enc.Bloom = r.Bloom
+	enc.Logs = r.Logs
+	enc.TxHash = r.TxHash
+	enc.ContractAddress = r.ContractAddress
+	enc.GasUsed = hexutil.Uint64(r.GasUsed)
+	enc.BlockHash = r.BlockHash
+	enc.BlockNumber = (*hexutil.Big)(r.BlockNumber)
+	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
+	enc.MarshalEasyJSON(w)
 }
 
 //easyjson:json

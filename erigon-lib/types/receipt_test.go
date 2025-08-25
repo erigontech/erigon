@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/mailru/easyjson"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -37,6 +38,39 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 )
+
+func BenchmarkName(b *testing.B) {
+	r := &Receipt{
+		Status:            ReceiptStatusFailed,
+		CumulativeGasUsed: 1,
+		Logs: []*Log{
+			{
+				Address: common.BytesToAddress([]byte{0x11}),
+				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+				Data:    []byte{0x01, 0x00, 0xff},
+				Index:   999,
+			},
+			{
+				Address: common.BytesToAddress([]byte{0x01, 0x11}),
+				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+				Data:    []byte{0x01, 0x00, 0xff},
+				Index:   1000,
+			},
+		},
+		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+		GasUsed:         111111,
+		BlockNumber:     big.NewInt(1),
+	}
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		easyjson.Marshal(r)
+	}
+}
+
+//BenchmarkName-16    	   73788	     16327 ns/op	   13881 B/op	      63 allocs/op
+//BenchmarkName-16    	  455552	      2670 ns/op	    8130 B/op	      57 allocs/op
+//BenchmarkName-16    	  102339	     11372 ns/op	    7635 B/op	      42 allocs/op
 
 func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	t.Parallel()

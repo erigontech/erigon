@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/mailru/easyjson/jwriter"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 )
@@ -37,7 +39,21 @@ func (l Log) MarshalJSON() ([]byte, error) {
 	enc.BlockHash = l.BlockHash
 	enc.Index = hexutil.Uint(l.Index)
 	enc.Removed = l.Removed
-	return json.Marshal(&enc)
+	return enc.MarshalJSON()
+}
+
+func (l Log) MarshalEasyJSON(w *jwriter.Writer) {
+	var enc LogMarshal
+	enc.Address = l.Address
+	enc.Topics = l.Topics
+	enc.Data = l.Data
+	enc.BlockNumber = hexutil.Uint64(l.BlockNumber)
+	enc.TxHash = l.TxHash
+	enc.TxIndex = hexutil.Uint(l.TxIndex)
+	enc.BlockHash = l.BlockHash
+	enc.Index = hexutil.Uint(l.Index)
+	enc.Removed = l.Removed
+	enc.MarshalEasyJSON(w)
 }
 
 //easyjson:json
