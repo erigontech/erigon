@@ -79,9 +79,13 @@ func (m *MockSyncer) ClearHeaderCache() {
 	m.Called()
 }
 
-func (m *MockSyncer) GetDoneChan() <-chan struct{} {
+//	func (m *MockSyncer) GetDoneChan() <-chan struct{} {
+//		args := m.Called()
+//		return args.Get(0).(<-chan struct{})
+//	}
+func (m *MockSyncer) GetDoneChan() <-chan uint64 {
 	args := m.Called()
-	return args.Get(0).(<-chan struct{})
+	return args.Get(0).(<-chan uint64)
 }
 
 type MockL2Syncer struct {
@@ -434,11 +438,13 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 			updater := NewUpdater(context.Background(), cfg, mockSyncer, nil)
 
 			logsChan := make(chan []types.Log, 1)
-			doneChan := make(chan struct{}, 1)
+			// doneChan := make(chan struct{}, 1)
+			doneChan := make(chan uint64, 1)
 
 			// Set up mock expectations
 			mockSyncer.On("GetLogsChan").Return(logsChan)
-			mockSyncer.On("GetDoneChan").Return((<-chan struct{})(doneChan))
+			// mockSyncer.On("GetDoneChan").Return((<-chan struct{})(doneChan))
+			mockSyncer.On("GetDoneChan").Return((<-chan uint64)(doneChan))
 			mockSyncer.On("GetProgressMessageChan").Return(make(chan string))
 			mockSyncer.On("IsDownloading").Return(false).Maybe()
 			mockSyncer.On("ClearHeaderCache").Return()
@@ -462,7 +468,8 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 			}
 
 			time.AfterFunc(1*time.Millisecond, func() {
-				close(doneChan) // Closed by syncer in prod
+				// close(doneChan) // Closed by syncer in prod
+				doneChan <- uint64(len(tc.logs)) // Simulate done signal
 			})
 			processed, err := updater.CheckForInfoTreeUpdates("test", tx)
 

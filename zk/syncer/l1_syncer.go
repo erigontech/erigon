@@ -81,8 +81,8 @@ type L1Syncer struct {
 	// Channels
 	logsChan         chan []ethTypes.Log
 	logsChanProgress chan string
-	doneChan         chan struct{}
-	doneChanMtx      sync.RWMutex
+	doneChan         chan uint64
+	// doneChanMtx      sync.RWMutex
 
 	highestBlockType string   // finalized, latest, safe
 	headersCache     sync.Map // map[uint64]*ethTypes.Header // cache for headers
@@ -101,6 +101,7 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		queryDelay:          queryDelay,
 		logsChan:            make(chan []ethTypes.Log, 10),
 		logsChanProgress:    make(chan string, 1),
+		doneChan:            make(chan uint64, 1),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
 		headersCache:        sync.Map{},
@@ -135,6 +136,7 @@ func (s *L1Syncer) ConsumeQueryBlocks() {
 		select {
 		case <-s.logsChan:
 		case <-s.logsChanProgress:
+		case <-s.doneChan:
 		default:
 			if !s.isSyncStarted.Load() {
 				return
@@ -157,25 +159,25 @@ func (s *L1Syncer) GetProgressMessageChan() chan string {
 	return s.logsChanProgress
 }
 
-func (s *L1Syncer) GetDoneChan() <-chan struct{} {
-	s.doneChanMtx.RLock()
-	defer s.doneChanMtx.RUnlock()
+func (s *L1Syncer) GetDoneChan() <-chan uint64 {
+	// s.doneChanMtx.RLock()
+	// defer s.doneChanMtx.RUnlock()
 	return s.doneChan
 }
 
-func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
+func (s *L1Syncer) RunQueryBlocks(from uint64) {
 	//if already started, don't start another thread
 	if s.isSyncStarted.Load() {
 		log.Info("L1 syncer already started, skipping")
 		return
 	}
 
-	s.resetDoneChannel()
+	// s.resetDoneChannel()
 
 	s.isSyncStarted.Store(true)
 
 	// set it to true to catch the first cycle run case where the check can pass before the latest block is checked
-	s.lastCheckedL1Block.Store(lastCheckedBlock)
+	s.lastCheckedL1Block.Store(from)
 
 	s.wgRunLoopDone.Add(1)
 	s.flagStop.Store(false)
@@ -197,22 +199,37 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 			if err != nil {
 				log.Error("Error getting latest L1 block", "err", err)
 			} else {
+				var numLogs uint64
 				if latestL1Block > s.lastCheckedL1Block.Load() {
-					if err := s.queryBlocks(); err != nil {
+					// It should not be checked again in the new cycle, so +1 is added here.
+					startBlock := s.lastCheckedL1Block.Load() + 1
+					endBlock := latestL1Block
+					if numLogs, err = s.queryBlocks(startBlock, endBlock); err != nil {
 						log.Error("Error querying blocks", "err", err)
 					} else {
 						s.lastCheckedL1Block.Store(latestL1Block)
 					}
+					// s.resetDoneChannel()
+					log.Info(fmt.Sprintf("L1 syncer queried blocks from %d to %d, found %d logs", startBlock, endBlock, numLogs))
+				} else {
+					log.Info("L1 syncer no new blocks", "latestL1Block", latestL1Block, "lastCheckedL1Block", s.lastCheckedL1Block.Load(), "sleep ms", s.queryDelay, "topics", s.topics[0])
 				}
+				s.writeDone(numLogs)
 			}
-
-			s.resetDoneChannel()
 			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
 	}()
 }
 
+// var initialTime time.Time = time.Now()
+
 func (s *L1Syncer) GetHeader(number uint64) (*ethTypes.Header, error) {
+	// if 30 seconds passed since initial time, we will imitate L1 down and return error for the next 4 minutes
+	// if time.Since(initialTime) > 30*time.Second && time.Since(initialTime) < 4*time.Minute {
+	// 	log.Info("======= Imitating L1 down ========")
+	// 	return nil, fmt.Errorf("L1 is down")
+	// }
+
 	if header, ok := s.headersCache.Load(number); ok {
 		return header.(*ethTypes.Header), nil
 	}
@@ -357,25 +374,25 @@ func (s *L1Syncer) getLatestL1Block() (uint64, error) {
 	latest := latestBlock.NumberU64()
 	s.latestL1Block = latest
 
+	log.Info("L1 syncer getting latest L1 block", "highestBlockType", s.highestBlockType, "latest", latest)
+
 	return latest, nil
 }
 
-func (s *L1Syncer) queryBlocks() error {
+func (s *L1Syncer) queryBlocks(startBlock, endBlock uint64) (numLogs uint64, err error) {
 	// Fixed receiving duplicate log events.
 	// lastCheckedL1Block means that it has already been checked in the previous cycle.
-	// It should not be checked again in the new cycle, so +1 is added here.
-	startBlock := s.lastCheckedL1Block.Load() + 1
 
-	log.Info("GetHighestSequence", "startBlock", startBlock)
+	log.Info("GetHighestSequence", "startBlock", startBlock, "latestBlock", s.latestL1Block)
 
 	// define the blocks we're going to fetch up front
-	fetches := make([]fetchJob, 0, (s.latestL1Block-startBlock)/s.blockRange+1)
+	fetches := make([]fetchJob, 0, (endBlock-startBlock)/s.blockRange+1)
 	low := startBlock
 	for {
 		high := low + s.blockRange
-		if high > s.latestL1Block {
+		if high > endBlock {
 			// at the end of our search
-			high = s.latestL1Block
+			high = endBlock
 		}
 
 		fetches = append(fetches, fetchJob{
@@ -383,7 +400,7 @@ func (s *L1Syncer) queryBlocks() error {
 			To:   high,
 		})
 
-		if high == s.latestL1Block {
+		if high == endBlock {
 			break
 		}
 		low += s.blockRange + 1
@@ -408,11 +425,9 @@ func (s *L1Syncer) queryBlocks() error {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	var err error
-	var progress uint64 = 0
-
-	aimingFor := s.latestL1Block - startBlock
+	aimingFor := endBlock - startBlock
 	complete := 0
+	var progress uint64 = 0
 loop:
 	for {
 		select {
@@ -430,10 +445,12 @@ loop:
 			}
 			progress += res.Size
 			if len(res.Logs) > 0 {
+				numLogs += uint64(len(res.Logs))
 				s.logsChan <- res.Logs
 			}
 
 			if complete == len(fetches) {
+				log.Info("L1 all fetches done", "logsNum", numLogs, "progress", progress, "len(fetches)", len(fetches))
 				// we've got all the results we need
 				break loop
 			}
@@ -448,7 +465,8 @@ loop:
 	close(stop)
 	wg.Wait()
 
-	return err
+	log.Info("L1 syncer finished querying blocks", "logsNum", numLogs)
+	return numLogs, err
 }
 
 func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult, stop chan bool, wg *sync.WaitGroup) {
@@ -456,8 +474,8 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 
 	for {
 		select {
-		case <-stop:
-			return
+		// case <-stop:
+		// 	return
 		case j, ok := <-jobs:
 			if !ok {
 				return
@@ -627,12 +645,18 @@ func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
 	return &logs[0], nil
 }
 
-func (s *L1Syncer) resetDoneChannel() {
-	s.doneChanMtx.Lock()
-	defer s.doneChanMtx.Unlock()
-
-	if s.doneChan != nil {
-		close(s.doneChan)
-	}
-	s.doneChan = make(chan struct{})
+func (s *L1Syncer) writeDone(numLogs uint64) {
+	log.Info(fmt.Sprintf("L1 syncer done with %d logs", numLogs))
+	s.doneChan <- numLogs
 }
+
+// func (s *L1Syncer) resetDoneChannel() {
+// 	// s.doneChanMtx.Lock()
+// 	// defer s.doneChanMtx.Unlock()
+
+// 	// s.doneChan <- struct{}{}
+// 	if s.doneChan != nil {
+// 		close(s.doneChan)
+// 	}
+// 	s.doneChan = make(chan struct{})
+// }

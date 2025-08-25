@@ -31,7 +31,7 @@ type IL1Syncer interface {
 	// Channels
 	GetLogsChan() chan []ethTypes.Log
 	GetProgressMessageChan() chan string
-	GetDoneChan() <-chan struct{}
+	GetDoneChan() <-chan uint64
 
 	L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error)
 	GetBlock(number uint64) (*ethTypes.Block, error)
@@ -186,6 +186,7 @@ Loop:
 		case progressMessage := <-progressMessageChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
 		case <-doneChan:
+			log.Info(fmt.Sprintf("[%s] Done channel received, exiting", logPrefix))
 			break Loop
 		case <-ctx.Done():
 			break Loop
