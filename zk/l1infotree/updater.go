@@ -22,6 +22,9 @@ import (
 	"github.com/iden3/go-iden3-crypto/keccak256"
 )
 
+// hard cap to avoid waiting forever when syncer is stuck “downloading”
+var NoActivityTimeout = 30 * time.Second // var to be overridden in tests
+
 type Syncer interface {
 	IsSyncStarted() bool
 	RunQueryBlocks(lastCheckedBlock uint64)
@@ -292,8 +295,8 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 
 	// Signals that no more logs will arrive
 	logsInputDone := make(chan struct{})
-	var tasksTotal uint64 = 0
-	var tasksPending uint64 = 0
+	var tasksTotal atomic.Uint64
+	var tasksPending atomic.Uint64
 	var expectedUpdates uint64 = 0 // only V1 logs produce updates
 	receivedAnyLogs := false
 
@@ -312,7 +315,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 			}
 		}()
 
-		// stop := false
 		for {
 			select {
 			case logs := <-logChan:
@@ -323,7 +325,7 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 				lastActivity = time.Now()
 				allLogs = append(allLogs, logs...)
 
-				tasksPending += uint64(len(logs))
+				tasksPending.Add(uint64(len(logs)))
 				for _, lg := range logs {
 					workerPool.AddTask(NewL1InfoTask(lg, u.syncer))
 					// Only V1 logs with 3 topics yield an update entry
@@ -333,8 +335,8 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 				}
 				// tasksTotal += uint64(len(logs))
 
-				log.Info(fmt.Sprintf("[%s] Received %d logs", logPrefix, len(logs)), "tasksPending", tasksPending, "tasksTotal", tasksTotal, "stop", stop.Load())
-				if tasksPending >= tasksTotal && stop.Load() {
+				log.Info(fmt.Sprintf("[%s] Received %d logs", logPrefix, len(logs)), "tasksPending", tasksPending.Load(), "tasksTotal", tasksTotal.Load(), "stop", stop.Load())
+				if tasksPending.Load() == tasksTotal.Load() && stop.Load() {
 					log.Info(fmt.Sprintf("[%s] Stopping log processing in logChan read", logPrefix))
 					return
 				}
@@ -344,17 +346,21 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 				log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
 
 			case numLogs := <-doneChan:
-				log.Info(fmt.Sprintf("[%s] Done channel received", logPrefix), "numLogs", numLogs)
-				stop.Store(true)
-				if numLogs == 0 {
-					// Do not stop the pool here; main loop will stop it after all tasks complete.
-					return
-				}
-				tasksTotal = numLogs
-				log.Info(fmt.Sprintf("[%s] Stopping log processing in doneChan read", logPrefix), "tasksTotal", tasksTotal, "tasksPending", tasksPending)
-				if tasksPending >= tasksTotal {
-					log.Info(fmt.Sprintf("[%s] All tasks done, exiting in doneChan", logPrefix))
-					return
+				log.Info(fmt.Sprintf("[%s] Done channel received", logPrefix), "numLogs", numLogs, "stop", stop.Load())
+				if !stop.Load() {
+					tasksTotal.Store(numLogs)
+					stop.Store(true)
+
+					// if numLogs == 0 && tasksTotal == 0 {
+					if numLogs == 0 {
+						// Do not stop the pool here; main loop will stop it after all tasks complete.
+						return
+					}
+					log.Info(fmt.Sprintf("[%s] Stopping log processing in doneChan read", logPrefix), "tasksTotal", tasksTotal.Load(), "tasksPending", tasksPending.Load())
+					if tasksPending.Load() == tasksTotal.Load() {
+						log.Info(fmt.Sprintf("[%s] All tasks done, exiting in doneChan", logPrefix))
+						return
+					}
 				}
 
 			case <-u.ctx.Done():
@@ -365,12 +371,9 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	}()
 
 	// Drain results until producer finished and every task has reported a result.
-	var tasksDone uint64 = 0
+	var tasksDone atomic.Uint64
 	idleTicker := time.NewTicker(5 * time.Second)
 	defer idleTicker.Stop()
-
-	// hard cap to avoid waiting forever when syncer is stuck “downloading”
-	const noActivityTimeout = 30 * time.Second
 
 drain:
 	for {
@@ -383,7 +386,7 @@ drain:
 			// Note: taskResChan is not closed until workerPool.Wait() below,
 			// so we don't check the 'ok' flag here.
 			lastActivity = time.Now()
-			tasksDone++
+			tasksDone.Store(tasksDone.Load() + 1)
 			if res.err != nil {
 				// Workers requeue on error, so this should be rare. Keep for safety.
 				log.Error(fmt.Sprintf("[%s] Failed to process log (will be requeued by worker): %v", logPrefix, res.err))
@@ -395,28 +398,28 @@ drain:
 			}
 
 			// if tasksDone >= tasksTotal && stop.Load() {
-			if tasksDone == tasksTotal && tasksDone == tasksPending && stop.Load() {
-				log.Info(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone, "tasksTotal", tasksTotal)
+			if tasksDone.Load() == tasksTotal.Load() && tasksDone.Load() == tasksPending.Load() && stop.Load() {
+				log.Info(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone.Load(), "tasksTotal", tasksTotal.Load())
 				break drain
 			}
 
 		case <-logsInputDone:
 			// log.Info(fmt.Sprintf("[%s] Logs input done", logPrefix), "tasksTotal", tasksTotal, "tasksDone", tasksDone)
 			// No more tasks will be added; wait until all current tasks are done.
-			if tasksDone == tasksTotal && tasksTotal == tasksPending {
-				log.Info(fmt.Sprintf("[%s] Logs input done, all tasks done, exiting", logPrefix), "tasksDone", tasksDone, "tasksTotal", tasksTotal)
+			if tasksDone.Load() == tasksTotal.Load() && tasksTotal.Load() == tasksPending.Load() {
+				log.Info(fmt.Sprintf("[%s] Logs input done, all tasks done, exiting", logPrefix), "tasksDone", tasksDone.Load(), "tasksTotal", tasksTotal.Load())
 				break drain
 			}
 
 		case <-idleTicker.C:
 			// Avoid blocking forever when no logs/results are received.
-			if time.Since(lastActivity) > noActivityTimeout {
-				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, noActivityTimeout),
+			if time.Since(lastActivity) > NoActivityTimeout {
+				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, NoActivityTimeout),
 					"receivedAnyLogs", receivedAnyLogs,
-					"tasksDone", tasksDone, "tasksTotal", tasksTotal)
-				// break drain
+					"tasksDone", tasksDone.Load(), "tasksTotal", tasksTotal.Load())
+				break drain
 			}
-		case <-doneChan:
+			// case <-doneChan:
 			// 	if tasksDone >= tasksTotal {
 			// 		log.Debug(fmt.Sprintf("[%s] All tasks done, exiting", logPrefix), "tasksDone", tasksDone, "tasksTotal", tasksTotal)
 			// 		break drain
@@ -428,14 +431,14 @@ drain:
 	workerPool.Stop()
 	workerPool.Wait()
 
-	log.Info(fmt.Sprintf("[%s] Finished processing logs", logPrefix), "tasksTotal", tasksTotal, "tasksDone", tasksDone)
+	log.Info(fmt.Sprintf("[%s] Finished processing logs", logPrefix), "tasksTotal", tasksTotal.Load(), "tasksDone", tasksDone.Load())
 
 	// Sanity check: indexUpdateMap should match expected V1 update count
 	if uint64(len(indexUpdateMap)) != expectedUpdates {
 		log.Warn(fmt.Sprintf("[%s] V1 update results mismatch", logPrefix),
 			"expectedV1Updates", expectedUpdates,
 			"gotV1Updates", len(indexUpdateMap),
-			"tasksTotal", tasksTotal, "tasksDone", tasksDone, "logs", len(allLogs))
+			"tasksTotal", tasksTotal.Load(), "tasksDone", tasksDone.Load(), "logs", len(allLogs))
 	}
 
 	// sort the logs by block number - it is important that we process them in order to get the index correct

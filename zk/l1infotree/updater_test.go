@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -79,10 +80,6 @@ func (m *MockSyncer) ClearHeaderCache() {
 	m.Called()
 }
 
-//	func (m *MockSyncer) GetDoneChan() <-chan struct{} {
-//		args := m.Called()
-//		return args.Get(0).(<-chan struct{})
-//	}
 func (m *MockSyncer) GetDoneChan() <-chan uint64 {
 	args := m.Called()
 	return args.Get(0).(<-chan uint64)
@@ -278,6 +275,11 @@ func TestInitialiseL1InfoTree(t *testing.T) {
 }
 
 func TestCheckForInfoTreeUpdates(t *testing.T) {
+	// Force the logger to print everything
+	log.Root().SetHandler(
+		log.LvlFilterHandler(log.LvlDebug, log.StderrHandler),
+	)
+
 	testCases := []struct {
 		name              string
 		logs              []types.Log
@@ -437,13 +439,11 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 			cfg := &ethconfig.Zk{L1FirstBlock: 1000}
 			updater := NewUpdater(context.Background(), cfg, mockSyncer, nil)
 
-			logsChan := make(chan []types.Log, 1)
-			// doneChan := make(chan struct{}, 1)
+			logsChan := make(chan []types.Log)
 			doneChan := make(chan uint64, 1)
 
 			// Set up mock expectations
 			mockSyncer.On("GetLogsChan").Return(logsChan)
-			// mockSyncer.On("GetDoneChan").Return((<-chan struct{})(doneChan))
 			mockSyncer.On("GetDoneChan").Return((<-chan uint64)(doneChan))
 			mockSyncer.On("GetProgressMessageChan").Return(make(chan string))
 			mockSyncer.On("IsDownloading").Return(false).Maybe()
@@ -460,15 +460,12 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 			// Add a catch-all mock for any other GetHeader calls (like block 0)
 			mockSyncer.On("GetHeader", mock.AnythingOfType("uint64")).Return((*types.Header)(nil), assert.AnError).Maybe()
 
-			// Send logs to channel
-			if len(tc.logs) > 0 {
-				logsChan <- tc.logs
-			} else {
-				logsChan <- []types.Log{}
-			}
-
 			time.AfterFunc(1*time.Millisecond, func() {
-				// close(doneChan) // Closed by syncer in prod
+				// Send logs to channel
+				if len(tc.logs) > 0 {
+					logsChan <- tc.logs
+				}
+
 				doneChan <- uint64(len(tc.logs)) // Simulate done signal
 			})
 			processed, err := updater.CheckForInfoTreeUpdates("test", tx)

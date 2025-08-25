@@ -20,7 +20,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-var (
+const (
 	batchWorkers = 4
 )
 
@@ -99,12 +99,14 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
-		logsChan:            make(chan []ethTypes.Log, 10),
-		logsChanProgress:    make(chan string, 1),
-		doneChan:            make(chan uint64, 1),
-		highestBlockType:    highestBlockType,
+		// logsChan:            make(chan []ethTypes.Log, 10),
+		logsChan:         make(chan []ethTypes.Log),
+		logsChanProgress: make(chan string, 1),
+		// doneChan:         make(chan uint64, 1),
+		doneChan:         make(chan uint64),
+		highestBlockType: highestBlockType,
 		firstL1Block:        firstL1Block,
-		headersCache:        sync.Map{},
+		headersCache:     sync.Map{},
 	}
 }
 
@@ -160,8 +162,6 @@ func (s *L1Syncer) GetProgressMessageChan() chan string {
 }
 
 func (s *L1Syncer) GetDoneChan() <-chan uint64 {
-	// s.doneChanMtx.RLock()
-	// defer s.doneChanMtx.RUnlock()
 	return s.doneChan
 }
 
@@ -171,8 +171,6 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 		log.Info("L1 syncer already started, skipping")
 		return
 	}
-
-	// s.resetDoneChannel()
 
 	s.isSyncStarted.Store(true)
 
@@ -209,7 +207,6 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 					} else {
 						s.lastCheckedL1Block.Store(latestL1Block)
 					}
-					// s.resetDoneChannel()
 					log.Info(fmt.Sprintf("L1 syncer queried blocks from %d to %d, found %d logs", startBlock, endBlock, numLogs))
 				} else {
 					log.Info("L1 syncer no new blocks", "latestL1Block", latestL1Block, "lastCheckedL1Block", s.lastCheckedL1Block.Load(), "sleep ms", s.queryDelay, "topics", s.topics[0])
@@ -225,7 +222,7 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 
 func (s *L1Syncer) GetHeader(number uint64) (*ethTypes.Header, error) {
 	// if 30 seconds passed since initial time, we will imitate L1 down and return error for the next 4 minutes
-	// if time.Since(initialTime) > 30*time.Second && time.Since(initialTime) < 4*time.Minute {
+	// if time.Since(initialTime) > 5*time.Second && time.Since(initialTime) < 20*time.Second {
 	// 	log.Info("======= Imitating L1 down ========")
 	// 	return nil, fmt.Errorf("L1 is down")
 	// }
@@ -412,8 +409,9 @@ func (s *L1Syncer) queryBlocks(startBlock, endBlock uint64) (numLogs uint64, err
 	results := make(chan jobResult, len(fetches))
 	defer close(results)
 
-	wg.Add(batchWorkers)
-	for i := 0; i < batchWorkers; i++ {
+	workers := min(batchWorkers, len(fetches))
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
 		go s.getSequencedLogs(jobs, results, stop, &wg)
 	}
 
@@ -472,25 +470,27 @@ loop:
 func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult, stop chan bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	for {
-		select {
-		// case <-stop:
-		// 	return
-		case j, ok := <-jobs:
-			if !ok {
-				return
-			}
-			query := ethereum.FilterQuery{
-				FromBlock: new(big.Int).SetUint64(j.From),
-				ToBlock:   new(big.Int).SetUint64(j.To),
-				Addresses: s.l1ContractAddresses,
-				Topics:    s.topics,
-			}
+	for j := range jobs {
+		query := ethereum.FilterQuery{
+			FromBlock: new(big.Int).SetUint64(j.From),
+			ToBlock:   new(big.Int).SetUint64(j.To),
+			Addresses: s.l1ContractAddresses,
+			Topics:    s.topics,
+		}
 
-			var logs []ethTypes.Log
-			var err error
-			retry := 0
-			for {
+		var logs []ethTypes.Log
+		var err error
+		retry := 0
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				if s.flagStop.Load() {
+					log.Info("L1 syncer queryBlocks stopping due to stop flag")
+					return
+				}
+				// log.Info("L1 syncer querying logs", "from", j.From, "to", j.To, "topics", s.topics[0])
 				em := s.getNextEtherman()
 				logs, err = em.FilterLogs(s.ctx, query)
 				if err != nil {
@@ -502,16 +502,18 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 					if retry > 20 {
 						panic("L1 syncer (getSequencedLogs) exceeded 20 retries")
 					}
+					// log.Info("Sleeping", "duration", time.Duration(retry*2)*time.Second)
 					time.Sleep(time.Duration(retry*2) * time.Second)
 					continue
 				}
-				break
+				// log.Info("queryBlock no error, not sleeping")
 			}
-			results <- jobResult{
-				Size:  j.To - j.From,
-				Error: nil,
-				Logs:  logs,
-			}
+			break
+		}
+		results <- jobResult{
+			Size:  j.To - j.From,
+			Error: nil,
+			Logs:  logs,
 		}
 	}
 }
@@ -649,14 +651,3 @@ func (s *L1Syncer) writeDone(numLogs uint64) {
 	log.Info(fmt.Sprintf("L1 syncer done with %d logs", numLogs))
 	s.doneChan <- numLogs
 }
-
-// func (s *L1Syncer) resetDoneChannel() {
-// 	// s.doneChanMtx.Lock()
-// 	// defer s.doneChanMtx.Unlock()
-
-// 	// s.doneChan <- struct{}{}
-// 	if s.doneChan != nil {
-// 		close(s.doneChan)
-// 	}
-// 	s.doneChan = make(chan struct{})
-// }
