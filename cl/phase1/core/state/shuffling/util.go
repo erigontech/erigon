@@ -44,10 +44,7 @@ func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint6
 		flip := (pivot + ind_count - ind) % ind_count
 
 		// No uint64 max function in go standard library.
-		position := ind
-		if flip > ind {
-			position = flip
-		}
+		position := max(flip, ind)
 		// Construct the second hash input.
 		copy(input2, seed[:])
 		input2[32] = byte(i)
