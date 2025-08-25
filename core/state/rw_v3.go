@@ -836,7 +836,7 @@ func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Acco
 			return nil, nil
 		}
 		if r.reader.trace {
-			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.reader.tracePrefix, address, data.Nonce, &data.Balance, data.CodeHash, r.reader.txNum)
+			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.tracePrefix, address, data.Nonce, &data.Balance, data.CodeHash)
 		}
 
 		result := *data
@@ -873,7 +873,7 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 	if ok {
 		if so.data == &deleted {
 			if r.reader.trace {
-				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty], txNum: %d\n", r.reader.tracePrefix, address, key, r.reader.txNum)
+				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty]\n", r.reader.tracePrefix, address, key)
 			}
 			r.bufferedState.accountsMutex.RUnlock()
 			return uint256.Int{}, false, nil
@@ -883,7 +883,9 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, key common.H
 			item, ok := so.storage.Get(storageItem{key: key})
 
 			if ok {
-				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x], txNum: %d\n", r.reader.tracePrefix, address, key, r.reader.txNum)
+				if r.reader.trace {
+					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.tracePrefix, address, key, &item.value)
+				}
 				r.bufferedState.accountsMutex.RUnlock()
 				return item.value, true, nil
 			}
