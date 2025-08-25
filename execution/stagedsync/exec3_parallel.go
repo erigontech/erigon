@@ -628,7 +628,9 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
-	te.doms.ClearRam(false)
+	if !te.inMemExec {
+		te.doms.ClearRam(false)
+	}
 
 	return tx, t2, nil
 }

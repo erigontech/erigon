@@ -60,7 +60,7 @@ var (
 	mxExecStepsInDB    = metrics.NewGauge(`exec_steps_in_db`) //nolint
 	mxExecRepeats      = metrics.NewGauge(`exec_repeats`)     //nolint
 	mxExecTriggers     = metrics.NewGauge(`exec_triggers`)    //nolint
-	mxExecTransactions = metrics.NewCounter(`exec_txns`)
+	mxExecTransactions = metrics.NewGauge(`exec_txns`)
 	mxExecTxnPerBlock  = metrics.NewGauge(`exec_txns_per_block`)
 	mxExecGasPerTxn    = metrics.NewGauge(`exec_gas_per_transaction`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
@@ -125,10 +125,39 @@ const (
 	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind
 )
 
-func resetExecGauges() {
+type gaugeResetTask struct {
+	*time.Timer
+	sync.Mutex
+	ctx     context.Context
+	stopped bool
+}
+
+func (g *gaugeResetTask) run(ctx context.Context) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				g.Lock()
+				defer g.Unlock()
+				g.reset()
+				g.stopped = true
+				return
+			case <-g.C:
+				g.Lock()
+				defer g.Unlock()
+				g.reset()
+				g.stopped = true
+				return
+			}
+		}
+	}()
+}
+
+func (g *gaugeResetTask) reset() {
 	mxExecStepsInDB.Set(0)
 	mxExecRepeats.Set(0)
 	mxExecTriggers.Set(0)
+	mxExecTransactions.Set(0)
 	mxExecTxnPerBlock.Set(0)
 	mxExecGasPerTxn.Set(0)
 	mxExecBlocks.Set(0)
@@ -181,6 +210,27 @@ func resetExecGauges() {
 	mxExecCodeDomainFileReadDuration.Set(0)
 }
 
+var resetTask *gaugeResetTask
+
+func resetExecGauges(ctx context.Context) {
+	// enough time to alow the sampler to scrape
+	const resetDelay = 60 * time.Second
+	if resetTask != nil {
+		resetTask.Lock()
+		defer resetTask.Unlock()
+		if resetTask.stopped {
+			resetTask.Timer = time.NewTimer(resetDelay)
+		} else {
+			resetTask.Reset(resetDelay)
+		}
+	} else {
+		resetTask = &gaugeResetTask{
+			Timer: time.NewTimer(resetDelay),
+		}
+		resetTask.run(ctx)
+	}
+}
+
 func updateDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbstate.SharedDomainsMetrics, interval time.Duration) *dbstate.SharedDomainsMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
@@ -204,7 +254,7 @@ func updateDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbs
 	mxExecDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 	mxExecDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
 	mxExecDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
-	mxExecDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+	mxExecDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
 	mxExecDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
 	prevMetrics.DomainIOMetrics = metrics.DomainIOMetrics
@@ -229,7 +279,7 @@ func updateDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbs
 		mxExecAccountDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 		mxExecAccountDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
 		mxExecAccountDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
-		mxExecAccountDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecAccountDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
 		mxExecAccountDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
 		prevAccountMetrics = *accountMetrics
@@ -256,7 +306,7 @@ func updateDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbs
 		mxExecStorageDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 		mxExecStorageDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
 		mxExecStorageDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
-		mxExecStorageDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecStorageDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
 		mxExecStorageDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
 		prevStorageMetrics = *storageMetrics
@@ -283,7 +333,7 @@ func updateDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbs
 		mxExecCodeDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 		mxExecCodeDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
 		mxExecCodeDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
-		mxExecCodeDomainFileReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecCodeDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
 		mxExecCodeDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
 		prevCodeMetrics = *codeMetrics
@@ -415,12 +465,12 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		avgStorageReadDur = curStorageReadDur / time.Duration(curActivations)
 		avgCodeReadDur = curCodeReadDur / time.Duration(curActivations)
 
-		mxExecTxnDuration.SetUint64(uint64(avgTaskDur.Microseconds()))
-		mxExecTxnExecDuration.SetUint64(uint64(avgExecDur.Microseconds()))
-		mxExecTxnReadDuration.SetUint64(uint64(avgReadDur.Microseconds()))
-		mxExecTxnAccountReadDuration.SetUint64(uint64(avgAccountReadDur.Microseconds()))
-		mxExecTxnStoreageReadDuration.SetUint64(uint64(avgStorageReadDur.Microseconds()))
-		mxExecTxnCodeReadDuration.SetUint64(uint64(avgCodeReadDur.Microseconds()))
+		mxExecTxnDuration.Set(float64(avgTaskDur))
+		mxExecTxnExecDuration.Set(float64(avgExecDur))
+		mxExecTxnReadDuration.Set(float64(avgReadDur))
+		mxExecTxnAccountReadDuration.Set(float64(avgAccountReadDur))
+		mxExecTxnStoreageReadDuration.Set(float64(avgStorageReadDur))
+		mxExecTxnCodeReadDuration.Set(float64(avgCodeReadDur))
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
@@ -481,9 +531,9 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 
 		mxExecReadRate.SetUint64(curReadRate)
 		mxExecWriteRate.SetUint64(curWriteRate)
-		mxExecAccountReadRate.SetUint64(uint64(float64(curAccountReadCount) / interval.Seconds()))
-		mxExecStorageReadRate.SetUint64(uint64(float64(curStorageReadCount) / interval.Seconds()))
-		mxExecCodeReadRate.SetUint64(uint64(float64(curCodeReadCount) / interval.Seconds()))
+		mxExecAccountReadRate.Set(float64(curAccountReadCount) / interval.Seconds())
+		mxExecStorageReadRate.Set(float64(curStorageReadCount) / interval.Seconds())
+		mxExecCodeReadRate.Set(float64(curCodeReadCount) / interval.Seconds())
 
 		mxExecGasPerTxn.Set(float64(avgTaskGas))
 		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
@@ -546,7 +596,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	executedDiffTxs := uint64(max(te.lastExecutedTxNum.Load()-int64(p.prevExecutedTxNum), 0))
 
 	mxExecBlocks.Add(float64(executedDiffBlocks))
-	mxExecTransactions.Add(float64(executedDiffTxs))
+	mxExecTransactions.Set(float64(executedDiffTxs))
 	mxExecTxnPerBlock.Set(float64(executedDiffBlocks) / float64(executedDiffTxs))
 
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
@@ -877,11 +927,12 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := cfg.batchSize.Bytes()
 
-	logEvery := time.NewTicker(20 * time.Second)
+	logInterval := 20 * time.Second
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	flushEvery := time.NewTicker(2 * time.Second)
 	defer flushEvery.Stop()
-	defer resetExecGauges()
+	defer resetExecGauges(ctx)
 
 	var executor executor
 	var executorContext context.Context
@@ -977,7 +1028,13 @@ func ExecV3(ctx context.Context,
 			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "fromTxNum", doms.TxNum(), "initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
+	var lastCommittedTxNum uint64
+	var lastCommittedBlockNum uint64
+
 	if !parallel {
+
+		se := executor.(*serialExecutor)
+
 		execErr = func() error {
 			// Only needed by bor chains
 			shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
@@ -1067,8 +1124,6 @@ func ExecV3(ctx context.Context,
 					inputTxNum++
 				}
 
-				se := executor.(*serialExecutor)
-
 				continueLoop, err := se.execute(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
 
 				if err != nil {
@@ -1146,7 +1201,7 @@ func ExecV3(ctx context.Context,
 						break
 					}
 
-					resetExecGauges()
+					resetExecGauges(ctx)
 
 					var (
 						commitStart   = time.Now()
@@ -1230,6 +1285,36 @@ func ExecV3(ctx context.Context,
 
 			return nil
 		}()
+
+		if u != nil && !u.HasUnwindPoint() {
+			if b != nil {
+				_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+				if err != nil {
+					return err
+				}
+
+				se.lastCommittedBlockNum = b.NumberU64()
+				se.lastCommittedTxNum = inputTxNum
+				se.committedGas += uncommitedGas
+				uncommitedGas = 0
+
+				commitStart := time.Now()
+				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
+				applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
+				if err != nil {
+					return err
+				}
+
+				if !useExternalTx {
+					executor.LogCommitted(commitStart, stepsInDb)
+				}
+			} else {
+				fmt.Printf("[dbg] mmmm... do we need action here????\n")
+			}
+		}
+
+		lastCommittedTxNum = se.lastCommittedTxNum
+		lastCommittedBlockNum = se.lastCommittedBlockNum
 	} else {
 		pe := executor.(*parallelExecutor)
 
@@ -1257,6 +1342,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 
+		var lastLogUpdate time.Time
 		var lastBlockResult blockResult
 		var uncommitedGas int64
 		var flushPending bool
@@ -1341,7 +1427,7 @@ func ExecV3(ctx context.Context,
 							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxExecBlockNum ||
 								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
 
-								resetExecGauges()
+								resetExecGauges(ctx)
 
 								if dbg.TraceApply && dbg.TraceBlock(applyResult.BlockNum) {
 									fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
@@ -1377,6 +1463,9 @@ func ExecV3(ctx context.Context,
 										}
 									}
 								}()
+
+								pe.LogExecuted()
+								lastLogUpdate = time.Now()
 
 								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 								close(commitProgress)
@@ -1441,9 +1530,12 @@ func ExecV3(ctx context.Context,
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					pe.LogExecuted()
-					if pe.agg.HasBackgroundFilesBuild() {
-						logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
+					if time.Since(lastLogUpdate) > logInterval-(logInterval/90) {
+						lastLogUpdate = time.Now()
+						pe.LogExecuted()
+						if pe.agg.HasBackgroundFilesBuild() {
+							logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
+						}
 					}
 				case <-flushEvery.C:
 					if flushPending {
@@ -1472,51 +1564,15 @@ func ExecV3(ctx context.Context,
 		if applyTx, err = pe.flushAndCommit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
 			return fmt.Errorf("flush failed: %w", err)
 		}
+
+		lastCommittedTxNum = pe.lastCommittedTxNum
+		lastCommittedBlockNum = pe.lastCommittedBlockNum
 	}
 
 	executor.wait(ctx)
 
-	if !parallel && u != nil && !u.HasUnwindPoint() {
-		if b != nil {
-			_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
-			if err != nil {
-				return err
-			}
-
-			se := executor.(*serialExecutor)
-			se.lastCommittedBlockNum = b.NumberU64()
-			se.lastCommittedTxNum = inputTxNum
-			se.committedGas += uncommitedGas
-			uncommitedGas = 0
-
-			commitStart := time.Now()
-			stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
-			applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
-			if err != nil {
-				return err
-			}
-
-			if !useExternalTx {
-				executor.LogCommitted(commitStart, stepsInDb)
-			}
-		} else {
-			fmt.Printf("[dbg] mmmm... do we need action here????\n")
-		}
-	}
-
 	if false && !inMemExec {
 		dumpPlainStateDebug(applyTx.(kv.TemporalRwTx), executor.domains())
-	}
-
-	var lastCommittedTxNum uint64
-	var lastCommittedBlockNum uint64
-
-	if parallel {
-		lastCommittedTxNum = executor.(*parallelExecutor).lastCommittedTxNum
-		lastCommittedBlockNum = executor.(*parallelExecutor).lastCommittedBlockNum
-	} else {
-		lastCommittedTxNum = executor.(*serialExecutor).lastCommittedTxNum
-		lastCommittedBlockNum = executor.(*serialExecutor).lastCommittedBlockNum
 	}
 
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
