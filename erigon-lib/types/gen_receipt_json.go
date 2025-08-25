@@ -3,9 +3,10 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
+
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -42,7 +43,7 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.BlockHash = r.BlockHash
 	enc.BlockNumber = (*hexutil.Big)(r.BlockNumber)
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
-	return json.Marshal(&enc)
+	return jsoniter.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -62,7 +63,7 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		TransactionIndex  *hexutil.Uint   `json:"transactionIndex"`
 	}
 	var dec Receipt
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := jsoniter.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Type != nil {

@@ -3,8 +3,9 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
+
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -35,7 +36,7 @@ func (l Log) MarshalJSON() ([]byte, error) {
 	enc.BlockHash = l.BlockHash
 	enc.Index = hexutil.Uint(l.Index)
 	enc.Removed = l.Removed
-	return json.Marshal(&enc)
+	return jsoniter.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -52,7 +53,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 		Removed     *bool           `json:"removed"`
 	}
 	var dec Log
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := jsoniter.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Address == nil {
