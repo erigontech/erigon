@@ -84,6 +84,10 @@ var (
 )
 
 var (
+	BorKurtosisDevnetChainId uint64 = 4927
+)
+
+var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
 

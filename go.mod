@@ -62,6 +62,7 @@ require (
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedib0t/go-pretty/v6 v6.5.9
+	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.18.0
@@ -97,7 +98,7 @@ require (
 	golang.org/x/crypto v0.32.0
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c
 	golang.org/x/net v0.34.0
-	golang.org/x/sync v0.10.0
+	golang.org/x/sync v0.15.0
 	golang.org/x/sys v0.31.0
 	golang.org/x/time v0.9.0
 	google.golang.org/grpc v1.69.4
