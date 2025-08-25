@@ -18,6 +18,7 @@ package seg
 
 import (
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/edsrzf/mmap-go"
@@ -159,6 +160,7 @@ type DecompressArenaSlice2 struct {
 	mem    []byte
 	cap    int
 	offset int
+	a      atomic.Uint32
 }
 
 func NewDecompressArenaSlice2(cap int) (*DecompressArenaSlice2, error) {
@@ -184,8 +186,10 @@ func (c *DecompressArenaSlice2) Allocate(size int) []byte {
 	}
 
 	low := c.offset
-	c.offset += size
-	newOffset := (c.offset + Alignment - 1) / Alignment * Alignment
+	alignedSize := (size + Alignment - 1) / Alignment * Alignment
+	c.offset += alignedSize
+	newOffset := c.offset
+	//c.a.Add(uint32(newOffset))
 	if newOffset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		c.mem = make([]byte, c.cap)
 		c.offset = 0
