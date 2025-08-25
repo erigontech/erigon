@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mailru/easyjson"
 )
 
 const (
@@ -51,6 +53,8 @@ type subscriptionResult struct {
 
 // A value of this type can a JSON-RPC request, notification, successful response or
 // error response. Which one it is depends on the fields.
+//
+//easyjson:json
 type jsonrpcMessage struct {
 	Version string          `json:"jsonrpc,omitempty"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -98,7 +102,7 @@ func (msg *jsonrpcMessage) namespace() string {
 }
 
 func (msg *jsonrpcMessage) String() string {
-	b, _ := json.Marshal(msg)
+	b, _ := easyjson.Marshal(msg)
 	return string(b)
 }
 
@@ -133,6 +137,7 @@ func errorMessage(err error) *jsonrpcMessage {
 	return msg
 }
 
+//easyjson:json
 type jsonError struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`
