@@ -168,6 +168,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	if firstBlock >= latestBlock.Uint64() {
 		return nil
 	}
+	latestBlock.SetUint64(min(latestBlock.Uint64(), firstBlock+uint64(cfg.syncConfig.LoopBlockLimit)))
 
 	if firstBlock+1 > latestBlock.Uint64() { // print only if 1+ blocks available
 		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
