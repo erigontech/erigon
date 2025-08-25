@@ -138,7 +138,7 @@ func (t *spanBlockProducersTracker) ObserveSpanAsync(ctx context.Context, span *
 }
 
 func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
-	t.logger.Info(heimdallLogPrefix("block producers tracker observing span"), "newSpan", newSpan)
+	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "newSpan", newSpan)
 
 	lastProducerSelection, ok, err := t.store.LastEntity(ctx)
 	if err != nil {
