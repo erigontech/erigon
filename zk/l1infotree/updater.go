@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -31,6 +33,7 @@ type Syncer interface {
 	ConsumeQueryBlocks()
 	WaitQueryBlocksToFinish()
 	QueryForRootLog(to uint64) (*types.Log, error)
+	ClearHeaderCache()
 }
 
 type L2InfoReaderRpc interface {
@@ -102,35 +105,191 @@ func (u *Updater) WarmUp(tx kv.RwTx) (err error) {
 	return nil
 }
 
+type LogKey struct {
+	BlockNumber uint64
+	TxIndex     uint
+	Index       uint
+}
+
+func NewLogKey(l types.Log) LogKey {
+	return LogKey{
+		BlockNumber: l.BlockNumber,
+		TxIndex:     l.TxIndex,
+		Index:       l.Index,
+	}
+}
+
+type L1InfoWorkerPool struct {
+	workers     []*L1InfoWorker
+	taskChan    chan *L1InfoTask
+	taskResChan chan *L1InfoTaskResult
+}
+
+func NewL1InfoWorkerPool(numWorkers int, syncer Syncer, l2Syncer L2Syncer) *L1InfoWorkerPool {
+	pool := &L1InfoWorkerPool{
+		workers:     make([]*L1InfoWorker, numWorkers),
+		taskChan:    make(chan *L1InfoTask, numWorkers),
+		taskResChan: make(chan *L1InfoTaskResult, numWorkers*10),
+	}
+
+	for i := 0; i < numWorkers; i++ {
+		worker := NewL1InfoWorker(i, syncer, l2Syncer, pool.taskChan, pool.taskResChan)
+		pool.workers[i] = worker
+	}
+
+	return pool
+}
+func (pool *L1InfoWorkerPool) Start() {
+	for _, worker := range pool.workers {
+		go worker.Start()
+	}
+}
+func (pool *L1InfoWorkerPool) Stop() {
+	close(pool.taskChan)
+}
+
+func (pool *L1InfoWorkerPool) AddTask(task *L1InfoTask) {
+	pool.taskChan <- task
+}
+func (pool *L1InfoWorkerPool) Wait() {
+	for _, worker := range pool.workers {
+		worker.Wait()
+	}
+	close(pool.taskResChan)
+}
+
+func (pool *L1InfoWorkerPool) GetTaskResChannel() chan *L1InfoTaskResult {
+	return pool.taskResChan
+}
+
+type L1InfoWorker struct {
+	id          int
+	syncer      Syncer
+	l2Syncer    L2Syncer
+	taskChan    chan *L1InfoTask
+	taskResChan chan *L1InfoTaskResult
+	waitGroup   sync.WaitGroup
+}
+
+func NewL1InfoWorker(id int, syncer Syncer, l2Syncer L2Syncer, taskChan chan *L1InfoTask, taskResChan chan *L1InfoTaskResult) *L1InfoWorker {
+	return &L1InfoWorker{
+		syncer:      syncer,
+		l2Syncer:    l2Syncer,
+		taskChan:    taskChan,
+		taskResChan: taskResChan,
+		waitGroup:   sync.WaitGroup{},
+	}
+}
+
+func (worker *L1InfoWorker) Start() {
+	worker.waitGroup.Add(1)
+	defer worker.waitGroup.Done()
+
+	for task := range worker.taskChan {
+		worker.taskResChan <- task.Do()
+	}
+}
+
+func (worker *L1InfoWorker) Wait() {
+	worker.waitGroup.Wait()
+}
+
+// L1InfoTask is used to query L1 header and create L1InfoTreeUpdate and calculate the leaf hash
+type L1InfoTask struct {
+	Log    types.Log
+	syncer Syncer
+}
+
+type L1InfoTaskResult struct {
+	l1InfoTreeUpdate *zkTypes.L1InfoTreeUpdateWithLeafHash
+	logKey           LogKey
+	err              error
+}
+
+func NewL1InfoTask(log types.Log, syncer Syncer) *L1InfoTask {
+	return &L1InfoTask{
+		Log:    log,
+		syncer: syncer,
+	}
+}
+
+func (t *L1InfoTask) Do() *L1InfoTaskResult {
+	header, err := t.syncer.GetHeader(t.Log.BlockNumber)
+	if err != nil {
+		log.Error("Failed to get header for L1InfoTask", "blockNumber", t.Log.BlockNumber, "error", err)
+		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("header not found for block number %d", t.Log.BlockNumber)}
+	}
+
+	update, err := createL1InfoTreeUpdateWithLeafHash(t.Log, header)
+	if err != nil {
+		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("createL1InfoTreeUpdateWithLeafHash: %w", err)}
+	}
+
+	return &L1InfoTaskResult{l1InfoTreeUpdate: update, logKey: NewLogKey(t.Log), err: nil}
+}
+
 func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (processed uint64, err error) {
+	start := time.Now()
 	defer func() {
 		if err != nil {
 			u.syncer.StopQueryBlocks()
 			u.syncer.ConsumeQueryBlocks()
 			u.syncer.WaitQueryBlocksToFinish()
 		}
+		u.syncer.ClearHeaderCache()
 	}()
 
 	hermezDb := hermez_db.NewHermezDb(tx)
 	logChan := u.syncer.GetLogsChan()
 	progressChan := u.syncer.GetProgressMessageChan()
 
+	workerPool := NewL1InfoWorkerPool(runtime.NumCPU(), u.syncer, u.l2Syncer)
+	workerPool.Start()
+
+	taskResChan := workerPool.GetTaskResChannel()
+
+	indexUpdateMap := make(map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash)
+
 	// first get all the logs we need to process
 	allLogs := make([]types.Log, 0)
-LOOP:
-	for {
-		select {
-		case logs := <-logChan:
-			allLogs = append(allLogs, logs...)
-		case msg := <-progressChan:
-			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
-		default:
-			if !u.syncer.IsDownloading() {
-				break LOOP
+	go func() {
+		for {
+			select {
+			case logs := <-logChan:
+				allLogs = append(allLogs, logs...)
+				for _, log := range logs {
+					workerPool.AddTask(NewL1InfoTask(log, u.syncer))
+				}
+
+			case msg := <-progressChan:
+				log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
+			default:
+				if !u.syncer.IsDownloading() {
+					workerPool.Stop()
+					workerPool.Wait()
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
+	}()
+
+	tree, err := InitialiseL1InfoTree(hermezDb)
+	if err != nil {
+		log.Error(fmt.Sprintf("[%s] Failed to initialise L1 info tree: %v", logPrefix, err))
+		return
 	}
+
+	for res := range taskResChan {
+		if res.err != nil {
+			log.Error(fmt.Sprintf("[%s] Failed to process log: %v", logPrefix, res.err))
+			continue
+		}
+
+		indexUpdateMap[res.logKey] = res.l1InfoTreeUpdate
+	}
+
+	log.Info(fmt.Sprintf("[%s] Finished processing logs of size %d", logPrefix, len(allLogs)), "processed", len(indexUpdateMap))
 
 	// sort the logs by block number - it is important that we process them in order to get the index correct
 	// the v2 topic always appears after the v1 topic so we can rely on this ordering to process the logs correctly.
@@ -147,82 +306,70 @@ LOOP:
 		return l1.Index < l2.Index
 	})
 
-	// chunk the logs into batches, so we don't overload the RPC endpoints too much at once
-	chunks := chunkLogs(allLogs, 50)
-
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	processed = 0
 
-	var tree *L1InfoTree
-	if len(allLogs) > 0 {
-		log.Info(fmt.Sprintf("[%s] Checking for L1 info tree updates, logs count:%v", logPrefix, len(allLogs)))
-		tree, err = InitialiseL1InfoTree(hermezDb)
-		if err != nil {
-			return 0, fmt.Errorf("InitialiseL1InfoTree: %w", err)
-		}
-	}
+	log.Info(fmt.Sprintf("[%s] Processing %d logs", logPrefix, len(allLogs)))
 
-	// process the logs in chunks
-	for _, chunk := range chunks {
+	for _, l := range allLogs {
 		select {
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Processed %d/%d logs, %d%% complete", logPrefix, processed, len(allLogs), int(processed)*100/len(allLogs)))
 		default:
 		}
 
-		headersMap, err := u.syncer.L1QueryHeaders(chunk)
-		if err != nil {
-			return 0, fmt.Errorf("L1QueryHeaders: %w", err)
-		}
-
-		for _, l := range chunk {
-			switch l.Topics[0] {
-			case contracts.UpdateL1InfoTreeTopic:
-				// calculate and store the info tree leaf / index
-				if err := u.HandleL1InfoTreeUpdate(hermezDb, l, tree, headersMap); err != nil {
-					return 0, fmt.Errorf("HandleL1InfoTreeUpdate: %w", err)
-				}
-				processed++
-			case contracts.UpdateL1InfoTreeV2Topic:
-				// here we can verify that the information we have stored about the info tree is indeed correct
-				leafCount := l.Topics[1].Big().Uint64()
-				root := l.Data[:32]
-				expectedIndex, found, err := hermezDb.GetL1InfoTreeIndexByRoot(common.BytesToHash(root))
-				if err != nil {
-					return 0, fmt.Errorf("GetL1InfoTreeIndexByRoot: %w", err)
-				}
-				if !found {
-					// some leaf must have been missed in this case as the v2 event from the info tree suggests
-					// there is a root that we haven't calculated so we need to unwind the info tree locally
-					// and try syncing again
-					log.Error(fmt.Sprintf("[%s] Could not find an l1 info tree update by root", logPrefix), "root", common.BytesToHash(root).String())
-					if err := u.RollbackL1InfoTree(hermezDb, tx); err != nil {
-						return 0, fmt.Errorf("RollbackL1InfoTree: %w", err)
-					}
-					u.syncer.RunQueryBlocks(u.progress)
-
-					return processed, nil
-				}
-				if expectedIndex == leafCount-1 {
-					if err = hermezDb.WriteConfirmedL1InfoTreeUpdate(expectedIndex, l.BlockNumber); err != nil {
-						return 0, fmt.Errorf("WriteConfirmedL1InfoTreeUpdate: %w", err)
-					}
-				} else {
-					log.Error(fmt.Sprintf("[%s] Unexpected index for L1 info tree root", logPrefix), "expected", expectedIndex, "found", leafCount-1)
-					if err := u.RollbackL1InfoTree(hermezDb, tx); err != nil {
-						return 0, fmt.Errorf("RollbackL1InfoTree: %w", err)
-					}
-					u.syncer.RunQueryBlocks(u.progress)
-
-					// early return as we need to re-start the syncing process here to get new
-					// leaves from scratch
-					return processed, nil
-				}
-				processed++
-			default:
-				log.Warn("received unexpected topic from l1 info tree stage", "topic", l.Topics[0])
+		switch l.Topics[0] {
+		case contracts.UpdateL1InfoTreeTopic:
+			// calculate and store the info tree leaf / index
+			update, ok := indexUpdateMap[NewLogKey(l)]
+			if !ok {
+				log.Error(fmt.Sprintf("[%s] Could not find L1 info tree update for log: %v", logPrefix, l))
+				panic(fmt.Sprintf("Could not find L1 info tree update for log: %v", l))
 			}
+			if err := u.HandleL1InfoTreeUpdate(hermezDb, tree, update); err != nil {
+				return 0, fmt.Errorf("HandleL1InfoTreeUpdate: %w", err)
+			}
+			processed++
+		case contracts.UpdateL1InfoTreeV2Topic:
+			// here we can verify that the information we have stored about the info tree is indeed correct
+			leafCount := l.Topics[1].Big().Uint64()
+			root := l.Data[:32]
+			expectedIndex, found, err := hermezDb.GetL1InfoTreeIndexByRoot(common.BytesToHash(root))
+			if err != nil {
+				return 0, fmt.Errorf("GetL1InfoTreeIndexByRoot: %w", err)
+			}
+			if !found {
+				// some leaf must have been missed in this case as the v2 event from the info tree suggests
+				// there is a root that we haven't calculated so we need to unwind the info tree locally
+				// and try syncing again
+				log.Error(fmt.Sprintf("[%s] Could not find an l1 info tree update by root", logPrefix), "root", common.BytesToHash(root).String())
+				if err := u.RollbackL1InfoTree(hermezDb, tx); err != nil {
+					return 0, fmt.Errorf("RollbackL1InfoTree: %w", err)
+				}
+				u.syncer.RunQueryBlocks(u.progress)
+
+				return processed, nil
+			}
+			if expectedIndex == leafCount-1 {
+				if err = hermezDb.WriteConfirmedL1InfoTreeUpdate(expectedIndex, l.BlockNumber); err != nil {
+					return 0, fmt.Errorf("WriteConfirmedL1InfoTreeUpdate: %w", err)
+				}
+			} else {
+				log.Error(fmt.Sprintf("[%s] Unexpected index for L1 info tree root", logPrefix), "expected", expectedIndex, "found", leafCount-1)
+				if err := u.RollbackL1InfoTree(hermezDb, tx); err != nil {
+					return 0, fmt.Errorf("RollbackL1InfoTree: %w", err)
+				}
+				u.syncer.RunQueryBlocks(u.progress)
+
+				// early return as we need to re-start the syncing process here to get new
+				// leaves from scratch
+				return processed, nil
+			}
+			processed++
+			log.Info(fmt.Sprintf("[%s] Processed L1 info tree v2 update", logPrefix), "processed", processed)
+		default:
+			log.Warn("received unexpected topic from l1 info tree stage", "topic", l.Topics[0])
 		}
 	}
 
@@ -236,37 +383,27 @@ LOOP:
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
+	root := tree.currentRoot
+	log.Info(fmt.Sprintf("[%s] L1 Info Tree root: %s", logPrefix, root.String()), "processed", processed, "progress", u.progress, "duration", time.Since(start).String())
+
 	return processed, nil
 }
 
-func (u *Updater) HandleL1InfoTreeUpdate(hermezDb *hermez_db.HermezDb, l types.Log, tree *L1InfoTree, headersMap map[uint64]*types.Header) error {
+func (u *Updater) HandleL1InfoTreeUpdate(hermezDb *hermez_db.HermezDb, tree *L1InfoTree, update *zkTypes.L1InfoTreeUpdateWithLeafHash) error {
 	var err error
-	header := headersMap[l.BlockNumber]
-	if header == nil {
-		header, err = u.syncer.GetHeader(l.BlockNumber)
-		if err != nil {
-			return fmt.Errorf("GetHeader: %w", err)
-		}
-	}
 
-	tmpUpdate, err := createL1InfoTreeUpdate(l, header)
-	if err != nil {
-		return fmt.Errorf("createL1InfoTreeUpdate: %w", err)
-	}
-
-	leafHash := HashLeafData(tmpUpdate.GER, tmpUpdate.ParentHash, tmpUpdate.Timestamp)
-	if tree.LeafExists(leafHash) {
-		log.Warn("Skipping log as L1 Info Tree leaf already exists", "hash", common.BytesToHash(leafHash[:]).String())
+	if tree.LeafExists(update.LeafHash) {
+		log.Warn("Skipping log as L1 Info Tree leaf already exists", "hash", common.BytesToHash(update.LeafHash[:]).String())
 		return nil
 	}
 
 	if u.latestUpdate != nil {
-		tmpUpdate.Index = u.latestUpdate.Index + 1
+		update.Index = u.latestUpdate.Index + 1
 	}
 	// if latestUpdate is nil then Index = 0 which is the default value so no need to set it
-	u.latestUpdate = tmpUpdate
+	u.latestUpdate = &update.L1InfoTreeUpdate
 
-	newRoot, err := tree.AddLeaf(uint32(u.latestUpdate.Index), leafHash)
+	newRoot, err := tree.AddLeaf(uint32(u.latestUpdate.Index), update.LeafHash)
 	if err != nil {
 		return fmt.Errorf("tree.AddLeaf: %w", err)
 	}
@@ -280,7 +417,7 @@ func (u *Updater) HandleL1InfoTreeUpdate(hermezDb *hermez_db.HermezDb, l types.L
 		"parent", u.latestUpdate.ParentHash.String(),
 	)
 
-	if err = writeL1InfoTreeUpdate(hermezDb, u.latestUpdate, leafHash, newRoot); err != nil {
+	if err = writeL1InfoTreeUpdate(hermezDb, u.latestUpdate, update.LeafHash, newRoot); err != nil {
 		return fmt.Errorf("writeL1InfoTreeUpdate: %w", err)
 	}
 
@@ -518,6 +655,23 @@ func createL1InfoTreeUpdate(l types.Log, header *types.Header) (*zkTypes.L1InfoT
 	}
 
 	return update, nil
+}
+
+func createL1InfoTreeUpdateWithLeafHash(l types.Log, header *types.Header) (*zkTypes.L1InfoTreeUpdateWithLeafHash, error) {
+	if header == nil {
+		return nil, fmt.Errorf("header not found for block number %d", l.BlockNumber)
+	}
+
+	update, err := createL1InfoTreeUpdate(l, header)
+	if err != nil {
+		return nil, err
+	}
+
+	leafHash := HashLeafData(update.GER, update.ParentHash, update.Timestamp)
+	return &zkTypes.L1InfoTreeUpdateWithLeafHash{
+		L1InfoTreeUpdate: *update,
+		LeafHash:         leafHash,
+	}, nil
 }
 
 func writeL1InfoTreeUpdate(

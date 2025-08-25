@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/iden3/go-iden3-crypto/keccak256"
+	"golang.org/x/sync/singleflight"
 
 	"encoding/binary"
 
@@ -82,7 +83,9 @@ type L1Syncer struct {
 	logsChan         chan []ethTypes.Log
 	logsChanProgress chan string
 
-	highestBlockType string // finalized, latest, safe
+	highestBlockType string   // finalized, latest, safe
+	headersCache     sync.Map // map[uint64]*ethTypes.Header // cache for headers
+	sfGroup          singleflight.Group
 }
 
 func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string, firstL1Block uint64) *L1Syncer {
@@ -99,6 +102,7 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		logsChanProgress:    make(chan string),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
+		headersCache:        sync.Map{},
 	}
 }
 
@@ -205,8 +209,30 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 }
 
 func (s *L1Syncer) GetHeader(number uint64) (*ethTypes.Header, error) {
-	em := s.getNextEtherman()
-	return em.HeaderByNumber(s.ctx, new(big.Int).SetUint64(number))
+	if header, ok := s.headersCache.Load(number); ok {
+		log.Info("Cache hit for header", "number", number)
+		return header.(*ethTypes.Header), nil
+	}
+
+	// Deduplicate concurrent requests
+	v, err, _ := s.sfGroup.Do(fmt.Sprintf("header-%d", number), func() (any, error) {
+		em := s.getNextEtherman()
+		header, err := em.HeaderByNumber(s.ctx, new(big.Int).SetUint64(number))
+		if err != nil {
+			return nil, err
+		}
+		s.headersCache.Store(number, header)
+		return header, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return v.(*ethTypes.Header), nil
+}
+
+func (s *L1Syncer) ClearHeaderCache() {
+	s.headersCache = sync.Map{}
 }
 
 func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
