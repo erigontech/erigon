@@ -3,7 +3,7 @@ set -e # Enable exit on error
 
 # Sanity check for mandatory parameters
 if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR]"
+  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST]"
   echo
   echo "  CHAIN:           The chain identifier (possible values: mainnet, gnosis, polygon)"
   echo "  RPC_VERSION:     The rpc-tests repository version or branch (e.g., v1.66.0, main)"
