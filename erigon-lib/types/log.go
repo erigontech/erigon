@@ -76,6 +76,7 @@ type ErigonLog struct {
 
 type ErigonLogs []*ErigonLog
 
+//easyjson:json
 type Logs []*Log
 
 func (logs Logs) Copy() Logs {
