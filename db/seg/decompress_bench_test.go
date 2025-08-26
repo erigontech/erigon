@@ -37,7 +37,9 @@ func BenchmarkDecompressNext(b *testing.B) {
 			g.Reset(0)
 			for g.HasNext() {
 				buf, _ = g.Next(buf[:0])
-				clear(buf)
+				if len(buf) > 0 {
+					_, _ = buf[0], buf[len(buf)-1]
+				}
 			}
 		}
 	})
@@ -48,7 +50,9 @@ func BenchmarkDecompressNext(b *testing.B) {
 			g.Reset(0)
 			for g.HasNext() {
 				k, _ := g.Next(nil)
-				clear(k)
+				if len(k) > 0 {
+					_, _ = k[0], k[len(k)-1]
+				}
 			}
 		}
 	})
