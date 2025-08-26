@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/types"
@@ -35,8 +36,11 @@ func (se *serialExecutor) LogExecuted() {
 	se.progress.LogExecuted(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitted(commitStart time.Time, stepsIndDb float64) {
-	se.progress.LogCommitted(se.rs.StateV3, se, commitStart, stepsIndDb)
+func (se *serialExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	se.committedGas += int64(committedGas)
+	se.lastCommittedBlockNum += committedBlocks
+	se.lastCommittedTxNum += committedTransactions
+	se.progress.LogCommitted(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {

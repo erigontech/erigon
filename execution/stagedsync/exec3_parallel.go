@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -91,7 +92,7 @@ type executor interface {
 	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
 
 	LogExecuted()
-	LogCommitted(commitStart time.Time, stepsInDb float64)
+	LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
 	LogComplete(stepsInDb float64)
 }
 
@@ -1179,8 +1180,11 @@ func (pe *parallelExecutor) LogExecuted() {
 	}
 }
 
-func (pe *parallelExecutor) LogCommitted(commitStart time.Time, stepsInDb float64) {
-	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb)
+func (pe *parallelExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	pe.committedGas += int64(committedGas)
+	pe.lastCommittedBlockNum += committedBlocks
+	pe.lastCommittedTxNum += committedTransactions
+	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}

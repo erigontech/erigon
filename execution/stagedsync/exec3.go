@@ -613,7 +613,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	}
 }
 
-func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64) {
+func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	var te *txExecutor
 	var suffix string
 
@@ -1001,7 +1001,7 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
-	var uncommitedGas int64
+	var uncommitedGas uint64
 	var b *types.Block
 
 	var readAhead chan uint64
@@ -1130,7 +1130,7 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				uncommitedGas = se.executedGas.Load() - int64(se.committedGas)
+				uncommitedGas = uint64(se.executedGas.Load() - int64(se.committedGas))
 
 				if !continueLoop {
 					return nil
@@ -1222,8 +1222,6 @@ func ExecV3(ctx context.Context,
 
 					se.lastCommittedBlockNum = b.NumberU64()
 					se.lastCommittedTxNum = inputTxNum
-					se.committedGas += uncommitedGas
-					uncommitedGas = 0
 
 					timeStart := time.Now()
 
@@ -1262,8 +1260,10 @@ func ExecV3(ctx context.Context,
 					}
 
 					if !useExternalTx {
-						executor.LogCommitted(commitStart, stepsInDb)
+						executor.LogCommitted(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
 					}
+
+					uncommitedGas = 0
 
 					logger.Info("Committed", "time", time.Since(commitStart),
 						"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
@@ -1294,9 +1294,8 @@ func ExecV3(ctx context.Context,
 				}
 
 				se.lastCommittedBlockNum = b.NumberU64()
+				committedTransactions := inputTxNum - se.lastCommittedTxNum
 				se.lastCommittedTxNum = inputTxNum
-				se.committedGas += uncommitedGas
-				uncommitedGas = 0
 
 				commitStart := time.Now()
 				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
@@ -1306,8 +1305,10 @@ func ExecV3(ctx context.Context,
 				}
 
 				if !useExternalTx {
-					executor.LogCommitted(commitStart, stepsInDb)
+					executor.LogCommitted(commitStart, 0, committedTransactions, uncommitedGas, stepsInDb, commitment.CommitProgress{})
 				}
+
+				uncommitedGas = 0
 			} else {
 				fmt.Printf("[dbg] mmmm... do we need action here????\n")
 			}
@@ -1342,7 +1343,8 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 
-		var lastLogUpdate time.Time
+		var lastExecutedLog time.Time
+		var lastCommitedLog time.Time
 		var lastBlockResult blockResult
 		var uncommitedGas int64
 		var flushPending bool
@@ -1365,6 +1367,7 @@ func ExecV3(ctx context.Context,
 
 			blockUpdateCount := 0
 			blockApplyCount := 0
+			transactionsPerBlock := uint64(0)
 
 			for {
 				select {
@@ -1418,6 +1421,9 @@ func ExecV3(ctx context.Context,
 						if applyResult.BlockNum > lastBlockResult.BlockNum {
 							pe.doms.SetTxNum(applyResult.lastTxNum)
 							pe.doms.SetBlockNum(applyResult.BlockNum)
+							if lastBlockResult.lastTxNum > 0 {
+								transactionsPerBlock = (transactionsPerBlock + applyResult.lastTxNum - lastBlockResult.lastTxNum) / 2
+							}
 							lastBlockResult = *applyResult
 						}
 
@@ -1440,10 +1446,13 @@ func ExecV3(ctx context.Context,
 								}
 								pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
+								uncommittedTransactions := lastBlockResult.lastTxNum - pe.lastCommittedTxNum
 								commitProgress := make(chan *commitment.CommitProgress, 100)
 
 								go func() {
 									logEvery := time.NewTicker(20 * time.Second)
+									commitStart := time.Now()
+
 									defer logEvery.Stop()
 									var lastProgress commitment.CommitProgress
 									for {
@@ -1452,20 +1461,37 @@ func ExecV3(ctx context.Context,
 											return
 										case progress, ok := <-commitProgress:
 											if !ok {
+												if time.Since(lastCommitedLog) > logInterval/20 {
+													progress := float64(lastProgress.KeyIndex) / float64(lastProgress.UpdateCount)
+													committedGas := uint64(float64(uncommitedGas) * progress)
+													committedTransactions := uint64(float64(uncommittedTransactions) * progress)
+													commitedBlocks := committedTransactions / transactionsPerBlock
+													pe.LogCommitted(commitStart, commitedBlocks, committedGas, committedTransactions, stepsInDb, lastProgress)
+													lastCommitedLog = time.Now()
+												}
 												return
 											}
 											lastProgress = *progress
 										case <-logEvery.C:
-											done := float64(lastProgress.KeyIndex) / float64(lastProgress.UpdateCount)
-											fmt.Println(lastProgress.KeyIndex, lastProgress.UpdateCount, done,
-												"uc gas", common.PrettyCounter(uncommitedGas),
-												"done gas", common.PrettyCounter(uint64(done*float64(uncommitedGas))))
+											if time.Since(lastCommitedLog) > logInterval-(logInterval/90) {
+												lastCommitedLog = time.Now()
+												progress := float64(lastProgress.KeyIndex) / float64(lastProgress.UpdateCount)
+												committedGas := uint64(float64(uncommitedGas) * progress)
+												committedTransactions := uint64(float64(uncommittedTransactions) * progress)
+												commitedBlocks := committedTransactions / transactionsPerBlock
+												pe.LogCommitted(commitStart, commitedBlocks, committedTransactions, committedGas, stepsInDb, lastProgress)
+												if pe.agg.HasBackgroundFilesBuild() {
+													logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
+												}
+											}
 										}
 									}
 								}()
 
-								pe.LogExecuted()
-								lastLogUpdate = time.Now()
+								if time.Since(lastExecutedLog) > logInterval/50 {
+									pe.LogExecuted()
+									lastExecutedLog = time.Now()
+								}
 
 								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 								close(commitProgress)
@@ -1496,7 +1522,6 @@ func ExecV3(ctx context.Context,
 
 								pe.lastCommittedBlockNum = lastBlockResult.BlockNum
 								pe.lastCommittedTxNum = lastBlockResult.lastTxNum
-								pe.committedGas += uncommitedGas
 								uncommitedGas = 0
 							}
 						}
@@ -1530,8 +1555,8 @@ func ExecV3(ctx context.Context,
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					if time.Since(lastLogUpdate) > logInterval-(logInterval/90) {
-						lastLogUpdate = time.Now()
+					if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
+						lastExecutedLog = time.Now()
 						pe.LogExecuted()
 						if pe.agg.HasBackgroundFilesBuild() {
 							logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
