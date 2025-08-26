@@ -570,11 +570,11 @@ func (g *Getter) Count() int        { return g.d.Count() }
 func (g *Getter) FileName() string  { return g.fName }
 
 func (g *Getter) nextPos(clean bool) (pos uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
+	//defer func() {
+	//	if rec := recover(); rec != nil {
+	//		panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
+	//	}
+	//}()
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
