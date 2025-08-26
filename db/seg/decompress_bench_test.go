@@ -29,21 +29,21 @@ func BenchmarkDecompressNext(b *testing.B) {
 	d := prepareDict(t, 1, 1_000)
 	defer d.Close()
 
-	b.Run("next.buf", func(b *testing.B) {
+	b.Run("buf", func(b *testing.B) {
 		b.ReportAllocs()
-		var buf []byte
+		var k []byte
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
 			g.Reset(0)
 			for g.HasNext() {
-				buf, _ = g.Next(buf[:0])
-				if len(buf) > 0 {
-					_, _ = buf[0], buf[len(buf)-1]
+				k, _ = g.Next(k[:0])
+				if len(k) > 0 {
+					_, _ = k[0], k[len(k)-1]
 				}
 			}
 		}
 	})
-	b.Run("next.nil", func(b *testing.B) {
+	b.Run("nil", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
@@ -56,27 +56,34 @@ func BenchmarkDecompressNext(b *testing.B) {
 			}
 		}
 	})
-	//b.Run("skip", func(b *testing.B) {
-	//	b.ReportAllocs()
-	//	g := d.MakeGetter()
-	//	for i := 0; i < b.N; i++ {
-	//		_, _ = g.Skip()
-	//		if !g.HasNext() {
-	//			g.Reset(0)
-	//		}
-	//	}
-	//})
-	//
-	//b.Run("matchcmp_non_existing_key", func(b *testing.B) {
-	//	b.ReportAllocs()
-	//	g := d.MakeGetter()
-	//	for i := 0; i < b.N; i++ {
-	//		_ = g.MatchCmp([]byte("longlongword"))
-	//		if !g.HasNext() {
-	//			g.Reset(0)
-	//		}
-	//	}
-	//})
+}
+
+func BenchmarkDecompressSkip(b *testing.B) {
+	t := new(testing.T)
+	d := prepareDict(t, 1, 1_000)
+	defer d.Close()
+
+	b.Run("skip", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			_, _ = g.Skip()
+			if !g.HasNext() {
+				g.Reset(0)
+			}
+		}
+	})
+
+	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
+		b.ReportAllocs()
+		g := d.MakeGetter()
+		for i := 0; i < b.N; i++ {
+			_ = g.MatchCmp([]byte("longlongword"))
+			if !g.HasNext() {
+				g.Reset(0)
+			}
+		}
+	})
 }
 
 func BenchmarkDecompressTorrent(t *testing.B) {
