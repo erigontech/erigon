@@ -683,14 +683,12 @@ func (g *Getter) HasNext() bool {
 
 func (g *Getter) alloc(n int) []byte {
 	const DecArenaSize = 64 * 1024
-	const Alignment = 8
 	if n >= DecArenaSize {
 		return make([]byte, n)
 	}
 
 	low := g.allocArenaPos
-	alignedN := (n + Alignment - 1) / Alignment * Alignment
-	g.allocArenaPos += alignedN
+	g.allocArenaPos += n
 	if g.allocArenaPos >= DecArenaSize || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		g.allocArena = make([]byte, DecArenaSize)
 		g.allocArenaPos = 0
