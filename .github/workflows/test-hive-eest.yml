@@ -203,7 +203,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/fusaka-devnet-5%40v1.1.0/fixtures_fusaka-devnet-5.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg branch=master --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/fusaka-devnet-5%40v1.1.0/fixtures_fusaka-devnet-5.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
