@@ -162,7 +162,8 @@ func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntit
 	// Due to VeBlop, span.StartBlock is no longer strictly increasing,
 	// so this kind of breaks the "Entity" abstraction.
 	// So for spans we skip the sorting and just rely on span.Id for the ordering.
-	if f.name != "SpanFetcher" {
+	var entity TEntity
+	if _, ok := any(entity).(*Span); !ok {
 		slices.SortFunc(entities, func(e1, e2 TEntity) int {
 			n1 := e1.BlockNumRange().Start
 			n2 := e2.BlockNumRange().Start
