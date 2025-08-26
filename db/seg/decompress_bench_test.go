@@ -26,7 +26,7 @@ import (
 
 func BenchmarkDecompressNext(b *testing.B) {
 	t := new(testing.T)
-	d := prepareDict(t, 1)
+	d := prepareDict(t, 1, 1_000)
 	defer d.Close()
 
 	b.Run("next.buf", func(b *testing.B) {
