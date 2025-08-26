@@ -576,7 +576,9 @@ func (c *Client) dispatch(codec ServerCodec) {
 					conn.handler.logger.Warn("[rpc] batch limit exceeded", "limit", c.batchLimit, "requested", len(op.msgs))
 					// Send error response
 					errMsg := errorMessage(batchErr)
-					_ = conn.codec.WriteJSON(context.Background(), errMsg)
+					if err := conn.codec.WriteJSON(context.Background(), errMsg); err != nil {
+						conn.handler.logger.Debug("Failed to send batch limit error", "err", err)
+					}
 					// Then close the connection
 					conn.close(batchErr, lastOp)
 					continue
@@ -588,7 +590,9 @@ func (c *Client) dispatch(codec ServerCodec) {
 
 		case err := <-c.readErr:
 			conn.handler.logger.Trace("RPC connection read error", "err", err)
-			conn.close(err, lastOp)
+			// A read error is fatal for the connection, and all pending requests must be cancelled, including any
+			// that might still be considered in-flight.
+			conn.close(err, nil)
 			reading = false
 
 		// Reconnect:
