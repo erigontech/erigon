@@ -524,6 +524,10 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 						fmt.Printf("%d (%d.%d) RM DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 					}
 
+					if pr.Version.TxIndex > s.dep {
+						s.dep = pr.Version.TxIndex
+					}
+
 					panic(ErrDependency)
 				}
 			}
