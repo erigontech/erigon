@@ -19,29 +19,10 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/zk/contracts"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/l1infotree"
 	"github.com/erigontech/erigon/zk/sequencer"
 	"github.com/erigontech/erigon/zk/types"
 )
-
-type IL1Syncer interface {
-	// atomic
-	IsSyncStarted() bool
-	GetLastCheckedL1Block() uint64
-
-	// Channels
-	GetLogsChan() chan []ethTypes.Log
-	GetProgressMessageChan() chan string
-	GetDoneChan() <-chan uint64
-
-	L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error)
-	GetBlock(number uint64) (*ethTypes.Block, error)
-	GetHeader(number uint64) (*ethTypes.Header, error)
-	RunQueryBlocks(lastCheckedBlock uint64)
-	StopQueryBlocks()
-	ConsumeQueryBlocks()
-	WaitQueryBlocksToFinish()
-	CheckL1BlockFinalized(blockNo uint64) (bool, uint64, error)
-}
 
 var (
 	ErrStateRootMismatch      = errors.New("state root mismatch")
@@ -50,12 +31,12 @@ var (
 
 type L1SyncerCfg struct {
 	db     kv.RwDB
-	syncer IL1Syncer
+	syncer l1infotree.Syncer
 
 	zkCfg *ethconfig.Zk
 }
 
-func StageL1SyncerCfg(db kv.RwDB, syncer IL1Syncer, zkCfg *ethconfig.Zk) L1SyncerCfg {
+func StageL1SyncerCfg(db kv.RwDB, syncer l1infotree.Syncer, zkCfg *ethconfig.Zk) L1SyncerCfg {
 	return L1SyncerCfg{
 		db:     db,
 		syncer: syncer,
@@ -125,7 +106,6 @@ func SpawnStageL1Syncer(
 
 	logsChan := cfg.syncer.GetLogsChan()
 	progressMessageChan := cfg.syncer.GetProgressMessageChan()
-	doneChan := cfg.syncer.GetDoneChan()
 	highestVerification := types.L1BatchInfo{}
 
 	newVerificationsCount := 0
@@ -134,7 +114,12 @@ func SpawnStageL1Syncer(
 Loop:
 	for {
 		select {
-		case logs := <-logsChan:
+		case logs, ok := <-logsChan:
+			log.Debug("SpawnStageL1Syncer l1 sync: got logs from chan", "count", len(logs))
+			if !ok {
+				break Loop
+			}
+
 			for _, l := range logs {
 				l := l
 				info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
@@ -185,8 +170,6 @@ Loop:
 			}
 		case progressMessage := <-progressMessageChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
-		case <-doneChan:
-			break Loop
 		case <-ctx.Done():
 			break Loop
 		}

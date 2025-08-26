@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/zk/contracts"
 	"github.com/erigontech/erigon/zk/hermez_db"
-	zkTypes "github.com/erigontech/erigon/zk/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -33,14 +32,14 @@ func (m *MockSyncer) RunQueryBlocks(lastCheckedBlock uint64) {
 	m.Called(lastCheckedBlock)
 }
 
-func (m *MockSyncer) GetLogsChan() chan []types.Log {
+func (m *MockSyncer) GetLogsChan() <-chan []types.Log {
 	args := m.Called()
-	return args.Get(0).(chan []types.Log)
+	return args.Get(0).(<-chan []types.Log)
 }
 
-func (m *MockSyncer) GetProgressMessageChan() chan string {
+func (m *MockSyncer) GetProgressMessageChan() <-chan string {
 	args := m.Called()
-	return args.Get(0).(chan string)
+	return args.Get(0).(<-chan string)
 }
 
 func (m *MockSyncer) IsDownloading() bool {
@@ -84,31 +83,14 @@ func (m *MockSyncer) GetDoneChan() <-chan uint64 {
 	return args.Get(0).(<-chan uint64)
 }
 
-type MockL2Syncer struct {
-	mock.Mock
-}
-
-func (m *MockL2Syncer) IsSyncStarted() bool {
+func (m *MockSyncer) GetLastCheckedL1Block() uint64 {
 	args := m.Called()
-	return args.Bool(0)
+	return uint64(args.Int(0))
 }
 
-func (m *MockL2Syncer) IsSyncFinished() bool {
-	args := m.Called()
-	return args.Bool(0)
-}
-
-func (m *MockL2Syncer) GetInfoTreeChan() chan []zkTypes.L1InfoTreeUpdate {
-	args := m.Called()
-	return args.Get(0).(chan []zkTypes.L1InfoTreeUpdate)
-}
-
-func (m *MockL2Syncer) RunSyncInfoTree() {
-	m.Called()
-}
-
-func (m *MockL2Syncer) ConsumeInfoTree() {
-	m.Called()
+func (m *MockSyncer) CheckL1BlockFinalized(blockNo uint64) (finalized bool, finalizedBn uint64, err error) {
+	args := m.Called(blockNo)
+	return args.Bool(0), uint64(args.Int(1)), args.Error(2)
 }
 
 func TestUpdater_WarmUp(t *testing.T) {
@@ -274,6 +256,8 @@ func TestInitialiseL1InfoTree(t *testing.T) {
 }
 
 func TestCheckForInfoTreeUpdates(t *testing.T) {
+	// Set log level to Debug
+
 	testCases := []struct {
 		name              string
 		logs              []types.Log
@@ -433,14 +417,11 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 			cfg := &ethconfig.Zk{L1FirstBlock: 1000}
 			updater := NewUpdater(context.Background(), cfg, mockSyncer, nil)
 
-			logsChan := make(chan []types.Log)
-			doneChan := make(chan uint64, 1)
+			logsChan := make(chan []types.Log, 10)
 
 			// Set up mock expectations
-			mockSyncer.On("GetLogsChan").Return(logsChan)
-			mockSyncer.On("GetDoneChan").Return((<-chan uint64)(doneChan))
-			mockSyncer.On("GetProgressMessageChan").Return(make(chan string))
-			mockSyncer.On("IsDownloading").Return(false).Maybe()
+			mockSyncer.On("GetLogsChan").Return((<-chan []types.Log)(logsChan))
+			mockSyncer.On("GetProgressMessageChan").Return((<-chan string)(make(chan string)))
 			mockSyncer.On("ClearHeaderCache").Return()
 			mockSyncer.On("StopQueryBlocks").Return().Maybe()
 			mockSyncer.On("ConsumeQueryBlocks").Return().Maybe()
@@ -456,12 +437,12 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 
 			time.AfterFunc(1*time.Millisecond, func() {
 				// Send logs to channel
-				if len(tc.logs) > 0 {
-					logsChan <- tc.logs
-				}
-
-				doneChan <- uint64(len(tc.logs)) // Simulate done signal
+				// if len(tc.logs) > 0 {
+				logsChan <- tc.logs
+				close(logsChan)
+				// }
 			})
+
 			processed, err := updater.CheckForInfoTreeUpdates("test", tx)
 
 			if tc.expectedError {

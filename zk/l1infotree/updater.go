@@ -23,16 +23,17 @@ import (
 )
 
 // hard cap to avoid waiting forever when syncer is stuck “downloading”
-var NoActivityTimeout = 30 * time.Second // var to be overridden in tests
+var NoActivityTimeout = 180 * time.Second // var to be overridden in tests
+var ErrNoActivity = errors.New("L1 Updater no activity")
 
 type Syncer interface {
 	IsSyncStarted() bool
+	GetLastCheckedL1Block() uint64
+	CheckL1BlockFinalized(blockNo uint64) (finalized bool, finalizedBn uint64, err error)
 	RunQueryBlocks(lastCheckedBlock uint64)
-	GetLogsChan() chan []types.Log
-	GetProgressMessageChan() chan string
-	GetDoneChan() <-chan uint64
+	GetLogsChan() <-chan []types.Log
+	GetProgressMessageChan() <-chan string
 	GetHeader(blockNumber uint64) (*types.Header, error)
-	L1QueryHeaders(logs []types.Log) (map[uint64]*types.Header, error)
 	StopQueryBlocks()
 	ConsumeQueryBlocks()
 	WaitQueryBlocksToFinish()
@@ -169,7 +170,7 @@ func (pool *L1InfoWorkerPool) Wait() {
 	close(pool.taskResChan)
 }
 
-func (pool *L1InfoWorkerPool) GetTaskResChannel() chan *L1InfoTaskResult {
+func (pool *L1InfoWorkerPool) GetTaskResChannel() <-chan *L1InfoTaskResult {
 	return pool.taskResChan
 }
 
@@ -177,11 +178,11 @@ type L1InfoWorker struct {
 	ctx         context.Context
 	syncer      Syncer
 	taskChan    chan *L1InfoTask
-	taskResChan chan *L1InfoTaskResult
+	taskResChan chan<- *L1InfoTaskResult
 	waitGroup   sync.WaitGroup
 }
 
-func NewL1InfoWorker(ctx context.Context, syncer Syncer, taskChan chan *L1InfoTask, taskResChan chan *L1InfoTaskResult) *L1InfoWorker {
+func NewL1InfoWorker(ctx context.Context, syncer Syncer, taskChan chan *L1InfoTask, taskResChan chan<- *L1InfoTaskResult) *L1InfoWorker {
 	return &L1InfoWorker{
 		ctx:         ctx,
 		syncer:      syncer,
@@ -202,7 +203,6 @@ func (worker *L1InfoWorker) Start() {
 		case task := <-worker.taskChan:
 			res := task.Run()
 			if res.err != nil {
-				log.Debug("Retrying L1 info task", "logKey", res.logKey, "error", res.err)
 				// assume a transient error and try again
 				worker.waitGroup.Add(1)
 				time.AfterFunc(1*time.Second, func() {
@@ -210,11 +210,10 @@ func (worker *L1InfoWorker) Start() {
 
 					select {
 					case <-worker.ctx.Done():
-						// context canceled, don't requeue
 						return
 					case worker.taskChan <- task:
 					case <-time.After(10 * time.Second):
-						log.Debug("Trying to requeue L1 info task", "logKey", res.logKey)
+						log.Debug("Still trying to requeue L1 info task", "logKey", res.logKey)
 					}
 				})
 				continue
@@ -266,95 +265,34 @@ func (t *L1InfoTask) Run() *L1InfoTaskResult {
 	return &L1InfoTaskResult{l1InfoTreeUpdate: update, logKey: NewLogKey(t.Log), err: nil}
 }
 
-func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (processed uint64, err error) {
-	defer func() {
-		if err != nil {
-			log.Info(fmt.Sprintf("[%s] CheckForInfoTreeUpdates failed", logPrefix), "err", err)
-			u.syncer.StopQueryBlocks()
-			u.syncer.ConsumeQueryBlocks()
-			u.syncer.WaitQueryBlocksToFinish()
-		}
-		u.syncer.ClearHeaderCache()
-	}()
-
-	hermezDb := hermez_db.NewHermezDb(tx)
-	logChan := u.syncer.GetLogsChan()
-	progressChan := u.syncer.GetProgressMessageChan()
-	// Signals that current log query is done
-	doneChan := u.syncer.GetDoneChan()
-	// Signals that no more logs will arrive
-	logsInputDone := make(chan struct{})
-
-	workerPool := NewL1InfoWorkerPool(u.ctx, runtime.NumCPU(), u.syncer)
-	workerPool.Start()
-
-	taskResChan := workerPool.GetTaskResChannel()
-
-	indexUpdateMap := make(map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash)
-
-	// first get all the logs we need to process
-	allLogs := make([]types.Log, 0)
-
-	var tasksTotal atomic.Uint64
-	var tasksPending atomic.Uint64
-	var expectedUpdates uint64 = 0 // only V1 logs produce updates
-	receivedAnyLogs := false
-
-	// track overall activity to avoid blocking forever if nothing happens
-	lastActivity := time.Now()
-
-	var stop atomic.Bool
+func (u *Updater) startLogProcessing(logPrefix string, workerPool *L1InfoWorkerPool, allLogs *[]types.Log, logChan <-chan []types.Log, progressChan <-chan string, logsInputDone chan<- uint64) {
 	go func() {
 		defer func() {
 			// ensure the input-done signal is closed if the function returns
-			select {
-			case <-logsInputDone:
-			default:
-				close(logsInputDone)
-			}
+			logsInputDone <- uint64(len(*allLogs))
+			close(logsInputDone)
 		}()
 
 		for {
 			select {
-			case logs := <-logChan:
-				if len(logs) == 0 {
-					continue
-				}
-				receivedAnyLogs = true
-				lastActivity = time.Now()
-				allLogs = append(allLogs, logs...)
-
-				tasksPending.Add(uint64(len(logs)))
-				for _, lg := range logs {
-					workerPool.AddTask(NewL1InfoTask(lg, u.syncer))
-					// Only V1 logs with 3 topics yield an update entry
-					if len(lg.Topics) == 3 && lg.Topics[0] == contracts.UpdateL1InfoTreeTopic {
-						expectedUpdates++
-					}
-				}
-
-				if tasksPending.Load() == tasksTotal.Load() && stop.Load() {
+			case logs, ok := <-logChan:
+				if !ok {
+					log.Debug(fmt.Sprintf("[%s] Log channel closed", logPrefix))
 					return
 				}
 
-			case msg := <-progressChan:
-				lastActivity = time.Now()
-				log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
-
-			case numLogs := <-doneChan:
-				if !stop.Load() {
-					tasksTotal.Store(numLogs)
-					stop.Store(true)
-
-					if numLogs == 0 {
-						// Do not stop the pool here; main loop will stop it after all tasks complete.
-						return
-					}
-
-					if tasksPending.Load() == tasksTotal.Load() {
-						return
-					}
+				if len(logs) == 0 {
+					continue
 				}
+
+				*allLogs = append(*allLogs, logs...)
+
+				for _, lg := range logs {
+					workerPool.AddTask(NewL1InfoTask(lg, u.syncer))
+				}
+
+			case msg := <-progressChan:
+				log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
 
 			case <-u.ctx.Done():
 				log.Debug(fmt.Sprintf("[%s] Context canceled while receiving logs", logPrefix))
@@ -362,20 +300,31 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 			}
 		}
 	}()
+}
 
+func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWorkerPool, logsInputDone <-chan uint64, indexUpdateMap map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash) error {
 	// Drain results until producer finished and every task has reported a result.
 	var tasksDone atomic.Uint64
 	idleTicker := time.NewTicker(5 * time.Second)
 	defer idleTicker.Stop()
 
-drain:
+	taskResChan := workerPool.GetTaskResChannel()
+	var numLogs uint64
+	stop := false
+	lastActivity := time.Now()
+
 	for {
 		select {
 		case <-u.ctx.Done():
 			log.Debug(fmt.Sprintf("[%s] Context canceled, exiting drain loop", logPrefix))
-			break drain
+			return nil
 
-		case res := <-taskResChan:
+		case res, ok := <-taskResChan:
+			if !ok {
+				log.Info(fmt.Sprintf("[%s] Task result channel closed, exiting drain loop", logPrefix))
+				return nil
+			}
+
 			// Note: taskResChan is not closed until workerPool.Wait() below,
 			// so we don't check the 'ok' flag here.
 			lastActivity = time.Now()
@@ -390,37 +339,45 @@ drain:
 				indexUpdateMap[res.logKey] = res.l1InfoTreeUpdate
 			}
 
-			if tasksDone.Load() == tasksTotal.Load() && tasksDone.Load() == tasksPending.Load() && stop.Load() {
-				break drain
+			if stop && tasksDone.Load() == numLogs {
+				return nil
 			}
 
-		case <-logsInputDone:
+		case numLogs = <-logsInputDone:
 			// No more tasks will be added; wait until all current tasks are done.
-			if tasksDone.Load() == tasksTotal.Load() && tasksTotal.Load() == tasksPending.Load() {
-				break drain
+			logsInputDone = nil // Stop waiting for more logs
+			lastActivity = time.Now()
+			if tasksDone.Load() == numLogs {
+				return nil
 			}
+			stop = true
 
 		case <-idleTicker.C:
 			// Avoid blocking forever when no logs/results are received.
 			if time.Since(lastActivity) > NoActivityTimeout {
 				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, NoActivityTimeout),
-					"receivedAnyLogs", receivedAnyLogs,
-					"tasksDone", tasksDone.Load(), "tasksTotal", tasksTotal.Load())
-				break drain
+					"tasksDone", tasksDone.Load())
+				return ErrNoActivity
 			}
 		}
 	}
+}
 
-	// Stop workers and close result channel
-	workerPool.Stop()
-	workerPool.Wait()
+func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (processed uint64, err error) {
+	defer func() {
+		if err != nil {
+			log.Info(fmt.Sprintf("[%s] CheckForInfoTreeUpdates failed", logPrefix), "err", err)
+			u.syncer.StopQueryBlocks()
+			u.syncer.ConsumeQueryBlocks()
+			u.syncer.WaitQueryBlocksToFinish()
+		}
+		u.syncer.ClearHeaderCache()
+	}()
 
-	// Sanity check: indexUpdateMap should match expected V1 update count
-	if uint64(len(indexUpdateMap)) != expectedUpdates {
-		log.Warn(fmt.Sprintf("[%s] V1 update results mismatch", logPrefix),
-			"expectedV1Updates", expectedUpdates,
-			"gotV1Updates", len(indexUpdateMap),
-			"tasksTotal", tasksTotal.Load(), "tasksDone", tasksDone.Load(), "logs", len(allLogs))
+	hermezDb := hermez_db.NewHermezDb(tx)
+	allLogs, indexUpdateMap, err := u.getLogs(logPrefix)
+	if err != nil {
+		return 0, fmt.Errorf("getLogs: %w", err)
 	}
 
 	// sort the logs by block number - it is important that we process them in order to get the index correct
@@ -517,8 +474,13 @@ drain:
 		// when the node / syncing process is restarted.
 		u.progress = allLogs[len(allLogs)-1].BlockNumber
 	}
+
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, u.progress); err != nil {
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
+	}
+
+	if tree != nil && u.latestUpdate != nil {
+		log.Info(fmt.Sprintf("[%s] L1 info tree updates complete", logPrefix), "root", tree.currentRoot.String(), "index", u.latestUpdate.Index, "progress", u.progress)
 	}
 
 	return processed, nil
@@ -737,7 +699,7 @@ LOOP:
 	}
 
 	if len(infoTrees) > 0 {
-		u.progress = infoTrees[len(infoTrees)-1].BlockNumber + 1
+		u.progress = infoTrees[len(infoTrees)-1].BlockNumber
 	}
 
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, u.progress); err != nil {
@@ -841,4 +803,34 @@ func truncateL1InfoTreeData(hermezDb *hermez_db.HermezDb, fromIndex uint64) erro
 		return fmt.Errorf("TruncateL1InfoTreeRoots: %w", err)
 	}
 	return nil
+}
+
+func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash, error) {
+	allLogs := make([]types.Log, 0)
+
+	logChan := u.syncer.GetLogsChan()
+	progressChan := u.syncer.GetProgressMessageChan()
+	// Signals that no more logs will arrive
+	logsInputDone := make(chan uint64)
+
+	indexUpdateMap := make(map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash)
+
+	workerPool := NewL1InfoWorkerPool(u.ctx, runtime.NumCPU(), u.syncer)
+	workerPool.Start()
+
+	// Will be stopped once syncer is done
+	u.startLogProcessing(logPrefix, workerPool, &allLogs, logChan, progressChan, logsInputDone)
+
+	err := u.createInfoTreeUpdates(logPrefix, workerPool, logsInputDone, indexUpdateMap)
+
+	// Stop workers
+	workerPool.Stop()
+	workerPool.Wait()
+
+	if err != nil {
+		log.Error(fmt.Sprintf("[%s] L1 Updater error", logPrefix), "err", err)
+		return nil, nil, err
+	}
+
+	return allLogs, indexUpdateMap, nil
 }

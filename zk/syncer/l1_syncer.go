@@ -21,11 +21,14 @@ import (
 )
 
 const (
-	batchWorkers = 4
+	batchWorkers    = 4
+	getLogsMaxRetry = 20
 )
 
 var errorShortResponseLT32 = fmt.Errorf("response too short to contain hash data")
 var errorShortResponseLT96 = fmt.Errorf("response too short to contain last batch number data")
+
+var L1FetchHeaderRetryDelay = time.Duration(1 * time.Second)
 
 const (
 	rollupSequencedBatchesSignature = "0x25280169" // hardcoded abi signature
@@ -74,18 +77,21 @@ type L1Syncer struct {
 
 	// atomic
 	isSyncStarted      atomic.Bool
+	isDownloading      atomic.Bool
 	lastCheckedL1Block atomic.Uint64
 	wgRunLoopDone      sync.WaitGroup
 	flagStop           atomic.Bool
 
 	// Channels
 	logsChan         chan []ethTypes.Log
+	logsQueue        []ethTypes.Log
 	logsChanProgress chan string
-	doneChan         chan uint64
+	logsChanMutex    sync.Mutex
 
 	highestBlockType string   // finalized, latest, safe
 	headersCache     sync.Map // map[uint64]*ethTypes.Header // cache for headers
 	sfGroup          singleflight.Group
+	fetchHeaders     bool
 }
 
 func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string, firstL1Block uint64) *L1Syncer {
@@ -98,9 +104,7 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
-		logsChan:            make(chan []ethTypes.Log, 10),
 		logsChanProgress:    make(chan string, 1),
-		doneChan:            make(chan uint64),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
 		headersCache:        sync.Map{},
@@ -135,7 +139,6 @@ func (s *L1Syncer) ConsumeQueryBlocks() {
 		select {
 		case <-s.logsChan:
 		case <-s.logsChanProgress:
-		case <-s.doneChan:
 		default:
 			if !s.isSyncStarted.Load() {
 				return
@@ -150,16 +153,36 @@ func (s *L1Syncer) WaitQueryBlocksToFinish() {
 }
 
 // Channels
-func (s *L1Syncer) GetLogsChan() chan []ethTypes.Log {
+func (s *L1Syncer) GetLogsChan() <-chan []ethTypes.Log {
+	s.logsChanMutex.Lock()
+	defer s.logsChanMutex.Unlock()
+
+	if s.logsChan == nil {
+		s.logsChan = make(chan []ethTypes.Log, 100)
+	}
+
+	// Flush the queue if there are any logs
+	if len(s.logsQueue) > 0 {
+		go func() {
+			s.logsChanMutex.Lock()
+			defer s.logsChanMutex.Unlock()
+
+			s.flushQueuedLogs()
+		}()
+	}
+
 	return s.logsChan
 }
 
-func (s *L1Syncer) GetProgressMessageChan() chan string {
-	return s.logsChanProgress
+func (s *L1Syncer) flushQueuedLogs() {
+	if s.logsChan != nil {
+		s.logsChan <- s.logsQueue
+		s.logsQueue = nil
+	}
 }
 
-func (s *L1Syncer) GetDoneChan() <-chan uint64 {
-	return s.doneChan
+func (s *L1Syncer) GetProgressMessageChan() <-chan string {
+	return s.logsChanProgress
 }
 
 func (s *L1Syncer) RunQueryBlocks(from uint64) {
@@ -193,18 +216,18 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 			if err != nil {
 				log.Error("Error getting latest L1 block", "err", err)
 			} else {
-				var numLogs uint64
 				if latestL1Block > s.lastCheckedL1Block.Load() {
 					// It should not be checked again in the new cycle, so +1 is added here.
 					startBlock := s.lastCheckedL1Block.Load() + 1
 					endBlock := latestL1Block
-					if numLogs, err = s.queryBlocks(startBlock, endBlock); err != nil {
+					if _, err = s.queryBlocks(startBlock, endBlock); err != nil {
 						log.Error("Error querying blocks", "err", err)
 					} else {
 						s.lastCheckedL1Block.Store(latestL1Block)
 					}
 				}
-				s.writeDone(numLogs)
+
+				s.closeLogsChannel()
 			}
 			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
@@ -212,13 +235,17 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 }
 
 func (s *L1Syncer) GetHeader(number uint64) (*ethTypes.Header, error) {
+	em := s.getNextEtherman()
+	return s.getHeader(em, number)
+}
+
+func (s *L1Syncer) getHeader(em IEtherman, number uint64) (*ethTypes.Header, error) {
 	if header, ok := s.headersCache.Load(number); ok {
 		return header.(*ethTypes.Header), nil
 	}
 
 	// Deduplicate concurrent requests
 	v, err, _ := s.sfGroup.Do(fmt.Sprintf("header-%d", number), func() (any, error) {
-		em := s.getNextEtherman()
 		header, err := em.HeaderByNumber(s.ctx, new(big.Int).SetUint64(number))
 		if err != nil {
 			return nil, err
@@ -274,7 +301,7 @@ func (s *L1Syncer) GetL1BlockTimeStampByTxHash(ctx context.Context, txHash commo
 		return 0, err
 	}
 
-	header, err := em.HeaderByNumber(s.ctx, r.BlockNumber)
+	header, err := s.getHeader(em, r.BlockNumber.Uint64())
 	if err != nil {
 		return 0, err
 	}
@@ -282,7 +309,7 @@ func (s *L1Syncer) GetL1BlockTimeStampByTxHash(ctx context.Context, txHash commo
 	return header.Time, nil
 }
 
-func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error) {
+func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 	logsSize := len(logs)
 
 	// queue up all the logs
@@ -295,23 +322,28 @@ func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Hea
 	var wg sync.WaitGroup
 	wg.Add(logsSize)
 
-	headersQueue := make(chan *ethTypes.Header, logsSize)
-
 	process := func(em IEtherman) {
 		for {
 			l, ok := <-logQueue
 			if !ok {
 				break
 			}
-			header, err := em.HeaderByNumber(s.ctx, new(big.Int).SetUint64(l.BlockNumber))
+
+			if s.flagStop.Load() {
+				log.Debug("L1 info query logs stopped")
+				wg.Done()
+				continue
+			}
+
+			header, err := s.getHeader(em, l.BlockNumber)
 			if err != nil {
-				log.Error("Error getting block", "err", err)
+				log.Debug("Error getting block", "err", err)
 				// assume a transient error and try again
-				time.Sleep(1 * time.Second)
+				time.Sleep(L1FetchHeaderRetryDelay)
 				logQueue <- l
 				continue
 			}
-			headersQueue <- header
+			s.headersCache.Store(header.Number.Uint64(), header)
 			wg.Done()
 		}
 	}
@@ -324,14 +356,8 @@ func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Hea
 	}
 
 	wg.Wait()
-	close(headersQueue)
 
-	headersMap := map[uint64]*ethTypes.Header{}
-	for header := range headersQueue {
-		headersMap[header.Number.Uint64()] = header
-	}
-
-	return headersMap, nil
+	return nil
 }
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {
@@ -364,6 +390,9 @@ func (s *L1Syncer) queryBlocks(startBlock, endBlock uint64) (numLogs uint64, err
 	// lastCheckedL1Block means that it has already been checked in the previous cycle.
 
 	log.Debug("GetHighestSequence", "startBlock", startBlock, "latestBlock", s.latestL1Block)
+
+	s.isDownloading.Store(true)
+	defer s.isDownloading.Store(false)
 
 	// define the blocks we're going to fetch up front
 	fetches := make([]fetchJob, 0, (endBlock-startBlock)/s.blockRange+1)
@@ -427,7 +456,17 @@ loop:
 			progress += res.Size
 			if len(res.Logs) > 0 {
 				numLogs += uint64(len(res.Logs))
-				s.logsChan <- res.Logs
+
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+
+					if s.fetchHeaders {
+						s.l1QueryHeaders(res.Logs)
+					}
+
+					s.storeLogs(res.Logs)
+				}()
 			}
 
 			if complete == len(fetches) {
@@ -462,23 +501,28 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 		var logs []ethTypes.Log
 		var err error
 		retry := 0
+	LOOP:
 		for {
 			select {
 			case <-stop:
-				return
+				break LOOP
 			default:
 				if s.flagStop.Load() {
-					return
+					break LOOP
 				}
+
 				em := s.getNextEtherman()
 				logs, err = em.FilterLogs(s.ctx, query)
 				if err != nil {
 					retry++
-					if retry > 5 {
-						log.Error("L1 syncer (getSequencedLogs) exceeded 5 retries", "retry", retry, "err", err)
-					}
-					if retry > 20 {
-						panic("L1 syncer (getSequencedLogs) exceeded 20 retries")
+					if retry > getLogsMaxRetry {
+						log.Error(fmt.Sprintf("L1 syncer (getSequencedLogs) exceeded %d retries", retry), "err", err)
+						results <- jobResult{
+							Size:  j.To - j.From,
+							Error: err,
+							Logs:  logs,
+						}
+						return
 					}
 					time.Sleep(time.Duration(retry*2) * time.Second)
 					continue
@@ -623,6 +667,28 @@ func (s *L1Syncer) QueryForRootLog(to uint64) (*ethTypes.Log, error) {
 	return &logs[0], nil
 }
 
-func (s *L1Syncer) writeDone(numLogs uint64) {
-	s.doneChan <- numLogs
+func (s *L1Syncer) SetFetchHeaders(fetchHeaders bool) {
+	s.fetchHeaders = fetchHeaders
+}
+
+func (s *L1Syncer) closeLogsChannel() {
+	s.logsChanMutex.Lock()
+	if s.logsChan != nil {
+		if len(s.logsQueue) > 0 {
+			s.flushQueuedLogs()
+		}
+		close(s.logsChan)
+		s.logsChan = nil
+	}
+	s.logsChanMutex.Unlock()
+}
+
+func (s *L1Syncer) storeLogs(logs []ethTypes.Log) {
+	s.logsChanMutex.Lock()
+	if s.logsChan != nil {
+		s.logsChan <- logs
+	} else {
+		s.logsQueue = append(s.logsQueue, logs...)
+	}
+	s.logsChanMutex.Unlock()
 }

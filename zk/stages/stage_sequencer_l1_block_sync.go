@@ -125,7 +125,7 @@ func SpawnSequencerL1BlockSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
-	doneChan := cfg.syncer.GetDoneChan()
+	defer cfg.syncer.ClearHeaderCache()
 
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
@@ -135,7 +135,10 @@ func SpawnSequencerL1BlockSyncStage(
 LOOP:
 	for {
 		select {
-		case logs := <-logChan:
+		case logs, ok := <-logChan:
+			if !ok {
+				break LOOP
+			}
 			for _, l := range logs {
 				// for some reason some endpoints seem to not have certain transactions available to
 				// them even they are perfectly valid and other RPC nodes return them fine.  So, leaning
@@ -226,8 +229,6 @@ LOOP:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
 		case <-logTicker.C:
 			log.Info(fmt.Sprintf("[%s] Syncing L1 blocks", logPrefix), "latest-batch", latestBatch)
-		case <-doneChan:
-			break LOOP
 		case <-ctx.Done():
 			break LOOP
 		}

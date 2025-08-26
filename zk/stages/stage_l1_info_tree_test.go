@@ -80,10 +80,8 @@ func newStageEnv(t *testing.T) *stageEnv {
 	// Remove default HeaderByNumber here; keep BlockByNumber
 	em.EXPECT().BlockByNumber(gomock.Any(), gomock.Any()).Return(block, nil).AnyTimes()
 
-	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 0, "latest", 0)
-	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1}, l1, l1infotree.NewInfoTreeL2RpcSyncer(ctx, &ethconfig.Zk{
-		L2RpcUrl: "http://127.0.0.1:8545",
-	}))
+	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 0, "latest", latest)
+	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1}, l1, nil)
 	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, updater)
 
 	return &stageEnv{
@@ -263,6 +261,7 @@ func TestSpawnL1InfoTreeStage_GetHeaderFails(t *testing.T) {
 
 func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
+	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
 
 	env := newStageEnv(t)
 
@@ -276,17 +275,19 @@ func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
 
 func TestSpawnL1InfoTreeStage_FilterLogsFails(t *testing.T) {
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
+	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
 
 	env := newStageEnv(t)
 
 	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(nil, fmt.Errorf("filter logs error")).AnyTimes()
 
 	err := runStageOnce(t, env)
-	require.Nil(t, err) // Though filter logs failed, it was retrying until a timeout, if timeout is less than max timeout for retries
+	require.ErrorIs(t, err, l1infotree.ErrNoActivity)
 }
 
 func TestSpawnL1InfoTreeStage_GetHeadersFailsThenNextIterationOK(t *testing.T) {
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
+	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
 
 	env := newStageEnv(t)
 

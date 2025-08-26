@@ -1136,6 +1136,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.L1HighestBlockType,
 			cfg.Zk.L1FirstBlock,
 		)
+		l1InfoTreeSyncer.SetFetchHeaders(true)
 
 		l1InfoTreeUpdater := l1infotree.NewUpdater(ctx, cfg.Zk, l1InfoTreeSyncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, cfg.Zk))
 

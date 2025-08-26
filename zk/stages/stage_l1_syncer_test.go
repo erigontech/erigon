@@ -295,6 +295,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 	}
 
 	EthermanMock.EXPECT().FilterLogs(gomock.Any(), filterQuery).Return(filteredLogs, nil).AnyTimes()
+	EthermanMock.EXPECT().HeaderByNumber(gomock.Any(), gomock.Any()).Return(genesisHeader, nil).AnyTimes()
 
 	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 0, "latest", 0)
 
