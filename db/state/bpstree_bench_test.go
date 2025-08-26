@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/seg"
 )
@@ -50,23 +51,51 @@ func BenchmarkBpsTreeNext(t *testing.B) {
 	t.ReportAllocs()
 }
 
+func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
+	b.Helper()
+
+	logger := log.New()
+	tmp := b.TempDir()
+	b.Cleanup(func() { dir.RemoveAll(tmp) })
+
+	dataPath := generateKV(b, tmp, 52, 10, 1_000_000, logger, 0)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
+
+	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
+	require.NoError(b, err)
+	b.Cleanup(func() { bt.Close() })
+	b.Cleanup(func() { kv.Close() })
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(b, err)
+	return kv, bt, keys, dataPath
+}
+
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
 	compress := seg.CompressNone
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
-	b.Run("seek_only", func(b *testing.B) {
-		p := 8
-		for i := 0; i < b.N; i++ {
-			cur, _ := bt.Seek(getter, keys[p])
-			cur.Close()
-		}
-	})
+	//b.Run("seek_only", func(b *testing.B) {
+	//	b.ReportAllocs()
+	//	for i := 0; i < b.N; i++ {
+	//		for _, k := range keys {
+	//			cur, _ := bt.Seek(getter, k)
+	//			cur.Close()
+	//		}
+	//	}
+	//})
+
 	b.Run("get_only", func(b *testing.B) {
-		p := 8
+		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			bt.Get(keys[p], getter)
+			bt.Get(keys[8], getter)
+			//for _, k := range keys {
+			//	bt.Get(k, getter)
+			//}
 		}
 	})
 
