@@ -521,17 +521,18 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				bodies := bodiesResponse.Data
 				blockBatch := make([]*types.Block, 0, len(headerBatch))
 				for i, header := range headerBatch {
-					block := types.NewBlockFromNetwork(header, bodies[i])
-					err = block.HashCheck(true)
+					body := bodies[i]
+					err = body.MatchesHeader(header)
 					if err == nil {
+						block := types.NewBlockFromNetwork(header, body)
 						blockBatch = append(blockBatch, block)
 						continue
 					}
 
 					bbd.logger.Debug(
-						"[backward-block-downloader] block hash check failed, penalizing peer",
-						"num", block.NumberU64(),
-						"hash", block.Hash(),
+						"[backward-block-downloader] body does not match header, penalizing peer",
+						"num", header.Number.Uint64(),
+						"hash", header.Hash(),
 						"peerId", peerId.String(),
 						"err", err,
 					)
