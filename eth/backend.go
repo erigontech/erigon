@@ -1256,7 +1256,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 
 	if miner.MiningConfig.Enabled {
 		if s.chainConfig.ChainName == networkname.Dev {
-			miner.MiningConfig.SigKey = genesiswrite.DevnetSignPrivateKey
+			miner.MiningConfig.SigKey = core.DevnetSignPrivateKey
 		}
 		if miner.MiningConfig.SigKey == nil {
 			s.logger.Error("Etherbase account unavailable locally", "err", err)

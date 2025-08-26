@@ -41,7 +41,7 @@ import (
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -657,7 +657,7 @@ func devTx(chaindata string) error {
 	defer tx.Rollback()
 	cc := tool.ChainConfig(tx)
 	txn := types.NewTransaction(2, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
-	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), genesiswrite.DevnetSignPrivateKey)
+	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
 	tool.Check(err)
 	buf := bytes.NewBuffer(nil)
 	err = signedTx.MarshalBinary(buf)

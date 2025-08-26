@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
-	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -171,8 +171,8 @@ func (m *BlockProducer) Configure(baseNode NodeArgs, nodeNumber int) error {
 			m.DevPeriod = 30
 		}
 		m.account = accounts.NewAccount(m.GetName() + "-etherbase")
-		genesiswrite.DevnetEtherbase = m.account.Address
-		genesiswrite.DevnetSignPrivateKey = m.account.SigKey()
+		core.DevnetEtherbase = m.account.Address
+		core.DevnetSignPrivateKey = m.account.SigKey()
 
 	case networkname.BorDevnet:
 		m.account = accounts.NewAccount(m.GetName() + "-etherbase")

@@ -22,7 +22,6 @@ package genesiswrite
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"math/big"
@@ -36,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -291,32 +289,6 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 		return err
 	}
 	return rawdb.WriteChainConfig(tx, block.Hash(), config)
-}
-
-// GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: chain.TestChainConfig}
-	block := MustCommitGenesis(&g, db, dirs, logger)
-	return block
-}
-
-type GenAccount struct {
-	Addr    common.Address
-	Balance *big.Int
-}
-
-// Pre-calculated version of:
-//
-//	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
-//	DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
-var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
-var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
-
-// DevnetSignKey is defined like this to allow the devnet process to pre-allocate keys
-// for nodes and then pass the address via --miner.etherbase - the function will be called
-// to retieve the mining key
-var DevnetSignKey = func(address common.Address) *ecdsa.PrivateKey {
-	return DevnetSignPrivateKey
 }
 
 // GenesisToBlock creates the genesis block and writes state of a genesis specification

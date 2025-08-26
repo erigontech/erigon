@@ -21,7 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/core"
 )
 
 const DevAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"
@@ -33,16 +33,16 @@ type Account struct {
 }
 
 func init() {
-	genesiswrite.DevnetSignKey = func(addr common.Address) *ecdsa.PrivateKey {
+	core.DevnetSignKey = func(addr common.Address) *ecdsa.PrivateKey {
 		return SigKey(addr)
 	}
 
 	devnetEtherbaseAccount := &Account{
 		"DevnetEtherbase",
-		genesiswrite.DevnetEtherbase,
-		genesiswrite.DevnetSignPrivateKey,
+		core.DevnetEtherbase,
+		core.DevnetSignPrivateKey,
 	}
-	accountsByAddress[genesiswrite.DevnetEtherbase] = devnetEtherbaseAccount
+	accountsByAddress[core.DevnetEtherbase] = devnetEtherbaseAccount
 	accountsByName[devnetEtherbaseAccount.Name] = devnetEtherbaseAccount
 }
 
@@ -91,8 +91,8 @@ func SigKey(source interface{}) *ecdsa.PrivateKey {
 			return account.sigKey
 		}
 
-		if source == genesiswrite.DevnetEtherbase {
-			return genesiswrite.DevnetSignPrivateKey
+		if source == core.DevnetEtherbase {
+			return core.DevnetSignPrivateKey
 		}
 	case string:
 		if account := GetAccount(source); account != nil {
