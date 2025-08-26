@@ -32,14 +32,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
@@ -236,7 +236,7 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	inboundMessagesStream := make(chan *delayedMessage[*sentryproto.InboundMessage])
 	peerEventsStream := make(chan *delayedMessage[*sentryproto.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	statusDataFactory := sentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
+	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
 		return &sentryproto.StatusData{}, nil
 	})
 	peerPenalizer := NewPeerPenalizer(sentryClient)

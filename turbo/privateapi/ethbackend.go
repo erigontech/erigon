@@ -25,7 +25,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"

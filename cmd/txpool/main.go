@@ -27,7 +27,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"

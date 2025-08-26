@@ -1,18 +1,35 @@
-package sentry_test
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package libsentry_test
 
 import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func newClient(ctrl *gomock.Controller, peerId *typesproto.H512, caps []string) *direct.MockSentryClient {
@@ -52,7 +69,7 @@ func TestProtocols(t *testing.T) {
 	direct := newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{0}), []string{"eth/67"})
 	direct.EXPECT().Protocol().Return(67)
 
-	p := sentry.Protocols(direct)
+	p := libsentry.Protocols(direct)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(67), p[0])
@@ -61,15 +78,15 @@ func TestProtocols(t *testing.T) {
 		mock: newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{1}), []string{"eth/68"}),
 	}
 
-	p = sentry.Protocols(base)
+	p = libsentry.Protocols(base)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(68), p[0])
 
-	mux := sentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct, base})
+	mux := libsentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct, base})
 	require.NotNil(t, mux)
 
-	p = sentry.Protocols(mux)
+	p = libsentry.Protocols(mux)
 
 	require.Len(t, p, 2)
 	require.Contains(t, p, byte(67))
@@ -84,15 +101,15 @@ func TestProtocolsByPeerId(t *testing.T) {
 
 	direct := newClient(ctrl, peerId, []string{"eth/67"})
 
-	p := sentry.PeerProtocols(direct, peerId)
+	p := libsentry.PeerProtocols(direct, peerId)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(67), p[0])
 
-	mux := sentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct})
+	mux := libsentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct})
 	require.NotNil(t, mux)
 
-	p = sentry.PeerProtocols(mux, peerId)
+	p = libsentry.PeerProtocols(mux, peerId)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(67), p[0])

@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 

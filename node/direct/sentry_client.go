@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 const (

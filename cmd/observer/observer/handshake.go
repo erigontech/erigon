@@ -27,9 +27,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"

@@ -31,7 +31,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/node/direct"
 )
 
 func TestFetch(t *testing.T) {

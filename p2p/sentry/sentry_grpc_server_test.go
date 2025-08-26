@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -37,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/forkid"
 )
