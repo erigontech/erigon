@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
+	polygonchain "github.com/erigontech/erigon/polygon/chain"
 )
 
 // GenesisMismatchError is raised when trying to overwrite an existing
@@ -507,6 +508,14 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
+	// these fields need to be overriden for Bor running in a kurtosis devnet
+	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
+		withdrawals = []*types.Withdrawal{}
+		head.BlobGasUsed = new(uint64)
+		head.ExcessBlobGas = new(uint64)
+		emptyHash := common.HexToHash("0x0")
+		head.ParentBeaconBlockRoot = &emptyHash
+	}
 	return
 }
 
