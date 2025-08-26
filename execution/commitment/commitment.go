@@ -110,6 +110,7 @@ type Trie interface {
 type CommitProgress struct {
 	KeyIndex    uint64
 	UpdateCount uint64
+	Metrics     MetricValues
 }
 
 type PatriciaContext interface {

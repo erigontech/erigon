@@ -3,6 +3,7 @@ package commitment
 import (
 	"encoding/csv"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strconv"
@@ -50,9 +51,45 @@ type Metrics struct {
 	spentProcessing time.Duration
 }
 
+type MetricValues struct {
+	Accounts        map[string]*AccountStats
+	Updates         uint64
+	AddressKeys     uint64
+	StorageKeys     uint64
+	LoadBranch      uint64
+	LoadAccount     uint64
+	LoadStorage     uint64
+	UpdateBranch    uint64
+	LoadDepths      [10]uint64
+	Unfolds         uint64
+	SpentUnfolding  time.Duration
+	SpentFolding    time.Duration
+	SpentProcessing time.Duration
+}
+
 func NewMetrics() *Metrics {
 	return &Metrics{
 		Accounts: NewAccounts(),
+	}
+}
+
+func (m *Metrics) AsValues() MetricValues {
+	accounts := map[string]*AccountStats{}
+	maps.Copy(accounts, m.Accounts.AccountStats)
+	return MetricValues{
+		Accounts:        accounts,
+		Updates:         m.updates.Load(),
+		AddressKeys:     m.addressKeys.Load(),
+		StorageKeys:     m.storageKeys.Load(),
+		LoadBranch:      m.loadBranch.Load(),
+		LoadAccount:     m.loadAccount.Load(),
+		LoadStorage:     m.loadStorage.Load(),
+		UpdateBranch:    m.updateBranch.Load(),
+		LoadDepths:      m.loadDepths,
+		Unfolds:         m.unfolds.Load(),
+		SpentUnfolding:  m.spentUnfolding,
+		SpentFolding:    m.spentFolding,
+		SpentProcessing: m.spentProcessing,
 	}
 }
 
@@ -70,10 +107,9 @@ func (m *Metrics) logMetrics() []any {
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
 		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
+		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
+		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
 	}
-
-	//logger.Log(level, prefix+"sccount progress")
 }
 
 func (m *Metrics) Headers() []string {

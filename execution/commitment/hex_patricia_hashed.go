@@ -2254,6 +2254,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			progress <- &CommitProgress{
 				KeyIndex:    ki,
 				UpdateCount: updatesCount,
+				Metrics:     hph.metrics.AsValues(),
 			}
 		}
 		return nil
