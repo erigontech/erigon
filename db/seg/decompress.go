@@ -707,7 +707,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	bufOffset := len(buf)
 	if len(buf)+int(wordLen) > cap(buf) {
 		newBuf := make([]byte, len(buf)+int(wordLen))
-		copy(newBuf, buf)
+		//copy(newBuf, buf)
 		buf = newBuf
 	} else {
 		// Expand buffer
@@ -792,7 +792,7 @@ func (g *Getter) Next2(buf []byte) ([]byte, uint64) {
 	bufOffset := len(buf)
 	if len(buf)+int(wordLen) > cap(buf) {
 		newBuf := g.alloc(len(buf) + int(wordLen))
-		copy(newBuf, buf)
+		//copy(newBuf, buf)
 		buf = newBuf
 	} else {
 		// Expand buffer
