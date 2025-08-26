@@ -65,7 +65,8 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '🗑️️';  // The run was cancelled before it completed.
+        case 'cancelled': return '🗑️️';  // The run was cancelled
+        case 'cancelled_after_start': return '✖️'; // The run was cancelled before it completed.
         case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';
@@ -193,12 +194,12 @@ export async function run() {
                     const workflowName = run.name ?? run.id.toString();
                     const jobName = job.name;
 
-                    // Correction to treat 'cancelled' with steps as 'timed_out'
-                    if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
-                        job.conclusion = 'timed_out'; // treat cancelled as timed_out
-
                     // Map the job conclusion to an icon
-                    const conclusion = mapConclusionToIcon(job.conclusion, job.status);
+                    let conclusion = mapConclusionToIcon(job.conclusion, job.status);
+
+                    // Correction to treat 'cancelled' with steps differently than 'cancelled' without steps
+                    if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
+                        conclusion = mapConclusionToIcon('cancelled_after_start', job.status);
 
                     // Find or create the workflow summary
                     let workflowSummary = summaries.find(w => w.name === workflowName);
