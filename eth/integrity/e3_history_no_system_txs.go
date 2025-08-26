@@ -124,7 +124,8 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 				continue
 			}
 
-			if int64(txNum) > _max {
+			// Descending iteration: when we cross below current block's min, reset to find new block bounds
+			if _min != -1 && int64(txNum) < _min {
 				blk = -1
 			}
 
