@@ -406,6 +406,43 @@ func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
 	return m
 }
 
+func (m *UnmarkedTx) BufferedWriter() *UnmarkedBufferedWriter {
+	return &UnmarkedBufferedWriter{
+		values:  etl.NewCollector(Registry.Name(m.id)+".forkable.buffer.flush", Registry.Dirs(m.id).Tmp, etl.SmallSortableBuffers.Get(), m.a.logger),
+		valsTbl: m.ap.valsTbl,
+	}
+}
+
+type UnmarkedBufferedWriter struct {
+	values  *etl.Collector
+	valsTbl string
+	f       *Forkable[UnmarkedTxI]
+}
+
+func (w *UnmarkedBufferedWriter) Put(n Num, v Bytes) error {
+	key := w.f.encTs(n)
+	return w.values.Collect(key, v)
+}
+
+func (w *UnmarkedBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	if w.values == nil {
+		return nil
+	}
+	return w.values.Load(tx, w.valsTbl, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
+}
+
+func (w *UnmarkedBufferedWriter) Close() {
+	if w == nil {
+		return
+	}
+	if w.values != nil {
+		w.values.Close()
+		w.values = nil
+	}
+}
+
+////////////////////////
+
 type BufferedTx struct {
 	*ProtoForkableTx
 	ap      *Forkable[BufferedTxI]
