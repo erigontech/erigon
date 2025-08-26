@@ -175,7 +175,7 @@ export async function run() {
                     continue;
                 }
 
-                core.info(`Processing workflow run: ${run.name} (${run.id})`);
+                core.info(`Processing workflow run: ${run.name} (${run.id}) - status=${run.status}, conclusion=${run.conclusion}`);
 
                 const {data: jobsData} = await octokit.rest.actions.listJobsForWorkflowRun({
                     owner,
@@ -184,10 +184,20 @@ export async function run() {
                 });
 
                 // Iterate through the jobs in the workflow run
+                if (!jobsData.jobs || !jobsData.jobs.length) {
+                    core.info(`No jobs found for workflow run: ${run.name} (${run.id})`);
+                    continue;
+                }
                 for (const job of jobsData.jobs) {
 
                     const workflowName = run.name ?? run.id.toString();
                     const jobName = job.name;
+
+                    // Correction to treat 'cancelled' with steps as 'timed_out'
+                    if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
+                        job.conclusion = 'timed_out'; // treat cancelled as timed_out
+
+                    // Map the job conclusion to an icon
                     const conclusion = mapConclusionToIcon(job.conclusion, job.status);
 
                     // Find or create the workflow summary
