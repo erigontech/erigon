@@ -17,27 +17,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package compiler wraps the Solidity and Vyper compiler executables (solc; vyper).
+// Package compiler wraps the ABI compilation outputs.
 package compiler
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os/exec"
-	"strconv"
-	"strings"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
-
-// Solidity contains information about the solidity compiler.
-type Solidity struct {
-	Path, Version, FullVersion string
-	Major, Minor, Patch        int
-}
 
 // --combined-output format
 type solcOutput struct {
@@ -62,90 +50,6 @@ type solcOutputV8 struct {
 		Hashes                map[string]string
 	}
 	Version string
-}
-
-func (s *Solidity) makeArgs() []string {
-	p := []string{
-		"--combined-json", "bin,bin-runtime,srcmap,srcmap-runtime,abi,userdoc,devdoc",
-		"--optimize",                  // code optimizer switched on
-		"--allow-paths", "., ./, ../", // default to support relative paths
-	}
-	if s.Major > 0 || s.Minor > 4 || s.Patch > 6 {
-		p[1] += ",metadata,hashes"
-	}
-	return p
-}
-
-// SolidityVersion runs solc and parses its version output.
-func SolidityVersion(ctx context.Context, solc string) (*Solidity, error) {
-	if solc == "" {
-		solc = "solc"
-	}
-	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, solc, "--version")
-	cmd.Stdout = &out
-	err := cmd.Run()
-	if err != nil {
-		return nil, err
-	}
-	matches := versionRegexp.FindStringSubmatch(out.String())
-	if len(matches) != 4 {
-		return nil, fmt.Errorf("can't parse solc version %q", out.String())
-	}
-	s := &Solidity{Path: cmd.Path, FullVersion: out.String(), Version: matches[0]}
-	if s.Major, err = strconv.Atoi(matches[1]); err != nil {
-		return nil, err
-	}
-	if s.Minor, err = strconv.Atoi(matches[2]); err != nil {
-		return nil, err
-	}
-	if s.Patch, err = strconv.Atoi(matches[3]); err != nil {
-		return nil, err
-	}
-	return s, nil
-}
-
-// CompileSolidityString builds and returns all the contracts contained within a source string.
-func CompileSolidityString(ctx context.Context, solc, source string) (map[string]*Contract, error) {
-	if len(source) == 0 {
-		return nil, errors.New("solc: empty source string")
-	}
-	s, err := SolidityVersion(ctx, solc)
-	if err != nil {
-		return nil, err
-	}
-	args := append(s.makeArgs(), "--")
-	cmd := exec.CommandContext(ctx, s.Path, append(args, "-")...) //nolint:gosec
-	cmd.Stdin = strings.NewReader(source)
-	return s.run(cmd, source)
-}
-
-// CompileSolidity compiles all given Solidity source files.
-func CompileSolidity(ctx context.Context, solc string, sourcefiles ...string) (map[string]*Contract, error) {
-	if len(sourcefiles) == 0 {
-		return nil, errors.New("solc: no source files")
-	}
-	source, err := slurpFiles(sourcefiles)
-	if err != nil {
-		return nil, err
-	}
-	s, err := SolidityVersion(ctx, solc)
-	if err != nil {
-		return nil, err
-	}
-	args := append(s.makeArgs(), "--")
-	cmd := exec.CommandContext(ctx, s.Path, append(args, sourcefiles...)...) //nolint:gosec
-	return s.run(cmd, source)
-}
-
-func (s *Solidity) run(cmd *exec.Cmd, source string) (map[string]*Contract, error) {
-	var stderr, stdout bytes.Buffer
-	cmd.Stderr = &stderr
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("solc: %w\n%s", err, stderr.Bytes())
-	}
-	return ParseCombinedJSON(stdout.Bytes(), source, s.Version, s.Version, strings.Join(s.makeArgs(), " "))
 }
 
 // ParseCombinedJSON takes the direct output of a solc --combined-output run and

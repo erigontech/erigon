@@ -239,6 +239,14 @@ func NewValidatorSet(valz []*Validator) *ValidatorSet {
 	return vals
 }
 
+func (vals *ValidatorSet) ValidatorAddresses() []common.Address {
+	addresses := make([]common.Address, len(vals.Validators))
+	for i, val := range vals.Validators {
+		addresses[i] = val.Address
+	}
+	return addresses
+}
+
 // Nil or empty validator sets are invalid.
 func (vals *ValidatorSet) IsNilOrEmpty() bool {
 	return vals == nil || len(vals.Validators) == 0
