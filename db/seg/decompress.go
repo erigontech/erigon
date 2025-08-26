@@ -555,6 +555,9 @@ type Getter struct {
 	dataBit     int // Value 0..7 - position of the bit
 	trace       bool
 	d           *Decompressor
+
+	allocArena    []byte
+	allocArenaPos int
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -567,11 +570,6 @@ func (g *Getter) Count() int        { return g.d.Count() }
 func (g *Getter) FileName() string  { return g.fName }
 
 func (g *Getter) nextPos(clean bool) (pos uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
@@ -683,6 +681,24 @@ func (g *Getter) HasNext() bool {
 	return g.dataP < uint64(len(g.data))
 }
 
+func (g *Getter) alloc(n int) []byte {
+	const DecArenaSize = 64 * 1024
+	const Alignment = 8
+	if n >= DecArenaSize {
+		return make([]byte, n)
+	}
+
+	low := g.allocArenaPos
+	alignedN := (n + Alignment - 1) / Alignment * Alignment
+	g.allocArenaPos += alignedN
+	if g.allocArenaPos >= DecArenaSize || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+		g.allocArena = make([]byte, DecArenaSize)
+		g.allocArenaPos = 0
+		low = 0
+	}
+	return g.allocArena[low : low+n : low+n] // https://go.dev/ref/spec#Slicel_expressions
+}
+
 // Next extracts a compressed word from current offset in the file
 // and appends it to the given buf, returning the result of appending
 // After extracting next word, it moves to the beginning of the next one
@@ -703,8 +719,10 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 
 	bufOffset := len(buf)
 	if len(buf)+int(wordLen) > cap(buf) {
-		newBuf := make([]byte, len(buf)+int(wordLen))
-		copy(newBuf, buf)
+		newBuf := g.alloc(len(buf) + int(wordLen))
+		//copy(newBuf, buf)
+		//newBuf := make([]byte, len(buf)+int(wordLen))
+		//copy(newBuf, buf)
 		buf = newBuf
 	} else {
 		// Expand buffer
