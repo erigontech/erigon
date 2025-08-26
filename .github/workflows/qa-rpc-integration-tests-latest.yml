@@ -18,7 +18,7 @@ on:
 
 
 jobs:
-  mainnet-rpc-integ-tests:
+  mainnet-rpc-integ-tests-latest:
     concurrency:
       group: >-
         ${{
