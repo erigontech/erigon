@@ -1181,8 +1181,9 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	}
 	defer release()
 
+	var buf []byte
 	var b *types.BodyOnlyTxn
-	b, _, err = BodyForTxnFromSnapshot(blockNum, seg, nil)
+	b, buf, err = BodyForTxnFromSnapshot(blockNum, seg, buf[:0])
 	if err != nil {
 		return nil, err
 	}
@@ -1203,7 +1204,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	defer release()
 
 	// +1 because block has system-txn in the beginning of block
-	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
+	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, buf[:0])
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
