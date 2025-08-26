@@ -62,7 +62,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
 	t.Run("empty index", func(t *testing.T) {
-		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
+		dataPath := generateKV(t, tmp, 52, 180, 0, logger, seg.CompressKeys)
 		indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 

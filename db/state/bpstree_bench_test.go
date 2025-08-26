@@ -18,7 +18,7 @@ func BenchmarkBpsTreeNext(t *testing.B) {
 	t.Logf("N: %d, M: %d skip since shard <= %d", keyCount, M, DefaultBtreeStartSkip)
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
-	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
@@ -75,7 +75,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
-	compress := seg.CompressNone
+	compress := seg.CompressKeys
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
@@ -92,10 +92,9 @@ func Benchmark_BTree_Seek(b *testing.B) {
 	b.Run("get_only", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			bt.Get(keys[8], getter)
-			//for _, k := range keys {
-			//	bt.Get(k, getter)
-			//}
+			for _, k := range keys {
+				bt.Get(k, getter)
+			}
 		}
 	})
 
