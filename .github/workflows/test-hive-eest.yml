@@ -163,7 +163,7 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v5
         with:
-          repository: erigontech/hive
+          repository: ethereum/hive
           ref: master
           path: hive
     
