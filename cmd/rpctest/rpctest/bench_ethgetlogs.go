@@ -157,10 +157,10 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 		return fmt.Errorf("could not get block number: %v", res.Err)
 	}
 	if blockNumber.Error != nil {
-		err := fmt.Errorf("error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
-		log.Warn(err.Error())
-	} else {
-		latestBlock := blockNumber.Number.Uint64()
+		return fmt.Errorf("error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+	latestBlock := blockNumber.Number.Uint64()
+	if latestBlock > 0 {
 		log.Info("[ethGetLogsInvariants] starting", "blockFrom", blockFrom, "blockTo", blockTo, "latestBlock", latestBlock)
 		if blockFrom > latestBlock {
 			return fmt.Errorf("fromBlock(%d) > latestBlock(%d)", blockFrom, latestBlock)
