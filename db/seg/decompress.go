@@ -570,11 +570,6 @@ func (g *Getter) Count() int        { return g.d.Count() }
 func (g *Getter) FileName() string  { return g.fName }
 
 func (g *Getter) nextPos(clean bool) (pos uint64) {
-	//defer func() {
-	//	if rec := recover(); rec != nil {
-	//		panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-	//	}
-	//}()
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
@@ -756,20 +751,19 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 }
 
 func (g *Getter) alloc(n int) []byte {
-	const decArenaSize = 64 * 1024
-	if n >= decArenaSize {
+	const DecArenaSize = 64 * 1024
+	if n >= DecArenaSize {
 		return make([]byte, n)
 	}
 
 	low := g.allocArenaPos
-	alignedN := (n + Alignment - 1) / Alignment * Alignment
-	g.allocArenaPos += alignedN
-	if g.allocArenaPos >= decArenaSize || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
-		g.allocArena = make([]byte, decArenaSize)
-		g.allocArenaPos = 0
+	g.allocArenaPos += n
+	if g.allocArenaPos >= DecArenaSize || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+		g.allocArena = make([]byte, DecArenaSize)
 		low = 0
+		g.allocArenaPos = n
 	}
-	return g.allocArena[low : low+n : low+n] // https://go.dev/ref/spec#Slicel_expressions
+	return g.allocArena[low:g.allocArenaPos:g.allocArenaPos] // https://go.dev/ref/spec#Slicel_expressions
 }
 
 // Next extracts a compressed word from current offset in the file
