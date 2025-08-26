@@ -1268,6 +1268,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 	view := r.sn.View()
 	defer view.Close()
 
+	var buf []byte
 	var expectedFirstTxnID uint64
 	for _, snb := range view.Bodies() {
 		if snb.Src() == nil {
@@ -1275,7 +1276,9 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
-		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
+		var b *types.BodyOnlyTxn
+		var err error
+		b, buf, err = BodyForTxnFromSnapshot(firstBlockNum, snb, buf[:0])
 		if err != nil {
 			return err
 		}
