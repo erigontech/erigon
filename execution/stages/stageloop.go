@@ -710,7 +710,6 @@ func NewDefaultStages(ctx context.Context,
 func NewPipelineStages(ctx context.Context,
 	db kv.TemporalRwDB,
 	cfg *ethconfig.Config,
-	p2pCfg p2p.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
@@ -718,9 +717,7 @@ func NewPipelineStages(ctx context.Context,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	logger log.Logger,
 	tracer *tracers.Tracer,
-	checkStateRoot bool,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -729,39 +726,20 @@ func NewPipelineStages(ctx context.Context,
 	dirs := cfg.Dirs
 	blockWriter := blockio.NewBlockWriter()
 
-	// During Import we don't want other services like header requests, body requests etc. to be running.
-	// Hence we run it in the test mode.
-	runInTestMode := cfg.ImportMode
-
 	var depositContract common.Address
 	if cfg.Genesis != nil {
 		depositContract = cfg.Genesis.Config.DepositContract
 	}
 	_ = depositContract
 
-	if len(cfg.Sync.UploadLocation) == 0 {
-		return stagedsync.PipelineStages(ctx,
-			stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, silkworm, cfg.Prune),
-			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
-			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
-			stagedsync.StageWitnessProcessingCfg(db, controlServer.ChainConfig, controlServer.WitnessBuffer))
-	}
-
-	return stagedsync.UploaderPipelineStages(ctx,
+	return stagedsync.PipelineStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, silkworm, cfg.Prune),
-		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
 		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg)),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
-		stagedsync.StageWitnessProcessingCfg(db, controlServer.ChainConfig, controlServer.WitnessBuffer),
-		runInTestMode)
-
+		stagedsync.StageWitnessProcessingCfg(db, controlServer.ChainConfig, controlServer.WitnessBuffer))
 }
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry_multi_client.MultiClient,
