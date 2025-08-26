@@ -51,19 +51,19 @@ func BenchmarkBpsTreeNext(t *testing.B) {
 	t.ReportAllocs()
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
+func benchInitBtreeIndex(b *testing.B, M uint64, compressFlags seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
 	tmp := b.TempDir()
 	b.Cleanup(func() { dir.RemoveAll(tmp) })
 
-	dataPath := generateKV(b, tmp, 52, 10, 1_000_000, logger, 0)
+	dataPath := generateKV(b, tmp, 52, 10, 1_000_000, logger, compressFlags)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
-	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+	buildBtreeIndex(b, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compressFlags, false)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })
