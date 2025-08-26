@@ -682,7 +682,7 @@ func (g *Getter) HasNext() bool {
 }
 
 func (g *Getter) alloc(n int) []byte {
-	const DecArenaSize = 64 * 1024
+	const DecArenaSize = 32 * 1024
 	if n >= DecArenaSize {
 		return make([]byte, n)
 	}
