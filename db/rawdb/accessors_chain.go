@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1226,17 +1227,14 @@ type RCacheV2Query struct {
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
+	v, err := tx.Unmarked(forkables.RcacheForkable).Get(kv.Num(query.TxNum))
 	if err != nil {
 		return nil, false, err
 	}
-	if !ok {
-		return nil, false, nil
-	}
+
 	if len(v) == 0 {
 		return nil, false, nil
 	}
-
 	// Convert the receipts from their storage form to their internal representation
 	receipt := &types.ReceiptForStorage{}
 	if err := rlp.DecodeBytes(v, receipt); err != nil {
@@ -1260,18 +1258,16 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
+	um := tx.Unmarked(forkables.RcacheForkable)
+
 	for txnID := _min; txnID < _max+1; txnID++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
+		v, err := um.Get(kv.Num(txnID))
 		if err != nil {
 			return nil, err
-		}
-		if !ok {
-			continue
 		}
 		if len(v) == 0 {
 			continue
 		}
-
 		// Convert the receipts from their storage form to their internal representation
 		receipt := &types.ReceiptForStorage{}
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
@@ -1287,7 +1283,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
+func WriteReceiptCacheV2(tx kv.TemporalRwTx, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -1315,12 +1311,9 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 		toWrite = []byte{}
 	}
 
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil, 0); err != nil {
+	if err := tx.UnmarkedRw(forkables.RcacheForkable).Append(kv.Num(txNum), toWrite); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
+
 	return nil
 }
-
-var (
-	receiptCacheKey = []byte{0x0}
-)
