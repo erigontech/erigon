@@ -756,15 +756,16 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 }
 
 func (g *Getter) alloc(n int) []byte {
-	if n >= AllocLimitOnArena {
+	const decArenaSize = 64 * 1024
+	if n >= decArenaSize {
 		return make([]byte, n)
 	}
 
 	low := g.allocArenaPos
 	alignedN := (n + Alignment - 1) / Alignment * Alignment
 	g.allocArenaPos += alignedN
-	if g.allocArenaPos >= 64*1024 || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
-		g.allocArena = make([]byte, 64*1024)
+	if g.allocArenaPos >= decArenaSize || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+		g.allocArena = make([]byte, decArenaSize)
 		g.allocArenaPos = 0
 		low = 0
 	}
