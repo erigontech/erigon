@@ -19,7 +19,6 @@ package seg
 import (
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/edsrzf/mmap-go"
 
@@ -87,21 +86,21 @@ func (c *DecompressArena) NoSpaceLeft() bool { return c.cap <= c.offset }
 const Alignment = 8
 const AllocLimitOnArena = 64 * 1024
 
-func (c *DecompressArena) Allocate(size int) []byte {
-	if size >= AllocLimitOnArena {
-		return make([]byte, size)
+func (c *DecompressArena) Allocate(n int) []byte {
+	if n >= AllocLimitOnArena {
+		return make([]byte, n)
 	}
 
 	low := c.offset
-	alignedSize := (size + Alignment - 1) / Alignment * Alignment
-	c.offset += alignedSize
+	c.offset += n
 	if c.offset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		if err := c.newChunk(); err != nil {
 			panic(err)
 		}
+		c.offset = n
 		low = 0
 	}
-	return c.mem[c.memI][low : low+size : low+size] // https://go.dev/ref/spec#Slicel_expressions
+	return c.mem[c.memI][low:c.offset:c.offset] // https://go.dev/ref/spec#Slicel_expressions
 }
 
 type DecompressArenaSlice struct {
@@ -138,24 +137,23 @@ func (c *DecompressArenaSlice) Free() {
 
 func (c *DecompressArenaSlice) NoSpaceLeft() bool { return c.cap <= c.offset }
 
-func (c *DecompressArenaSlice) Allocate(size int) []byte {
-	if size >= AllocLimitOnArena {
-		return make([]byte, size)
+func (c *DecompressArenaSlice) Allocate(n int) []byte {
+	if n >= AllocLimitOnArena {
+		return make([]byte, n)
 	}
 
 	low := c.offset
-	alignedSize := (size + Alignment - 1) / Alignment * Alignment
-	c.offset += alignedSize
+	//alignedSize := (size + Alignment - 1) / Alignment * Alignment
+	c.offset += n
 	if c.offset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		if c.mem != nil {
 			bufPool.Put(c.mem)
 		}
 		c.mem = bufPool.Get().([]byte)
-		c.offset = 0
+		c.offset = n
 		low = 0
 	}
-	return unsafe.Slice(&c.mem[low], size)
-	//return c.mem[low : low+size : low+size] // https://go.dev/ref/spec#Slicel_expressions
+	return c.mem[low:c.offset:c.offset] // https://go.dev/ref/spec#Slicel_expressions
 }
 
 type DecompressArenaSlice2 struct {
@@ -182,19 +180,18 @@ func (c *DecompressArenaSlice2) Free() {
 	}
 }
 
-func (c *DecompressArenaSlice2) Allocate(size int) []byte {
-	if size >= AllocLimitOnArena {
-		return make([]byte, size)
+func (c *DecompressArenaSlice2) Allocate(n int) []byte {
+	if n >= AllocLimitOnArena {
+		return make([]byte, n)
 	}
 
 	low := c.offset
-	alignedSize := (size + Alignment - 1) / Alignment * Alignment
-	c.offset += alignedSize
+	c.offset += n
 	if c.offset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		c.mem = make([]byte, c.cap)
-		c.offset = 0
+		c.offset = n
 		low = 0
 	}
-	return unsafe.Slice(&c.mem[low], size)
-	//return c.mem[low : low+size : low+size] // https://go.dev/ref/spec#Slicel_expressions
+	//return unsafe.Slice(&c.mem[low], size)
+	return c.mem[low:c.offset:c.offset] // https://go.dev/ref/spec#Slicel_expressions
 }
