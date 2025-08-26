@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package genesiswrite
 
 import (
 	"bytes"
@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/config3"
@@ -117,7 +118,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	if err := WriteGenesisIfNotExist(tx, genesis); err != nil {
+	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
 
@@ -180,13 +181,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
 	}
-	storedCfg, storedErr := ReadChainConfig(tx, storedHash)
+	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil && newCfg.Bor == nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
 		logger.Warn("Found genesis block without chain config")
-		err1 := WriteChainConfig(tx, storedHash, newCfg)
+		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
 			return newCfg, nil, err1
 		}
@@ -208,7 +209,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
-	if err := WriteChainConfig(tx, storedHash, newCfg); err != nil {
+	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
@@ -289,7 +290,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return err
 	}
-	return WriteChainConfig(tx, block.Hash(), config)
+	return rawdb.WriteChainConfig(tx, block.Hash(), config)
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
@@ -410,7 +411,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			}
 
 			if len(account.Constructor) > 0 {
-				if _, err = SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
+				if _, err = core.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
 					return err
 				}
 			}

@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -1400,10 +1400,10 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 
 	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev || chainName == networkname.BorDevnet {
 		if etherbase == "" {
-			cfg.Miner.Etherbase = core.DevnetEtherbase
+			cfg.Miner.Etherbase = genesiswrite.DevnetEtherbase
 		}
 
-		cfg.Miner.SigKey = core.DevnetSignKey(cfg.Miner.Etherbase)
+		cfg.Miner.SigKey = genesiswrite.DevnetSignKey(cfg.Miner.Etherbase)
 
 		setSigKey(ctx, cfg)
 	}

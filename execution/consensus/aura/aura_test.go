@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -44,7 +45,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, _, err := core.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, _, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
