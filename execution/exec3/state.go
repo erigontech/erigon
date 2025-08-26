@@ -385,13 +385,14 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 			txTask.Error = outerErr
 			return
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
 
 		txTask.ValidationResults = validationResults
 	}
 
 	if len(txTask.ValidationResults) == 0 {
 		txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+		return
 	}
 
 	aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
