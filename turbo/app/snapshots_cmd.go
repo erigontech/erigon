@@ -1741,7 +1741,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	defer decompressor.MadvSequential().DisableReadAhead()
+	defer decompressor.MadvNormal().DisableReadAhead()
 
 	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
@@ -1754,7 +1754,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	g := decompressor.MakeGetter()
 	buf := make([]byte, 0, 1*datasize.MB)
 	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
+		buf, _ = g.Next(nil)
 		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
 		if _, err := wr.Write(numBuf[:n]); err != nil {
 			return err
