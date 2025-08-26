@@ -99,7 +99,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 			"gasLimit", block.GasLimit(),
 			"gasUsed", block.GasUsed(),
 			"blobGasUsed", block.Header().BlobGasUsed,
-			"len(transactions)", block.Transactions().Len(),
+			"transactionsCount", block.Transactions().Len(),
 			"coinbase", block.Coinbase(),
 			"stateRoot", block.Root(),
 			"withdrawalsHash", block.WithdrawalsHash(),
