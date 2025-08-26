@@ -1,4 +1,4 @@
-package sentry
+package libsentry
 
 import (
 	"context"

@@ -1,18 +1,19 @@
-package sentry_test
+package libsentry_test
 
 import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func newClient(ctrl *gomock.Controller, peerId *typesproto.H512, caps []string) *direct.MockSentryClient {
@@ -52,7 +53,7 @@ func TestProtocols(t *testing.T) {
 	direct := newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{0}), []string{"eth/67"})
 	direct.EXPECT().Protocol().Return(67)
 
-	p := sentry.Protocols(direct)
+	p := libsentry.Protocols(direct)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(67), p[0])
@@ -61,15 +62,15 @@ func TestProtocols(t *testing.T) {
 		mock: newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{1}), []string{"eth/68"}),
 	}
 
-	p = sentry.Protocols(base)
+	p = libsentry.Protocols(base)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(68), p[0])
 
-	mux := sentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct, base})
+	mux := libsentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct, base})
 	require.NotNil(t, mux)
 
-	p = sentry.Protocols(mux)
+	p = libsentry.Protocols(mux)
 
 	require.Len(t, p, 2)
 	require.Contains(t, p, byte(67))
@@ -84,15 +85,15 @@ func TestProtocolsByPeerId(t *testing.T) {
 
 	direct := newClient(ctrl, peerId, []string{"eth/67"})
 
-	p := sentry.PeerProtocols(direct, peerId)
+	p := libsentry.PeerProtocols(direct, peerId)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(67), p[0])
 
-	mux := sentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct})
+	mux := libsentry.NewSentryMultiplexer([]sentryproto.SentryClient{direct})
 	require.NotNil(t, mux)
 
-	p = sentry.PeerProtocols(mux, peerId)
+	p = libsentry.PeerProtocols(mux, peerId)
 
 	require.Len(t, p, 1)
 	require.Equal(t, byte(67), p[0])

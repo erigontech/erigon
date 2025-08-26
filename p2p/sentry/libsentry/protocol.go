@@ -1,4 +1,4 @@
-package sentry
+package libsentry
 
 import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"

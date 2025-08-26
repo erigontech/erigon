@@ -1,13 +1,14 @@
-package sentry
+package libsentry
 
 import (
 	"context"
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func PeerProtocols(sentry sentryproto.SentryClient, peer *typesproto.H512) []byte {
