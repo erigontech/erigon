@@ -58,7 +58,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 	tmp := b.TempDir()
 	b.Cleanup(func() { dir.RemoveAll(tmp) })
 
-	dataPath := generateKV(b, tmp, 52, 10, 1_000_000, logger, 0)
+	dataPath := generateKV(b, tmp, 52, 10, 1_000_000, logger, compression)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
@@ -75,7 +75,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
-	compress := seg.CompressNone
+	compress := seg.CompressKeys
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
