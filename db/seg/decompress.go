@@ -719,7 +719,9 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	if buf == nil {
 		buf = g.alloc(len(buf) + int(wordLen))
 	} else if len(buf)+int(wordLen) > cap(buf) {
-		buf = make([]byte, len(buf)+int(wordLen))
+		newBuf := make([]byte, len(buf)+int(wordLen))
+		copy(newBuf, buf)
+		buf = newBuf
 	} else {
 		// Expand buffer
 		buf = buf[:len(buf)+int(wordLen)]
