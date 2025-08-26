@@ -161,7 +161,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				Index:       log.Index,
 				Removed:     log.Removed,
 			},
-			BlockTimestamp: log.Timestamp,
+			// Arbitrum has not yet inherited this change from geth.
+			// BlockTimestamp: log.Timestamp,
 		}
 	}
 

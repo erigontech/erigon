@@ -100,8 +100,9 @@ func (logs Logs) Copy() Logs {
 // ToRPCTransactionLog converts types.Log in a RPCLog.
 func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex uint64) *RPCLog {
 	return &RPCLog{
-		Log:            *log,
-		BlockTimestamp: header.Time,
+		Log: *log,
+		// Arbitrum has not yet inherited this change from geth.
+		// BlockTimestamp: header.Time,
 	}
 }
 
