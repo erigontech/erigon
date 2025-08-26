@@ -93,12 +93,13 @@ func (c *DecompressArena) Allocate(size int) []byte {
 	}
 
 	low := c.offset
-	c.offset += size
-	newOffset := (c.offset + Alignment - 1) / Alignment * Alignment
-	if newOffset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+	alignedSize := (size + Alignment - 1) / Alignment * Alignment
+	c.offset += alignedSize
+	if c.offset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		if err := c.newChunk(); err != nil {
 			panic(err)
 		}
+		low = 0
 	}
 	return c.mem[c.memI][low : low+size : low+size] // https://go.dev/ref/spec#Slicel_expressions
 }
@@ -143,14 +144,15 @@ func (c *DecompressArenaSlice) Allocate(size int) []byte {
 	}
 
 	low := c.offset
-	c.offset += size
-	newOffset := (c.offset + Alignment - 1) / Alignment * Alignment
-	if newOffset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+	alignedSize := (size + Alignment - 1) / Alignment * Alignment
+	c.offset += alignedSize
+	if c.offset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		if c.mem != nil {
 			bufPool.Put(c.mem)
 		}
 		c.mem = bufPool.Get().([]byte)
 		c.offset = 0
+		low = 0
 	}
 	return unsafe.Slice(&c.mem[low], size)
 	//return c.mem[low : low+size : low+size] // https://go.dev/ref/spec#Slicel_expressions
@@ -188,11 +190,10 @@ func (c *DecompressArenaSlice2) Allocate(size int) []byte {
 	low := c.offset
 	alignedSize := (size + Alignment - 1) / Alignment * Alignment
 	c.offset += alignedSize
-	newOffset := c.offset
-	//c.a.Add(uint32(newOffset))
-	if newOffset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+	if c.offset >= c.cap || c.mem == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		c.mem = make([]byte, c.cap)
 		c.offset = 0
+		low = 0
 	}
 	return unsafe.Slice(&c.mem[low], size)
 	//return c.mem[low : low+size : low+size] // https://go.dev/ref/spec#Slicel_expressions

@@ -24,65 +24,86 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkDecompress(b *testing.B) {
+func BenchmarkDecompressNext(b *testing.B) {
 	t := new(testing.T)
-	d := prepareDict(t, 100_000)
+	d := prepareDict(t, 1)
 	defer d.Close()
 
-	b.Run("next", func(b *testing.B) {
+	b.Run("next.buf", func(b *testing.B) {
 		b.ReportAllocs()
 		var buf []byte
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
-			buf, _ = g.Next(buf[:0])
-			if !g.HasNext() {
-				g.Reset(0)
+			g.Reset(0)
+			for g.HasNext() {
+				buf, _ = g.Next(buf[:0])
 			}
 		}
 	})
-	b.Run("skip", func(b *testing.B) {
+	b.Run("next.arena", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
-			_, _ = g.Skip()
-			if !g.HasNext() {
-				g.Reset(0)
+			g.Reset(0)
+			for g.HasNext() {
+				g.Next2(nil)
 			}
 		}
 	})
-	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
+	b.Run("next.nil", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
-			_ = g.MatchCmp([]byte("longlongword"))
-			if !g.HasNext() {
-				g.Reset(0)
+			g.Reset(0)
+			for g.HasNext() {
+				g.Next(nil)
 			}
 		}
 	})
+
+	//b.Run("skip", func(b *testing.B) {
+	//	b.ReportAllocs()
+	//	g := d.MakeGetter()
+	//	for i := 0; i < b.N; i++ {
+	//		_, _ = g.Skip()
+	//		if !g.HasNext() {
+	//			g.Reset(0)
+	//		}
+	//	}
+	//})
+	//b.Run("matchcmp_non_existing_key", func(b *testing.B) {
+	//	b.ReportAllocs()
+	//	g := d.MakeGetter()
+	//	for i := 0; i < b.N; i++ {
+	//		_ = g.MatchCmp([]byte("longlongword"))
+	//		if !g.HasNext() {
+	//			g.Reset(0)
+	//		}
+	//	}
+	//})
 }
 
-func BenchmarkDecompressTorrent(t *testing.B) {
-	t.Skip()
+func BenchmarkDecompressTorrent(b *testing.B) {
+	b.Skip()
 
 	//fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-bodies.seg"
 	fpath := "/Volumes/wotah/mainnet/snapshots/v1.0-013500-014000-transactions.seg"
 	//fpath := "./v1.0-006000-006500-transactions.seg"
 	st, err := os.Stat(fpath)
-	require.NoError(t, err)
+	require.NoError(b, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
 	condensePatternTableBitThreshold = 5
 	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
 
-	t.Run("init", func(t *testing.B) {
+	b.Run("init", func(t *testing.B) {
 		for i := 0; i < t.N; i++ {
 			d, err := NewDecompressor(fpath)
 			require.NoError(t, err)
 			d.Close()
 		}
 	})
-	t.Run("run", func(t *testing.B) {
+	b.Run("run", func(t *testing.B) {
 		d, err := NewDecompressor(fpath)
 		require.NoError(t, err)
 		defer d.Close()

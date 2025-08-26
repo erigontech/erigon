@@ -555,6 +555,9 @@ type Getter struct {
 	dataBit     int // Value 0..7 - position of the bit
 	trace       bool
 	d           *Decompressor
+
+	allocArena    []byte
+	allocArenaPos int
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -704,6 +707,91 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	bufOffset := len(buf)
 	if len(buf)+int(wordLen) > cap(buf) {
 		newBuf := make([]byte, len(buf)+int(wordLen))
+		copy(newBuf, buf)
+		buf = newBuf
+	} else {
+		// Expand buffer
+		buf = buf[:len(buf)+int(wordLen)]
+	}
+
+	// Loop below fills in the patterns
+	// Tracking position in buf where to insert part of the word
+	bufPos := bufOffset
+	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
+		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
+		pt := g.nextPattern()
+		copy(buf[bufPos:], pt)
+	}
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
+	postLoopPos := g.dataP
+	g.dataP = savePos
+	g.dataBit = 0
+	g.nextPos(true /* clean */) // Reset the state of huffman reader
+
+	// Restore to the beginning of buf
+	bufPos = bufOffset
+	lastUncovered := bufOffset
+
+	// Loop below fills the data which is not in the patterns
+	for pos := g.nextPos(false); pos != 0; pos = g.nextPos(false) {
+		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
+		if bufPos > lastUncovered {
+			dif := uint64(bufPos - lastUncovered)
+			copy(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif])
+			postLoopPos += dif
+		}
+		lastUncovered = bufPos + len(g.nextPattern())
+	}
+	if bufOffset+int(wordLen) > lastUncovered {
+		dif := uint64(bufOffset + int(wordLen) - lastUncovered)
+		copy(buf[lastUncovered:lastUncovered+int(dif)], g.data[postLoopPos:postLoopPos+dif])
+		postLoopPos += dif
+	}
+	g.dataP = postLoopPos
+	g.dataBit = 0
+	return buf, postLoopPos
+}
+
+func (g *Getter) alloc(n int) []byte {
+	if n >= AllocLimitOnArena {
+		return make([]byte, n)
+	}
+
+	low := g.allocArenaPos
+	alignedN := (n + Alignment - 1) / Alignment * Alignment
+	g.allocArenaPos += alignedN
+	if g.allocArenaPos >= 64*1024 || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
+		g.allocArena = make([]byte, 64*1024)
+		g.allocArenaPos = 0
+		low = 0
+	}
+	return g.allocArena[low : low+n : low+n] // https://go.dev/ref/spec#Slicel_expressions
+}
+
+// Next extracts a compressed word from current offset in the file
+// and appends it to the given buf, returning the result of appending
+// After extracting next word, it moves to the beginning of the next one
+func (g *Getter) Next2(buf []byte) ([]byte, uint64) {
+	savePos := g.dataP
+	wordLen := g.nextPos(true)
+	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
+	if wordLen == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
+		if buf == nil { // wordLen == 0, means we have valid record of 0 size. nil - is the marker of "something not found"
+			buf = []byte{}
+		}
+		return buf, g.dataP
+	}
+
+	bufOffset := len(buf)
+	if len(buf)+int(wordLen) > cap(buf) {
+		newBuf := g.alloc(len(buf) + int(wordLen))
 		copy(newBuf, buf)
 		buf = newBuf
 	} else {
