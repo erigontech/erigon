@@ -93,7 +93,13 @@ func Benchmark_BTree_Seek(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			for _, k := range keys {
-				bt.Get(k, getter)
+				k, v, _, _, _ := bt.Get(k, getter)
+				if len(k) > 0 {
+					_, _ = k[0], k[len(k)-1]
+				}
+				if len(v) > 0 {
+					_, _ = v[0], v[len(v)-1]
+				}
 			}
 		}
 	})

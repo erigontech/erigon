@@ -390,7 +390,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				offset = b.offt.Get(m)
 				g.Reset(offset)
 			}
-			v, _ = g.Next(v[:0])
+			v, _ = g.Next(nil)
 			if cmp = bytes.Compare(v, key); cmp > 0 {
 				return nil, false, 0, err
 			} else if cmp < 0 {
@@ -403,7 +403,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			return v, true, offset, nil
 		}
 
-		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
+		cmp, _, err = b.keyCmpFunc(key, m, g, nil)
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -424,7 +424,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	cmp, _, err = b.keyCmpFunc(key, l, g, v[:0])
+	cmp, _, err = b.keyCmpFunc(key, l, g, nil)
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
