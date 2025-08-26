@@ -83,13 +83,15 @@ func (c *DecompressArena) Free() {
 
 func (c *DecompressArena) NoSpaceLeft() bool { return c.cap <= c.offset }
 
-const Alignment = 8
 const AllocLimitOnArena = 64 * 1024
 
 func (c *DecompressArena) Allocate(n int) []byte {
 	if n >= AllocLimitOnArena {
 		return make([]byte, n)
 	}
+
+	//const Alignment = 8
+	//alignedN := (n + Alignment - 1) / Alignment * Alignment
 
 	low := c.offset
 	c.offset += n
