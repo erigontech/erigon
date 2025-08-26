@@ -43,7 +43,7 @@ func BenchmarkDecompressNext(b *testing.B) {
 			}
 		}
 	})
-	b.Run("nil", func(b *testing.B) {
+	b.Run("arena", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
 		for i := 0; i < b.N; i++ {
