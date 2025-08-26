@@ -121,8 +121,6 @@ jobs:
           fi
           echo "All tests passed successfully."
 
-
-
       # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
       # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
       - name: Remove Hive directory
@@ -142,4 +140,133 @@ jobs:
           echo "Pruning docker..."
           docker system prune -af --volumes
         if: always()
+
+  test-hive-eest-devnet:
+    runs-on:
+      group: hive
+    steps:
+      - name: Clean docker system
+        run: |
+          echo "Force stopping and removing all containers..."
+          if [ -n "$(docker ps -aq)" ]; then
+            docker kill $(docker ps -aq) || true
+            docker rm -f $(docker ps -aq) || true
+          fi
+          echo "Pruning all images..."
+          docker image prune -af || true
+          if [ -n "$(docker images -aq)" ]; then
+            echo "Force removing all images..."
+            docker rmi -f $(docker images -aq) || true
+          fi
+          echo "Pruning docker system..."
+          docker system prune -af --volumes
+      - name: Checkout Hive
+        uses: actions/checkout@v5
+        with:
+          repository: erigontech/hive
+          ref: master
+          path: hive
+    
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+    
+      - name: Setup go env and cache
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.24'
+
+      # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
+      # this builds the container from github and uses it for tests
+      - name: Get dependencies and build hive
+        run: |
+          cd hive
+          git status
+          go get . >> buildlogs.log
+          rm clients/erigon/Dockerfile
+          mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
+          branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
+          echo Building Hive with Erigon branch - $branch_name
+          sed -i "s/^ARG github=ledgerwatch\/erigon$/ARG github=erigontech\/erigon/" clients/erigon/Dockerfile
+          sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
+          go build . >> buildlogs.log
+      # Depends on the last line of hive output that prints the number of suites, tests and failed
+      # Currently, we fail even if suites and tests are too few, indicating the tests did not run
+      # We also fail if more than half the tests fail
+      - name: Run hive tests for devnet and parse output
+        run: |
+          cd hive
+          docker ps
+          run_suite() {
+            echo -e "\n\n============================================================"
+            echo "Running test: ${1}"
+            echo -e "\n"
+            ./hive --sim 'ethereum/eest/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg branch=hive --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/fusaka-devnet-5%40v1.1.0/fixtures_fusaka-devnet-5.tar.gz 2>&1 | tee output.log || {
+              if [ $? -gt 0 ]; then
+                echo "Exitcode gt 0"
+              fi
+            }
+            status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+            suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+            if [ -z "$suites" ]; then
+              status_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+              suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+            fi 
+            tests=$(echo "$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
+            failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+
+            echo -e "\n"
+            message="-----------   Results for ${1}    -----------\nTests: $tests, Failed: $failed\n\n============================================================"
+            echo -e "$message"
+            echo -e "$message" >> result.log
+
+            if (( tests < 4 )); then
+              echo "Too few tests run for suite ${1} - ${tests} tests"
+              echo "failed" > failed.log
+              exit 1
+            fi
+            if (( failed > 3 )); then
+              echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
+              echo "failed" > failed.log
+              exit 1
+            fi
+          }
+          run_suite eest/consume-engine
+        continue-on-error: true
+      - name: Upload output log
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-workspace-log
+          path: hive/workspace/logs
+      - name: Test Results
+        run: |
+          cat hive/result.log
+          if grep -q "failed" hive/failed.log; then
+            echo "One or more tests failed."
+            exit 1
+          fi
+          echo "All tests passed successfully."
+          
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
+      - name: Remove Hive directory
+        run: |
+          echo "Removing the Hive directory..."
+          rm -rf hive
+        if: always()
+
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
+      - name: Prune docker
+        run: |
+          echo "Stopping and removing all containers..."
+          docker rm -f $(docker ps -aq) || true
+          echo "Removing all images..."
+          docker rmi -f $(docker images -aq) || true
+          echo "Pruning docker..."
+          docker system prune -af --volumes
+        if: always()
+
 
