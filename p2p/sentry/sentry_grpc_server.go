@@ -1269,6 +1269,14 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 	case direct.ETH68:
 		reply.Protocol = proto_sentry.Protocol_ETH68
 	}
+
+	// Add side protocols if available
+	for _, protocol := range ss.Protocols {
+		if protocol.Name == wit.ProtocolName && protocol.Version == wit.ProtocolVersions[0] {
+			reply.SideProtocols = append(reply.SideProtocols, proto_sentry.Protocol_WIT0)
+		}
+	}
+
 	return reply, nil
 }
 
