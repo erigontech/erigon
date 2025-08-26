@@ -137,28 +137,6 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	}
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
-	b.Helper()
-
-	logger := log.New()
-	tmp := b.TempDir()
-	b.Cleanup(func() { dir.RemoveAll(tmp) })
-
-	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
-	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
-
-	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
-
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
-	require.NoError(b, err)
-	b.Cleanup(func() { bt.Close() })
-	b.Cleanup(func() { kv.Close() })
-
-	keys, err := pivotKeysFromKV(dataPath)
-	require.NoError(b, err)
-	return kv, bt, keys, dataPath
-}
-
 // requires existing KV index file at ../../data/storage.kv
 func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	dataPath := "../../data/storage.kv"
