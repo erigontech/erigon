@@ -691,10 +691,10 @@ func (g *Getter) alloc(n int) []byte {
 	g.allocArenaPos += n
 	if g.allocArenaPos >= DecArenaSize || g.allocArena == nil { //fallback to normal allocation - it doesn't reduce value-lifetime guaranties (valid until end of Txn)
 		g.allocArena = make([]byte, DecArenaSize)
-		g.allocArenaPos = 0
 		low = 0
+		g.allocArenaPos = n
 	}
-	return g.allocArena[low : low+n : low+n] // https://go.dev/ref/spec#Slicel_expressions
+	return g.allocArena[low:g.allocArenaPos:g.allocArenaPos] // https://go.dev/ref/spec#Slicel_expressions
 }
 
 // Next extracts a compressed word from current offset in the file
