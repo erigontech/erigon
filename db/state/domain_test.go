@@ -725,12 +725,13 @@ func TestNewSegStreamReader(t *testing.T) {
 	keyCount := 1000
 	valSize := 4
 
-	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.CompressNone)
+	compressFlags := seg.CompressNone
+	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, compressFlags)
 	dec, err := seg.NewDecompressor(fpath)
 	require.NoError(t, err)
 
 	defer dec.Close()
-	r := seg.NewReader(dec.MakeGetter(), seg.CompressNone)
+	r := seg.NewReader(dec.MakeGetter(), compressFlags)
 
 	sr := NewSegStreamReader(r, -1)
 	require.NotNil(t, sr)
