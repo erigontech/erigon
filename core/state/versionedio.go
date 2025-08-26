@@ -471,9 +471,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 			if s.versionedReads == nil {
 				s.versionedReads = ReadSet{}
 			}
-			if s.blockNum == 74404031 && s.txIndex == 92 {
-				fmt.Printf("%d (%d.%d) Set 1: %#v\n", s.blockNum, s.txIndex, s.version, vr)
-			}
+
 			s.versionedReads.Set(vr)
 
 			panic(ErrDependency)
@@ -519,6 +517,12 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 					return pr.Val.(T), ReadSetRead, pr.Version, nil
 				}
+
+				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+					fmt.Printf("%d (%d.%d) RM DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
+				}
+
+				panic(ErrDependency)
 			}
 		}
 
