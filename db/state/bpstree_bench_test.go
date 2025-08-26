@@ -79,22 +79,23 @@ func Benchmark_BTree_Seek(b *testing.B) {
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
-	b.Run("seek_only", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			for _, k := range keys {
-				cur, _ := bt.Seek(getter, k)
-				cur.Close()
-			}
-		}
-	})
+	//b.Run("seek_only", func(b *testing.B) {
+	//	b.ReportAllocs()
+	//	for i := 0; i < b.N; i++ {
+	//		for _, k := range keys {
+	//			cur, _ := bt.Seek(getter, k)
+	//			cur.Close()
+	//		}
+	//	}
+	//})
 
 	b.Run("get_only", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			for _, k := range keys {
-				bt.Get(k, getter)
-			}
+			bt.Get(keys[8], getter)
+			//for _, k := range keys {
+			//	bt.Get(k, getter)
+			//}
 		}
 	})
 
