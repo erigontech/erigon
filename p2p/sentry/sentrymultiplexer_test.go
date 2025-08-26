@@ -18,11 +18,11 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
