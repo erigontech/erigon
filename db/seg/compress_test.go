@@ -96,7 +96,7 @@ func prepareDict(t *testing.T, multiplier int) *Decompressor {
 	defer c.Close()
 	k := bytes.Repeat([]byte("long"), multiplier)
 	v := bytes.Repeat([]byte("word"), multiplier)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1_000; i++ {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
