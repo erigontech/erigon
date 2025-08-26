@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/cli"
 )
@@ -113,7 +114,7 @@ func withReset(cmd *cobra.Command) {
 }
 
 func withSqueeze(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&reset, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
 }
 
 func withBucket(cmd *cobra.Command) {
@@ -141,6 +142,10 @@ func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+}
+
+func withConcurrentCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&state.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
