@@ -105,8 +105,6 @@ type SnapInfo struct {
 	Ext string // extension
 }
 
-type Version = version.Version
-
 // func (f *SnapInfo) IsSeg() bool      { return strings.Compare(f.Ext, ".seg") == 0 }
 // func (f *SnapInfo) IsV() bool        { return strings.Compare(f.Ext, ".v") == 0 }
 // func (f *SnapInfo) IsKV() bool       { return strings.Compare(f.Ext, ".kv") == 0 }

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -114,7 +115,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	}
 
 	tv := commitment.VariantHexPatriciaTrie
-	if ExperimentalConcurrentCommitment {
+	if statecfg.ExperimentalConcurrentCommitment {
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
