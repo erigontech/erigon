@@ -38,8 +38,8 @@ func (se *serialExecutor) LogExecuted() {
 
 func (se *serialExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	se.committedGas += int64(committedGas)
-	se.lastCommittedBlockNum += committedBlocks
-	se.lastCommittedTxNum += committedTransactions
+	se.txExecutor.lastCommittedBlockNum += committedBlocks
+	se.txExecutor.lastCommittedTxNum += committedTransactions
 	se.progress.LogCommitted(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
@@ -49,6 +49,14 @@ func (se *serialExecutor) LogComplete(stepsInDb float64) {
 
 func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
+}
+
+func (se *serialExecutor) lastCommittedBlockNum() uint64 {
+	return se.txExecutor.lastCommittedBlockNum
+}
+
+func (se *serialExecutor) lastCommittedTxNum() uint64 {
+	return se.txExecutor.lastCommittedTxNum
 }
 
 func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {

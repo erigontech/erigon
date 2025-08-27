@@ -396,10 +396,13 @@ var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if gasUsed != h.GasUsed {
-		fmt.Println(h.Number.Uint64(), "gas used mismatch", "execution:", gasUsed, "header:", h.GasUsed)
+		var txgas string
+		sep := ""
 		for _, receipt := range receipts {
-			fmt.Println(h.Number.Uint64(), receipt.TransactionIndex, "gas", receipt.GasUsed)
+			txgas += fmt.Sprintf("%s%d=%d", sep, receipt.TransactionIndex, receipt.GasUsed)
+			sep = ", "
 		}
+		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", gasUsed, "txgas", txgas)
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
 	}

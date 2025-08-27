@@ -632,7 +632,7 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 	}
 
 	currentTime := time.Now()
-	interval := currentTime.Sub(p.prevExecTime)
+	interval := currentTime.Sub(p.prevCommitTime)
 
 	if te.shouldGenerateChangesets {
 		suffix += "(commit every block)"
@@ -715,7 +715,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	vals := []interface{}{
 		"blk", blk,
 		"blks", blks,
-		"blk/s", common.PrettyCounter(uint64(float64(blks) / interval.Seconds())),
+		"blk/s", common.PrettyCounter(float64(blks) / interval.Seconds()),
 		"txs", common.PrettyCounter(txs),
 		"tx/s", common.PrettyCounter(txsSec),
 		"gas/s", common.PrettyCounter(gasSec),
@@ -953,6 +953,8 @@ func ExecV3(ctx context.Context,
 				progress:                 NewProgress(blockNum, outputTxNum.Load(), commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey:        execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:                    hooks,
+				lastCommittedTxNum:       doms.TxNum(),
+				lastCommittedBlockNum:    blockNum,
 			},
 			workerCount: workerCount,
 		}
@@ -979,6 +981,8 @@ func ExecV3(ctx context.Context,
 				progress:                 NewProgress(blockNum, outputTxNum.Load(), commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey:        execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:                    hooks,
+				lastCommittedTxNum:       doms.TxNum(),
+				lastCommittedBlockNum:    blockNum,
 			},
 		}
 
@@ -1028,11 +1032,7 @@ func ExecV3(ctx context.Context,
 			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "fromTxNum", doms.TxNum(), "initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
-	var lastCommittedTxNum uint64
-	var lastCommittedBlockNum uint64
-
 	if !parallel {
-
 		se := executor.(*serialExecutor)
 
 		execErr = func() error {
@@ -1220,8 +1220,8 @@ func ExecV3(ctx context.Context,
 					computeCommitmentDuration += times.ComputeCommitment
 					flushDuration := times.Flush
 
-					se.lastCommittedBlockNum = b.NumberU64()
-					se.lastCommittedTxNum = inputTxNum
+					se.txExecutor.lastCommittedBlockNum = b.NumberU64()
+					se.txExecutor.lastCommittedTxNum = inputTxNum
 
 					timeStart := time.Now()
 
@@ -1293,9 +1293,9 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				se.lastCommittedBlockNum = b.NumberU64()
-				committedTransactions := inputTxNum - se.lastCommittedTxNum
-				se.lastCommittedTxNum = inputTxNum
+				se.txExecutor.lastCommittedBlockNum = b.NumberU64()
+				committedTransactions := inputTxNum - se.txExecutor.lastCommittedTxNum
+				se.txExecutor.lastCommittedTxNum = inputTxNum
 
 				commitStart := time.Now()
 				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
@@ -1313,9 +1313,6 @@ func ExecV3(ctx context.Context,
 				fmt.Printf("[dbg] mmmm... do we need action here????\n")
 			}
 		}
-
-		lastCommittedTxNum = se.lastCommittedTxNum
-		lastCommittedBlockNum = se.lastCommittedBlockNum
 	} else {
 		pe := executor.(*parallelExecutor)
 
@@ -1346,7 +1343,9 @@ func ExecV3(ctx context.Context,
 		var lastExecutedLog time.Time
 		var lastCommitedLog time.Time
 		var lastBlockResult blockResult
-		var uncommitedGas int64
+		var uncommittedBlocks int64
+		var uncommittedTransactions uint64
+		var uncommittedGas int64
 		var flushPending bool
 
 		execErr = func() error {
@@ -1367,7 +1366,6 @@ func ExecV3(ctx context.Context,
 
 			blockUpdateCount := 0
 			blockApplyCount := 0
-			transactionsPerBlock := uint64(0)
 
 			for {
 				select {
@@ -1376,7 +1374,8 @@ func ExecV3(ctx context.Context,
 				case applyResult := <-applyResults:
 					switch applyResult := applyResult.(type) {
 					case *txResult:
-						uncommitedGas += applyResult.gasUsed
+						uncommittedGas += applyResult.gasUsed
+						uncommittedTransactions += applyResult.txCount
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 							pe.rs.SetTrace(true)
@@ -1419,11 +1418,9 @@ func ExecV3(ctx context.Context,
 						}
 
 						if applyResult.BlockNum > lastBlockResult.BlockNum {
+							uncommittedBlocks++
 							pe.doms.SetTxNum(applyResult.lastTxNum)
 							pe.doms.SetBlockNum(applyResult.BlockNum)
-							if lastBlockResult.lastTxNum > 0 {
-								transactionsPerBlock = (transactionsPerBlock + applyResult.lastTxNum - lastBlockResult.lastTxNum) / 2
-							}
 							lastBlockResult = *applyResult
 						}
 
@@ -1431,7 +1428,7 @@ func ExecV3(ctx context.Context,
 
 						if !dbg.DiscardCommitment() {
 							if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxExecBlockNum ||
-								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum()) {
 
 								resetExecGauges(ctx)
 
@@ -1446,7 +1443,6 @@ func ExecV3(ctx context.Context,
 								}
 								pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
-								uncommittedTransactions := lastBlockResult.lastTxNum - pe.lastCommittedTxNum
 								commitProgress := make(chan *commitment.CommitProgress, 100)
 
 								go func() {
@@ -1455,6 +1451,34 @@ func ExecV3(ctx context.Context,
 
 									defer logEvery.Stop()
 									var lastProgress commitment.CommitProgress
+
+									var prevCommitedBlocks uint64
+									var prevCommittedTransactions uint64
+									var prevCommitedGas uint64
+
+									logCommitted := func(commitProgress commitment.CommitProgress) {
+										// this is an approximation of blcok prgress - it assumnes an
+										// even distribution of keys to blocks
+										progress := float64(commitProgress.KeyIndex) / float64(commitProgress.UpdateCount)
+										committedGas := uint64(float64(uncommittedGas) * progress)
+										committedTransactions := uint64(float64(uncommittedTransactions) * progress)
+										commitedBlocks := uint64(float64(uncommittedBlocks) * progress)
+
+										pe.LogCommitted(commitStart,
+											commitedBlocks-prevCommitedBlocks,
+											committedTransactions-prevCommittedTransactions,
+											committedGas-prevCommitedGas, stepsInDb, commitProgress)
+
+										lastCommitedLog = time.Now()
+										prevCommitedBlocks = commitedBlocks
+										prevCommittedTransactions = committedTransactions
+										prevCommitedGas = committedGas
+
+										if pe.agg.HasBackgroundFilesBuild() {
+											logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
+										}
+									}
+
 									for {
 										select {
 										case <-ctx.Done():
@@ -1462,27 +1486,14 @@ func ExecV3(ctx context.Context,
 										case progress, ok := <-commitProgress:
 											if !ok {
 												if time.Since(lastCommitedLog) > logInterval/20 {
-													progress := float64(lastProgress.KeyIndex) / float64(lastProgress.UpdateCount)
-													committedGas := uint64(float64(uncommitedGas) * progress)
-													committedTransactions := uint64(float64(uncommittedTransactions) * progress)
-													commitedBlocks := committedTransactions / transactionsPerBlock
-													pe.LogCommitted(commitStart, commitedBlocks, committedGas, committedTransactions, stepsInDb, lastProgress)
-													lastCommitedLog = time.Now()
+													logCommitted(lastProgress)
 												}
 												return
 											}
 											lastProgress = *progress
 										case <-logEvery.C:
 											if time.Since(lastCommitedLog) > logInterval-(logInterval/90) {
-												lastCommitedLog = time.Now()
-												progress := float64(lastProgress.KeyIndex) / float64(lastProgress.UpdateCount)
-												committedGas := uint64(float64(uncommitedGas) * progress)
-												committedTransactions := uint64(float64(uncommittedTransactions) * progress)
-												commitedBlocks := committedTransactions / transactionsPerBlock
-												pe.LogCommitted(commitStart, commitedBlocks, committedTransactions, committedGas, stepsInDb, lastProgress)
-												if pe.agg.HasBackgroundFilesBuild() {
-													logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
-												}
+												logCommitted(lastProgress)
 											}
 										}
 									}
@@ -1519,10 +1530,12 @@ func ExecV3(ctx context.Context,
 									}
 									return fmt.Errorf("wrong trie root: %d", applyResult.BlockNum)
 								}
-
-								pe.lastCommittedBlockNum = lastBlockResult.BlockNum
-								pe.lastCommittedTxNum = lastBlockResult.lastTxNum
-								uncommitedGas = 0
+								// fix these here - they will contain estimates after commit logging
+								pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
+								pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
+								uncommittedBlocks = 0
+								uncommittedGas = 0
+								uncommittedGas = 0
 							}
 						}
 
@@ -1589,9 +1602,6 @@ func ExecV3(ctx context.Context,
 		if applyTx, err = pe.flushAndCommit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
 			return fmt.Errorf("flush failed: %w", err)
 		}
-
-		lastCommittedTxNum = pe.lastCommittedTxNum
-		lastCommittedBlockNum = pe.lastCommittedBlockNum
 	}
 
 	executor.wait(ctx)
@@ -1600,14 +1610,14 @@ func ExecV3(ctx context.Context,
 		dumpPlainStateDebug(applyTx.(kv.TemporalRwTx), executor.domains())
 	}
 
-	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
+	lastCommitedStep := kv.Step((executor.lastCommittedTxNum()) / doms.StepSize())
 
 	if lastFrozenStep := applyTx.(kv.TemporalRwTx).StepsInFiles(kv.CommitmentDomain); lastCommitedStep <= lastFrozenStep {
 		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
-			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommitedStep,
+			"block", executor.lastCommittedBlockNum(), "txNum", executor.lastCommittedTxNum(), "step", lastCommitedStep,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
 		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
-			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
+			executor.lastCommittedBlockNum(), executor.lastCommittedTxNum(), lastCommitedStep)
 	}
 
 	if !useExternalTx && applyTx != nil {

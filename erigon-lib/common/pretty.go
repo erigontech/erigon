@@ -6,36 +6,39 @@ import (
 )
 
 type number interface {
-	int | int64 | uint | uint64
+	int | int64 | uint | uint64 | float64
 }
 
 const (
-	numK = uint64(1_000)
+	numK = 1_000
 	numM = numK * numK
-	numB = numM * numK
-	numT = numB * numK
+	numG = numM * numK
+	numT = numG * numK
 	numQ = numT * numK
 )
 
 // PrettyCounter print counter number in human readable format
 func PrettyCounter[N number](num N) string {
 	if num < N(numK) {
-		return fmt.Sprintf("%d", num)
+		if num < 1 && num > 0 {
+			return fmt.Sprintf("%.2f", float64(num))
+		}
+		return fmt.Sprintf("%d", uint64(num))
 	}
 	if num < N(numM) {
 		// sequence %02d does not always print 2 first digits but prints whole value so we have to divide by expected /100th part
-		return fmt.Sprintf("%d.%02dk", num/N(numK), num%N(numK)/N(10))
+		return fmt.Sprintf("%d.%02dk", uint64(num)/numK, (uint64(num)%numK)/10)
 	}
-	if num < N(numB) {
-		return fmt.Sprintf("%d.%02dM", num/N(numM), num%N(numM)/N(numK*10))
+	if num < N(numG) {
+		return fmt.Sprintf("%d.%02dM", uint64(num)/numM, (uint64(num)%numM)/(numK*10))
 	}
 	if num < N(numT) {
-		return fmt.Sprintf("%d.%02dB", num/N(numB), num%N(numB)/N(numM*10))
+		return fmt.Sprintf("%d.%02dG", uint64(num)/numG, (uint64(num)%numG)/(numM*10))
 	}
 	if num < N(numQ) {
-		return fmt.Sprintf("%d.%02dT", num/N(numT), num%N(numT)/N(numB*10))
+		return fmt.Sprintf("%d.%02dT", uint64(num)/numT, (uint64(num)%numT)/(numG*10))
 	}
-	return fmt.Sprintf("%d.%02dQ", num/N(numQ), num%N(numQ)/N(numT*10))
+	return fmt.Sprintf("%d.%02dQ", uint64(num)/numQ, (uint64(num)%numQ)/(numT*10))
 }
 
 var divs = []time.Duration{
