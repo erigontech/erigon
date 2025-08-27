@@ -878,7 +878,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		collation, err := ii.collate(context.Background(), 0, tx)
 		require.NoError(t, err)
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
-		txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
+		txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 		ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 		// after reCalcVisibleFiles must be able to prune step 0. but not more
