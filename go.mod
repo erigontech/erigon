@@ -53,7 +53,7 @@ require (
 	github.com/ethereum/c-kzg-4844/v2 v2.1.1
 	github.com/felixge/fgprof v0.9.5
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
-	github.com/go-chi/chi/v5 v5.2.2
+	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.1
 	github.com/go-echarts/go-echarts/v2 v2.3.3
 	github.com/go-quicktest/qt v1.101.0
