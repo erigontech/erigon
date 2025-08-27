@@ -620,7 +620,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		salt := uint32(1)
 		dirs := datadir.New(os.TempDir())
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
-		cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+		cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
 		d, err := NewDomain(cfg, 1, dirs, log.New())
 		if err != nil {
