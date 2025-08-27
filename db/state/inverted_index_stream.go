@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // InvertedIdxStreamFiles allows iteration over range of txn numbers
@@ -49,7 +50,7 @@ type InvertedIdxStreamFiles struct {
 	err     error
 
 	seq       *multiencseq.SequenceReader
-	accessors Accessors
+	accessors statecfg.Accessors
 	ii        *InvertedIndexRoTx
 }
 

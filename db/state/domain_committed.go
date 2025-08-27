@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -245,7 +246,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		}
 		return encodeShorterKey(nil, offset), true
 	}
-	if dt.d.Accessors.Has(AccessorBTree) {
+	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}

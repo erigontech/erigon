@@ -175,32 +175,25 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	cfg := Schema.GetDomainCfg(name)
-	//TODO: move dynamic part of config to InvertedIndex
-	cfg.hist.iiCfg.salt.Store(salt)
-	cfg.hist.iiCfg.dirs = dirs
-	a.d[name], err = NewDomain(cfg, a.stepSize, logger)
+func (a *Aggregator) registerDomain(cfg domainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
+	a.d[cfg.name], err = NewDomain(cfg, a.stepSize, dirs, logger)
 	if err != nil {
 		return err
 	}
-	a.AddDependencyBtwnHistoryII(name)
+	a.d[cfg.name].salt.Store(salt)
+	a.AddDependencyBtwnHistoryII(cfg.name)
 	return nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
-	idxCfg := Schema.GetIICfg(idx)
-	idxCfg.salt.Store(salt)
-	idxCfg.dirs = dirs
-
-	if ii := a.searchII(idx); ii != nil {
-		return fmt.Errorf("inverted index %s already registered", idx)
+func (a *Aggregator) registerII(cfg iiCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
+	if ii := a.searchII(cfg.name); ii != nil {
+		return fmt.Errorf("inverted index %s already registered", cfg.name)
 	}
-
-	ii, err := NewInvertedIndex(idxCfg, a.stepSize, logger)
+	ii, err := NewInvertedIndex(cfg, a.stepSize, dirs, logger)
 	if err != nil {
 		return err
 	}
+	ii.salt.Store(salt)
 	a.iis = append(a.iis, ii)
 	return nil
 }
@@ -231,13 +224,11 @@ func (a *Aggregator) reloadSalt() error {
 	}
 
 	for _, d := range a.d {
-		d.hist.iiCfg.salt.Store(salt)
-		d.History.histCfg.iiCfg.salt.Store(salt)
-		d.History.InvertedIndex.iiCfg.salt.Store(salt)
+		d.salt.Store(salt)
 	}
 
 	for _, ii := range a.iis {
-		ii.iiCfg.salt.Store(salt)
+		ii.salt.Store(salt)
 	}
 
 	return nil

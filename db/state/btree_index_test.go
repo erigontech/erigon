@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func Test_BtreeIndex_Init(t *testing.T) {
@@ -44,7 +45,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r, background.NewProgressSet(), tmp, 1, logger, true, AccessorBTree|AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r, background.NewProgressSet(), tmp, 1, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, r)
@@ -193,7 +194,7 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), compressed)
-	err = BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, AccessorBTree|AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 }
 

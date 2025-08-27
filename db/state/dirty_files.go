@@ -27,6 +27,8 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
+
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -334,7 +336,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 
-			if item.index == nil && d.Accessors.Has(AccessorHashMap) {
+			if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
 				fPathMask := d.kviAccessorFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -353,7 +355,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.bindex == nil && d.Accessors.Has(AccessorBTree) {
+			if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
 				fPathMask := d.kvBtAccessorFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -372,7 +374,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.existence == nil && d.Accessors.Has(AccessorExistence) {
+			if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
 				fPathMask := d.kvExistenceIdxFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
@@ -595,7 +597,7 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
 	if trace {
@@ -643,7 +645,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l Accessors, checker fun
 	return newVisibleFiles
 }
 
-func checkForVisibility(item *FilesItem, l Accessors, trace bool) (canBeVisible bool) {
+func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {
 	if item.canDelete.Load() {
 		if trace {
 			log.Warn("[dbg] canDelete=true", "f", item.decompressor.FileName())
@@ -656,21 +658,21 @@ func checkForVisibility(item *FilesItem, l Accessors, trace bool) (canBeVisible 
 		}
 		return false
 	}
-	if l.Has(AccessorBTree) && item.bindex == nil {
+	if l.Has(statecfg.AccessorBTree) && item.bindex == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
 		}
 		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
-	if l.Has(AccessorHashMap) && item.index == nil {
+	if l.Has(statecfg.AccessorHashMap) && item.index == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}
 		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 		return false
 	}
-	if l.Has(AccessorExistence) && item.existence == nil {
+	if l.Has(statecfg.AccessorExistence) && item.existence == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
 		}
