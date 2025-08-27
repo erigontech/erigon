@@ -1,4 +1,4 @@
-name: QA - Tip tracking (Gnosis)
+name: QA - Tip tracking & migration (Gnosis)
 
 on:
   push:

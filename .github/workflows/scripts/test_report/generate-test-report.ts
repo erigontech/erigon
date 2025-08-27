@@ -13,7 +13,7 @@ const acceptedWorkflows = [
     'QA - Sync with external CL',
     'QA - Tip tracking',
     'QA - Tip tracking & migration',
-    'QA - Tip tracking (Gnosis)',
+    'QA - Tip tracking & migration (Gnosis)',
     'QA - Tip tracking (Polygon)',
     'QA - Constrained Tip tracking',
     'QA - TxPool performance test',
@@ -65,7 +65,8 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '🗑️️';  // The run was cancelled before it completed.
+        case 'cancelled': return '🗑️️';  // The run was cancelled
+        case 'cancelled_after_start': return '✖️'; // The run was cancelled before it completed.
         case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';
@@ -175,7 +176,7 @@ export async function run() {
                     continue;
                 }
 
-                core.info(`Processing workflow run: ${run.name} (${run.id})`);
+                core.info(`Processing workflow run: ${run.name} (${run.id}) - status=${run.status}, conclusion=${run.conclusion}`);
 
                 const {data: jobsData} = await octokit.rest.actions.listJobsForWorkflowRun({
                     owner,
@@ -184,11 +185,21 @@ export async function run() {
                 });
 
                 // Iterate through the jobs in the workflow run
+                if (!jobsData.jobs || !jobsData.jobs.length) {
+                    core.info(`No jobs found for workflow run: ${run.name} (${run.id})`);
+                    continue;
+                }
                 for (const job of jobsData.jobs) {
 
                     const workflowName = run.name ?? run.id.toString();
                     const jobName = job.name;
-                    const conclusion = mapConclusionToIcon(job.conclusion, job.status);
+
+                    // Map the job conclusion to an icon
+                    let conclusion = mapConclusionToIcon(job.conclusion, job.status);
+
+                    // Correction to treat 'cancelled' with steps differently than 'cancelled' without steps
+                    if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
+                        conclusion = mapConclusionToIcon('cancelled_after_start', job.status);
 
                     // Find or create the workflow summary
                     let workflowSummary = summaries.find(w => w.name === workflowName);
