@@ -262,6 +262,9 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 			}
 
+			//[dbg] run block 75360372 topic 106f923f993c2149d49b4255ff723acafa1f2d94393f561d3eda32ae348f7241, resp: false
+			//[dbg] filtered 2 -> 2
+
 			fmt.Printf("[dbg] run block0 %d, %d\n", bn, len(sawTopics))
 			for topic := range sawTopics {
 				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs3(bn, bn, topic), &resp)
@@ -278,7 +281,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 					return fmt.Errorf("eth_getLogs: at blockNum=%d, topic %x not indexed", bn, topic)
 				}
 				logs := filterLogsByTopic(resp.Result, topic)
-				fmt.Printf("[dbg] filtered %d -> %d\n", len(resp.Result), len(logs))
+				fmt.Printf("[dbg] filtered %d, %d -> %d\n", bn, len(resp.Result), len(logs))
 				//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 				if len(logs) == 0 {
 					if failFast {
