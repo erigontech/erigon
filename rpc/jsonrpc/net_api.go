@@ -27,9 +27,9 @@ import (
 
 // NetAPI the interface for the net_ RPC commands
 type NetAPI interface {
-	Listening(_ context.Context) (bool, error)
+	// Listening(_ context.Context) (bool, error)
 	Version(_ context.Context) (string, error)
-	PeerCount(_ context.Context) (hexutil.Uint, error)
+	// PeerCount(_ context.Context) (hexutil.Uint, error)
 }
 
 // NetAPIImpl data structure to store things needed for net_ commands

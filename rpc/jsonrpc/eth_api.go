@@ -98,7 +98,7 @@ type EthAPI interface {
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	Syncing(ctx context.Context) (interface{}, error)
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
-	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
+	// ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 
@@ -113,9 +113,9 @@ type EthAPI interface {
 	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
-	Coinbase(ctx context.Context) (common.Address, error)
-	Hashrate(ctx context.Context) (uint64, error)
-	Mining(ctx context.Context) (bool, error)
+	// Coinbase(ctx context.Context) (common.Address, error)
+	// Hashrate(ctx context.Context) (uint64, error)
+	// Mining(ctx context.Context) (bool, error)
 	GetWork(ctx context.Context) ([4]string, error)
 	SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error)
 	SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error)
