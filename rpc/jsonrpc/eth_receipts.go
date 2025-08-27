@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/RoaringBitmap/roaring/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -191,9 +192,9 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	var topicsBitmap stream.U64
 
 	if asc {
-		topicsBitmap, err = getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum, asc)
+		topicsBitmap, err = getTopicsFilter(tx, crit.Topics, fromTxNum, toTxNum, asc)
 	} else {
-		topicsBitmap, err = getTopicsBitmapV3(tx, crit.Topics, toTxNum, fromTxNum, asc)
+		topicsBitmap, err = getTopicsFilter(tx, crit.Topics, toTxNum, fromTxNum, asc)
 	}
 	if err != nil {
 		return out, err
@@ -205,9 +206,9 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	var addrBitmap stream.U64
 
 	if asc {
-		addrBitmap, err = getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum, asc)
+		addrBitmap, err = getAddrsFilter(tx, crit.Addresses, fromTxNum, toTxNum, asc)
 	} else {
-		addrBitmap, err = getAddrsBitmapV3(tx, crit.Addresses, toTxNum, fromTxNum, asc)
+		addrBitmap, err = getAddrsFilter(tx, crit.Addresses, toTxNum, fromTxNum, asc)
 	}
 	if err != nil {
 		return out, err
@@ -368,8 +369,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64, asc order.By) (res stream.U64, err error) {
-
+func getTopicsFilter(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64, asc order.By) (res stream.U64, err error) {
 	for _, sub := range topics {
 		if len(sub) == 0 {
 			continue
@@ -393,7 +393,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 	return res, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64, asc order.By) (res stream.U64, err error) {
+func getAddrsFilter(tx kv.TemporalTx, addrs []common.Address, from, to uint64, asc order.By) (res stream.U64, err error) {
 	for _, addr := range addrs {
 		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), asc, kv.Unlim)
 		if err != nil {
