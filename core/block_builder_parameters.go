@@ -31,4 +31,5 @@ type BlockBuilderParameters struct {
 	SuggestedFeeRecipient common.Address
 	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
+	InclusionList         [][]byte            // IL txs
 }

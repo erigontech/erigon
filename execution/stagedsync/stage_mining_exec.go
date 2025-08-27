@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -50,17 +51,18 @@ import (
 )
 
 type MiningExecCfg struct {
-	db          kv.RwDB
-	miningState MiningState
-	notifier    ChainEventNotifier
-	chainConfig *chain.Config
-	engine      consensus.Engine
-	blockReader services.FullBlockReader
-	vmConfig    *vm.Config
-	tmpdir      string
-	interrupt   *int32
-	payloadId   uint64
-	txnProvider txnprovider.TxnProvider
+	db            kv.RwDB
+	miningState   MiningState
+	notifier      ChainEventNotifier
+	chainConfig   *chain.Config
+	engine        consensus.Engine
+	blockReader   services.FullBlockReader
+	vmConfig      *vm.Config
+	tmpdir        string
+	interrupt     *int32
+	payloadId     uint64
+	txnProvider   txnprovider.TxnProvider
+	inclusionList [][]byte
 }
 
 func StageMiningExecCfg(
@@ -75,19 +77,21 @@ func StageMiningExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
+	inclusionList [][]byte,
 ) MiningExecCfg {
 	return MiningExecCfg{
-		db:          db,
-		miningState: miningState,
-		notifier:    notifier,
-		chainConfig: chainConfig,
-		engine:      engine,
-		blockReader: blockReader,
-		vmConfig:    vmConfig,
-		tmpdir:      tmpdir,
-		interrupt:   interrupt,
-		payloadId:   payloadId,
-		txnProvider: txnProvider,
+		db:            db,
+		miningState:   miningState,
+		notifier:      notifier,
+		chainConfig:   chainConfig,
+		engine:        engine,
+		blockReader:   blockReader,
+		vmConfig:      vmConfig,
+		tmpdir:        tmpdir,
+		interrupt:     interrupt,
+		payloadId:     payloadId,
+		txnProvider:   txnProvider,
+		inclusionList: inclusionList,
 	}
 }
 
@@ -150,6 +154,9 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		}
 
 		interrupt := cfg.interrupt
+
+		addedTxHashes := mapset.NewSet[common.Hash]()
+
 		const amount = 50
 		for {
 			txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
@@ -158,11 +165,20 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 
 			if len(txns) > 0 {
+				txCountBefore := current.Txns.Len()
+
 				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, cfg.miningState.MiningConfig.Etherbase, ibs, interrupt, cfg.payloadId, logger)
 				if err != nil {
 					return err
 				}
 				NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+
+				txCountAfter := current.Txns.Len()
+				addedCount := txCountAfter - txCountBefore
+				for i := 0; i < addedCount && i < len(txns); i++ {
+					addedTxHashes.Add(txns[i].Hash())
+				}
+
 				if stop {
 					break
 				}
@@ -178,6 +194,50 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 					time.Sleep(50 * time.Millisecond)
 				} else {
 					break
+				}
+			}
+		}
+
+		// After processing normal transactions, add inclusion list transactions if they exist
+		if len(cfg.inclusionList) > 0 {
+			inclusionTxns, err := engine_types.ConvertInclusionListToTransactions(cfg.inclusionList)
+			if err != nil {
+				logger.Error("Failed to decode inclusion list transactions", "err", err)
+			} else if len(inclusionTxns) > 0 {
+				logger.Info("Processing inclusion list transactions after normal transactions", "count", len(inclusionTxns))
+
+				// Filter out transactions that were already added from the txpool
+				var uniqueInclusionTxns []types.Transaction
+				duplicateCount := 0
+				for _, txn := range inclusionTxns {
+					if !addedTxHashes.Contains(txn.Hash()) {
+						uniqueInclusionTxns = append(uniqueInclusionTxns, txn)
+					} else {
+						duplicateCount++
+						logger.Debug("Skipping duplicate transaction from inclusion list", "hash", txn.Hash())
+					}
+				}
+
+				if duplicateCount > 0 {
+					logger.Info("Filtered out duplicate transactions from inclusion list", "duplicates", duplicateCount, "unique", len(uniqueInclusionTxns))
+				}
+
+				if len(uniqueInclusionTxns) > 0 {
+					// filter inclusion list transactions
+					filteredTxns, err := filterBadTransactions(uniqueInclusionTxns, chainID, cfg.chainConfig, executionAt+1, current.Header, simStateReader, simStateWriter, logger)
+					if err != nil {
+						logger.Error("Failed to filter inclusion list transactions", "err", err)
+					} else if len(filteredTxns) > 0 {
+						logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, filteredTxns, cfg.miningState.MiningConfig.Etherbase, ibs, interrupt, cfg.payloadId, logger)
+						if err != nil {
+							logger.Error("Failed to add inclusion list transactions to block", "err", err)
+						} else {
+							NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+							logger.Info("Successfully added inclusion list transactions to block", "count", len(filteredTxns))
+						}
+					}
+				} else {
+					logger.Info("No unique inclusion list transactions to add after deduplication")
 				}
 			}
 		}

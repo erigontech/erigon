@@ -69,6 +69,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
+		InclusionList:         req.InclusionList,
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
@@ -84,8 +85,6 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	if e.lastParameters != nil {
 		param.PayloadId = e.lastParameters.PayloadId
 		if reflect.DeepEqual(e.lastParameters, &param) {
-
-			// update the payload with inclusion lists
 			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 			return &execution.AssembleBlockResponse{
 				Id:   e.lastParameters.PayloadId,
