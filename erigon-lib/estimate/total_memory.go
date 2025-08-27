@@ -14,41 +14,24 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package sync
+package estimate
 
 import (
-	"context"
+	"runtime/debug"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/pbnjay/memory"
 )
 
-type ctxKey int
+func TotalMemory() uint64 {
+	mem := memory.TotalMemory()
 
-const (
-	ckLogger ctxKey = iota
-	ckTempDir
-)
-
-func WithLogger(ctx context.Context, logger log.Logger) context.Context {
-	return context.WithValue(ctx, ckLogger, logger)
-}
-
-func Logger(ctx context.Context) log.Logger {
-	if logger, ok := ctx.Value(ckLogger).(log.Logger); ok {
-		return logger
+	if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
+		mem = min(mem, cgroupsMemLimit)
 	}
 
-	return log.Root()
-}
-
-func WithTempDir(ctx context.Context, tempDir string) context.Context {
-	return context.WithValue(ctx, ckTempDir, tempDir)
-}
-
-func TempDir(ctx context.Context) string {
-	if tempDir, ok := ctx.Value(ckTempDir).(string); ok {
-		return tempDir
+	if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
+		mem = min(mem, uint64(goMemLimit))
 	}
 
-	return ""
+	return mem
 }

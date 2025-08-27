@@ -151,7 +151,7 @@ func (heimdallStore) Close() {
 }
 
 func NewHeimdallSimulator(ctx context.Context, snapDir string, logger log.Logger, iterations []uint64) (*HeimdallSimulator, error) {
-	snapshots := heimdall.NewRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, 0, logger)
+	snapshots := heimdall.NewRoSnapshots(ethconfig.Defaults.Snapshot, snapDir, logger)
 
 	// index local files
 	localFiles, err := os.ReadDir(snapDir)
