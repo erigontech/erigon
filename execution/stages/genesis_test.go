@@ -105,7 +105,7 @@ func TestSetupGenesis(t *testing.T) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return genesiswrite.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: chainspec.SepoliaGenesisHash},
+			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: chainspec.Sepolia.GenesisHash},
 			wantHash:   chainspec.Sepolia.GenesisHash,
 			wantConfig: chainspec.Sepolia.Config,
 		},
@@ -115,7 +115,7 @@ func TestSetupGenesis(t *testing.T) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return genesiswrite.CommitGenesisBlock(db, polychain.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: polychain.BorMainnetGenesisHash},
+			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: polychain.BorMainnet.GenesisHash},
 			wantHash:   polychain.BorMainnet.GenesisHash,
 			wantConfig: polychain.BorMainnet.Config,
 		},
