@@ -552,7 +552,7 @@ func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
 }
 
 func (iit *InvertedIndexRoTx) makeStepPrefixedKey(addr []byte, txNum uint64) []byte {
-	step := txNum / iit.aggStep
+	step := txNum / iit.stepSize
 	invertedStep := ^step
 	stepKey := make([]byte, 8+len(addr))
 	binary.BigEndian.PutUint64(stepKey[:8], invertedStep)
@@ -1016,7 +1016,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	// Create step-prefixed key range for this step
 	invertedStep := ^step
 	var stepKey [8]byte
-	binary.BigEndian.PutUint64(stepKey[:], invertedStep)
+	binary.BigEndian.PutUint64(stepKey[:], uint64(invertedStep))
 
 	for k, v, err := valuesCursor.Seek(stepKey[:]); k != nil; k, v, err = valuesCursor.Next() {
 		if err != nil {
@@ -1027,7 +1027,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		if len(k) < 8 {
 			continue
 		}
-		keyStep := binary.BigEndian.Uint64(k[:8])
+		keyStep := kv.Step(binary.BigEndian.Uint64(k[:8]))
 		if keyStep != invertedStep {
 			break // We've moved past our step
 		}
@@ -1274,13 +1274,13 @@ func (iit *InvertedIndexRoTx) recentIterateRangeBySteps(key []byte, startTxNum, 
 
 	var fromStep, toStep uint64
 	if startTxNum >= 0 {
-		fromStep = uint64(startTxNum) / iit.aggStep
+		fromStep = uint64(startTxNum) / iit.stepSize
 	} else {
 		// startTxNum is -1 (unbounded), start from step 0
 		fromStep = 0
 	}
 	if endTxNum >= 0 {
-		toStep = uint64(endTxNum) / iit.aggStep
+		toStep = uint64(endTxNum) / iit.stepSize
 	} else {
 		// endTxNum is -1 (unbounded), find max step in DB
 		_, maxStepFloat := iit.stepsRangeInDB(roTx)
