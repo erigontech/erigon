@@ -138,7 +138,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, "", 0, log.New()), nil)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, "", log.New()), nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -284,7 +284,7 @@ func extractBodies(datadir string) error {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	snaps := freezeblocks.NewRoSnapshots(freezeCfg, filepath.Join(datadir, "snapshots"), 0, log.New())
+	snaps := freezeblocks.NewRoSnapshots(freezeCfg, filepath.Join(datadir, "snapshots"), log.New())
 	snaps.OpenFolder()
 
 	/* method Iterate was removed, need re-implement

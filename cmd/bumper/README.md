@@ -178,3 +178,6 @@ If you want to upgrade something:
 
 **Q:** I generated new files and forgot to increase a version — what to do?
 **A:** Use renamer and choose there only files that you definitely want to rename.
+
+**Q:** I modified templates (by refactoring) - how to re-gen code?
+**A:** ?

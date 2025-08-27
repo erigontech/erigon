@@ -573,7 +573,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
-	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}

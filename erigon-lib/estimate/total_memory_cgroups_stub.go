@@ -14,28 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package debug
+//go:build !linux
+
+package estimate
 
 import (
-	"runtime"
+	"errors"
 )
 
-// Callers returns given number of callers with packages
-func Callers(show int) []string {
-	fpcs := make([]uintptr, show)
-	n := runtime.Callers(2, fpcs)
-	if n == 0 {
-		return nil
-	}
-
-	callers := make([]string, 0, len(fpcs))
-	for _, p := range fpcs {
-		caller := runtime.FuncForPC(p - 1)
-		if caller == nil {
-			continue
-		}
-		callers = append(callers, caller.Name())
-	}
-
-	return callers
+func cgroupsMemoryLimit() (uint64, error) {
+	return 0, errors.New("cgroups not supported in this environment")
 }
