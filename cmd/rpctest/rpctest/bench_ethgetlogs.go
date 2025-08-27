@@ -270,6 +270,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs3(bn, bn, topic), &resp)
 				fmt.Printf("[dbg] run block %d topic %x, resp: %t\n", bn, topic, res.Result != nil)
 				if res.Err != nil {
+					fmt.Printf("[dbg] run block11 %d topic %x, resp: %t\n", bn, topic, res.Result != nil)
 					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 				}
 				if resp.Error != nil {
