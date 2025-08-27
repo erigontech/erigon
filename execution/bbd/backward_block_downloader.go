@@ -60,7 +60,7 @@ func NewBackwardBlockDownloader(
 	peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
 	messageListener := p2p.NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
 	messageSender := p2p.NewMessageSender(sentryClient)
-	peerTracker := p2p.NewPeerTracker(logger, sentryClient, messageListener)
+	peerTracker := p2p.NewPeerTracker(logger, messageListener)
 	var fetcher p2p.Fetcher
 	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
 	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
