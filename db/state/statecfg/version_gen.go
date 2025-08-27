@@ -1,17 +1,26 @@
-package state
+package statecfg
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"go/format"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+	"gopkg.in/yaml.v3"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/version"
 )
+
+type Versioned interface {
+	GetVersions() VersionTypes
+}
+
+type Version = version.Version
 
 /* ---------- YAML ---------- */
 
@@ -93,17 +102,17 @@ func goStruct(dom string) string {
 
 func pathPrefix(sec, dom string) string {
 	if sec == "domain" {
-		return ".version"
+		return ".Version"
 	}
 	if sec == "hist" {
-		return ".hist.version"
+		return ".hist.Version"
 	}
 	// ii
 	switch dom {
 	case "logaddrs", "logtopics", "tracesfrom", "tracesto":
-		return ".version"
+		return ".Version"
 	default:
-		return ".hist.iiCfg.version"
+		return ".hist.IiCfg.Version"
 	}
 }
 
