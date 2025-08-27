@@ -83,7 +83,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, dirs, logger)
 	d.salt.Store(&salt)
@@ -1050,8 +1050,8 @@ func emptyTestDomain(aggStep uint64) *Domain {
 
 	salt := uint32(1)
 	dirs := datadir2.New(os.TempDir())
-	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.Name = kv.InvertedIdx(0)
+	cfg.hist.iiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
 
 	d, err := NewDomain(cfg, aggStep, dirs, log.New())
@@ -1506,7 +1506,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
-	d.filenameBase = kv.CommitmentDomain.String()
+	d.FilenameBase = kv.CommitmentDomain.String()
 
 	dc := d.BeginFilesRo()
 	defer d.Close()
@@ -1581,7 +1581,7 @@ func TestDomainRange(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.Compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
-	d.filenameBase = kv.AccountsDomain.String()
+	d.FilenameBase = kv.AccountsDomain.String()
 
 	dc := d.BeginFilesRo()
 	defer d.Close()
@@ -1695,7 +1695,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
-	d.filenameBase = kv.CommitmentDomain.String()
+	d.FilenameBase = kv.CommitmentDomain.String()
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1806,7 +1806,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	keyLimit := uint64(200)
 
 	// Key's lengths are variable so lookup should be in commitment mode.
-	d.filenameBase = kv.CommitmentDomain.String()
+	d.FilenameBase = kv.CommitmentDomain.String()
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)

@@ -2,7 +2,6 @@ package state
 
 import (
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/version"
 )
 
 func InitSchemas() {
@@ -80,27 +79,4 @@ func InitSchemas() {
 			".efi": Schema.TracesToIdx.GetVersions().II.AccessorEFI.MinSupported,
 		},
 	}
-}
-
-type DomainVersionTypes struct {
-	DataKV       version.Versions
-	AccessorBT   version.Versions
-	AccessorKVEI version.Versions
-	AccessorKVI  version.Versions
-}
-
-type HistVersionTypes struct {
-	DataV      version.Versions
-	AccessorVI version.Versions
-}
-
-type IIVersionTypes struct {
-	DataEF      version.Versions
-	AccessorEFI version.Versions
-}
-
-type VersionTypes struct {
-	Hist   *HistVersionTypes
-	Domain *DomainVersionTypes
-	II     *IIVersionTypes
 }

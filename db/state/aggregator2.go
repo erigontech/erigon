@@ -100,14 +100,14 @@ type SchemaGen struct {
 	CommitmentDomain domainCfg
 	ReceiptDomain    domainCfg
 	RCacheDomain     domainCfg
-	LogAddrIdx       iiCfg
-	LogTopicIdx      iiCfg
-	TracesFromIdx    iiCfg
-	TracesToIdx      iiCfg
+	LogAddrIdx       statecfg.InvIdx
+	LogTopicIdx      statecfg.InvIdx
+	TracesFromIdx    statecfg.InvIdx
+	TracesToIdx      statecfg.InvIdx
 }
 
 type Versioned interface {
-	GetVersions() VersionTypes
+	GetVersions() statecfg.VersionTypes
 }
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
@@ -150,8 +150,8 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 	return v
 }
 
-func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
-	var v iiCfg
+func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) statecfg.InvIdx {
+	var v statecfg.InvIdx
 	switch name {
 	case kv.LogAddrIdx:
 		v = s.LogAddrIdx
@@ -162,7 +162,7 @@ func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
 	case kv.TracesToIdx:
 		v = s.TracesToIdx
 	default:
-		v = iiCfg{}
+		v = statecfg.InvIdx{}
 	}
 	return v
 }
@@ -183,8 +183,8 @@ var Schema = SchemaGen{
 			historyLargeValues: false,
 			historyIdx:         kv.AccountsHistoryIdx,
 
-			iiCfg: iiCfg{
-				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
+			iiCfg: statecfg.InvIdx{
+				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
 			},
@@ -203,8 +203,8 @@ var Schema = SchemaGen{
 			historyLargeValues: false,
 			historyIdx:         kv.StorageHistoryIdx,
 
-			iiCfg: iiCfg{
-				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
+			iiCfg: statecfg.InvIdx{
+				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys, ValuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
 			},
@@ -224,8 +224,8 @@ var Schema = SchemaGen{
 			historyLargeValues: true,
 			historyIdx:         kv.CodeHistoryIdx,
 
-			iiCfg: iiCfg{
-				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
+			iiCfg: statecfg.InvIdx{
+				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys, ValuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
 			},
@@ -249,8 +249,8 @@ var Schema = SchemaGen{
 			snapshotsDisabled: true,
 			historyDisabled:   true,
 
-			iiCfg: iiCfg{
-				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
+			iiCfg: statecfg.InvIdx{
+				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
 			},
@@ -270,8 +270,8 @@ var Schema = SchemaGen{
 			historyLargeValues: false,
 			historyIdx:         kv.ReceiptHistoryIdx,
 
-			iiCfg: iiCfg{
-				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
+			iiCfg: statecfg.InvIdx{
+				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys, ValuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
 			},
@@ -294,41 +294,41 @@ var Schema = SchemaGen{
 			snapshotsDisabled:             true,
 			historyValuesOnCompressedPage: 16,
 
-			iiCfg: iiCfg{
-				disable:      true, // disable everything by default
-				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
+			iiCfg: statecfg.InvIdx{
+				Disable:      true, // disable everything by default
+				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
 			},
 		},
 	},
 
-	LogAddrIdx: iiCfg{
-		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
+	LogAddrIdx: statecfg.InvIdx{
+		FilenameBase: kv.FileLogAddressIdx, KeysTable: kv.TblLogAddressKeys, ValuesTable: kv.TblLogAddressIdx,
 
 		Compression: seg.CompressNone,
-		name:        kv.LogAddrIdx,
+		Name:        kv.LogAddrIdx,
 		Accessors:   statecfg.AccessorHashMap,
 	},
-	LogTopicIdx: iiCfg{
-		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
+	LogTopicIdx: statecfg.InvIdx{
+		FilenameBase: kv.FileLogTopicsIdx, KeysTable: kv.TblLogTopicsKeys, ValuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
-		name:        kv.LogTopicIdx,
+		Name:        kv.LogTopicIdx,
 		Accessors:   statecfg.AccessorHashMap,
 	},
-	TracesFromIdx: iiCfg{
-		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
+	TracesFromIdx: statecfg.InvIdx{
+		FilenameBase: kv.FileTracesFromIdx, KeysTable: kv.TblTracesFromKeys, ValuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
-		name:        kv.TracesFromIdx,
+		Name:        kv.TracesFromIdx,
 		Accessors:   statecfg.AccessorHashMap,
 	},
-	TracesToIdx: iiCfg{
-		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
+	TracesToIdx: statecfg.InvIdx{
+		FilenameBase: kv.FileTracesToIdx, KeysTable: kv.TblTracesToKeys, ValuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
-		name:        kv.TracesToIdx,
+		Name:        kv.TracesToIdx,
 		Accessors:   statecfg.AccessorHashMap,
 	},
 }
@@ -416,7 +416,7 @@ var HistoryCompressCfg = seg.Cfg{
 
 func EnableHistoricalRCache() {
 	cfg := Schema.RCacheDomain
-	cfg.hist.iiCfg.disable = false
+	cfg.hist.iiCfg.Disable = false
 	cfg.hist.historyDisabled = false
 	cfg.hist.snapshotsDisabled = false
 	Schema.RCacheDomain = cfg

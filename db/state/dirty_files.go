@@ -521,9 +521,9 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if fileVer.Less(ii.version.DataEF.MinSupported) {
+				if fileVer.Less(ii.Version.DataEF.MinSupported) {
 					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, ii.version.DataEF)
+					versionTooLowPanic(fName, ii.Version.DataEF)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -550,9 +550,9 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					// don't interrupt on error. other files may be good
 				}
 				if ok {
-					if fileVer.Less(ii.version.AccessorEFI.MinSupported) {
+					if fileVer.Less(ii.Version.AccessorEFI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, ii.version.AccessorEFI)
+						versionTooLowPanic(fName, ii.Version.AccessorEFI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)

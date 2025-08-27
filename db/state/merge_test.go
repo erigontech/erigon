@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -154,7 +155,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, mr.needMerge)
 		assert.Equal(t, 0, int(mr.from))
 		assert.Equal(t, 4, int(mr.to))
-		assert.Equal(t, ii.name.String(), mr.name)
+		assert.Equal(t, ii.Name.String(), mr.name)
 
 		idxF := ic.staticFilesInRange(mr.from, mr.to)
 		assert.Len(t, idxF, 3)
@@ -495,7 +496,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, mr.needMerge)
 		require.Zero(t, int(mr.from))
 		require.Equal(t, 4, int(mr.to))
-		require.Equal(t, ii.name.String(), mr.name)
+		require.Equal(t, ii.Name.String(), mr.name)
 		idxFiles := ic.staticFilesInRange(mr.from, mr.to)
 		require.Len(t, idxFiles, 3)
 	})
@@ -618,8 +619,8 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 		salt := uint32(1)
 		dirs := datadir.New(os.TempDir())
-		cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-		cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+		cfg.hist.iiCfg.Name = kv.InvertedIdx(0)
+		cfg.hist.iiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 
 		d, err := NewDomain(cfg, 1, dirs, log.New())
 		if err != nil {

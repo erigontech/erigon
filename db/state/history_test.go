@@ -352,7 +352,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 
 		require.NoError(err)
 
-		for _, table := range []string{h.keysTable, h.valuesTable, h.valuesTable} {
+		for _, table := range []string{h.KeysTable, h.valuesTable, h.valuesTable} {
 			var cur kv.Cursor
 			cur, err = tx.Cursor(table)
 			require.NoError(err)
@@ -527,7 +527,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	hc := h.BeginFilesRo()
 	defer hc.Close()
 
-	itable, err := rwTx.CursorDupSort(hc.iit.ii.valuesTable)
+	itable, err := rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
 	require.NoError(t, err)
 	defer itable.Close()
 	limits := 10
@@ -542,7 +542,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
 	}
 	canHist, txTo := hc.canPruneUntil(rwTx, math.MaxUint64)
-	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.keysTable, txTo)
+	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
 
 	stat, err := hc.Prune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
 	require.NoError(t, err)
@@ -586,7 +586,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.valuesTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -609,7 +609,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index keys table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.keysTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.KeysTable)
 	require.NoError(t, err)
 	defer itable.Close()
 

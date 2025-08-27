@@ -206,12 +206,12 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	if item == nil {
 		return nil, false
 	}
-	if !strings.Contains(item.decompressor.FileName(), dt.d.filenameBase) {
-		panic(fmt.Sprintf("findShortenedKeyEasier of %s called with merged file %s", dt.d.filenameBase, item.decompressor.FileName()))
+	if !strings.Contains(item.decompressor.FileName(), dt.d.FilenameBase) {
+		panic(fmt.Sprintf("findShortenedKeyEasier of %s called with merged file %s", dt.d.FilenameBase, item.decompressor.FileName()))
 	}
 	if /*assert.Enable && */ itemGetter.FileName() != item.decompressor.FileName() {
 		panic(fmt.Sprintf("findShortenedKey of %s itemGetter (%s) is different to item.decompressor (%s)",
-			dt.d.filenameBase, itemGetter.FileName(), item.decompressor.FileName()))
+			dt.d.FilenameBase, itemGetter.FileName(), item.decompressor.FileName()))
 	}
 
 	//if idxList&withExistence != 0 {
@@ -276,7 +276,7 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesIt
 	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
 		return dirty, nil
 	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.filenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
 }
 
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
