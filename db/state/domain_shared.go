@@ -74,6 +74,8 @@ type SharedDomainsMetrics struct {
 type DomainIOMetrics struct {
 	CacheReadCount    int64
 	CacheReadDuration time.Duration
+	CacheWriteCount   int64
+	CacheSize         int
 	DbReadCount       int64
 	DbReadDuration    time.Duration
 	FileReadCount     int64
@@ -89,7 +91,6 @@ type SharedDomains struct {
 
 	txNum             uint64
 	blockNum          atomic.Uint64
-	estSize           int
 	trace             bool //nolint
 	commitmentCapture bool
 	commitProgress    chan *commitment.CommitProgress
@@ -239,7 +240,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	sd.estSize = 0
+	sd.metrics.CacheSize = 0
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
@@ -247,18 +248,36 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uin
 	defer sd.muMaps.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
 	if domain == kv.StorageDomain {
+		var estSize int
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
-			sd.estSize += len(val) - len(old.data)
+			estSize = len(val) - len(old.data)
 		} else {
-			sd.estSize += len(key) + len(val)
+			estSize = len(key) + len(val)
+		}
+		sd.metrics.CacheSize += estSize
+		if dm, ok := sd.metrics.Domains[kv.StorageDomain]; ok {
+			dm.CacheSize += estSize
+		} else {
+			sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
+				CacheSize: estSize,
+			}
 		}
 		return
 	}
 
+	var estSize int
 	if old, ok := sd.domains[domain][key]; ok {
-		sd.estSize += len(val) - len(old.data)
+		estSize += len(val) - len(old.data)
 	} else {
-		sd.estSize += len(key) + len(val)
+		estSize += len(key) + len(val)
+	}
+	sd.metrics.CacheSize += estSize
+	if dm, ok := sd.metrics.Domains[kv.StorageDomain]; ok {
+		dm.CacheSize += estSize
+	} else {
+		sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
+			CacheSize: estSize,
+		}
 	}
 	sd.domains[domain][key] = valWithPrevStep
 }
@@ -286,7 +305,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.estSize) * 4
+	return uint64(sd.metrics.CacheSize) * 4
 }
 
 const CodeSizeTableFake = "CodeSize"
