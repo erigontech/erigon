@@ -408,7 +408,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	//}()
 
 	if w.largeValues {
-		w.historyKey = historyKeyInDB(txNum, k, w.ii.aggregationStep, w.historyKey) // ^step + key + txNum -> value
+		w.historyKey = historyKeyInDB(txNum, k, w.ii.stepSize, w.historyKey) // ^step + key + txNum -> value
 		if err := w.historyVals.Collect(w.historyKey, original); err != nil {
 			return err
 		}
@@ -426,7 +426,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		panic("History value is too large while largeValues=false")
 	}
 
-	step := txNum / w.ii.aggregationStep
+	step := txNum / w.ii.stepSize
 	w.historyKey = historyKeyPrefixInDB(step, k, w.historyKey[:0])
 	histKey := w.historyKey
 
@@ -656,7 +656,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
 			if !h.historyLargeValues {
 				// ^step + key -> txNum + v
-				stepKey := historyKeyPrefixInDB(vTxNum/h.aggregationStep, prevKey, nil)
+				stepKey := historyKeyPrefixInDB(vTxNum/h.stepSize, prevKey, nil)
 				val, err := cd.SeekBothRange(stepKey, numBuf)
 				if err != nil {
 					return fmt.Errorf("SeekBothRange %s step-prefixed values [%x]: %w", h.filenameBase, stepKey, err)
@@ -675,7 +675,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			}
 
 			// ^step + addr + txNum -> v
-			keyBuf = historyKeyInDB(vTxNum, prevKey, h.aggregationStep, keyBuf[:0])
+			keyBuf = historyKeyInDB(vTxNum, prevKey, h.stepSize, keyBuf[:0])
 			_, val, err := c.SeekExact(keyBuf)
 			if err != nil {
 				return fmt.Errorf("seekExact %s step-prefixed key [%x]: %w", h.filenameBase, keyBuf, err)
@@ -1063,8 +1063,8 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		if ht.h.historyLargeValues {
 			// For large values with step-prefixed keys: [^step][addr][txNum] -> value
 			// Create step+addr prefix and iterate through all matching keys
-			minStep := minTxNum / ht.aggStep
-			maxStep := maxTxNum / ht.aggStep
+			minStep := minTxNum / ht.stepSize
+			maxStep := maxTxNum / ht.stepSize
 
 			for step := minStep; step <= maxStep; step++ {
 				invertedStep := ^step
@@ -1093,8 +1093,8 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		} else {
 			// For non-large values with step-prefixed keys: [^step][addr] -> txNum+value
 			// Create step+addr k and iterate through all values
-			minStep := minTxNum / ht.aggStep
-			maxStep := maxTxNum / ht.aggStep
+			minStep := minTxNum / ht.stepSize
+			maxStep := maxTxNum / ht.stepSize
 
 			for step := minStep; step <= maxStep; step++ {
 				invertedStep := ^step
@@ -1257,7 +1257,7 @@ func (ht *HistoryRoTx) keyInFiles(txNum uint64, key []byte) []byte {
 
 // keyInDB ^step + key + txNum
 func (ht *HistoryRoTx) keyInDB(key []byte, txNum uint64) []byte {
-	ht._bufKey = historyKeyInDB(txNum, key, ht.aggStep, ht._bufKey)
+	ht._bufKey = historyKeyInDB(txNum, key, ht.stepSize, ht._bufKey)
 	return ht._bufKey
 }
 
@@ -1329,12 +1329,12 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		return nil, false, err
 	}
 
-	step := txNum / ht.aggStep
+	step := txNum / ht.stepSize
 	_, maxStep := ht.stepsRangeInDB(tx)
 	for searchStep := step; searchStep <= uint64(maxStep); searchStep++ {
 		seekTxNum := txNum
 		if searchStep > step {
-			seekTxNum = searchStep * ht.aggStep // Start of the step
+			seekTxNum = searchStep * ht.stepSize // Start of the step
 		}
 
 		seek := ht.keyPrefixInDB(searchStep, key)
@@ -1529,10 +1529,10 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 
 	// Calculate step range for the given txNum range
 	var fromStep, toStep uint64
-	fromStep = uint64(fromTxNum) / ht.aggStep
+	fromStep = uint64(fromTxNum) / ht.stepSize
 
 	if toTxNum >= 0 {
-		toStep = uint64(toTxNum) / ht.aggStep
+		toStep = uint64(toTxNum) / ht.stepSize
 	} else {
 		// For unlimited upper bound, scan a reasonable number of recent steps
 		toStep = fromStep + 100 // Scan up to 100 steps for efficiency
@@ -1545,13 +1545,13 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	for step := fromStep; step <= toStep && step != ^uint64(0); step++ {
 		// Create step-specific iterator
 		s := &HistoryChangesIterDB{
-			endTxNum:        toTxNum,
-			roTx:            roTx,
-			largeValues:     ht.h.historyLargeValues,
-			valsTable:       ht.h.valuesTable,
-			limit:           limit,
-			step:            step,
-			aggregationStep: ht.aggStep,
+			endTxNum:    toTxNum,
+			roTx:        roTx,
+			largeValues: ht.h.historyLargeValues,
+			valsTable:   ht.h.valuesTable,
+			limit:       limit,
+			step:        step,
+			stepSize:    ht.stepSize,
 		}
 		binary.BigEndian.PutUint64(s.startTxNumBytes[:], uint64(fromTxNum))
 
@@ -1667,12 +1667,12 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 
 	var fromStep, toStep uint64
 	if startTxNum >= 0 {
-		fromStep = uint64(startTxNum) / ht.aggStep
+		fromStep = uint64(startTxNum) / ht.stepSize
 	} else {
 		fromStep = 0
 	}
 	if endTxNum >= 0 {
-		toStep = uint64(endTxNum) / ht.aggStep
+		toStep = uint64(endTxNum) / ht.stepSize
 	} else {
 		_, maxStepFloat := ht.stepsRangeInDB(roTx)
 		toStep = uint64(maxStepFloat) + 1

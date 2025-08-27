@@ -505,7 +505,7 @@ type HistoryChangesIterDB struct {
 	limit, endTxNum  int
 	startTxNumBytes  [8]byte
 	step             uint64
-	aggregationStep  uint64
+	stepSize         uint64
 	nextKey, nextVal []byte
 	k, v             []byte
 	err              error
