@@ -2,7 +2,7 @@ module github.com/erigontech/erigon-lib
 
 go 1.24
 
-replace github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
+replace github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250826132655-0f8ab1696efc
 
 require github.com/erigontech/secp256k1 v1.2.0
 
