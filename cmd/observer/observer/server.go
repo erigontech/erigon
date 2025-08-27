@@ -24,7 +24,7 @@ import (
 	"net"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -151,7 +151,7 @@ func (server *Server) mapNATPort(ctx context.Context, realAddr *net.UDPAddr) {
 	}
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		nat.Map(server.natInterface, ctx.Done(), "udp", realAddr.Port, realAddr.Port, "ethereum discovery", server.logger)
 	}()
 }

@@ -14,14 +14,24 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !linux
-
-package mmap
+package estimate
 
 import (
-	"errors"
+	"runtime/debug"
+
+	"github.com/pbnjay/memory"
 )
 
-func cgroupsMemoryLimit() (uint64, error) {
-	return 0, errors.New("cgroups not supported in this environment")
+func TotalMemory() uint64 {
+	mem := memory.TotalMemory()
+
+	if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
+		mem = min(mem, cgroupsMemLimit)
+	}
+
+	if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
+		mem = min(mem, uint64(goMemLimit))
+	}
+
+	return mem
 }

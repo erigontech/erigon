@@ -23,7 +23,6 @@ package ethash
 import (
 	"errors"
 	"fmt"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
 	"math/rand"
 	"os"
@@ -35,10 +34,12 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
-	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -251,7 +252,7 @@ func newCache(epoch uint64) interface{} {
 // generate ensures that the cache content is generated before use.
 func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 	c.once.Do(func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		size := cacheSize(c.epoch*epochLength + 1)
 		seed := seedHash(c.epoch*epochLength + 1)
 		if test {
@@ -512,7 +513,7 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 	// If async is specified, generate everything in a background thread
 	if async && !current.generated() {
 		go func() {
-			defer debug.LogPanic()
+			defer dbg.LogPanic()
 			current.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ethashcfg.ModeTest)
 
 			if futureI != nil {

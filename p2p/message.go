@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/event"
@@ -120,7 +120,7 @@ func Send(w MsgWriter, msgcode uint64, data interface{}) error {
 //
 //	[e1, e2, e3]
 func SendItems(w MsgWriter, msgcode uint64, elems ...interface{}) error {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	return Send(w, msgcode, elems)
 }
 

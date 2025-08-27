@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/mmap"
 )
 
 var (
@@ -203,7 +203,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		ReadMemStats(&memStats)
 	}
 
-	totalMemory := mmap.TotalMemory()
+	totalMemory := estimate.TotalMemory()
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap profile threshold check",
