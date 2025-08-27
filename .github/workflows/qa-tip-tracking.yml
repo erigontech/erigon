@@ -175,12 +175,12 @@ jobs:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
-    - name: Upload erigon log
+    - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log
-        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+        name: erigon-logs
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'
@@ -246,12 +246,12 @@ jobs:
         name: torrent-client-status-downgrade-test
         path: torrent-client-status.txt
 
-    - name: Upload erigon log of the downgrade test
+    - name: Upload erigon logs of the downgrade test
       if: steps.downgrade_test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log-downgrade-test
-        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+        name: erigon-logs-downgrade-test
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}
