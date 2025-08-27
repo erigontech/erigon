@@ -16,8 +16,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-// this is supposed to register domains/iis
-// salt file should exist, else agg created has nil salt.
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	salt, err := GetStateIndicesSalt(dirs, false, logger)
 	if err != nil {
