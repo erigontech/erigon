@@ -77,16 +77,7 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.24](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
-architecture.
-
-- ArchiveNode Ethereum Mainnet: 3.2T (Aug 2025). FullNode: 1.5TB (May 2025)
-- ArchiveNode Gnosis: 1.2T (Aug 2025). FullNode: 500GB (June 2024)
-- ArchiveNode Polygon Mainnet: 5.7T (Aug 2024). FullNode: 2Tb (April 2024)
-
-SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
-Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like gp3): Blocks Execution is slow
-on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
+See <https://docs.erigon.tech/getting-started/hw-requirements>
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
@@ -131,12 +122,7 @@ Running `make help` will list and describe the convenience commands available in
 
 ### Upgrading from 3.0 to 3.1
 
-1. Backup your datadir.
-2. Upgrade your Erigon binary.
-3. OPTIONAL: Upgrade snapshot files.
-   1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
-   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See [Resetting snapshots](#Resetting-snapshots) for more details.
-4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset your datadir, Erigon will sync to the latest remote snapshots.
+See <https://docs.erigon.tech/installation/upgrading.html>
 
 ### Datadir structure
 

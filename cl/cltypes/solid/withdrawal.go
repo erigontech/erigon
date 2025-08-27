@@ -53,7 +53,7 @@ func (p *WithdrawalRequest) Static() bool {
 }
 
 type PendingPartialWithdrawal struct {
-	Index             uint64 `json:"index"`              // validator index
+	ValidatorIndex    uint64 `json:"validator_index"`    // validator index
 	Amount            uint64 `json:"amount"`             // Gwei
 	WithdrawableEpoch uint64 `json:"withdrawable_epoch"` // epoch when the withdrawal can be processed
 }
@@ -63,11 +63,11 @@ func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {
 }
 
 func (p *PendingPartialWithdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return ssz2.MarshalSSZ(buf, &p.ValidatorIndex, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return ssz2.UnmarshalSSZ(buf, version, &p.ValidatorIndex, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {
@@ -75,7 +75,7 @@ func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {
 }
 
 func (p *PendingPartialWithdrawal) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(&p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return merkle_tree.HashTreeRoot(&p.ValidatorIndex, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) Static() bool {
