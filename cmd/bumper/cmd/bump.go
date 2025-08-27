@@ -15,7 +15,7 @@ var bumpCmd = &cobra.Command{
 	Use:   "bump",
 	Short: "Edit versions.yaml in TUI and regenerate code",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		file := "./db/state/versions.yaml"
+		file := "./db/state/statecfg/versions.yaml"
 		out := "./db/state/statecfg/version_schema_gen.go"
 
 		if err := tui.Run(file); err != nil {
