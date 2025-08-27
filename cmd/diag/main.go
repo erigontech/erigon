@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/cmd/diag/stages"
 	sinfo "github.com/erigontech/erigon/cmd/diag/sysinfo"
 	"github.com/erigontech/erigon/cmd/diag/ui"
-	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -82,7 +81,7 @@ func main() {
 
 			var cancel context.CancelFunc
 
-			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger)) //nolint
+			ctx.Context, cancel = context.WithCancel(ctx.Context) //nolint
 
 			go handleTerminationSignals(cancel, logger)
 
