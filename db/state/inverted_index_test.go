@@ -835,7 +835,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		}).MustOpen()
 		tb.Cleanup(db.Close)
 		salt := uint32(1)
-		cfg := iiCfg{filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+		cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, Version: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 		cfg.Accessors = statecfg.AccessorHashMap
 		ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
 		require.NoError(tb, err)
@@ -850,7 +850,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		tb.Cleanup(db.Close)
 
 		err := db.Update(ctx, func(tx kv.RwTx) error {
-			if cnt, _ := tx.Count(ii.keysTable); cnt > 0 { // if db is re-usable
+			if cnt, _ := tx.Count(ii.KeysTable); cnt > 0 { // if db is re-usable
 				return nil
 			}
 			ic := ii.BeginFilesRo()
