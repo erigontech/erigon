@@ -299,7 +299,7 @@ eest-hive-devnet:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"", --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/fusaka-devnet-5%40v1.1.0/fixtures_fusaka-devnet-5.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,".*Osaka.*", --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/fusaka-devnet-5%40v1.1.0/fixtures_fusaka-devnet-5.tar.gz)
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
