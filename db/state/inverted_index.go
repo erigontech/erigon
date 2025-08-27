@@ -393,7 +393,7 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
 	// Create step-prefixed key: ^step + addr
-	step := txNum / w.aggregationStep
+	step := txNum / w.stepSize
 	invertedStep := ^step
 	stepKey := make([]byte, 8+len(indexKey))
 	binary.BigEndian.PutUint64(stepKey[:8], invertedStep)

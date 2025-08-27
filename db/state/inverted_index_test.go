@@ -903,7 +903,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
 		ic := ii.BeginFilesRo()
-		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+		ic.Prune(context.Background(), tx, 0, ic.stepSize, ic.stepSize, logEvery, true, nil)
 		tx.Rollback()
 		ic.Close()
 	}
