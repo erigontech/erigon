@@ -825,12 +825,12 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		}).MustOpen()
 		tb.Cleanup(db.Close)
 		salt := uint32(1)
-		cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
-		cfg.salt.Store(&salt)
-		cfg.Accessors = AccessorHashMap
-		ii, err := NewInvertedIndex(cfg, aggStep, logger)
+		cfg := iiCfg{filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+		cfg.Accessors = statecfg.AccessorHashMap
+		ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
 		require.NoError(tb, err)
 		ii.DisableFsync()
+		ii.salt.Store(&salt)
 		tb.Cleanup(ii.Close)
 		return db, ii
 	}
@@ -893,7 +893,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
 		ic := ii.BeginFilesRo()
-		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+		ic.Prune(context.Background(), tx, 0, ic.stepSize, ic.stepSize, logEvery, true, nil)
 		tx.Rollback()
 		ic.Close()
 	}
@@ -903,7 +903,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		require.NoError(t, err)
 		ic := ii.BeginFilesRo()
 		start := time.Now()
-		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+		ic.Prune(context.Background(), tx, 0, ic.stepSize, ic.stepSize, logEvery, true, nil)
 		a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
 		fmt.Printf("[dbg] 1 step:   took=%s dirt=%s\n", time.Since(start), datasize.ByteSize(a).HR())
 		tx.Rollback()
@@ -927,7 +927,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		require.NoError(t, err)
 		ic := ii.BeginFilesRo()
 		start := time.Now()
-		pruneLimit := ic.aggStep * 30
+		pruneLimit := ic.stepSize * 30
 		ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
 		a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
 		fmt.Printf("[dbg] 30 steps: took=%s dirt=%s\n", time.Since(start), datasize.ByteSize(a).HR())
