@@ -218,6 +218,8 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 			} else {
 				if latestL1Block > s.lastCheckedL1Block.Load() {
 					// It should not be checked again in the new cycle, so +1 is added here.
+					// Fixed receiving duplicate log events.
+					// lastCheckedL1Block means that it has already been checked in the previous cycle.
 					startBlock := s.lastCheckedL1Block.Load() + 1
 					endBlock := latestL1Block
 					if _, err = s.queryBlocks(startBlock, endBlock); err != nil {
@@ -330,7 +332,6 @@ func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 			}
 
 			if s.flagStop.Load() {
-				log.Debug("L1 info query logs stopped")
 				wg.Done()
 				continue
 			}
@@ -386,10 +387,7 @@ func (s *L1Syncer) getLatestL1Block() (uint64, error) {
 }
 
 func (s *L1Syncer) queryBlocks(startBlock, endBlock uint64) (numLogs uint64, err error) {
-	// Fixed receiving duplicate log events.
-	// lastCheckedL1Block means that it has already been checked in the previous cycle.
-
-	log.Debug("GetHighestSequence", "startBlock", startBlock, "latestBlock", s.latestL1Block)
+	log.Debug("GetHighestSequence", "startBlock", startBlock, "latestBlock", endBlock)
 
 	s.isDownloading.Store(true)
 	defer s.isDownloading.Store(false)
@@ -514,6 +512,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 				em := s.getNextEtherman()
 				logs, err = em.FilterLogs(s.ctx, query)
 				if err != nil {
+					log.Debug("getSequencedLogs retry error", "err", err)
 					retry++
 					if retry > getLogsMaxRetry {
 						log.Error(fmt.Sprintf("L1 syncer (getSequencedLogs) exceeded %d retries", retry), "err", err)

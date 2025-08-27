@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -249,13 +248,13 @@ func NewL1InfoTask(log types.Log, syncer Syncer) *L1InfoTask {
 }
 
 func (t *L1InfoTask) Run() *L1InfoTaskResult {
+	if len(t.Log.Topics) != 3 {
+		return &L1InfoTaskResult{nil, NewLogKey(t.Log), nil}
+	}
+
 	header, err := t.syncer.GetHeader(t.Log.BlockNumber)
 	if err != nil {
 		return &L1InfoTaskResult{nil, NewLogKey(t.Log), fmt.Errorf("header not found for block number %d, %w", t.Log.BlockNumber, err)}
-	}
-
-	if len(t.Log.Topics) != 3 {
-		return &L1InfoTaskResult{nil, NewLogKey(t.Log), nil}
 	}
 
 	update, err := createL1InfoTreeUpdateWithLeafHash(t.Log, header)
@@ -302,9 +301,9 @@ func (u *Updater) startLogProcessing(logPrefix string, workerPool *L1InfoWorkerP
 	}()
 }
 
-func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWorkerPool, logsInputDone <-chan uint64, indexUpdateMap map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash) error {
+func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWorkerPool, logsInputDone <-chan uint64) (map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash, error) {
 	// Drain results until producer finished and every task has reported a result.
-	var tasksDone atomic.Uint64
+	var tasksDone uint64
 	idleTicker := time.NewTicker(5 * time.Second)
 	defer idleTicker.Stop()
 
@@ -313,22 +312,23 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 	stop := false
 	lastActivity := time.Now()
 
+	indexUpdates := make(map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash)
+
 	for {
 		select {
 		case <-u.ctx.Done():
 			log.Debug(fmt.Sprintf("[%s] Context canceled, exiting drain loop", logPrefix))
-			return nil
+			return indexUpdates, nil
 
 		case res, ok := <-taskResChan:
 			if !ok {
-				log.Info(fmt.Sprintf("[%s] Task result channel closed, exiting drain loop", logPrefix))
-				return nil
+				return indexUpdates, nil
 			}
 
 			// Note: taskResChan is not closed until workerPool.Wait() below,
 			// so we don't check the 'ok' flag here.
 			lastActivity = time.Now()
-			tasksDone.Store(tasksDone.Load() + 1)
+			tasksDone++
 			if res.err != nil {
 				// Workers requeue on error, so this should be rare. Keep for safety.
 				log.Error(fmt.Sprintf("[%s] Failed to process log (will be requeued by worker): %v", logPrefix, res.err))
@@ -336,19 +336,19 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 			}
 			// Only map successful V1 updates
 			if res.l1InfoTreeUpdate != nil {
-				indexUpdateMap[res.logKey] = res.l1InfoTreeUpdate
+				indexUpdates[res.logKey] = res.l1InfoTreeUpdate
 			}
 
-			if stop && tasksDone.Load() == numLogs {
-				return nil
+			if stop && tasksDone == numLogs {
+				return indexUpdates, nil
 			}
 
 		case numLogs = <-logsInputDone:
 			// No more tasks will be added; wait until all current tasks are done.
 			logsInputDone = nil // Stop waiting for more logs
 			lastActivity = time.Now()
-			if tasksDone.Load() == numLogs {
-				return nil
+			if tasksDone == numLogs {
+				return indexUpdates, nil
 			}
 			stop = true
 
@@ -356,8 +356,8 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 			// Avoid blocking forever when no logs/results are received.
 			if time.Since(lastActivity) > NoActivityTimeout {
 				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, NoActivityTimeout),
-					"tasksDone", tasksDone.Load())
-				return ErrNoActivity
+					"tasksDone", tasksDone)
+				return nil, ErrNoActivity
 			}
 		}
 	}
@@ -813,15 +813,13 @@ func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1
 	// Signals that no more logs will arrive
 	logsInputDone := make(chan uint64)
 
-	indexUpdateMap := make(map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash)
-
 	workerPool := NewL1InfoWorkerPool(u.ctx, runtime.NumCPU(), u.syncer)
 	workerPool.Start()
 
 	// Will be stopped once syncer is done
 	u.startLogProcessing(logPrefix, workerPool, &allLogs, logChan, progressChan, logsInputDone)
 
-	err := u.createInfoTreeUpdates(logPrefix, workerPool, logsInputDone, indexUpdateMap)
+	indexUpdates, err := u.createInfoTreeUpdates(logPrefix, workerPool, logsInputDone)
 
 	// Stop workers
 	workerPool.Stop()
@@ -832,5 +830,5 @@ func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1
 		return nil, nil, err
 	}
 
-	return allLogs, indexUpdateMap, nil
+	return allLogs, indexUpdates, nil
 }

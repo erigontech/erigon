@@ -115,7 +115,6 @@ Loop:
 	for {
 		select {
 		case logs, ok := <-logsChan:
-			log.Debug("SpawnStageL1Syncer l1 sync: got logs from chan", "count", len(logs))
 			if !ok {
 				break Loop
 			}

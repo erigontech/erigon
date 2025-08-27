@@ -437,10 +437,8 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 
 			time.AfterFunc(1*time.Millisecond, func() {
 				// Send logs to channel
-				// if len(tc.logs) > 0 {
 				logsChan <- tc.logs
 				close(logsChan)
-				// }
 			})
 
 			processed, err := updater.CheckForInfoTreeUpdates("test", tx)
