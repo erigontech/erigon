@@ -219,7 +219,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				sawAddr[l.Address] = struct{}{}
 			}
 
-			//TODO: checking only first Topics now - because they are positional. Need somehow implement other topics check.
+			//TODO: checking only first Topics now - because they are positional. Need somehow implement other topics check. Likely can use getLogsForTopics
 			sawTopics := map[common.Hash]struct{}{} // don't check same topic again
 			for _, l := range resp.Result {
 				if len(l.Topics) > 0 {
@@ -262,27 +262,18 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 			}
 
-			//[dbg] run block 75360372 topic 106f923f993c2149d49b4255ff723acafa1f2d94393f561d3eda32ae348f7241, resp: false
-			//[dbg] filtered 2 -> 2
-
-			fmt.Printf("[dbg] run block0 %d, %d\n", bn, len(sawTopics))
 			for topic := range sawTopics {
 				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs3(bn, bn, topic), &resp)
-				fmt.Printf("[dbg] run block %d topic %x, resp: %t\n", bn, topic, res.Result != nil)
 				if res.Err != nil {
-					fmt.Printf("[dbg] run block11 %d topic %x, resp: %t\n", bn, topic, res.Result != nil)
 					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 				}
 				if resp.Error != nil {
-					fmt.Printf("[dbg] run block1 %d topic %x, resp: %s\n", bn, topic, res.Err)
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
 				if len(resp.Result) == 0 {
-					fmt.Printf("[dbg] run block2 %d topic %x, resp: %s\n", bn, topic, res.Err)
 					return fmt.Errorf("eth_getLogs: at blockNum=%d, topic %x not indexed", bn, topic)
 				}
 				logs := filterLogsByTopic(resp.Result, topic)
-				fmt.Printf("[dbg] filtered %d, %d -> %d\n", bn, len(resp.Result), len(logs))
 				//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 				if len(logs) == 0 {
 					if failFast {
@@ -295,7 +286,6 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				if err := noDuplicates(logs); err != nil {
 					return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, topic, err)
 				}
-				fmt.Printf("[dbg] good %d, %x, %s\n", bn, topic, resp.Result)
 			}
 
 			select {
