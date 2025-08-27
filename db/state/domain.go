@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -126,8 +127,8 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
-func NewDomain(cfg domainCfg, stepSize uint64, logger log.Logger) (*Domain, error) {
-	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
+func NewDomain(cfg domainCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
+	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
 	if cfg.hist.iiCfg.filenameBase == "" {
@@ -141,7 +142,7 @@ func NewDomain(cfg domainCfg, stepSize uint64, logger log.Logger) (*Domain, erro
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, stepSize, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, stepSize, dirs, logger); err != nil {
 		return nil, err
 	}
 

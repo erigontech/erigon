@@ -57,6 +57,7 @@ import (
 
 type InvertedIndex struct {
 	iiCfg
+	dirs    datadir.Dirs
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
@@ -82,7 +83,6 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
 	version IIVersionTypes
@@ -110,8 +110,8 @@ type iiVisible struct {
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg iiCfg, stepSize uint64, logger log.Logger) (*InvertedIndex, error) {
-	if cfg.dirs.SnapDomain == "" {
+func NewInvertedIndex(cfg iiCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
+	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
 	if cfg.filenameBase == "" {
@@ -124,13 +124,15 @@ func NewInvertedIndex(cfg iiCfg, stepSize uint64, logger log.Logger) (*InvertedI
 	}
 
 	ii := InvertedIndex{
-		iiCfg:      cfg,
+		iiCfg: cfg,
+		dirs:  dirs,
+		salt:  &atomic.Pointer[uint32]{},
+
 		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newIIVisible(cfg.filenameBase, []visibleFile{}),
 		logger:     logger,
 
 		stepSize: stepSize,
-		salt:     &atomic.Pointer[uint32]{},
 	}
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
@@ -986,7 +988,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	}
 	defer keysCursor.Close()
 
-	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
+	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".collate.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 
 	var txKey [8]byte

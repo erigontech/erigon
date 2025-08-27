@@ -176,9 +176,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 }
 
 func (a *Aggregator) registerDomain(cfg domainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	//TODO: move dynamic part of config to InvertedIndex
-	cfg.hist.iiCfg.dirs = dirs
-	a.d[cfg.name], err = NewDomain(cfg, a.stepSize, logger)
+	a.d[cfg.name], err = NewDomain(cfg, a.stepSize, dirs, logger)
 	if err != nil {
 		return err
 	}
@@ -188,11 +186,10 @@ func (a *Aggregator) registerDomain(cfg domainCfg, salt *uint32, dirs datadir.Di
 }
 
 func (a *Aggregator) registerII(cfg iiCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
-	cfg.dirs = dirs
 	if ii := a.searchII(cfg.name); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", cfg.name)
 	}
-	ii, err := NewInvertedIndex(cfg, a.stepSize, logger)
+	ii, err := NewInvertedIndex(cfg, a.stepSize, dirs, logger)
 	if err != nil {
 		return err
 	}

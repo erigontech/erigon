@@ -115,8 +115,8 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
 	cfg := Schema.AccountsDomain.hist.iiCfg
 
-	cfg.dirs = datadir.New(os.TempDir())
-	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
+	dirs := datadir.New(os.TempDir())
+	ii, err := NewInvertedIndex(cfg, aggStep, dirs, log.New())
 	ii.Accessors = 0
 	ii.salt.Store(&salt)
 	if err != nil {
@@ -617,11 +617,11 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		cfg := Schema.GetDomainCfg(dom)
 
 		salt := uint32(1)
-		cfg.hist.iiCfg.dirs = datadir.New(os.TempDir())
+		dirs := datadir.New(os.TempDir())
 		cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 		cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 
-		d, err := NewDomain(cfg, 1, log.New())
+		d, err := NewDomain(cfg, 1, dirs, log.New())
 		if err != nil {
 			panic(err)
 		}
@@ -635,7 +635,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 	setup := func() (account, storage, commitment *Domain) {
 		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
-		checker := NewDependencyIntegrityChecker(account.hist.iiCfg.dirs, log.New())
+		checker := NewDependencyIntegrityChecker(account.dirs, log.New())
 		info := &DependentInfo{
 			entity: FromDomain(commitment.name),
 			filesGetter: func() *btree2.BTreeG[*FilesItem] {

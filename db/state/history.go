@@ -30,6 +30,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 
@@ -110,7 +111,7 @@ func (h histCfg) GetVersions() VersionTypes {
 	}
 }
 
-func NewHistory(cfg histCfg, stepSize uint64, logger log.Logger) (*History, error) {
+func NewHistory(cfg histCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
@@ -123,7 +124,7 @@ func NewHistory(cfg histCfg, stepSize uint64, logger log.Logger) (*History, erro
 	}
 
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, stepSize, logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, stepSize, dirs, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.iiCfg.filenameBase, err)
 	}

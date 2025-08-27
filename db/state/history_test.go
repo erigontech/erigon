@@ -58,7 +58,6 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	salt := uint32(1)
 	cfg := Schema.AccountsDomain
 
-	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
 	cfg.hist.historyLargeValues = largeValues
 
@@ -67,7 +66,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
-	h, err := NewHistory(cfg.hist, aggregationStep, logger)
+	h, err := NewHistory(cfg.hist, aggregationStep, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Close)
 	h.salt.Store(&salt)

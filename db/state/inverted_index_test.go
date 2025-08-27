@@ -59,9 +59,9 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg := iiCfg{filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
-	ii, err := NewInvertedIndex(cfg, aggStep, logger)
+	ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(ii.Close)
 	ii.salt.Store(&salt)
@@ -610,7 +610,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	cfg := ii.iiCfg
 
 	var err error
-	ii, err = NewInvertedIndex(cfg, 16, logger)
+	ii, err = NewInvertedIndex(cfg, 16, ii.dirs, logger)
 	require.NoError(err)
 	defer ii.Close()
 	ii.salt.Store(&salt)

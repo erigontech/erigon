@@ -84,9 +84,8 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	salt := uint32(1)
 
 	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
-	cfg.hist.iiCfg.dirs = dirs
 	//cfg.hist.historyValuesOnCompressedPage = 16
-	d, err := NewDomain(cfg, aggStep, logger)
+	d, err := NewDomain(cfg, aggStep, dirs, logger)
 	d.salt.Store(&salt)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -1050,12 +1049,12 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg := Schema.AccountsDomain
 
 	salt := uint32(1)
-	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+	dirs := datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
 
-	d, err := NewDomain(cfg, aggStep, log.New())
+	d, err := NewDomain(cfg, aggStep, dirs, log.New())
 	if err != nil {
 		panic(err)
 	}
