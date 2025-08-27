@@ -19,7 +19,7 @@ package consensus
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -35,7 +35,7 @@ type Cancel struct {
 }
 
 func (c *Cancel) CancelFunc() {
-	log.Trace("Cancel mining task", "callers", debug.Callers(10))
+	log.Trace("Cancel mining task", "callers", dbg.Callers(10))
 	c.cancel()
 }
 

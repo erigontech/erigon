@@ -47,7 +47,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -953,7 +952,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -1315,7 +1314,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		defer close(s.waitForMiningStop)
 		defer streamCancel()
 

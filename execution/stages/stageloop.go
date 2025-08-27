@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -202,7 +201,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	// avoid crash because Erigon's core does many things
-	defer debug.RecoverPanicIntoError(logger, &err)
+	defer dbg.RecoverPanicIntoError(logger, &err)
 
 	hasMore := true
 	for hasMore {

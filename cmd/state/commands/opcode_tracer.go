@@ -33,7 +33,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
@@ -470,7 +470,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 		defer close(chanOpcodes)
 
 		go func() {
-			defer debug.LogPanic()
+			defer dbg.LogPanic()
 			var fops *os.File
 			var fopsWriter *bufio.Writer
 			var fopsEnc *gob.Encoder
