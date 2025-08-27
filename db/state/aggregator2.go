@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -148,7 +147,6 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 	default:
 		v = domainCfg{}
 	}
-	v.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 	return v
 }
 
@@ -166,7 +164,6 @@ func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
 	default:
 		v = iiCfg{}
 	}
-	v.salt = new(atomic.Pointer[uint32])
 	return v
 }
 

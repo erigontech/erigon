@@ -57,6 +57,7 @@ import (
 
 type InvertedIndex struct {
 	iiCfg
+	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
 	stepSize uint64 // amount of transactions inside single aggregation step
@@ -81,7 +82,6 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt    *atomic.Pointer[uint32]
 	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
@@ -130,6 +130,7 @@ func NewInvertedIndex(cfg iiCfg, stepSize uint64, logger log.Logger) (*InvertedI
 		logger:     logger,
 
 		stepSize: stepSize,
+		salt:     &atomic.Pointer[uint32]{},
 	}
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")

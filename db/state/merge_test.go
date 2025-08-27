@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -116,14 +115,10 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
 	cfg := Schema.AccountsDomain.hist.iiCfg
 
-	if cfg.salt == nil {
-		cfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.salt.Store(&salt)
 	cfg.dirs = datadir.New(os.TempDir())
-
 	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
 	ii.Accessors = 0
+	ii.salt.Store(&salt)
 	if err != nil {
 		panic(err)
 	}
@@ -622,10 +617,6 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		cfg := Schema.GetDomainCfg(dom)
 
 		salt := uint32(1)
-		if cfg.hist.iiCfg.salt == nil {
-			cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
-		}
-		cfg.hist.iiCfg.salt.Store(&salt)
 		cfg.hist.iiCfg.dirs = datadir.New(os.TempDir())
 		cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 		cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
@@ -634,6 +625,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
+		d.salt.Store(&salt)
 
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
