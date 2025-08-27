@@ -42,13 +42,13 @@ func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 
 	var err error
 	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
-	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0[:], 0)
-	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1[:], 0)
-	proof0, err := kzg.Ctx().ComputeBlobKZGProof(blob0[:], commitment0, 0)
+	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(&blob0, 0)
+	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(&blob1, 0)
+	proof0, err := kzg.Ctx().ComputeBlobKZGProof(&blob0, commitment0, 0)
 	if err != nil {
 		fmt.Println("error", err)
 	}
-	proof1, err := kzg.Ctx().ComputeBlobKZGProof(blob1[:], commitment1, 0)
+	proof1, err := kzg.Ctx().ComputeBlobKZGProof(&blob1, commitment1, 0)
 	if err != nil {
 		fmt.Println("error", err)
 	}
@@ -83,8 +83,8 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 	copy(blob0[:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
 	copy(blob1[:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
 
-	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0[:], 0)
-	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1[:], 0)
+	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(&blob0, 0)
+	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(&blob1, 0)
 
 	ethKzgCtx := kzg.GoEthKzgCtx()
 	_, p1, err := ethKzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&blob0), 4)
@@ -151,22 +151,22 @@ func MakeWrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	copy(wrappedTxn.Blobs[0][:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
 	copy(wrappedTxn.Blobs[1][:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
 
-	commitment0, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[0][:], 0)
+	commitment0, err := kzg.Ctx().BlobToKZGCommitment((*gokzg4844.Blob)(&wrappedTxn.Blobs[0]), 0)
 	if err != nil {
 		panic(err)
 	}
-	commitment1, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[1][:], 0)
+	commitment1, err := kzg.Ctx().BlobToKZGCommitment((*gokzg4844.Blob)(&wrappedTxn.Blobs[1]), 0)
 	if err != nil {
 		panic(err)
 	}
 	copy(wrappedTxn.Commitments[0][:], commitment0[:])
 	copy(wrappedTxn.Commitments[1][:], commitment1[:])
 
-	proof0, err := kzg.Ctx().ComputeBlobKZGProof(wrappedTxn.Blobs[0][:], commitment0, 0)
+	proof0, err := kzg.Ctx().ComputeBlobKZGProof((*gokzg4844.Blob)(&wrappedTxn.Blobs[0]), commitment0, 0)
 	if err != nil {
 		panic(err)
 	}
-	proof1, err := kzg.Ctx().ComputeBlobKZGProof(wrappedTxn.Blobs[1][:], commitment1, 0)
+	proof1, err := kzg.Ctx().ComputeBlobKZGProof((*gokzg4844.Blob)(&wrappedTxn.Blobs[1]), commitment1, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -201,11 +201,11 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	copy(wrappedTxn.Blobs[0][:], hexutil.MustDecodeHex(testdata.ValidBlob1Hex))
 	copy(wrappedTxn.Blobs[1][:], hexutil.MustDecodeHex(testdata.ValidBlob2Hex))
 
-	commitment0, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[0][:], 0)
+	commitment0, err := kzg.Ctx().BlobToKZGCommitment((*gokzg4844.Blob)(&wrappedTxn.Blobs[0]), 0)
 	if err != nil {
 		panic(err)
 	}
-	commitment1, err := kzg.Ctx().BlobToKZGCommitment(wrappedTxn.Blobs[1][:], 0)
+	commitment1, err := kzg.Ctx().BlobToKZGCommitment((*gokzg4844.Blob)(&wrappedTxn.Blobs[1]), 0)
 	if err != nil {
 		panic(err)
 	}
