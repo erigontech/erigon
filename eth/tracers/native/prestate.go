@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -178,6 +179,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
+	t.lookupAccount(params.HistoryStorageAddress)
 
 	// Add accounts with authorizations to the prestate before they get applied.
 	var b [32]byte
