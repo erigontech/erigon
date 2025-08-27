@@ -27,9 +27,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/db/version"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -93,7 +96,7 @@ type histCfg struct {
 
 	historyValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 
-	Accessors     Accessors
+	Accessors     statecfg.Accessors
 	CompressorCfg seg.Cfg             // Compression settings for history files
 	Compression   seg.FileCompression // defines type of Compression for history files
 	historyIdx    kv.InvertedIdx
@@ -108,10 +111,10 @@ func (h histCfg) GetVersions() VersionTypes {
 	}
 }
 
-func NewHistory(cfg histCfg, stepSize uint64, logger log.Logger) (*History, error) {
+func NewHistory(cfg histCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.Accessors == 0 {
-		cfg.Accessors = AccessorHashMap
+		cfg.Accessors = statecfg.AccessorHashMap
 	}
 
 	h := History{
@@ -121,7 +124,7 @@ func NewHistory(cfg histCfg, stepSize uint64, logger log.Logger) (*History, erro
 	}
 
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, stepSize, logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, stepSize, dirs, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.iiCfg.filenameBase, err)
 	}
@@ -243,7 +246,7 @@ func (h *History) MissedMapAccessors() (l []*FilesItem) {
 }
 
 func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !h.Accessors.Has(AccessorHashMap) {
+	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
