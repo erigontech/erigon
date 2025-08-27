@@ -1036,7 +1036,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 
 				for k, _, err := valsC.Seek(stepAddrPrefix); k != nil; k, _, err = valsC.Next() {
 					if err != nil {
-						return fmt.Errorf("iterate over %s values cursor: %w", ht.h.filenameBase, err)
+						return fmt.Errorf("iterate over %s values cursor: %w", ht.h.FilenameBase, err)
 					}
 					txNum := binary.BigEndian.Uint64(k[len(k)-8:])
 					if txNum > maxTxNum {
@@ -1065,7 +1065,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 
 				for v, err := valsCDup.SeekBothRange(stepKey, txFromBytes[:]); v != nil; _, v, err = valsCDup.NextDup() {
 					if err != nil {
-						return fmt.Errorf("iterate over %s values cursor: %w", ht.h.filenameBase, err)
+						return fmt.Errorf("iterate over %s values cursor: %w", ht.h.FilenameBase, err)
 					}
 					txNum := binary.BigEndian.Uint64(v)
 					if txNum > maxTxNum {
@@ -1316,8 +1316,8 @@ func (ht *HistoryRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	// For step-prefixed keys, get range from valuesTable
 	var fst, lst []byte
 
-	fst, _ = kv.FirstKey(tx, ht.h.valuesTable)
-	lst, _ = kv.LastKey(tx, ht.h.valuesTable)
+	fst, _ = kv.FirstKey(tx, ht.h.ValuesTable)
+	lst, _ = kv.LastKey(tx, ht.h.ValuesTable)
 
 	if len(fst) >= 8 {
 		invertedStep := binary.BigEndian.Uint64(fst[:8])
