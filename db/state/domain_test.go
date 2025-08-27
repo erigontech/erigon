@@ -31,7 +31,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -78,17 +78,15 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := Schema.AccountsDomain
-	cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
 	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
-	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.salt.Store(&salt)
 	//cfg.hist.historyValuesOnCompressedPage = 16
-	d, err := NewDomain(cfg, aggStep, logger)
+	d, err := NewDomain(cfg, aggStep, dirs, logger)
+	d.salt.Store(&salt)
 	require.NoError(t, err)
 	d.DisableFsync()
 	t.Cleanup(d.Close)
@@ -1052,19 +1050,16 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg := Schema.AccountsDomain
 
 	salt := uint32(1)
-	if cfg.hist.iiCfg.salt == nil {
-		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.hist.iiCfg.salt.Store(&salt)
-	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+	dirs := datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
-	cfg.hist.iiCfg.Accessors = AccessorHashMap
+	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
 
-	d, err := NewDomain(cfg, aggStep, log.New())
+	d, err := NewDomain(cfg, aggStep, dirs, log.New())
 	if err != nil {
 		panic(err)
 	}
+	d.salt.Store(&salt)
 
 	return d
 }
