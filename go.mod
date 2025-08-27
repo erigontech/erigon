@@ -88,7 +88,6 @@ require (
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.11.0
 	github.com/multiformats/go-multiaddr v0.13.0
-	github.com/nxadm/tail v1.4.11
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.2.4
@@ -134,7 +133,6 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.38.2
 	pgregory.net/rapid v1.2.0
 	sigs.k8s.io/yaml v1.4.0
 )
@@ -316,10 +314,10 @@ require (
 	golang.org/x/mod v0.27.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250528174236-200df99c418a // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
-	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 	modernc.org/libc v1.66.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.21.1 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
