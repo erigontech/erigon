@@ -295,6 +295,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				if err := noDuplicates(logs); err != nil {
 					return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, topic, err)
 				}
+				fmt.Printf("[dbg] good %d, %x, %s\n", bn, topic, resp.Result)
 			}
 
 			select {
