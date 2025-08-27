@@ -34,7 +34,6 @@ import (
 	rand2 "golang.org/x/exp/rand"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -98,9 +97,6 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-const AggregatorSqueezeCommitmentValues = true
-const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
-
 func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
@@ -117,7 +113,7 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, d
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
 
-		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
+		commitmentValuesTransform: statecfg.AggregatorSqueezeCommitmentValues,
 
 		produce: true,
 	}, nil
@@ -1000,7 +996,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			if err != nil {
 				return false, err
 			}
-			if spaceDirty > uint64(MaxNonFuriousDirtySpacePerTx) {
+			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
 				return false, nil
 			}
 		}

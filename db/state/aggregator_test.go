@@ -344,7 +344,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if !AggregatorSqueezeCommitmentValues {
+	if !statecfg.AggregatorSqueezeCommitmentValues {
 		t.Skip()
 	}
 
@@ -1652,9 +1652,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 
 	t.Run("v1.0 files", func(t *testing.T) {
 		// Schema is global and edited by subtests
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1681,9 +1681,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("v1.1 files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1710,9 +1710,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("v2.0 files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1739,9 +1739,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("empty files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())

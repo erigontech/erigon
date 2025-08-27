@@ -3,17 +3,19 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon/db/state"
-	"github.com/spf13/cobra"
 	"reflect"
 	"strings"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
+
+	"github.com/spf13/cobra"
 )
 
 var inspectCmd = &cobra.Command{
 	Use:   "inspect",
 	Short: "List all SchemaGen fields and their types",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fields := InspectSchemaFields(&state.Schema)
+		fields := InspectSchemaFields(&statecfg.Schema)
 		data, err := json.MarshalIndent(fields, "", "  ")
 		if err != nil {
 			return err
@@ -30,11 +32,11 @@ type FieldInfo struct {
 }
 
 // InspectSchemaFields uses reflection to list SchemaGen fields and classify their types
-func InspectSchemaFields(s *state.SchemaGen) []FieldInfo {
+func InspectSchemaFields(s *statecfg.SchemaGen) []FieldInfo {
 	return inspectSchemaFields(s)
 }
 
-func inspectSchemaFields(s *state.SchemaGen) []FieldInfo {
+func inspectSchemaFields(s *statecfg.SchemaGen) []FieldInfo {
 	var result []FieldInfo
 	v := reflect.ValueOf(*s)
 	t := v.Type()
@@ -67,7 +69,7 @@ func parseName(name string) (string, string) {
 	return name, ""
 }
 
-func getNames(s *state.SchemaGen) (res map[string]string, domains []string) {
+func getNames(s *statecfg.SchemaGen) (res map[string]string, domains []string) {
 	fields := inspectSchemaFields(s)
 	res = make(map[string]string)
 	for _, f := range fields {

@@ -83,6 +83,7 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
@@ -315,7 +316,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
-			state.EnableHistoricalRCache()
+			statecfg.EnableHistoricalRCache()
 		}
 
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {

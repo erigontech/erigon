@@ -472,14 +472,14 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	if !ok {
 		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
 	}
-	rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, filePath, state.DefaultBtreeM, state.Schema.CommitmentDomain.Compression, false)
+	rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, filePath, state.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
 		return false, false, err
 	}
 	defer rd.Close()
 	defer btindex.Close()
 
-	getter := seg.NewReader(rd.MakeGetter(), state.Schema.CommitmentDomain.Compression)
+	getter := seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression)
 	c, err := btindex.Seek(getter, []byte(stateKey))
 	if err != nil {
 		return false, false, err
@@ -1066,7 +1066,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
-			newVersion := state.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
+			newVersion := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
 			expectedFileName := strings.Replace(res.Name(), "accounts", snapType.String(), 1)
 			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
@@ -1075,8 +1075,8 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 			oldVersion = newVersion
 			// check that the index file exist
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorBTree) {
-				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
+			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorBTree) {
+				newVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -1087,8 +1087,8 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
-				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
+			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
+				newVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -1099,8 +1099,8 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
-				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
+			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
+				newVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -1177,7 +1177,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	for _, res := range accFiles {
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
-			versioned, err := state.Schema.GetVersioned(snapType)
+			versioned, err := statecfg.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
 			}

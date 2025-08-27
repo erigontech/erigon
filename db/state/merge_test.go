@@ -114,7 +114,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
-	cfg := Schema.AccountsDomain.Hist.IiCfg
+	cfg := statecfg.Schema.AccountsDomain.Hist.IiCfg
 
 	dirs := datadir.New(os.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, dirs, log.New())
@@ -615,7 +615,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 	t.Parallel()
 
 	newTestDomain := func(dom kv.Domain) *Domain {
-		cfg := Schema.GetDomainCfg(dom)
+		cfg := statecfg.Schema.GetDomainCfg(dom)
 
 		salt := uint32(1)
 		dirs := datadir.New(os.TempDir())
@@ -871,7 +871,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 
 	agg, _ := newAggregatorOld(context.Background(), dirs, 1, db, logger)
 	setup := func() (account *Domain) {
-		agg.registerDomain(Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
+		agg.registerDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
 		domain := agg.d[kv.AccountsDomain]
 		domain.History.InvertedIndex.Accessors = 0
 		domain.History.Accessors = 0

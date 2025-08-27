@@ -56,7 +56,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := Schema.AccountsDomain
+	cfg := statecfg.Schema.AccountsDomain
 
 	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
 	cfg.Hist.HistoryLargeValues = largeValues
