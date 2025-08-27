@@ -32,10 +32,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/version"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
@@ -93,7 +95,7 @@ type iiCfg struct {
 	Compression   seg.FileCompression // compression type for inverted index keys and values
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
-	Accessors Accessors
+	Accessors statecfg.Accessors
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -118,7 +120,7 @@ func NewInvertedIndex(cfg iiCfg, stepSize uint64, logger log.Logger) (*InvertedI
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.CompressorCfg = seg.DefaultCfg
 	if cfg.Accessors == 0 {
-		cfg.Accessors = AccessorHashMap
+		cfg.Accessors = statecfg.AccessorHashMap
 	}
 
 	ii := InvertedIndex{
@@ -254,7 +256,7 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !ii.Accessors.Has(AccessorHashMap) {
+	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
@@ -1160,7 +1162,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
-	if ii.Accessors.Has(AccessorHashMap) {
+	if ii.Accessors.Has(statecfg.AccessorHashMap) {
 		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}

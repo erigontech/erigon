@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -1058,7 +1059,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
-	cfg.hist.iiCfg.Accessors = AccessorHashMap
+	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
 
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {

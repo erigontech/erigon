@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -96,8 +97,8 @@ type domainCfg struct {
 	name        kv.Domain
 	Compression seg.FileCompression
 	CompressCfg seg.Cfg
-	Accessors   Accessors // list of indexes for given domain
-	valuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	Accessors   statecfg.Accessors // list of indexes for given domain
+	valuesTable string             // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	largeValues bool
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
@@ -147,13 +148,13 @@ func NewDomain(cfg domainCfg, stepSize uint64, logger log.Logger) (*Domain, erro
 	if d.version.DataKV.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
-	if d.Accessors.Has(AccessorBTree) && d.version.AccessorBT.IsZero() {
+	if d.Accessors.Has(statecfg.AccessorBTree) && d.version.AccessorBT.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
-	if d.Accessors.Has(AccessorHashMap) && d.version.AccessorKVI.IsZero() {
+	if d.Accessors.Has(statecfg.AccessorHashMap) && d.version.AccessorKVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
-	if d.Accessors.Has(AccessorExistence) && d.version.AccessorKVEI.IsZero() {
+	if d.Accessors.Has(statecfg.AccessorExistence) && d.version.AccessorKVEI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
 
@@ -602,7 +603,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
-	if dt.d.Accessors.Has(AccessorBTree) {
+	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i))
 		if err != nil || !ok {
 			return nil, false, 0, err
@@ -610,7 +611,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 		return v, true, offset, nil
 	}
-	if dt.d.Accessors.Has(AccessorHashMap) {
+	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
 		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
 			return nil, false, 0, nil
@@ -994,7 +995,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if d.Accessors.Has(AccessorHashMap) {
+	if d.Accessors.Has(statecfg.AccessorHashMap) {
 		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
@@ -1004,14 +1005,14 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 		}
 	}
 
-	if d.Accessors.Has(AccessorBTree) {
+	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(stepFrom, stepTo)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.Accessors.Has(AccessorExistence) {
+	if d.Accessors.Has(statecfg.AccessorExistence) {
 		fPath := d.kvExistenceIdxNewFilePath(stepFrom, stepTo)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
@@ -1096,7 +1097,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if d.Accessors.Has(AccessorHashMap) {
+	if d.Accessors.Has(statecfg.AccessorHashMap) {
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
@@ -1106,14 +1107,14 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		}
 	}
 
-	if d.Accessors.Has(AccessorBTree) {
+	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.Accessors.Has(AccessorExistence) {
+	if d.Accessors.Has(statecfg.AccessorExistence) {
 		fPath := d.kvExistenceIdxNewFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
@@ -1158,7 +1159,7 @@ func (d *Domain) MissedBtreeAccessors() (l []*FilesItem) {
 }
 
 func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !d.Accessors.Has(AccessorBTree) {
+	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
@@ -1179,7 +1180,7 @@ func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
 }
 
 func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !d.Accessors.Has(AccessorHashMap) {
+	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
@@ -1403,7 +1404,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	if maxTxNum == 0 {
 		maxTxNum = math.MaxUint64
 	}
-	useExistenceFilter := dt.d.Accessors.Has(AccessorExistence)
+	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(k)

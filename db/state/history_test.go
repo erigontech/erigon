@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -61,7 +62,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 	}
 	cfg.hist.iiCfg.salt.Store(&salt)
-	cfg.hist.iiCfg.Accessors = AccessorHashMap
+	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
 	cfg.hist.historyLargeValues = largeValues
 
 	//perf of tests
@@ -260,7 +261,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		for i := 0; i < len(keyWords); i++ {
 			var offset uint64
 			var ok bool
-			if h.InvertedIndex.Accessors.Has(AccessorExistence) {
+			if h.InvertedIndex.Accessors.Has(statecfg.AccessorExistence) {
 				offset, ok = r.Lookup([]byte(keyWords[i]))
 				if !ok {
 					continue
