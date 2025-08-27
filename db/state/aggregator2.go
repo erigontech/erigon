@@ -35,44 +35,9 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err != nil {
 		return nil, err
 	}
-	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(dirs, logger); err != nil {
+	if err := statecfg.Configure(a, dirs, salt, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(statecfg.Schema.GetDomainCfg(kv.StorageDomain), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(statecfg.Schema.GetDomainCfg(kv.CodeDomain), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(statecfg.Schema.GetDomainCfg(kv.CommitmentDomain), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(statecfg.Schema.GetDomainCfg(kv.ReceiptDomain), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(statecfg.Schema.GetDomainCfg(kv.RCacheDomain), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(statecfg.Schema.GetIICfg(kv.LogAddrIdx), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(statecfg.Schema.GetIICfg(kv.LogTopicIdx), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(statecfg.Schema.GetIICfg(kv.TracesFromIdx), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(statecfg.Schema.GetIICfg(kv.TracesToIdx), salt, dirs, logger); err != nil {
-		return nil, err
-	}
-
-	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
-	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
-
-	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()

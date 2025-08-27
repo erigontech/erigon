@@ -172,7 +172,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
+func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
 	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, dirs, logger)
 	if err != nil {
 		return err
@@ -182,7 +182,7 @@ func (a *Aggregator) registerDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	return nil
 }
 
-func (a *Aggregator) registerII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
+func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
 	if ii := a.searchII(cfg.Name); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", cfg.Name)
 	}
@@ -1544,13 +1544,12 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 // Affects only domains with dontProduceHistoryFiles=true.
 // Usually equal to one a.stepSize, but could be set to step/2 or step/4 to reduce size of history tables.
 // when we exec blocks from snapshots we can set it to 0, because no re-org on those blocks are possible
-func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64) *Aggregator {
+func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64) {
 	for _, d := range a.d {
 		if d != nil && d.History.SnapshotsDisabled {
 			d.History.KeepRecentTxnInDB = recentTxs
 		}
 	}
-	return a
 }
 
 func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {

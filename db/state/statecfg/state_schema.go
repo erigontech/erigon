@@ -16,6 +16,56 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
+// AggSetters interface - allow break deps to `state` package and keep all biz-logic in current package
+type AggSetters interface {
+	RegisterDomain(cfg DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error
+	RegisterII(cfg InvIdxCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error
+	AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain)
+	KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64)
+}
+
+func Configure(a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger) error {
+	if err := AdjustReceiptCurrentVersionIfNeeded(dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.AccountsDomain), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.StorageDomain), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CodeDomain), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentDomain), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.ReceiptDomain), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.RCacheDomain), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterII(Schema.GetIICfg(kv.LogAddrIdx), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterII(Schema.GetIICfg(kv.LogTopicIdx), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterII(Schema.GetIICfg(kv.TracesFromIdx), salt, dirs, logger); err != nil {
+		return err
+	}
+	if err := a.RegisterII(Schema.GetIICfg(kv.TracesToIdx), salt, dirs, logger); err != nil {
+		return err
+	}
+
+	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
+	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
+
+	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
+	return nil
+}
+
 const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
