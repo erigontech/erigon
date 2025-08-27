@@ -262,6 +262,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 			}
 
+			fmt.Printf("[dbg] run block0 %d, %d\n", bn, len(sawTopics))
 			for topic := range sawTopics {
 				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs3(bn, bn, topic), &resp)
 				fmt.Printf("[dbg] run block %d topic %x, resp: %t\n", bn, topic, res.Result != nil)
