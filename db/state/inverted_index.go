@@ -56,7 +56,7 @@ import (
 )
 
 type InvertedIndex struct {
-	statecfg.InvIdx
+	statecfg.InvIdxCfg
 	dirs    datadir.Dirs
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
@@ -88,7 +88,7 @@ type iiVisible struct {
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg statecfg.InvIdx, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
+func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -102,10 +102,9 @@ func NewInvertedIndex(cfg statecfg.InvIdx, stepSize uint64, dirs datadir.Dirs, l
 	}
 
 	ii := InvertedIndex{
-		InvIdx: cfg,
-		dirs:   dirs,
-		salt:   &atomic.Pointer[uint32]{},
-
+		InvIdxCfg:  cfg,
+		dirs:       dirs,
+		salt:       &atomic.Pointer[uint32]{},
 		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newIIVisible(cfg.FilenameBase, []visibleFile{}),
 		logger:     logger,

@@ -36,7 +36,7 @@ func (d DomainCfg) GetVersions() VersionTypes {
 }
 
 type HistCfg struct {
-	IiCfg InvIdx
+	IiCfg InvIdxCfg
 
 	ValuesTable string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
 
@@ -74,7 +74,7 @@ func (h HistCfg) GetVersions() VersionTypes {
 	}
 }
 
-type InvIdx struct {
+type InvIdxCfg struct {
 	Disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
 	Version IIVersionTypes
@@ -90,7 +90,7 @@ type InvIdx struct {
 	Accessors Accessors
 }
 
-func (ii InvIdx) GetVersions() VersionTypes {
+func (ii InvIdxCfg) GetVersions() VersionTypes {
 	return VersionTypes{
 		II: &ii.Version,
 	}

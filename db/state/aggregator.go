@@ -182,7 +182,7 @@ func (a *Aggregator) registerDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	return nil
 }
 
-func (a *Aggregator) registerII(cfg statecfg.InvIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
+func (a *Aggregator) registerII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
 	if ii := a.searchII(cfg.Name); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", cfg.Name)
 	}
@@ -265,7 +265,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	}
 
 	h := dd.History
-	ue := FromII(dd.InvertedIndex.InvIdx.Name)
+	ue := FromII(dd.InvertedIndex.InvIdxCfg.Name)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity: ue,
 		filesGetter: func() *btree.BTreeG[*FilesItem] {
