@@ -344,9 +344,6 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if !statecfg.AggregatorSqueezeCommitmentValues {
-		t.Skip()
-	}
 
 	t.Parallel()
 	_db, agg := testDbAndAggregatorv3(t, 5)
@@ -355,14 +352,14 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
+	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = true
+
 	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	txs := uint64(100)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	agg.commitmentValuesTransform = true
 
 	state := make(map[string][]byte)
 

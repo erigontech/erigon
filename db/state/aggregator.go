@@ -70,8 +70,6 @@ type Aggregator struct {
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
 
-	commitmentValuesTransform bool // enables squeezing commitment values in CommitmentDomain
-
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
 	buildingFiles atomic.Bool
@@ -112,8 +110,6 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, d
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
-
-		commitmentValuesTransform: statecfg.AggregatorSqueezeCommitmentValues,
 
 		produce: true,
 	}, nil
@@ -1309,7 +1305,8 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	r := &Ranges{invertedIndex: make([]*MergeRange, len(at.a.iis))}
-	if at.a.commitmentValuesTransform {
+	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	if commitmentUseReferencedBranches {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange()
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange()
 		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange()
@@ -1328,7 +1325,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
-	if at.a.commitmentValuesTransform && r.domain[kv.CommitmentDomain].values.needMerge {
+	if commitmentUseReferencedBranches && r.domain[kv.CommitmentDomain].values.needMerge {
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
@@ -1392,6 +1389,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}()
 
 	at.a.logger.Info("[snapshots] merge state " + r.String())
+	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1405,15 +1403,16 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 
 		id := id
 		kid := kv.Domain(id)
-		if at.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
+		if commitmentUseReferencedBranches && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 			accStorageMerged.Add(1)
 		}
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if at.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
+			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain {
 				accStorageMerged.Wait()
 
+				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
 				vt, err = at.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, at.d[kv.AccountsDomain], at.d[kv.StorageDomain],
 					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
 
@@ -1423,7 +1422,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 			}
 
 			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, at.a.ps)
-			if at.a.commitmentValuesTransform {
+			if commitmentUseReferencedBranches {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
 				}
