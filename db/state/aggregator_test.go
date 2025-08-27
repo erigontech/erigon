@@ -310,16 +310,16 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 
 	checkAllEntities := func(expectedLen, expectedRefCnt int) {
 		for _, d := range agg.d {
-			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
-			if d.snapshotsDisabled {
+			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.Name.String())
+			if d.SnapshotsDisabled {
 				continue
 			}
-			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
-			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
+			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.Name.String())
+			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.Name.String())
 		}
 
 		for _, ii := range agg.iis {
-			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt, ii.disable, ii.filenameBase)
+			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt, ii.Disable, ii.FilenameBase)
 		}
 	}
 
@@ -344,7 +344,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if !AggregatorSqueezeCommitmentValues {
+	if !statecfg.AggregatorSqueezeCommitmentValues {
 		t.Skip()
 	}
 
@@ -1652,9 +1652,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 
 	t.Run("v1.0 files", func(t *testing.T) {
 		// Schema is global and edited by subtests
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1671,8 +1671,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1681,9 +1681,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("v1.1 files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1700,8 +1700,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1710,9 +1710,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("v2.0 files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1729,8 +1729,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1739,9 +1739,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("empty files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1754,8 +1754,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
