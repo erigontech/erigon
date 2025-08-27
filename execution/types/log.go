@@ -81,7 +81,7 @@ type ErigonLogs []*ErigonLog
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {
 	Log
-	BlockTimestamp uint64 `json:"blockTimestamp" codec:"-"`
+	BlockTimestamp uint64 `json:"-" codec:"-"` // omit this field while arbitrum has not yet inherited this change from geth
 }
 
 type RPCLogs []*RPCLog
@@ -100,9 +100,8 @@ func (logs Logs) Copy() Logs {
 // ToRPCTransactionLog converts types.Log in a RPCLog.
 func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex uint64) *RPCLog {
 	return &RPCLog{
-		Log: *log,
-		// Arbitrum has not yet inherited this change from geth.
-		// BlockTimestamp: header.Time,
+		Log:            *log,
+		BlockTimestamp: header.Time,
 	}
 }
 
