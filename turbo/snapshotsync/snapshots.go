@@ -1571,7 +1571,7 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
 		}
-		return seg, true, func() { segmentRotx.Close() }
+		return seg, true, segmentRotx.Close
 	}
 	segmentRotx.Close()
 	return nil, false, noop

@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
@@ -492,16 +493,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	return false, false, nil
 }
 
-func doRmStateSnapshots(cliCtx *cli.Context) error {
-	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer l.Unlock()
-
-	removeLatest := cliCtx.Bool("latest")
-	dryRun := cliCtx.Bool("dry-run")
-
+func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
@@ -547,7 +539,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
-	doesRmCommitment := !cliCtx.IsSet("domain") || slices.Contains(cliCtx.StringSlice("domain"), "commitment")
+	doesRmCommitment := len(domainNames) != 0 || slices.Contains(domainNames, kv.CommitmentDomain.String())
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
@@ -573,9 +565,8 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	toRemove := make(map[string]snaptype.FileInfo)
-	if cliCtx.IsSet("domain") {
+	if len(domainNames) > 0 {
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
-		domainNames := cliCtx.StringSlice("domain")
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
 			if err != nil {
@@ -593,11 +584,9 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 		files = domainFiles
 	}
-	if cliCtx.IsSet("step") || removeLatest {
-		steprm := cliCtx.String("step")
-
+	if stepRange != "" || removeLatest {
 		var minS, maxS uint64
-		if steprm != "" {
+		if stepRange != "" {
 			parseStep := func(step string) (uint64, uint64, error) {
 				var from, to uint64
 				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
@@ -606,7 +595,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				return from, to, nil
 			}
 			var err error
-			minS, maxS, err = parseStep(steprm)
+			minS, maxS, err = parseStep(stepRange)
 			if err != nil {
 				return err
 			}
@@ -614,6 +603,10 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		promptExit := func(s string) (exitNow bool) {
+			if !promptUserBeforeDelete {
+				return false
+			}
+
 		AllowPruneSteps:
 			fmt.Printf("\n%s", s)
 			var ans uint8
@@ -666,6 +659,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				}
 			}
 		}
+
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
 				toRemove[res.Path] = res
@@ -691,6 +685,22 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
+}
+
+func doRmStateSnapshots(cliCtx *cli.Context) error {
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
+
+	removeLatest := cliCtx.Bool("latest")
+	stepRange := cliCtx.String("step")
+	domainNames := cliCtx.StringSlice("domain")
+	dryRun := cliCtx.Bool("dry-run")
+	promptUser := true // CLI should always prompt the user
+
+	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
@@ -1065,7 +1075,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 			oldVersion = newVersion
 			// check that the index file exist
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(state.AccessorBTree) {
+			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorBTree) {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -1077,7 +1087,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(state.AccessorExistence) {
+			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -1089,7 +1099,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(state.AccessorHashMap) {
+			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
