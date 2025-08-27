@@ -599,7 +599,7 @@ func validateSnapshots[T Entity](
 				accumulatedErr = errors.New("missing entities")
 			}
 
-			accumulatedErr = fmt.Errorf("%w: snap [%d, %d)", accumulatedErr, expectedId, entity.RawId())
+			accumulatedErr = fmt.Errorf("%w: snap [%d, %d), file: %s", accumulatedErr, expectedId, entity.RawId(), seg.File)
 			if failFast {
 				return accumulatedErr
 			}
