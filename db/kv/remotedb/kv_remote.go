@@ -245,6 +245,7 @@ func (tx *tx) CanUnwindToBlockNum() (uint64, error) { panic("not implemented") }
 func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
 	panic("not implemented")
 }
+func (tx *tx) AllForkableIds() (ids []kv.ForkableId)                 { panic("not implemented") }
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
 func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }

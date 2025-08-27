@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
@@ -467,7 +467,6 @@ func TestHeadStorage(t *testing.T) {
 func TestBlockReceiptStorage(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -535,13 +534,14 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		sd.SetTxNum(base)
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
+		putter := sd.AsUnmarkedPutter(forkables.RcacheForkable)
+		require.NoError(rawdb.WriteReceiptCacheV2(putter, nil, base))
 		for i, r := range receipts {
 			sd.SetTxNum(base + 1 + uint64(i))
-			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, base+1+uint64(i)))
+			require.NoError(rawdb.WriteReceiptCacheV2(putter, r, base+1+uint64(i)))
 		}
 		sd.SetTxNum(base + uint64(len(receipts)) + 1)
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+uint64(len(receipts))+1))
+		require.NoError(rawdb.WriteReceiptCacheV2(putter, nil, base+uint64(len(receipts))+1))
 
 		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
 		require.NoError(err)

@@ -627,7 +627,7 @@ type ForkablePruneStat struct {
 	PruneCount     uint64
 }
 
-var EmptyForkablePruneStat = ForkablePruneStat{MinNum: Num(math.MaxUint64), MaxNum: Num(0)}
+var EmptyForkablePruneStat = ForkablePruneStat{MinNum: Num(uint64(math.MaxUint64)), MaxNum: Num(0)}
 
 func (ps *ForkablePruneStat) Set(minNum, maxNum Num, pruneCount uint64) {
 	ps.MinNum = minNum

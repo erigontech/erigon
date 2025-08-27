@@ -213,6 +213,8 @@ func (a *ProtoForkable) BeginNoFilesRo() *ProtoForkableTx {
 	}
 }
 
+func (a *ProtoForkableTx) Id() ForkableId { return a.id }
+
 func (a *ProtoForkableTx) Close() {
 	if a.files == nil {
 		return

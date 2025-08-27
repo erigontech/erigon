@@ -445,6 +445,8 @@ type TemporalDebugTx interface {
 
 	CanUnwindToBlockNum() (uint64, error)
 	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
+
+	AllForkableIds() []ForkableId
 }
 
 type TemporalDebugDB interface {

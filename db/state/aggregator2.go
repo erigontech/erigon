@@ -56,9 +56,9 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	// if err := a.registerDomain(kv.RCacheDomain, salt, dirs, logger); err != nil {
-	// 	return nil, err
-	// }
+	if err := a.registerDomain(kv.RCacheDomain, salt, dirs, logger); err != nil {
+		return nil, err
+	}
 	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}

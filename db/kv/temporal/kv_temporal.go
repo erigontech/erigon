@@ -142,6 +142,12 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.agg.BeginFilesRo()
+	if db.forkableEnabled {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -664,4 +670,16 @@ func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint6
 }
 func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
 	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
+}
+func (tx *Tx) AllForkableIds() (ids []kv.ForkableId) {
+	for _, forkagg := range tx.tx.forkaggs {
+		ids = append(ids, forkagg.Ids()...)
+	}
+	return
+}
+func (tx *RwTx) AllForkableIds() (ids []kv.ForkableId) {
+	for _, forkagg := range tx.tx.forkaggs {
+		ids = append(ids, forkagg.Ids()...)
+	}
+	return
 }

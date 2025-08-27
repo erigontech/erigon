@@ -454,6 +454,8 @@ var ChaindataTables = []string{
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
 	HashedStorageDeprecated,
+
+	TblRCacheFVAls,
 }
 
 const (
