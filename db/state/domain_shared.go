@@ -624,7 +624,7 @@ func (sd *SharedDomains) LogMetrics() []any {
 	defer sd.metrics.RUnlock()
 
 	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
-		metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
+		metrics = append(metrics, "cache", common.PrettyCounter(readCount), "writes", common.PrettyCounter(sd.metrics.CacheWriteCount), "size", common.PrettyCounter(sd.metrics.CacheSize), "cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
 	if readCount := sd.metrics.DbReadCount; readCount > 0 {
