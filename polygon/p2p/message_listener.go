@@ -27,9 +27,9 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 type DecodedInboundMessage[TPacket any] struct {
@@ -65,7 +65,7 @@ func applyRegisterOptions(opts []RegisterOpt) *registerOptions {
 func NewMessageListener(
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentry.StatusDataFactory,
+	statusDataFactory libsentry.StatusDataFactory,
 	peerPenalizer *PeerPenalizer,
 ) *MessageListener {
 	return &MessageListener{
@@ -84,7 +84,7 @@ func NewMessageListener(
 type MessageListener struct {
 	logger                  log.Logger
 	sentryClient            sentryproto.SentryClient
-	statusDataFactory       sentry.StatusDataFactory
+	statusDataFactory       libsentry.StatusDataFactory
 	peerPenalizer           *PeerPenalizer
 	newBlockObservers       *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashesObservers *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
@@ -205,14 +205,14 @@ func streamMessages[TMessage any](
 	ctx context.Context,
 	ml *MessageListener,
 	name string,
-	streamFactory sentry.MessageStreamFactory,
+	streamFactory libsentry.MessageStreamFactory,
 	handler func(event *TMessage) error,
 ) {
 	messageHandler := func(_ context.Context, event *TMessage, client sentryproto.SentryClient) error {
 		return handler(event)
 	}
 
-	sentry.ReconnectAndPumpStreamLoop(
+	libsentry.ReconnectAndPumpStreamLoop(
 		ctx,
 		ml.sentryClient,
 		ml.statusDataFactory,

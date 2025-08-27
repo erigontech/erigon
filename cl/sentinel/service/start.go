@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/direct"
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )

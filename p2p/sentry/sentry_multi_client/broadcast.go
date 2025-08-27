@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"strings"
 	"syscall"
 
 	"google.golang.org/grpc"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
@@ -96,7 +96,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 
 		_, err = sentry.SendMessageToRandomPeers(ctx, &req66, &grpc.EmptyCallOption{})
 		if err != nil {
-			if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+			if libsentry.IsPeerNotFoundErr(err) || networkTemporaryErr(err) {
 				log.Debug("broadcastNewBlock", "err", err)
 				continue
 			}
@@ -107,7 +107,4 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 
 func networkTemporaryErr(err error) bool {
 	return errors.Is(err, syscall.EPIPE) || errors.Is(err, p2p.ErrShuttingDown)
-}
-func isPeerNotFoundErr(err error) bool {
-	return strings.Contains(err.Error(), "peer not found")
 }

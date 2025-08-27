@@ -19,7 +19,6 @@ package app
 import (
 	"bufio"
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -27,7 +26,6 @@ import (
 	"io"
 	"io/fs"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -47,7 +45,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -64,22 +61,19 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
-	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -182,33 +176,6 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 			}),
-		},
-		{
-			Name:   "uploader",
-			Action: doUploaderCommand,
-			Usage:  "run erigon in snapshot upload mode (no execution)",
-			Flags: joinFlags(erigoncli.DefaultFlags,
-				[]cli.Flag{
-					&erigoncli.UploadLocationFlag,
-					&erigoncli.UploadFromFlag,
-					&erigoncli.FrozenBlockLimitFlag,
-				}),
-			Before: func(ctx *cli.Context) error {
-				ctx.Set(erigoncli.SyncLoopBreakAfterFlag.Name, "Senders")
-				ctx.Set(utils.NoDownloaderFlag.Name, "true")
-				ctx.Set(utils.HTTPEnabledFlag.Name, "false")
-				ctx.Set(utils.TxPoolDisableFlag.Name, "true")
-
-				if !ctx.IsSet(erigoncli.SyncLoopBlockLimitFlag.Name) {
-					ctx.Set(erigoncli.SyncLoopBlockLimitFlag.Name, "100000")
-				}
-
-				if !ctx.IsSet(erigoncli.FrozenBlockLimitFlag.Name) {
-					ctx.Set(erigoncli.FrozenBlockLimitFlag.Name, "1500000")
-				}
-
-				return nil
-			},
 		},
 		{
 			Name:   "uncompress",
@@ -1074,7 +1041,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 			oldVersion = newVersion
 			// check that the index file exist
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(state.AccessorBTree) {
+			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorBTree) {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -1086,7 +1053,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(state.AccessorExistence) {
+			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -1098,7 +1065,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if state.Schema.GetDomainCfg(snapType).Accessors.Has(state.AccessorHashMap) {
+			if state.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
 				newVersion = state.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -1652,14 +1619,14 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
+	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = blockSnaps.OpenFolder(); err != nil {
 		return
 	}
 	blockSnaps.LogStat("block")
 
 	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
-	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
+	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = borSnaps.OpenFolder(); err != nil {
 		return
 	}
@@ -2193,55 +2160,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	return nil
-}
-
-func doUploaderCommand(cliCtx *cli.Context) error {
-	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer l.Unlock()
-	var logger log.Logger
-	var tracer *tracers.Tracer
-	var metricsMux *http.ServeMux
-	var pprofMux *http.ServeMux
-
-	if logger, tracer, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
-		return err
-	}
-
-	debugMux := cmp.Or(metricsMux, pprofMux)
-
-	// initializing the node and providing the current git commit there
-
-	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
-	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
-	erigonInfoGauge.Set(1)
-
-	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
-	if err != nil {
-		return err
-	}
-	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
-		return err
-	}
-
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
-	if err != nil {
-		log.Error("Erigon startup", "err", err)
-		return err
-	}
-	defer ethNode.Close()
-
-	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
-
-	err = ethNode.Serve()
-	if err != nil {
-		log.Error("error while serving an Erigon node", "err", err)
-	}
-	return err
 }
 
 func doCompareIdx(cliCtx *cli.Context) error {

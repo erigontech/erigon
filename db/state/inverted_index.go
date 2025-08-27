@@ -32,10 +32,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/version"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
@@ -55,6 +57,8 @@ import (
 
 type InvertedIndex struct {
 	iiCfg
+	dirs    datadir.Dirs
+	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
 	stepSize uint64 // amount of transactions inside single aggregation step
@@ -79,8 +83,6 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt    *atomic.Pointer[uint32]
-	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
 	version IIVersionTypes
@@ -93,7 +95,7 @@ type iiCfg struct {
 	Compression   seg.FileCompression // compression type for inverted index keys and values
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
-	Accessors Accessors
+	Accessors statecfg.Accessors
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -108,8 +110,8 @@ type iiVisible struct {
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg iiCfg, stepSize uint64, logger log.Logger) (*InvertedIndex, error) {
-	if cfg.dirs.SnapDomain == "" {
+func NewInvertedIndex(cfg iiCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
+	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
 	if cfg.filenameBase == "" {
@@ -118,11 +120,14 @@ func NewInvertedIndex(cfg iiCfg, stepSize uint64, logger log.Logger) (*InvertedI
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.CompressorCfg = seg.DefaultCfg
 	if cfg.Accessors == 0 {
-		cfg.Accessors = AccessorHashMap
+		cfg.Accessors = statecfg.AccessorHashMap
 	}
 
 	ii := InvertedIndex{
-		iiCfg:      cfg,
+		iiCfg: cfg,
+		dirs:  dirs,
+		salt:  &atomic.Pointer[uint32]{},
+
 		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newIIVisible(cfg.filenameBase, []visibleFile{}),
 		logger:     logger,
@@ -254,7 +259,7 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
-	if !ii.Accessors.Has(AccessorHashMap) {
+	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
@@ -983,7 +988,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	}
 	defer keysCursor.Close()
 
-	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
+	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".collate.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 
 	var txKey [8]byte
@@ -1160,7 +1165,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
-	if ii.Accessors.Has(AccessorHashMap) {
+	if ii.Accessors.Has(statecfg.AccessorHashMap) {
 		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}

@@ -31,15 +31,15 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func TestFetcherFetchHeaders(t *testing.T) {
@@ -985,7 +985,7 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	statusDataFactory := sentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
+	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
 		return &sentryproto.StatusData{}, nil
 	})
 	peerPenalizer := NewPeerPenalizer(sentryClient)
