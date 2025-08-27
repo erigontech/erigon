@@ -37,8 +37,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	db := wrapDbWithCtx(_db, agg)
 
-	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
-	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = agg.commitmentValuesTransform
+	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = !cfg.disableCommitmentBranchTransform
 
 	ctx := context.Background()
 	agg.logger = log.Root().New()
@@ -117,7 +116,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	domains.Close()
 
 	// now do the squeeze
-	agg.commitmentValuesTransform = true
 	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = true
 	err = SqueezeCommitmentFiles(context.Background(), AggTx(rwTx), log.New())
 	require.NoError(t, err)
