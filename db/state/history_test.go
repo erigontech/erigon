@@ -25,7 +25,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,22 +45,20 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	tb.Cleanup(db.Close)
+
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := Schema.AccountsDomain
 
-	cfg.hist.iiCfg.dirs = dirs
-	if cfg.hist.iiCfg.salt == nil {
-		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.hist.iiCfg.salt.Store(&salt)
-	cfg.hist.iiCfg.Accessors = AccessorHashMap
+	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
 	cfg.hist.historyLargeValues = largeValues
 
 	//perf of tests
@@ -69,11 +66,11 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
-	h, err := NewHistory(cfg.hist, aggregationStep, logger)
+	h, err := NewHistory(cfg.hist, aggregationStep, dirs, logger)
 	require.NoError(tb, err)
-	h.DisableFsync()
-	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
+	h.salt.Store(&salt)
+	h.DisableFsync()
 	return db, h
 }
 
@@ -261,7 +258,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		for i := 0; i < len(keyWords); i++ {
 			var offset uint64
 			var ok bool
-			if h.InvertedIndex.Accessors.Has(AccessorExistence) {
+			if h.InvertedIndex.Accessors.Has(statecfg.AccessorExistence) {
 				offset, ok = r.Lookup([]byte(keyWords[i]))
 				if !ok {
 					continue

@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/event"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -61,13 +60,13 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -111,11 +110,13 @@ import (
 	stages2 "github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -360,7 +361,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		genesisConfig, err := core.ReadGenesis(tx)
+		genesisConfig, err := rawdb.ReadGenesis(tx)
 		if err != nil {
 			return err
 		}
@@ -382,7 +383,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -1582,7 +1583,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
-	allSegmentsDownloadComplete, err := core.AllSegmentsDownloadCompleteFromDB(db)
+	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

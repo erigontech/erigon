@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -40,7 +41,7 @@ type SnapshotRepo struct {
 
 	cfg       *SnapshotConfig
 	schema    SnapNameSchema
-	accessors Accessors
+	accessors statecfg.Accessors
 	stepSize  uint64
 
 	logger log.Logger
@@ -166,7 +167,7 @@ func (f *SnapshotRepo) GetFreezingRange(from RootNum, to RootNum) (freezeFrom Ro
 }
 
 func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*FilesItem) {
-	if !f.accessors.Has(AccessorBTree) {
+	if !f.accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
 	p := f.schema
@@ -181,7 +182,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*FilesItem) {
 }
 
 func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
-	if !f.accessors.Has(AccessorHashMap) {
+	if !f.accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	p := f.schema
@@ -355,7 +356,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 
 			accessors := p.AccessorList()
 
-			if item.index == nil && accessors.Has(AccessorHashMap) {
+			if item.index == nil && accessors.Has(statecfg.AccessorHashMap) {
 				fPathGen := p.AccessorIdxFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -373,7 +374,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 			}
 
-			if item.bindex == nil && accessors.Has(AccessorBTree) {
+			if item.bindex == nil && accessors.Has(statecfg.AccessorBTree) {
 				fPathGen := p.BtIdxFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -391,7 +392,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					}
 				}
 			}
-			if item.existence == nil && accessors.Has(AccessorExistence) {
+			if item.existence == nil && accessors.Has(statecfg.AccessorExistence) {
 				fPathGen := p.ExistenceFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)

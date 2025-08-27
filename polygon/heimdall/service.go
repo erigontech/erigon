@@ -178,6 +178,11 @@ func (s *Service) SynchronizeMilestones(ctx context.Context) (*Milestone, bool, 
 	return s.milestoneScraper.Synchronize(ctx)
 }
 
+func (s *Service) AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
+	s.logger.Info(heimdallLogPrefix(fmt.Sprintf("anticipating new span update within %.0f seconds", timeout.Seconds())))
+	return s.spanBlockProducersTracker.AnticipateNewSpanWithTimeout(ctx, timeout)
+}
+
 func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
 

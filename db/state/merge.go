@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
@@ -545,7 +546,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.Accessors.Has(AccessorBTree) {
+	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
@@ -556,7 +557,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.Accessors.Has(AccessorHashMap) {
+	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
 		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, dt.dataReader(valuesIn.decompressor), ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -565,7 +566,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if dt.d.Accessors.Has(AccessorExistence) {
+	if dt.d.Accessors.Has(statecfg.AccessorExistence) {
 		bloomIndexPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {

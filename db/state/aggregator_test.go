@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1229,7 +1230,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 
 	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
-	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -1759,7 +1760,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := AccessorBTree | AccessorExistence
+		accessors := statecfg.AccessorBTree | statecfg.AccessorExistence
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
 			BtIndex().Existence().
@@ -1770,7 +1771,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	populateFiles2(t, dirs, domainR, ranges)
 
 	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := AccessorHashMap
+		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone).
 			Accessor(dirs.SnapAccessors).
@@ -1781,7 +1782,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	populateFiles2(t, dirs, domainHR, ranges)
 
 	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := AccessorHashMap
+		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone).
 			Accessor(dirs.SnapAccessors).
@@ -1810,7 +1811,7 @@ func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange
 func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
-		accessors := AccessorHashMap
+		accessors := statecfg.AccessorHashMap
 		name = "commitment"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).

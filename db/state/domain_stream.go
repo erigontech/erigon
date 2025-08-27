@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 type CursorType uint8
@@ -384,7 +385,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 				}
 			case FILE_CURSOR:
 				indexList := dt.d.Accessors
-				if indexList.Has(AccessorBTree) {
+				if indexList.Has(statecfg.AccessorBTree) {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -395,7 +396,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 						ci1.btCursor.Close()
 					}
 				}
-				if indexList.Has(AccessorHashMap) {
+				if indexList.Has(statecfg.AccessorHashMap) {
 					ci1.idx.Reset(ci1.latestOffset)
 					if !ci1.idx.HasNext() {
 						break
