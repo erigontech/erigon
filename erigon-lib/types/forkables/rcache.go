@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 var RcacheForkable kv.ForkableId = math.MaxUint16
@@ -23,7 +24,7 @@ func NewRcacheForkable(pre snapcfg.PreverifiedItems, dirs datadir.Dirs, stepSize
 			state.WithSaltFile(path.Join(dirs.Snap, "salt-state.txt")),
 		)
 	}
-	schema := state.Schema.RCacheForkable
+	schema := statecfg.Schema.RCacheForkable
 
 	f, err := state.NewUnmarkedForkable(RcacheForkable, schema.ValsTbl, state.IdentityRootRelationInstance, logger)
 	if err != nil {
@@ -37,5 +38,5 @@ func NewRcacheForkable(pre snapcfg.PreverifiedItems, dirs datadir.Dirs, stepSize
 }
 
 func RCacheSnapSchema(dirs datadir.Dirs, stepSize uint64) state.SnapNameSchema {
-	return state.NewForkableSnapSchema(state.Schema.RCacheForkable, stepSize, dirs)
+	return state.NewForkableSnapSchema(statecfg.Schema.RCacheForkable, stepSize, dirs)
 }
