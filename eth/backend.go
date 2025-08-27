@@ -47,7 +47,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -84,6 +83,7 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
@@ -316,7 +316,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
-			state.EnableHistoricalRCache()
+			statecfg.EnableHistoricalRCache()
 		}
 
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
@@ -953,7 +953,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -1010,8 +1010,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
-	checkStateRoot := true
-	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, logger, tracer, checkStateRoot)
+	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentLogs, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, ctx)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
@@ -1315,7 +1314,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		defer close(s.waitForMiningStop)
 		defer streamCancel()
 
@@ -1527,11 +1526,9 @@ func (s *Ethereum) setUpSnapDownloader(
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		// start embedded Downloader
-		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) == 0 {
-			err = s.downloader.AddTorrentsFromDisk(ctx)
-			if err != nil {
-				return fmt.Errorf("adding torrents from disk: %w", err)
-			}
+		err = s.downloader.AddTorrentsFromDisk(ctx)
+		if err != nil {
+			return fmt.Errorf("adding torrents from disk: %w", err)
 		}
 
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
@@ -1546,22 +1543,14 @@ func (s *Ethereum) setUpSnapDownloader(
 }
 
 func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, nodeConfig *nodecfg.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
-	var minFrozenBlock uint64
-
-	if frozenLimit := snConfig.Sync.FrozenBlockLimit; frozenLimit != 0 {
-		if maxSeedable := snapcfg.MaxSeedableSegment(snConfig.Genesis.Config.ChainName, dirs.Snap); maxSeedable > frozenLimit {
-			minFrozenBlock = maxSeedable - frozenLimit
-		}
-	}
-
-	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
+	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 
 	if chainConfig.Bor != nil {
-		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
+		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
 	}
