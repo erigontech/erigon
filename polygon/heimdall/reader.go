@@ -11,7 +11,6 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type Reader struct {
@@ -63,7 +62,7 @@ func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]
 	return r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 }
 
-func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
 	return r.spanBlockProducersTracker.Producers(ctx, blockNum)
 }
 
@@ -85,7 +84,7 @@ func NewRemoteReader(client remote.HeimdallBackendClient) *RemoteReader {
 	}
 }
 
-func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
 	reply, err := r.client.Producers(ctx, &remote.BorProducersRequest{BlockNum: blockNum})
 	if err != nil {
 		return nil, err
@@ -97,12 +96,12 @@ func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.
 	validators := reply.Validators
 	proposer := reply.Proposer
 
-	v := make([]*valset.Validator, len(validators))
+	v := make([]*Validator, len(validators))
 	for i, validator := range validators {
 		v[i] = decodeValidator(validator)
 	}
 
-	validatorSet := valset.ValidatorSet{
+	validatorSet := ValidatorSet{
 		Proposer:   decodeValidator(proposer),
 		Validators: v,
 	}
@@ -130,8 +129,8 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func decodeValidator(v *remote.Validator) *valset.Validator {
-	return &valset.Validator{
+func decodeValidator(v *remote.Validator) *Validator {
+	return &Validator{
 		ID:               v.Id,
 		Address:          gointerfaces.ConvertH160toAddress(v.Address),
 		VotingPower:      v.VotingPower,

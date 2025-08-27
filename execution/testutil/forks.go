@@ -24,417 +24,208 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/jinzhu/copier"
+
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
+// See https://github.com/ethereum/execution-spec-tests/pull/2050
+var blobSchedule = map[string]*params.BlobConfig{
+	"bpo1": {
+		Target:                9,
+		Max:                   14,
+		BaseFeeUpdateFraction: 8832827,
+	},
+	"bpo2": {
+		Target:                14,
+		Max:                   21,
+		BaseFeeUpdateFraction: 13739630,
+	},
+	"bpo3": {
+		Target:                21,
+		Max:                   32,
+		BaseFeeUpdateFraction: 20609697,
+	},
+	"bpo4": {
+		Target:                14,
+		Max:                   21,
+		BaseFeeUpdateFraction: 13739630,
+	},
+}
+
 // Forks table defines supported forks and their chain config.
-var Forks = map[string]*chain.Config{
-	"Frontier": {
-		ChainID: big.NewInt(1),
-	},
-	"Homestead": {
-		ChainID:        big.NewInt(1),
-		HomesteadBlock: big.NewInt(0),
-	},
-	"EIP150": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-	},
-	"EIP158": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-	},
-	"Byzantium": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-	},
-	"Constantinople": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(10000000),
-	},
-	"ConstantinopleFix": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-	},
-	"Istanbul": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-	},
-	"FrontierToHomesteadAt5": {
-		ChainID:        big.NewInt(1),
-		HomesteadBlock: big.NewInt(5),
-	},
-	"HomesteadToEIP150At5": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(5),
-	},
-	"HomesteadToDaoAt5": {
-		ChainID:        big.NewInt(1),
-		HomesteadBlock: big.NewInt(0),
-		DAOForkBlock:   big.NewInt(5),
-	},
-	"EIP158ToByzantiumAt5": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(5),
-	},
-	"ByzantiumToConstantinopleAt5": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(5),
-	},
-	"ByzantiumToConstantinopleFixAt5": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(5),
-		PetersburgBlock:       big.NewInt(5),
-	},
-	"ConstantinopleFixToIstanbulAt5": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(5),
-	},
-	"EIP2384": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-	},
-	"Berlin": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-	},
-	"BerlinToLondonAt5": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(5),
-	},
-	"London": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-	},
-	"ArrowGlacier": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArrowGlacierBlock:     big.NewInt(0),
-	},
-	"GrayGlacier": {
-		ChainID:               big.NewInt(1),
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArrowGlacierBlock:     big.NewInt(0),
-		GrayGlacierBlock:      big.NewInt(0),
-	},
-	"Merge": {
-		ChainID:                 big.NewInt(1),
-		HomesteadBlock:          big.NewInt(0),
-		TangerineWhistleBlock:   big.NewInt(0),
-		SpuriousDragonBlock:     big.NewInt(0),
-		ByzantiumBlock:          big.NewInt(0),
-		ConstantinopleBlock:     big.NewInt(0),
-		PetersburgBlock:         big.NewInt(0),
-		IstanbulBlock:           big.NewInt(0),
-		MuirGlacierBlock:        big.NewInt(0),
-		BerlinBlock:             big.NewInt(0),
-		LondonBlock:             big.NewInt(0),
-		ArrowGlacierBlock:       big.NewInt(0),
-		GrayGlacierBlock:        big.NewInt(0),
-		TerminalTotalDifficulty: big.NewInt(0),
-	},
-	"Paris": {
-		ChainID:                 big.NewInt(1),
-		HomesteadBlock:          big.NewInt(0),
-		TangerineWhistleBlock:   big.NewInt(0),
-		SpuriousDragonBlock:     big.NewInt(0),
-		ByzantiumBlock:          big.NewInt(0),
-		ConstantinopleBlock:     big.NewInt(0),
-		PetersburgBlock:         big.NewInt(0),
-		IstanbulBlock:           big.NewInt(0),
-		MuirGlacierBlock:        big.NewInt(0),
-		BerlinBlock:             big.NewInt(0),
-		LondonBlock:             big.NewInt(0),
-		ArrowGlacierBlock:       big.NewInt(0),
-		GrayGlacierBlock:        big.NewInt(0),
-		TerminalTotalDifficulty: big.NewInt(0),
-	},
-	"ArrowGlacierToParisAtDiffC0000": {
-		ChainID:                 big.NewInt(1),
-		HomesteadBlock:          big.NewInt(0),
-		TangerineWhistleBlock:   big.NewInt(0),
-		SpuriousDragonBlock:     big.NewInt(0),
-		ByzantiumBlock:          big.NewInt(0),
-		ConstantinopleBlock:     big.NewInt(0),
-		PetersburgBlock:         big.NewInt(0),
-		IstanbulBlock:           big.NewInt(0),
-		MuirGlacierBlock:        big.NewInt(0),
-		BerlinBlock:             big.NewInt(0),
-		LondonBlock:             big.NewInt(0),
-		ArrowGlacierBlock:       big.NewInt(0),
-		TerminalTotalDifficulty: big.NewInt(0xC0000),
-	},
-	"Shanghai": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-	},
-	"ParisToShanghaiAtTime15k": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(15_000),
-	},
-	"Cancun": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-	},
-	"Cancun+1153": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-	},
-	"ShanghaiToCancunAtTime15k": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(15_000),
-	},
-	"Prague": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(0),
-		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
-	},
-	"CancunToPragueAtTime15k": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(15_000),
-		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
-	},
-	"Osaka": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(0),
-		OsakaTime:                     big.NewInt(0),
-		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
-	},
-	"PragueToOsakaAtTime15k": {
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
-		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(0),
-		OsakaTime:                     big.NewInt(15_000),
-		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
-	},
+var Forks = map[string]*chain.Config{}
+
+func init() {
+	c := &chain.Config{ChainID: big.NewInt(1)}
+	Forks["Frontier"] = c
+
+	c = configCopy(c)
+	c.HomesteadBlock = big.NewInt(5)
+	Forks["FrontierToHomesteadAt5"] = c
+
+	c = configCopy(c)
+	c.HomesteadBlock = big.NewInt(0)
+	Forks["Homestead"] = c
+
+	c = configCopy(c)
+	c.DAOForkBlock = big.NewInt(5)
+	Forks["HomesteadToDaoAt5"] = c
+
+	c = configCopy(c)
+	c.DAOForkBlock = nil
+	c.TangerineWhistleBlock = big.NewInt(5)
+	Forks["HomesteadToEIP150At5"] = c
+
+	c = configCopy(c)
+	c.TangerineWhistleBlock = big.NewInt(0)
+	Forks["EIP150"] = c
+
+	c = configCopy(c)
+	c.SpuriousDragonBlock = big.NewInt(0)
+	Forks["EIP158"] = c
+
+	c = configCopy(c)
+	c.ByzantiumBlock = big.NewInt(5)
+	Forks["EIP158ToByzantiumAt5"] = c
+
+	c = configCopy(c)
+	c.ByzantiumBlock = big.NewInt(0)
+	Forks["Byzantium"] = c
+
+	c = configCopy(c)
+	c.ConstantinopleBlock = big.NewInt(5)
+	Forks["ByzantiumToConstantinopleAt5"] = c
+
+	c = configCopy(c)
+	c.PetersburgBlock = big.NewInt(5)
+	Forks["ByzantiumToConstantinopleFixAt5"] = c
+
+	c = configCopy(c)
+	c.ConstantinopleBlock = big.NewInt(0)
+	c.PetersburgBlock = nil
+	Forks["Constantinople"] = c
+
+	c = configCopy(c)
+	c.PetersburgBlock = big.NewInt(0)
+	Forks["ConstantinopleFix"] = c
+
+	c = configCopy(c)
+	c.IstanbulBlock = big.NewInt(5)
+	Forks["ConstantinopleFixToIstanbulAt5"] = c
+
+	c = configCopy(c)
+	c.IstanbulBlock = big.NewInt(0)
+	Forks["Istanbul"] = c
+
+	c = configCopy(c)
+	c.MuirGlacierBlock = big.NewInt(0)
+	Forks["EIP2384"] = c
+
+	c = configCopy(c)
+	c.BerlinBlock = big.NewInt(0)
+	Forks["Berlin"] = c
+
+	c = configCopy(c)
+	c.LondonBlock = big.NewInt(5)
+	Forks["BerlinToLondonAt5"] = c
+
+	c = configCopy(c)
+	c.LondonBlock = big.NewInt(0)
+	Forks["London"] = c
+
+	c = configCopy(c)
+	c.ArrowGlacierBlock = big.NewInt(0)
+	Forks["ArrowGlacier"] = c
+
+	c = configCopy(c)
+	c.TerminalTotalDifficulty = big.NewInt(0xC00000)
+	Forks["ArrowGlacierToParisAtDiffC0000"] = c
+
+	c = configCopy(c)
+	c.TerminalTotalDifficulty = nil
+	c.GrayGlacierBlock = big.NewInt(0)
+	Forks["GrayGlacier"] = c
+
+	c = configCopy(c)
+	c.TerminalTotalDifficulty = big.NewInt(0)
+	Forks["Merge"] = c
+	Forks["Paris"] = c
+
+	c = configCopy(c)
+	c.TerminalTotalDifficultyPassed = true
+	c.ShanghaiTime = big.NewInt(15_000)
+	Forks["ParisToShanghaiAtTime15k"] = c
+
+	c = configCopy(c)
+	c.ShanghaiTime = big.NewInt(0)
+	Forks["Shanghai"] = c
+
+	c = configCopy(c)
+	c.CancunTime = big.NewInt(15_000)
+	Forks["ShanghaiToCancunAtTime15k"] = c
+
+	c = configCopy(c)
+	c.CancunTime = big.NewInt(0)
+	Forks["Cancun"] = c
+
+	c = configCopy(c)
+	c.PragueTime = big.NewInt(15_000)
+	c.DepositContract = common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa")
+	Forks["CancunToPragueAtTime15k"] = c
+
+	c = configCopy(c)
+	c.PragueTime = big.NewInt(0)
+	Forks["Prague"] = c
+
+	c = configCopy(c)
+	c.OsakaTime = big.NewInt(15_000)
+	Forks["PragueToOsakaAtTime15k"] = c
+
+	c = configCopy(c)
+	c.OsakaTime = big.NewInt(0)
+	Forks["Osaka"] = c
+
+	c = configCopy(c)
+	c.BlobSchedule = blobSchedule
+	c.Bpo1Time = big.NewInt(15_000)
+	Forks["OsakaToBPO1AtTime15k"] = c
+
+	c = configCopy(c)
+	c.Bpo1Time = big.NewInt(0)
+	Forks["BPO1"] = c
+
+	c = configCopy(c)
+	c.Bpo2Time = big.NewInt(15_000)
+	Forks["BPO1ToBPO2AtTime15k"] = c
+
+	c = configCopy(c)
+	c.Bpo2Time = big.NewInt(0)
+	Forks["BPO2"] = c
+
+	c = configCopy(c)
+	c.Bpo3Time = big.NewInt(15_000)
+	Forks["BPO2ToBPO3AtTime15k"] = c
+
+	c = configCopy(c)
+	c.Bpo3Time = big.NewInt(0)
+	Forks["BPO3"] = c
+
+	c = configCopy(c)
+	c.Bpo4Time = big.NewInt(15_000)
+	Forks["BPO3ToBPO4AtTime15k"] = c
+
+	c = configCopy(c)
+	c.Bpo4Time = big.NewInt(0)
+	Forks["BPO4"] = c
+}
+
+func configCopy(c *chain.Config) *chain.Config {
+	cpy := new(chain.Config)
+	copier.Copy(cpy, c)
+	return cpy
 }
 
 // Returns the set of defined fork names

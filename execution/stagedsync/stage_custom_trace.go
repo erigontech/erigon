@@ -25,25 +25,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/integrity"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -119,7 +119,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader(ctx)
 
-	//agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
+	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	//stepSize := agg.StepSize()
 
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
@@ -151,7 +151,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	endBlock = execProgress
 
 	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).MadvNormal().DisableReadAhead()
-	//defer tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).MadvNormal().DisableReadAhead()
+	//defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
@@ -173,7 +173,7 @@ Loop:
 		select {
 		case <-ctx.Done():
 			logger.Warn("[snapshots] user has interrupted process but anyway waiting for build & merge files")
-		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(context.Background()):
+		case <-cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForBuildAndMerge(context.Background()):
 			break Loop // Here we don't quit due to ctx because it's not safe for files.
 		case <-logEvery.C:
 			var m runtime.MemStats
@@ -218,7 +218,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		}
 		defer tx.Rollback()
 
-		doms, err := state2.NewSharedDomains(tx, logger)
+		doms, err := dbstate.NewSharedDomains(tx, logger)
 		if err != nil {
 			return err
 		}
@@ -246,12 +246,12 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 
 	}
 
-	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
-	var fromStep, toStep uint64
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	var fromStep, toStep kv.Step
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
 		if lastTxNum/agg.StepSize() > 0 {
-			toStep = lastTxNum / agg.StepSize()
+			toStep = kv.Step(lastTxNum / agg.StepSize())
 		}
 		return nil
 	}); err != nil {
@@ -305,7 +305,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalTx, 
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, tx, cfg.BlockReader, true)
 }
 
-func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *dbstate.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -460,10 +460,10 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 	return txNum
 }
 
-func firstStepNotInFiles(tx kv.Tx, produce Produce) uint64 {
+func firstStepNotInFiles(tx kv.Tx, produce Produce) kv.Step {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
-	ac := state2.AggTx(tx)
-	fromStep := uint64(math.MaxUint64)
+	ac := dbstate.AggTx(tx)
+	fromStep := kv.Step(math.MaxUint64)
 	if produce.ReceiptDomain {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
 	}

@@ -26,13 +26,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // Config are the configuration options for the Interpreter
@@ -182,7 +181,7 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case evm.ChainRules().IsOsaka:
+	case evm.chainRules.IsOsaka:
 		jt = &osakaInstructionSet
 	case evm.ChainRules().IsBhilai:
 		jt = &bhilaiInstructionSet

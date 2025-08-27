@@ -31,19 +31,18 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/node/direct"
 )
 
 func TestFetch(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
 	remoteKvClient := remote.NewMockKVClient(ctrl)
@@ -74,8 +73,7 @@ func TestFetch(t *testing.T) {
 }
 
 func TestSendTxnPropagate(t *testing.T) {
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx := t.Context()
 	t.Run("few remote byHash", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		sentryServer := sentryproto.NewMockSentryServer(ctrl)
@@ -228,8 +226,7 @@ func decodeHex(in string) []byte {
 }
 
 func TestOnNewBlock(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, db := memdb.NewTestDB(t, kv.ChainDB), memdb.NewTestDB(t, kv.TxPoolDB)
 	ctrl := gomock.NewController(t)
 

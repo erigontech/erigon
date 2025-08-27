@@ -5,6 +5,8 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
+var initialCycleDurationSecs = metrics.GetOrCreateGauge("initial_cycle_duration_secs")
+
 type metricsCache struct {
 	stageRunDurationSummaries    map[stages.SyncStage]metrics.Summary
 	stagePruneDurationSummaries  map[stages.SyncStage]metrics.Summary

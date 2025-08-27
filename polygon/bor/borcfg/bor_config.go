@@ -21,8 +21,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // BorConfig is the consensus engine configs for Matic bor based sealing.
@@ -44,6 +44,7 @@ type BorConfig struct {
 	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
 	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
 	BhilaiBlock                *big.Int          `json:"bhilaiBlock"`                // Bhilai switch block (nil = no fork, 0 = already on Ahmedabad)
+	VeBlopBlock                *big.Int          `json:"veblopBlock"`                // VeBlop switch block (nil = no fork, 0 = already on veblop)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	sprints sprints
@@ -175,6 +176,14 @@ func (c *BorConfig) IsBhilai(number uint64) bool {
 
 func (c *BorConfig) GetBhilaiBlock() *big.Int {
 	return c.BhilaiBlock
+}
+
+func (c *BorConfig) IsVeBlop(number uint64) bool {
+	return isForked(c.VeBlopBlock, number)
+}
+
+func (c *BorConfig) GetVeBlopBlock() *big.Int {
+	return c.VeBlopBlock
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {

@@ -20,7 +20,7 @@ jobs:
             backend: Polygon
             cgroup_name: constrained_res_64G
             prune_mode: full_node
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -33,7 +33,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Clean Erigon Build Directory
       run: |

@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor"
 )
 
@@ -45,6 +45,7 @@ type difficultyCalculator interface {
 
 type headerValidator interface {
 	ValidateHeader(ctx context.Context, header *types.Header, parent *types.Header, now time.Time) error
+	UpdateLatestVerifiedHeader(header *types.Header)
 }
 
 func NewCanonicalChainBuilder(root *types.Header, dc difficultyCalculator, hv headerValidator) *CanonicalChainBuilder {
@@ -70,6 +71,7 @@ func (ccb *CanonicalChainBuilder) Reset(root *types.Header) {
 		headerHash: root.Hash(),
 	}
 	ccb.tip = ccb.root
+	ccb.headerValidator.UpdateLatestVerifiedHeader(root)
 }
 
 // depth-first search

@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 )
@@ -102,6 +102,11 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	for i := 0; i < count; i++ {
 		txn, err := transactor.SubmitSimpleTransfer(from, to, amount)
 		if err != nil {
+			if strings.Contains(err.Error(), "failed to get transaction count: Invalid params") {
+				logger.Warn("failed to get transaction count, retrying", "err", err)
+				time.Sleep(time.Second)
+				continue
+			}
 			return err
 		}
 		logger.Info("transaction sent", "hash", txn.Hash())

@@ -4,13 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"sort"
+	"slices"
+
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/p2p/enode"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
-	"github.com/holiman/uint256"
 )
 
 // CustodyIndex represents the index of a custody group
@@ -62,9 +63,7 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 	}
 
 	// Sort custody groups
-	sort.Slice(custodyGroups, func(i, j int) bool {
-		return custodyGroups[i] < custodyGroups[j]
-	})
+	slices.Sort(custodyGroups)
 
 	return custodyGroups, nil
 }

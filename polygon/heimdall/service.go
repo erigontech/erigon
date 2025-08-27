@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 const (
@@ -69,7 +69,7 @@ func NewService(config ServiceConfig) *Service {
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
-		TransientErrors,
+		poshttp.TransientErrors,
 		logger,
 	)
 
@@ -78,7 +78,7 @@ func NewService(config ServiceConfig) *Service {
 	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
-	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, TransientErrors...)
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, poshttp.TransientErrors...)
 	milestoneScraper := NewScraper(
 		"milestones",
 		store.Milestones(),
@@ -93,7 +93,7 @@ func NewService(config ServiceConfig) *Service {
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
-		TransientErrors,
+		poshttp.TransientErrors,
 		logger,
 	)
 
@@ -178,6 +178,11 @@ func (s *Service) SynchronizeMilestones(ctx context.Context) (*Milestone, bool, 
 	return s.milestoneScraper.Synchronize(ctx)
 }
 
+func (s *Service) AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
+	s.logger.Info(heimdallLogPrefix(fmt.Sprintf("anticipating new span update within %.0f seconds", timeout.Seconds())))
+	return s.spanBlockProducersTracker.AnticipateNewSpanWithTimeout(ctx, timeout)
+}
+
 func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
 
@@ -228,7 +233,7 @@ func (s *Service) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([
 	return s.reader.MilestonesFromBlock(ctx, startBlock)
 }
 
-func (s *Service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (s *Service) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
 	return s.reader.Producers(ctx, blockNum)
 }
 
@@ -324,16 +329,16 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	s.RegisterSpanObserver(func(span *Span) {
-		s.spanBlockProducersTracker.ObserveSpanAsync(span)
+		s.spanBlockProducersTracker.ObserveSpanAsync(ctx, span)
 	})
 
 	milestoneObserver := s.RegisterMilestoneObserver(func(milestone *Milestone) {
-		UpdateObservedWaypointMilestoneLength(milestone.Length())
+		poshttp.UpdateObservedWaypointMilestoneLength(milestone.Length())
 	})
 	defer milestoneObserver()
 
 	checkpointObserver := s.RegisterCheckpointObserver(func(checkpoint *Checkpoint) {
-		UpdateObservedWaypointCheckpointLength(checkpoint.Length())
+		poshttp.UpdateObservedWaypointCheckpointLength(checkpoint.Length())
 	}, WithEventsLimit(5))
 	defer checkpointObserver()
 

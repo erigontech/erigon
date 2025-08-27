@@ -27,20 +27,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 /*
@@ -160,7 +160,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, nil, evm.Config())
+			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -362,7 +362,6 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	// set code tx
@@ -373,14 +372,8 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP7907 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
-		}
-	} else if isEIP3860 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSize {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-		}
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -478,7 +471,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
@@ -525,14 +517,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP7907 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
-		}
-	} else if isEIP3860 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSize {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-		}
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
 	// Execute the preparatory steps for state transition which includes:

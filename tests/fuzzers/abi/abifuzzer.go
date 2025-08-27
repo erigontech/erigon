@@ -26,7 +26,7 @@ import (
 
 	fuzz "github.com/google/gofuzz"
 
-	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon/execution/abi"
 )
 
 var (

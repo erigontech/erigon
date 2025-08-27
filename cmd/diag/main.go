@@ -27,7 +27,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cmd/diag/db"
 	"github.com/erigontech/erigon/cmd/diag/downloader"
 	"github.com/erigontech/erigon/cmd/diag/stages"
@@ -35,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/cmd/diag/ui"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
@@ -45,7 +44,7 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = "diagnostics"
-	app.Version = params.VersionWithCommit(params.GitCommit)
+	app.Version = version.VersionWithCommit(version.GitCommit)
 	app.EnableBashCompletion = true
 
 	app.Commands = []*cli.Command{

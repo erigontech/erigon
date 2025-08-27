@@ -30,10 +30,12 @@ import (
 	"strconv"
 	"strings"
 
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 var logger = log.New()
@@ -792,7 +794,7 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer dir2.RemoveAll(dir)
 	var db kv.RwDB
 	db, err = kv2.New(kv.ChainDB, logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
@@ -828,7 +830,7 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 				return fmt.Errorf("close %s_%d: %w", filename, gi, err)
 			}
 			// nolint:gosec
-			cmd := exec.Command("dot", "-Tpng:gd", "-o", fmt.Sprintf("%s_%d.png", filename, gi), fmt.Sprintf("%s_%d.dot", filename, gi))
+			cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o", fmt.Sprintf("%s_%d.png", filename, gi), fmt.Sprintf("%s_%d.dot", filename, gi))
 			var output []byte
 			if output, err = cmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("dot generation error: %w, output: %s", err, output)

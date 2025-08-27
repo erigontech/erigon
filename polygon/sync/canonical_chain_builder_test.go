@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type mockDifficultyCalculator struct{}
@@ -44,6 +44,8 @@ type mockHeaderValidator struct{}
 func (v *mockHeaderValidator) ValidateHeader(_ context.Context, _ *types.Header, _ *types.Header, _ time.Time) error {
 	return nil
 }
+
+func (v *mockHeaderValidator) UpdateLatestVerifiedHeader(header *types.Header) {}
 
 func makeRoot() *types.Header {
 	return &types.Header{

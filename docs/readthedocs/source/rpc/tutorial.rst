@@ -14,9 +14,9 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
     import (
         "context"
 
-        "github.com/erigontech/erigon-lib/kv"
+        "github.com/erigontech/erigon/db/kv"
         "github.com/erigontech/erigon-lib/common"
-        "github.com/erigontech/erigon-db/rawdb"
+        "github.com/erigontech/erigon/db/rawdb"
     )
 
     type API struct {
@@ -58,7 +58,7 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
     import (
         "os"
 
-        "github.com/erigontech/erigon-lib/kv"
+        "github.com/erigontech/erigon/db/kv"
         "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
         "github.com/erigontech/erigon/cmd/utils"
         "github.com/erigontech/erigon/rpc"

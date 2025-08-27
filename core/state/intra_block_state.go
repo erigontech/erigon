@@ -30,17 +30,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -1558,15 +1558,6 @@ func (sdb *IntraBlockState) AddressInAccessList(addr common.Address) bool {
 
 func (sdb *IntraBlockState) SlotInAccessList(addr common.Address, slot common.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
-}
-
-func (sdb *IntraBlockState) AddCodeAddressToAccessList(codeAddr common.Address) bool {
-	if sdb.accessList.AddCodeAccess(codeAddr) {
-		sdb.journal.append(accessListAddCodeAccessChange{codeAddr})
-		return true
-	}
-
-	return false
 }
 
 func (sdb *IntraBlockState) accountRead(addr common.Address, account *accounts.Account) {

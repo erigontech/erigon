@@ -33,30 +33,31 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/chain"
+	chainparams "github.com/erigontech/erigon/execution/chain/params"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -176,12 +177,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 			)
 			require.NoError(t, err)
 		})
-
-		t.Run("build shutter block without blob txns", func(t *testing.T) {
-			//
-			//  TODO
-			//
-		})
 	})
 
 	t.Run("eon 1", func(t *testing.T) {
@@ -261,6 +256,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		AuthRpcPort:              engineApiPort,
 		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
+		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
 	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
@@ -307,9 +303,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	shutterConfig.ChainId = chainIdU256
 	shutterConfig.SecondsPerSlot = 1
 	shutterConfig.EncryptedGasLimit = 3 * 21_000 // max 3 simple encrypted transfers per block
-	shutterConfig.SequencerContractAddress = crypto.CreateAddress(contractDeployer, 0).String()
-	shutterConfig.KeyperSetManagerContractAddress = crypto.CreateAddress(contractDeployer, 1).String()
-	shutterConfig.KeyBroadcastContractAddress = crypto.CreateAddress(contractDeployer, 2).String()
+	shutterConfig.SequencerContractAddress = types.CreateAddress(contractDeployer, 0).String()
+	shutterConfig.KeyperSetManagerContractAddress = types.CreateAddress(contractDeployer, 1).String()
+	shutterConfig.KeyBroadcastContractAddress = types.CreateAddress(contractDeployer, 2).String()
 
 	ethConfig := ethconfig.Config{
 		Dirs: dirs,
@@ -317,7 +313,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 			NoDownloader: true,
 		},
 		TxPool: txPoolConfig,
-		Miner: params.MiningConfig{
+		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
 		Shutter: shutterConfig,
@@ -337,7 +333,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	t.Cleanup(cleanNode(ethNode))
 
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	err = copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	require.NoError(t, err)
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
@@ -347,15 +344,15 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis := chainspec.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
-	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.ConsolidationRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}
-	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+	genesis.Alloc[chainparams.WithdrawalRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[common.Hash]common.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}
@@ -364,7 +361,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	bank.RegisterGenesisAlloc(genesis)
 	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
 	require.NoError(t, err)
-	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
+	_, gensisBlock, err := genesiswrite.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
 	require.NoError(t, err)
 	chainDB.Close()
 

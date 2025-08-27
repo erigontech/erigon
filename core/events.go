@@ -21,7 +21,7 @@ package core
 
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // NewTxsEvent is posted when a batch of transactions enter the transaction pool.

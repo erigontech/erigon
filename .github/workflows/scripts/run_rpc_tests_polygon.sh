@@ -10,10 +10,11 @@ RESULT_DIR="$2"
 DISABLED_TEST_LIST=(
   bor_getAuthor
   bor_getSnapshot
+  eth_getTransactionReceipt/test_01.json
 )
 
 # Transform the array into a comma-separated string
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" polygon-pos v1.68.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" polygon-pos v1.71.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

@@ -1,12 +1,13 @@
 package das
 
 import (
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 const (
@@ -76,6 +77,18 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 		return false
 	}
 	return ok
+}
+
+func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
+	cells, err := ckzg.ComputeCells((*ckzg.Blob)(blobs))
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]cltypes.Cell, len(cells))
+	for i, cell := range &cells {
+		ret[i] = cltypes.Cell(cell)
+	}
+	return ret, nil
 }
 
 // ComputeSubnetForDataColumnSidecar computes the subnet ID for a given data column sidecar index.

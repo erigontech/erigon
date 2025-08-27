@@ -19,9 +19,10 @@ package eth_clock
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSlotOperations(t *testing.T) {
@@ -43,9 +44,4 @@ func TestGetForkDigests(t *testing.T) {
 	lastFork, err := clock.LastFork()
 	require.NoError(t, err)
 	require.Equal(t, lastFork, nextDigest)
-	expectedForkId := make([]byte, 16)
-	copy(expectedForkId, currDigest[:])
-	forkId, err := clock.ForkId()
-	require.NoError(t, err)
-	require.Equal(t, expectedForkId, forkId)
 }

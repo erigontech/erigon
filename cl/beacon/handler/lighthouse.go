@@ -21,12 +21,12 @@ import (
 	"net/http"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type LighthouseValidatorInclusionGlobal struct {
@@ -124,14 +124,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 	}
 
 	// read the epoch datas first
-	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
 	if epochData == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
-	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
+	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -286,14 +286,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 	defer snRoTx.Close()
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	// read the epoch datas first
-	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
 	if epochData == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
-	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
+	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}

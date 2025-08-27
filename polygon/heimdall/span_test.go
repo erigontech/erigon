@@ -20,10 +20,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
 )
 
 func TestSpanListResponse(t *testing.T) {
@@ -40,12 +40,12 @@ func TestSpanListResponse(t *testing.T) {
 }
 
 func TestSpanJsonMarshall(t *testing.T) {
-	validators := []*valset.Validator{
-		valset.NewValidator(common.HexToAddress("deadbeef"), 1),
-		valset.NewValidator(common.HexToAddress("cafebabe"), 2),
+	validators := []*Validator{
+		NewValidator(common.HexToAddress("deadbeef"), 1),
+		NewValidator(common.HexToAddress("cafebabe"), 2),
 	}
 
-	validatorSet := valset.ValidatorSet{
+	validatorSet := ValidatorSet{
 		Validators: validators,
 		Proposer:   validators[0],
 	}
@@ -55,7 +55,7 @@ func TestSpanJsonMarshall(t *testing.T) {
 		StartBlock:        100,
 		EndBlock:          200,
 		ValidatorSet:      validatorSet,
-		SelectedProducers: []valset.Validator{*validators[0]},
+		SelectedProducers: []Validator{*validators[0]},
 		ChainID:           "bor",
 	}
 

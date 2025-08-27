@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/cmd/observer/database"
 	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
 	"github.com/erigontech/erigon/cmd/observer/utils"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 

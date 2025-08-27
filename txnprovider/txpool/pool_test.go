@@ -29,25 +29,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/testutil"
+	"github.com/erigontech/erigon/execution/types"
+	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -860,13 +860,12 @@ func TestTxnPoke(t *testing.T) {
 	}
 }
 
-func TestValidateTxn(t *testing.T) {
+func TestShanghaiValidateTxn(t *testing.T) {
 	asrt := assert.New(t)
 	tests := map[string]struct {
 		expected   txpoolcfg.DiscardReason
 		dataLen    int
 		isShanghai bool
-		isOsaka    bool
 		creation   bool
 	}{
 		"no shanghai": {
@@ -905,36 +904,6 @@ func TestValidateTxn(t *testing.T) {
 			isShanghai: true,
 			creation:   false,
 		},
-		"osaka within bounds": {
-			expected: txpoolcfg.Success,
-			dataLen:  32,
-			isOsaka:  true,
-			creation: true,
-		},
-		"osaka exactly on bound - create tx": {
-			expected: txpoolcfg.Success,
-			dataLen:  params.MaxInitCodeSizeEip7907,
-			isOsaka:  true,
-			creation: true,
-		},
-		"osaka one over bound - create tx": {
-			expected: txpoolcfg.InitCodeTooLarge,
-			dataLen:  params.MaxInitCodeSizeEip7907 + 1,
-			isOsaka:  true,
-			creation: true,
-		},
-		"osaka exactly on bound - calldata tx": {
-			expected: txpoolcfg.Success,
-			dataLen:  params.MaxInitCodeSizeEip7907,
-			isOsaka:  true,
-			creation: false,
-		},
-		"osaka one over bound - calldata tx": {
-			expected: txpoolcfg.Success,
-			dataLen:  params.MaxInitCodeSizeEip7907 + 1,
-			isOsaka:  true,
-			creation: false,
-		},
 	}
 
 	logger := log.New()
@@ -949,9 +918,6 @@ func TestValidateTxn(t *testing.T) {
 			chainConfig := testutil.Forks["Paris"]
 			if test.isShanghai {
 				chainConfig = testutil.Forks["Shanghai"]
-			}
-			if test.isOsaka {
-				chainConfig = testutil.Forks["Osaka"]
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -977,7 +943,7 @@ func TestValidateTxn(t *testing.T) {
 			txn := &TxnSlot{
 				DataLen:  test.dataLen,
 				FeeCap:   *uint256.NewInt(21000),
-				Gas:      6000000,
+				Gas:      500000,
 				SenderID: 0,
 				Creation: test.creation,
 			}
