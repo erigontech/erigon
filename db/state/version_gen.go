@@ -3,14 +3,16 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"go/format"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+	"gopkg.in/yaml.v3"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 /* ---------- YAML ---------- */

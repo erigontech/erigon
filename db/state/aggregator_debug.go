@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 type aggDirtyFilesRoTx struct {
@@ -141,9 +142,9 @@ func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 
 func (d *domainDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorDomainFiles) {
 	return &MissedAccessorDomainFiles{
-		files: map[Accessors][]*FilesItem{
-			AccessorBTree:   d.d.missedBtreeAccessors(d.files),
-			AccessorHashMap: d.d.missedMapAccessors(d.files),
+		files: map[statecfg.Accessors][]*FilesItem{
+			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files),
+			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files),
 		},
 		history: d.history.FilesWithMissedAccessors(),
 	}
@@ -180,8 +181,8 @@ func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 func (f *historyDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorHistoryFiles) {
 	return &MissedAccessorHistoryFiles{
 		ii: f.ii.FilesWithMissedAccessors(),
-		files: map[Accessors][]*FilesItem{
-			AccessorHashMap: f.h.missedMapAccessors(f.files),
+		files: map[statecfg.Accessors][]*FilesItem{
+			statecfg.AccessorHashMap: f.h.missedMapAccessors(f.files),
 		},
 	}
 }
@@ -215,8 +216,8 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 
 func (f *iiDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorIIFiles) {
 	return &MissedAccessorIIFiles{
-		files: map[Accessors][]*FilesItem{
-			AccessorHashMap: f.ii.missedMapAccessors(f.files),
+		files: map[statecfg.Accessors][]*FilesItem{
+			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files),
 		},
 	}
 }
@@ -250,7 +251,7 @@ func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
 }
 
 // fileItems collection of missed files
-type MissedFilesMap map[Accessors][]*FilesItem
+type MissedFilesMap map[statecfg.Accessors][]*FilesItem
 type MissedAccessorAggFiles struct {
 	domain map[kv.Domain]*MissedAccessorDomainFiles
 	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
@@ -280,11 +281,11 @@ type MissedAccessorDomainFiles struct {
 }
 
 func (m *MissedAccessorDomainFiles) missedBtreeAccessors() []*FilesItem {
-	return m.files[AccessorBTree]
+	return m.files[statecfg.AccessorBTree]
 }
 
 func (m *MissedAccessorDomainFiles) missedMapAccessors() []*FilesItem {
-	return m.files[AccessorHashMap]
+	return m.files[statecfg.AccessorHashMap]
 }
 
 func (m *MissedAccessorDomainFiles) IsEmpty() bool {
@@ -305,7 +306,7 @@ type MissedAccessorHistoryFiles struct {
 }
 
 func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*FilesItem {
-	return m.files[AccessorHashMap]
+	return m.files[statecfg.AccessorHashMap]
 }
 
 func (m *MissedAccessorHistoryFiles) IsEmpty() bool {
@@ -325,7 +326,7 @@ type MissedAccessorIIFiles struct {
 }
 
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*FilesItem {
-	return m.files[AccessorHashMap]
+	return m.files[statecfg.AccessorHashMap]
 }
 
 func (m *MissedAccessorIIFiles) IsEmpty() bool {
