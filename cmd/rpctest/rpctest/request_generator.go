@@ -24,9 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/valyala/fastjson"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/valyala/fastjson"
 )
 
 type CallResult struct {
@@ -126,6 +127,19 @@ func (g *RequestGenerator) getLogsForAddresses(prevBn uint64, bn uint64, account
 	return sb.String()
 }
 
+func (g *RequestGenerator) getLogsForTopics(prevBn uint64, bn uint64, topics []common.Hash) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "topics": [`, prevBn, bn)
+	for i, topic := range topics {
+		if i > 0 {
+			fmt.Fprintf(&sb, `,`)
+		}
+		fmt.Fprintf(&sb, `"0x%x"`, topic)
+	}
+	fmt.Fprintf(&sb, `]}],"id":%d}`, g.reqID.Add(1))
+	return sb.String()
+}
+
 func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account common.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))
@@ -149,6 +163,11 @@ func (g *RequestGenerator) getLogs2(prevBn uint64, bn uint64, account common.Add
 func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account common.Address, topic1, topic2 common.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]},{}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID.Add(1))
+}
+
+func (g *RequestGenerator) getLogs3(prevBn uint64, bn uint64, topic common.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x","topics": ["0x%x"]}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, topic, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) accountRange(bn uint64, page []byte, num int) string { //nolint
