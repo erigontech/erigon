@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -180,6 +181,10 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
+	t.lookupAccount(params.HistoryStorageAddress)
+	if env.ChainConfig.IsArbitrum() {
+		t.lookupAccount(types.ArbosStateAddress)
+	}
 
 	if t.create && t.config.DiffMode {
 		t.created[t.to] = true
