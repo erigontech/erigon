@@ -42,34 +42,34 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err := AdjustReceiptCurrentVersionIfNeeded(dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(Schema.GetDomainCfg(kv.AccountsDomain), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(Schema.GetDomainCfg(kv.StorageDomain), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(Schema.GetDomainCfg(kv.CodeDomain), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(Schema.GetDomainCfg(kv.CommitmentDomain), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(Schema.GetDomainCfg(kv.ReceiptDomain), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.RCacheDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(Schema.GetDomainCfg(kv.RCacheDomain), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
+	if err := a.registerII(Schema.GetIICfg(kv.LogAddrIdx), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdx, salt, dirs, logger); err != nil {
+	if err := a.registerII(Schema.GetIICfg(kv.LogTopicIdx), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdx, salt, dirs, logger); err != nil {
+	if err := a.registerII(Schema.GetIICfg(kv.TracesFromIdx), salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesToIdx, salt, dirs, logger); err != nil {
+	if err := a.registerII(Schema.GetIICfg(kv.TracesToIdx), salt, dirs, logger); err != nil {
 		return nil, err
 	}
 

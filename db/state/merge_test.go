@@ -878,7 +878,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 
 	agg, _ := newAggregatorOld(context.Background(), dirs, 1, db, logger)
 	setup := func() (account *Domain) {
-		agg.registerDomain(kv.AccountsDomain, nil, dirs, logger)
+		agg.registerDomain(Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
 		domain := agg.d[kv.AccountsDomain]
 		domain.History.InvertedIndex.Accessors = 0
 		domain.History.Accessors = 0
