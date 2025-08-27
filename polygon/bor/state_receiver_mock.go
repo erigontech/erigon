@@ -12,10 +12,9 @@ package bor
 import (
 	reflect "reflect"
 
-	gomock "go.uber.org/mock/gomock"
-
 	consensus "github.com/erigontech/erigon/execution/consensus"
 	rlp "github.com/erigontech/erigon/execution/rlp"
+	gomock "go.uber.org/mock/gomock"
 )
 
 // MockStateReceiver is a mock of StateReceiver interface.
