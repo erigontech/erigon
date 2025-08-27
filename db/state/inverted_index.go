@@ -887,7 +887,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 
-		if err = rwTx.Delete(ii.keysTable, k); err != nil {
+		if err = rwTx.Delete(ii.KeysTable, k); err != nil {
 			return nil, err
 		}
 
@@ -896,7 +896,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
+	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.ValuesTable)
 	if err != nil {
 		return nil, err
 	}
@@ -913,7 +913,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		stepKey := iit.makeStepPrefixedKey(key, stat.MinTxNum)
 		for v, err := valsTblDelCursor.SeekBothRange(stepKey, txKey[:]); v != nil; _, v, err = valsTblDelCursor.NextDup() {
 			if err != nil {
-				return fmt.Errorf("iterate over %s values cursor: %w", ii.filenameBase, err)
+				return fmt.Errorf("iterate over %s values cursor: %w", ii.FilenameBase, err)
 			}
 			txNum := binary.BigEndian.Uint64(v)
 			if txNum > stat.MaxTxNum {
