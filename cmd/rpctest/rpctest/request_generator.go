@@ -127,14 +127,21 @@ func (g *RequestGenerator) getLogsForAddresses(prevBn uint64, bn uint64, account
 	return sb.String()
 }
 
-func (g *RequestGenerator) getLogsForTopics(prevBn uint64, bn uint64, topics []common.Hash) string {
+func (g *RequestGenerator) getLogsForTopics(prevBn uint64, bn uint64, topicsUnion [][]common.Hash) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "topics": [`, prevBn, bn)
-	for i, topic := range topics {
-		if i > 0 {
+	for j, topics := range topicsUnion {
+		if j > 0 {
 			fmt.Fprintf(&sb, `,`)
 		}
-		fmt.Fprintf(&sb, `"0x%x"`, topic)
+		fmt.Fprintf(&sb, `[`)
+		for i, topic := range topics {
+			if i > 0 {
+				fmt.Fprintf(&sb, `,`)
+			}
+			fmt.Fprintf(&sb, `"0x%x"`, topic)
+		}
+		fmt.Fprintf(&sb, `]`)
 	}
 	fmt.Fprintf(&sb, `]}],"id":%d}`, g.reqID.Add(1))
 	return sb.String()
