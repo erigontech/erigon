@@ -264,14 +264,16 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 
 			for topic := range sawTopics {
 				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs3(bn, bn, topic), &resp)
-				fmt.Printf("[dbg] run block %d topic %x, resp: %s\n", bn, topic, res.Result.String())
+				fmt.Printf("[dbg] run block %d topic %x, resp: %t\n", bn, topic, res.Result != nil)
 				if res.Err != nil {
 					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 				}
 				if resp.Error != nil {
+					fmt.Printf("[dbg] run block1 %d topic %x, resp: %s\n", bn, topic, res.Err)
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
 				if len(resp.Result) == 0 {
+					fmt.Printf("[dbg] run block2 %d topic %x, resp: %s\n", bn, topic, res.Err)
 					return fmt.Errorf("eth_getLogs: at blockNum=%d, topic %x not indexed", bn, topic)
 				}
 				logs := filterLogsByTopic(resp.Result, topic)
