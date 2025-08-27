@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
@@ -43,8 +42,8 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	ptypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
@@ -70,12 +69,14 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	stages2 "github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -334,7 +335,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
+	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if tb != nil {
 			tb.Fatal(err)

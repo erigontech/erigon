@@ -7,7 +7,7 @@ replace github.com/erigontech/erigon-lib => ./erigon-lib
 require github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 
 replace (
-	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
+	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250826132655-0f8ab1696efc
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 )
 
@@ -32,10 +32,13 @@ require (
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.17.0
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.59.0
+	github.com/anacrolix/torrent v1.59.2-0.20250821042548-a1365a81964a
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
-	github.com/consensys/gnark-crypto v0.18.0
+	github.com/charmbracelet/bubbles v0.21.0
+	github.com/charmbracelet/bubbletea v1.3.6
+	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/consensys/gnark-crypto v0.19.0
 	github.com/crate-crypto/go-eth-kzg v1.3.0
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
 	github.com/davecgh/go-spew v1.1.1
@@ -77,6 +80,7 @@ require (
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedib0t/go-pretty/v6 v6.5.9
+	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/jinzhu/copier v0.4.0
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.18.0
@@ -85,6 +89,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.11.0
 	github.com/multiformats/go-multiaddr v0.13.0
 	github.com/nxadm/tail v1.4.11
+	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pion/randutil v0.1.0
@@ -95,6 +100,7 @@ require (
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+	github.com/quic-go/quic-go v0.48.2
 	github.com/rs/cors v1.11.1
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/shirou/gopsutil/v4 v4.24.8
@@ -118,6 +124,7 @@ require (
 	golang.org/x/net v0.43.0
 	golang.org/x/sync v0.16.0
 	golang.org/x/sys v0.35.0
+	golang.org/x/text v0.28.0
 	golang.org/x/time v0.12.0
 	golang.org/x/tools v0.36.0
 	google.golang.org/grpc v1.74.2
@@ -151,15 +158,21 @@ require (
 	github.com/anacrolix/upnp v0.1.4 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/atotto/clipboard v0.1.4 // indirect
+	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/benbjohnson/immutable v0.4.1-0.20221220213129-8932b999621d // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.20.0 // indirect
+	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
+	github.com/charmbracelet/x/ansi v0.9.3 // indirect
+	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
+	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
@@ -171,6 +184,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
+	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
@@ -207,11 +221,13 @@ require (
 	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/libp2p/go-reuseport v0.4.0 // indirect
 	github.com/libp2p/go-yamux/v4 v4.0.1 // indirect
+	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20220913051719-115f729f3c8c // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.15 // indirect
+	github.com/mattn/go-localereader v0.0.1 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/miekg/dns v1.1.62 // indirect
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
@@ -222,6 +238,9 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
+	github.com/muesli/cancelreader v0.2.2 // indirect
+	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.4.1 // indirect
@@ -233,7 +252,6 @@ require (
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
-	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
 	github.com/onsi/ginkgo/v2 v2.20.2 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
@@ -267,7 +285,6 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/protolambda/ctxlock v0.1.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
-	github.com/quic-go/quic-go v0.48.2 // indirect
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -283,6 +300,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
+	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
@@ -294,7 +312,6 @@ require (
 	go.uber.org/fx v1.23.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.27.0 // indirect
-	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250528174236-200df99c418a // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect

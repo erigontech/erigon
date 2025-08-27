@@ -81,10 +81,10 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeHeader: %s", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}
 		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeTd: %s", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
 		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
@@ -92,7 +92,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not commit: %s", err)
 	}
 
 	return &execution.InsertionResult{
