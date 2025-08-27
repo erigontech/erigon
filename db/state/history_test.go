@@ -827,7 +827,7 @@ func checkHistoryHistory(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		from, to := hc.stepsRangeInDB(tx)
-		expectedSteps := txs / h.aggregationStep
+		expectedSteps := txs / h.stepSize
 		if expectedSteps > 1 {
 			// Should have steps from recent data in DB (last 2 steps remain uncollated)
 			require.Greater(t, to, 0.0, "Should have steps in DB")

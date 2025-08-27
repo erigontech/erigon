@@ -835,12 +835,12 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		}).MustOpen()
 		tb.Cleanup(db.Close)
 		salt := uint32(1)
-		cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
-		cfg.salt.Store(&salt)
-		cfg.Accessors = AccessorHashMap
-		ii, err := NewInvertedIndex(cfg, aggStep, logger)
+		cfg := iiCfg{filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+		cfg.Accessors = statecfg.AccessorHashMap
+		ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
 		require.NoError(tb, err)
 		ii.DisableFsync()
+		ii.salt.Store(&salt)
 		tb.Cleanup(ii.Close)
 		return db, ii
 	}
@@ -888,7 +888,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		collation, err := ii.collate(context.Background(), 0, tx)
 		require.NoError(t, err)
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
-		txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
+		txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 		ii.integrateDirtyFiles(sf, txFrom, txTo)
 
 		// after reCalcVisibleFiles must be able to prune step 0. but not more
@@ -913,7 +913,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		require.NoError(t, err)
 		ic := ii.BeginFilesRo()
 		start := time.Now()
-		ic.Prune(context.Background(), tx, 0, ic.aggStep, ic.aggStep, logEvery, true, nil)
+		ic.Prune(context.Background(), tx, 0, ic.stepSize, ic.stepSize, logEvery, true, nil)
 		a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
 		fmt.Printf("[dbg] 1 step:   took=%s dirt=%s\n", time.Since(start), datasize.ByteSize(a).HR())
 		tx.Rollback()
@@ -937,7 +937,7 @@ func TestInvIndexPruningPerf(t *testing.T) {
 		require.NoError(t, err)
 		ic := ii.BeginFilesRo()
 		start := time.Now()
-		pruneLimit := ic.aggStep * 30
+		pruneLimit := ic.stepSize * 30
 		ic.Prune(context.Background(), tx, 0, txCnt, pruneLimit, logEvery, true, nil)
 		a, _, _ := tx.(*mdbx.MdbxTx).SpaceDirty()
 		fmt.Printf("[dbg] 30 steps: took=%s dirt=%s\n", time.Since(start), datasize.ByteSize(a).HR())
