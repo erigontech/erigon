@@ -73,11 +73,12 @@ func (b *Bloom) SetBytes(d []byte) {
 
 // Add adds d to the filter. Future calls of Test(d) will return true.
 func (b *Bloom) Add(d []byte) {
-	b.add(d, make([]byte, 6))
+	var buf [6]byte
+	b.add(d, &buf)
 }
 
 // add is internal version of Add, which takes a scratch buffer for reuse (needs to be at least 6 bytes)
-func (b *Bloom) add(d []byte, buf []byte) {
+func (b *Bloom) add(d []byte, buf *[6]byte) {
 	i1, v1, i2, v2, i3, v3 := bloomValues(d, buf)
 	b[i1] |= v1
 	b[i2] |= v2
@@ -98,7 +99,8 @@ func (b Bloom) Bytes() []byte {
 
 // Test checks if the given topic is present in the bloom filter
 func (b Bloom) Test(topic []byte) bool {
-	i1, v1, i2, v2, i3, v3 := bloomValues(topic, make([]byte, 6))
+	var buf [6]byte
+	i1, v1, i2, v2, i3, v3 := bloomValues(topic, &buf)
 	return v1 == v1&b[i1] &&
 		v2 == v2&b[i2] &&
 		v3 == v3&b[i3]
@@ -115,27 +117,16 @@ func (b *Bloom) UnmarshalText(input []byte) error {
 }
 
 func CreateBloom(receipts Receipts) Bloom {
-	buf := make([]byte, 6)
-	var bin Bloom
+	var (
+		bin Bloom
+		buf [6]byte
+	)
 	for _, receipt := range receipts {
 		for _, log := range receipt.Logs {
-			bin.add(log.Address[:], buf)
+			bin.add(log.Address[:], &buf)
 			for _, b := range log.Topics {
-				bin.add(b[:], buf)
+				bin.add(b[:], &buf)
 			}
-		}
-	}
-	return bin
-}
-
-// LogsBloom returns the bloom bytes for the given logs
-func LogsBloom(logs []*Log) Bloom {
-	buf := make([]byte, 6)
-	var bin Bloom
-	for _, log := range logs {
-		bin.add(log.Address[:], buf)
-		for _, b := range log.Topics {
-			bin.add(b[:], buf)
 		}
 	}
 	return bin
@@ -149,17 +140,17 @@ func Bloom9(data []byte) []byte {
 }
 
 // bloomValues returns the bytes (index-value pairs) to set for the given data
-func bloomValues(data []byte, hashbuf []byte) (uint, byte, uint, byte, uint, byte) {
+func bloomValues(data []byte, hashbuf *[6]byte) (uint, byte, uint, byte, uint, byte) {
 	sha := crypto.NewKeccakState()
-	sha.Write(data)   //nolint:errcheck
-	sha.Read(hashbuf) //nolint:errcheck
+	sha.Write(data)      //nolint:errcheck
+	sha.Read(hashbuf[:]) //nolint:errcheck
 	crypto.ReturnToPool(sha)
 	// The actual bits to flip
 	v1 := byte(1 << (hashbuf[1] & 0x7))
 	v2 := byte(1 << (hashbuf[3] & 0x7))
 	v3 := byte(1 << (hashbuf[5] & 0x7))
 	// The indices for the bytes to OR in
-	i1 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf)&0x7ff)>>3) - 1
+	i1 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf[:])&0x7ff)>>3) - 1
 	i2 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf[2:])&0x7ff)>>3) - 1
 	i3 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf[4:])&0x7ff)>>3) - 1
 

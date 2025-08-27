@@ -8,10 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestDependency(t *testing.T) {
@@ -35,7 +36,7 @@ func TestDependency(t *testing.T) {
 	dinfo := &DependentInfo{
 		entity:      CommitmentDomainUniversal,
 		filesGetter: fg,
-		accessors:   AccessorHashMap,
+		accessors:   statecfg.AccessorHashMap,
 	}
 
 	checker := NewDependencyIntegrityChecker(dirs, logger)
@@ -77,7 +78,7 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 	dinfo := &DependentInfo{
 		entity:      CommitmentDomainUniversal,
 		filesGetter: fg,
-		accessors:   AccessorHashMap,
+		accessors:   statecfg.AccessorHashMap,
 	}
 
 	checker := NewDependencyIntegrityChecker(dirs, logger)

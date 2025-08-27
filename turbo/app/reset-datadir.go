@@ -12,13 +12,12 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -170,7 +169,7 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 			return
 		}
 		// Do we need genesis block hash here?
-		chainCfg, err = core.ReadChainConfig(tx, genesis)
+		chainCfg, err = rawdb.ReadChainConfig(tx, genesis)
 		if err != nil {
 			err = fmt.Errorf("reading chain config: %w", err)
 			return

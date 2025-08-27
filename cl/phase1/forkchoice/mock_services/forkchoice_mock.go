@@ -432,3 +432,7 @@ func (f *ForkChoiceStorageMock) GetPendingDeposits(blockRoot common.Hash) (*soli
 func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool) {
 	return nil, false
 }
+
+func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
+	return nil, false
+}

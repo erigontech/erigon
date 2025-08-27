@@ -26,11 +26,11 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -88,7 +88,13 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 }
 
 func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
-	if opts.GetLabel() != kv.ChainDB {
+	migrationDBs := map[kv.Label]bool{
+		kv.ChainDB:         true,
+		kv.ConsensusDB:     true,
+		kv.HeimdallDB:      true,
+		kv.PolygonBridgeDB: true,
+	}
+	if _, ok := migrationDBs[opts.GetLabel()]; !ok {
 		panic(opts.GetLabel())
 	}
 

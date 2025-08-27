@@ -3,13 +3,12 @@ package heimdall
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 )
 
-func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *RoSnapshots, failFast bool) error {
-	baseStore := NewMdbxStore(logger, dirs.DataDir, true, 32)
-	snapshotStore := NewSpanSnapshotStore(baseStore.Spans(), snaps)
+func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs, heimdallStore Store, snaps *RoSnapshots, failFast bool) error {
+	snapshotStore := NewSpanSnapshotStore(heimdallStore.Spans(), snaps)
 	err := snapshotStore.Prepare(ctx)
 	if err != nil {
 		return err
@@ -20,9 +19,8 @@ func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs,
 	return err
 }
 
-func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *RoSnapshots, failFast bool) error {
-	baseStore := NewMdbxStore(logger, dirs.DataDir, true, 32)
-	snapshotStore := NewCheckpointSnapshotStore(baseStore.Checkpoints(), snaps)
+func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir.Dirs, heimdallStore Store, snaps *RoSnapshots, failFast bool) error {
+	snapshotStore := NewCheckpointSnapshotStore(heimdallStore.Checkpoints(), snaps)
 	err := snapshotStore.Prepare(ctx)
 	if err != nil {
 		return err

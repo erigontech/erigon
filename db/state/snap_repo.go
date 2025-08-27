@@ -7,12 +7,13 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // i) manages dirtyfiles and visible files,
@@ -40,7 +41,7 @@ type SnapshotRepo struct {
 
 	cfg       *SnapshotConfig
 	schema    SnapNameSchema
-	accessors Accessors
+	accessors statecfg.Accessors
 	stepSize  uint64
 
 	logger log.Logger
@@ -166,22 +167,22 @@ func (f *SnapshotRepo) GetFreezingRange(from RootNum, to RootNum) (freezeFrom Ro
 }
 
 func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*FilesItem) {
-	if !f.accessors.Has(AccessorBTree) {
+	if !f.accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
 	p := f.schema
 	ss := f.stepSize
 	v := version.V1_0
 
-	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
-		from, to := RootNum(fromStep*ss), RootNum(toStep*ss)
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+		from, to := RootNum(uint64(fromStep)*ss), RootNum(uint64(toStep)*ss)
 		fname := p.BtIdxFile(v, from, to)
 		return []string{fname, p.ExistenceFile(v, from, to)}
 	})
 }
 
 func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
-	if !f.accessors.Has(AccessorHashMap) {
+	if !f.accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	p := f.schema
@@ -190,9 +191,9 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
 	accCount := f.schema.AccessorIdxCount()
 	files := make([]string, accCount)
 
-	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
 		for i := uint64(0); i < accCount; i++ {
-			files[i] = p.AccessorIdxFile(v, RootNum(fromStep*ss), RootNum(toStep*ss), i)
+			files[i] = p.AccessorIdxFile(v, RootNum(fromStep.ToTxNum(ss)), RootNum(toStep.ToTxNum(ss)), i)
 		}
 		return files
 	})
@@ -355,7 +356,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 
 			accessors := p.AccessorList()
 
-			if item.index == nil && accessors.Has(AccessorHashMap) {
+			if item.index == nil && accessors.Has(statecfg.AccessorHashMap) {
 				fPathGen := p.AccessorIdxFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -373,7 +374,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 			}
 
-			if item.bindex == nil && accessors.Has(AccessorBTree) {
+			if item.bindex == nil && accessors.Has(statecfg.AccessorBTree) {
 				fPathGen := p.BtIdxFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -390,7 +391,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					}
 				}
 			}
-			if item.existence == nil && accessors.Has(AccessorExistence) {
+			if item.existence == nil && accessors.Has(statecfg.AccessorExistence) {
 				fPathGen := p.ExistenceFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
 				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)

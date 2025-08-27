@@ -22,7 +22,9 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"os"
 	"runtime"
+	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -30,7 +32,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/tests/bor/helper"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 const (
@@ -83,12 +85,27 @@ func TestMiningBenchmark(t *testing.T) {
 	}
 
 	//usually 15sec is enough
-	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
+	timeout := time.Minute
+	ctx, clean := context.WithTimeout(context.Background(), timeout)
 	defer clean()
 
 	logger := testlog.Logger(t, log.LvlDebug)
-	fdlimit.Raise(2048)
+	goroutineDumpTimer := time.NewTimer(timeout - 5*time.Second)
+	defer goroutineDumpTimer.Stop()
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-goroutineDumpTimer.C:
+			logger.Error("goroutine dump timer expired")
+			err := pprof.Lookup("goroutine").WriteTo(os.Stderr, 2)
+			if err != nil {
+				logger.Error("failed to dump goroutines", "err", err)
+			}
+		}
+	}()
 
+	debug.RaiseFdLimit()
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)
 
 	cspec := chainspec.Spec{
@@ -162,12 +179,15 @@ func TestMiningBenchmark(t *testing.T) {
 
 	start := time.Now()
 
-	for _, txn := range txs {
+	for i, txn := range txs {
 		buf := bytes.NewBuffer(nil)
 		txV := *txn
 		err := txV.MarshalBinary(buf)
 		if err != nil {
 			panic(err)
+		}
+		if i%1000 == 0 {
+			logger.Debug("Adding txn", "num", i)
 		}
 		_, err = ethbackends[0].TxpoolServer().Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 		if err != nil {

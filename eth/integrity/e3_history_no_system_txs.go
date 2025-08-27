@@ -26,10 +26,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -112,6 +112,8 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 			return err
 		}
 
+		blk, _min, _max := int64(-1), int64(-1), int64(-1)
+
 		for it.HasNext() {
 			txNum, err := it.Next()
 			if err != nil {
@@ -122,20 +124,37 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 				continue
 			}
 
-			blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
-			if err != nil {
-				return err
+			if int64(txNum) > _max {
+				blk = -1
 			}
-			if !ok {
-				panic(fmt.Sprintf("blockNum not found for txNum=%d", txNum))
+
+			if blk == -1 {
+				blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					panic(fmt.Sprintf("blockNum not found for txNum=%d", txNum))
+				}
+				blk = int64(blockNum)
+				if blockNum == 0 {
+					continue
+				}
+				minT, err := rawdbv3.TxNums.Min(tx, blockNum)
+				if err != nil {
+					return err
+				}
+				_min = int64(minT)
+				maxT, err := rawdbv3.TxNums.Max(tx, blockNum)
+				if err != nil {
+					return err
+				}
+				_max = int64(maxT)
 			}
-			if blockNum == 0 {
-				continue
-			}
-			_min, _ := rawdbv3.TxNums.Min(tx, blockNum)
-			if txNum == _min {
+
+			if int64(txNum) == _min {
 				minStep = min(minStep, txNum/agg.StepSize())
-				log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blockNum, key))
+				log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blk, key))
 				break
 			}
 		}

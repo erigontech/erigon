@@ -29,9 +29,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const (
@@ -226,12 +226,12 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 
 	kzgCtx := libkzg.Ctx()
 	for i := 0; i < len(blobs); i++ {
-		commitment, err := kzgCtx.BlobToKZGCommitment(blobs[i][:], 1 /*numGoRoutines*/)
+		commitment, err := kzgCtx.BlobToKZGCommitment((*gokzg4844.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %w", err)
 		}
 
-		proof, err := kzgCtx.ComputeBlobKZGProof(blobs[i][:], commitment, 1 /*numGoRoutnes*/)
+		proof, err := kzgCtx.ComputeBlobKZGProof((*gokzg4844.Blob)(&blobs[i]), commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %w", err)
 		}
@@ -243,10 +243,10 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
-func toBlobs(_blobs Blobs) []gokzg4844.BlobRef {
-	blobs := make([]gokzg4844.BlobRef, len(_blobs))
-	for i, _blob := range _blobs {
-		blobs[i] = _blob[:]
+func toBlobs(_blobs Blobs) []*gokzg4844.Blob {
+	blobs := make([]*gokzg4844.Blob, len(_blobs))
+	for i := range _blobs {
+		blobs[i] = (*gokzg4844.Blob)(&_blobs[i])
 	}
 	return blobs
 }

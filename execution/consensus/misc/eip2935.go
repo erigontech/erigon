@@ -20,7 +20,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -34,7 +33,7 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 		return err
 	}
 	if codeSize == 0 {
-		log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
+		// log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
 		return nil
 	}
 	headerNum := header.Number.Uint64()

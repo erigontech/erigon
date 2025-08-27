@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
@@ -765,7 +765,9 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 					return nil, storageRootHashIsSet, nil, err
 				}
 				cell.setFromUpdate(update)
-				fmt.Printf("Storage %x was not loaded\n", cell.storageAddr[:cell.storageAddrLen])
+				if hph.trace {
+					fmt.Printf("Storage %x was not loaded\n", cell.storageAddr[:cell.storageAddrLen])
+				}
 			}
 			if singleton {
 				if hph.trace {
@@ -1381,10 +1383,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
-	branchData, fileEndTxNum, err := hph.ctx.Branch(key)
+	branchData, step, err := hph.ctx.Branch(key)
 	if err != nil {
 		return false, err
 	}
+	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest
@@ -2069,9 +2072,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	hph.memoizationOff, hph.trace = true, false
-	//defer func() {
-	//	hph.memoizationOff, hph.trace = false, false
-	//}()
+	// defer func() {
+	// 	hph.memoizationOff, hph.trace = false, false
+	// }()
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
@@ -2087,9 +2090,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 
 		var tr *trie.Trie
-		//if hph.trace {
-		fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		//}
+		if hph.trace {
+			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		}
 
 		var update *Update
 		if len(plainKey) == hph.accountKeyLen { // account
@@ -2637,6 +2640,25 @@ func HexTrieExtractStateRoot(enc []byte) ([]byte, error) {
 		return nil, err
 	}
 	return root.hash[:], nil
+}
+
+func HexTrieStateToShortString(enc []byte) (string, error) {
+	if len(enc) < 18 {
+		return "", fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)
+	}
+	txn := binary.BigEndian.Uint64(enc)
+	bn := binary.BigEndian.Uint64(enc[8:])
+	sl := binary.BigEndian.Uint16(enc[16:18])
+
+	var s state
+	if err := s.Decode(enc[18 : 18+sl]); err != nil {
+		return "", err
+	}
+	root := new(cell)
+	if err := root.Decode(s.Root); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", bn, txn, root.hash[:]), nil
 }
 
 func HexTrieStateToString(enc []byte) (string, error) {

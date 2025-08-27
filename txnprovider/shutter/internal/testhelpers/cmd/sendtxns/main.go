@@ -107,6 +107,11 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	for i := 0; i < count; i++ {
 		txn, err := transactor.SubmitSimpleTransfer(from, to, amount)
 		if err != nil {
+			if strings.Contains(err.Error(), "failed to get transaction count: Invalid params") {
+				logger.Warn("failed to get transaction count, retrying", "err", err)
+				time.Sleep(time.Second)
+				continue
+			}
 			return err
 		}
 		logger.Info("transaction sent", "hash", txn.Hash())

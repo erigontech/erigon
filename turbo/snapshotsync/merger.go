@@ -11,8 +11,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -185,18 +185,16 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			}
 		}
 
-		for _, t := range snapTypes {
-			if len(toMerge[t.Enum()]) == 0 {
-				continue
+		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earliear can make sense.
+		toMergeFileNames := make([]string, 0, 16)
+		for _, segments := range toMerge {
+			for _, segment := range segments {
+				toMergeFileNames = append(toMergeFileNames, segment.FilePaths(snapDir)...)
 			}
-			toMergeFilePaths := make([]string, 0, len(toMerge[t.Enum()]))
-			for _, f := range toMerge[t.Enum()] {
-				toMergeFilePaths = append(toMergeFilePaths, f.FilePath())
-			}
-			if onDelete != nil {
-				if err := onDelete(toMergeFilePaths); err != nil {
-					return err
-				}
+		}
+		if onDelete != nil {
+			if err := onDelete(toMergeFileNames); err != nil {
+				return fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}
 	}

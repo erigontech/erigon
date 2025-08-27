@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"iter"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,12 +32,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -57,19 +58,20 @@ import (
 	"github.com/anacrolix/torrent/webseed"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
-	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 var debugWebseed = false
+
+const TorrentClientStatusPath = "/downloader/torrentClientStatus"
 
 func init() {
 	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
@@ -251,66 +253,92 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	return resp, err
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
-	// Cloudflare, or OS socket overhead seems to limit us to ~100-150MB/s in testing to Cloudflare
-	// buckets. If we could limit HTTP requests to 1 per connection we'd do that, but the HTTP2
-	// config field doesn't do anything yet in Go 1.24 (and 1.25rc1). Disabling HTTP2 is another way
-	// to achieve this.
-	requestTransport := &http.Transport{
-		ReadBufferSize: 2 << 20,
-		// Note this does nothing in go1.24.
-		//HTTP2: &http.HTTP2Config{
-		//	MaxConcurrentStreams: 1,
-		//},
+var (
+	httpDialer = net.Dialer{
+		Timeout: time.Minute,
+	}
+	httpReadBufferSize = initIntFromEnv("DOWNLOADER_HTTP_READ_BUFFER_SIZE", 2<<20, 0)
+	maxConnsPerHost    = initIntFromEnv("DOWNLOADER_MAX_CONNS_PER_HOST", 10, 0)
+	tcpReadBufferSize  = initIntFromEnv("DOWNLOADER_TCP_READ_BUFFER_SIZE", 0, 0)
+	useHttp3           = os.Getenv("DOWNLOADER_HTTP3") != ""
+	forceIpv4          = os.Getenv("DOWNLOADER_FORCE_IPV4") != ""
+)
+
+// Configure a downloader transport (requests and metainfo sources). These now use common settings.
+func makeTransport() http.RoundTripper {
+	if useHttp3 {
+		return &http3.Transport{}
+	}
+	t := &http.Transport{
+		ReadBufferSize: httpReadBufferSize,
 		// Big hammer to achieve one request per connection.
-		DisableKeepAlives: os.Getenv("DOWNLOADER_DISABLE_KEEP_ALIVES") != "",
-		// I see requests get stuck waiting for headers to come back. I suspect Go 1.24 HTTP2
-		// bug.
+		DisableKeepAlives:     os.Getenv("DOWNLOADER_DISABLE_KEEP_ALIVES") != "",
 		ResponseHeaderTimeout: time.Minute,
+		MaxConnsPerHost:       maxConnsPerHost,
+		IdleConnTimeout:       10 * time.Second,
+		DialContext: func(ctx context.Context, network, addr string) (conn net.Conn, err error) {
+			if forceIpv4 {
+				switch network {
+				case "tcp", "tcp6":
+					network = "tcp4"
+				case "tcp4":
+				default:
+					panic(network)
+				}
+			}
+			conn, err = httpDialer.DialContext(ctx, network, addr)
+			if err != nil {
+				return
+			}
+			if tcpReadBufferSize != 0 {
+				err = conn.(*net.TCPConn).SetReadBuffer(tcpReadBufferSize)
+				panicif.Err(err)
+			}
+			return
+		},
 	}
+	configureHttp2(t)
+	return t
+}
 
-	if s := os.Getenv("DOWNLOADER_MAX_CONNS_PER_HOST"); s != "" {
-		var err error
-		i64, err := strconv.ParseInt(s, 10, 0)
-		panicif.Err(err)
-		requestTransport.MaxConnsPerHost = int(i64)
-	}
-
-	requestHandler := requestHandler{
-		RoundTripper: requestTransport,
-	}
-	// Disable HTTP2. See above.
-	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") == "" {
-		// Don't set the http2.Transport as the RoundTripper. It's hooked into the http.Transport by
-		// this call.
-		h2t, err := http2.ConfigureTransports(requestTransport)
-		panicif.Err(err)
-		// Some of these are the defaults, but I really don't trust Go HTTP2 at this point.
-
-		// Will this fix pings from not timing out?
-		h2t.WriteByteTimeout = 15 * time.Second
-		// If we don't read for this long, send a ping.
-		h2t.ReadIdleTimeout = 15 * time.Second
-		h2t.PingTimeout = 15 * time.Second
-		h2t.MaxReadFrameSize = 1 << 20 // Same as net/http.Transport.ReadBufferSize?
-	} else {
+// Configures "Downloader" Transport HTTP2.
+func configureHttp2(t *http.Transport) {
+	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") != "" {
 		// Disable h2 being added automatically.
-		g.MakeMap(&requestTransport.TLSNextProto)
+		g.MakeMap(&t.TLSNextProto)
 	}
+	// Don't set the http2.Transport as the RoundTripper. It's hooked into the http.Transport by
+	// this call. Need to use external http2 library to get access to some config fields that
+	// aren't in std.
+	h2t, err := http2.ConfigureTransports(t)
+	panicif.Err(err)
+	// Some of these are the defaults, but I really don't trust Go HTTP2 at this point.
 
-	// TODO: Add this specifically for webseeds and not as the Client wide HTTP transport.
-	cfg.ClientConfig.WebTransport = &requestHandler
-	metainfoSourcesTransport := http.Transport{
-		MaxConnsPerHost:       10,
-		ResponseHeaderTimeout: time.Minute,
+	// Will this fix pings from not timing out?
+	h2t.WriteByteTimeout = 15 * time.Second
+	// If we don't read for this long, send a ping.
+	h2t.ReadIdleTimeout = 15 * time.Second
+	h2t.PingTimeout = 15 * time.Second
+	h2t.MaxReadFrameSize = 1 << 20 // Same as net/http.Transport.ReadBufferSize?
+}
+
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
+	requestHandler := &requestHandler{}
+	{
+		requestHandler.RoundTripper = makeTransport()
+		cfg.ClientConfig.WebTransport = requestHandler
+		// requestHandler.downloader is set later.
 	}
-	// Separate transport so webseed requests and metainfo fetching don't block each other.
-	// Additionally, we can tune for their specific workloads.
-	cfg.ClientConfig.MetainfoSourcesClient = &http.Client{
-		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-			insertCloudflareHeaders(req)
-			return metainfoSourcesTransport.RoundTrip(req)
-		}),
+	{
+		metainfoSourcesTransport := makeTransport()
+		// Separate transport so webseed requests and metainfo fetching don't block each other.
+		// Additionally, we can tune for their specific workloads.
+		cfg.ClientConfig.MetainfoSourcesClient = &http.Client{
+			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				insertCloudflareHeaders(req)
+				return metainfoSourcesTransport.RoundTrip(req)
+			}),
+		}
 	}
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
@@ -380,6 +408,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	d.ctx, d.stopMainLoop = context.WithCancel(context.Background())
 
 	if d.cfg.AddTorrentsFromDisk {
+		if d.cfg.VerifyTorrentData {
+			return nil, errors.New("must add torrents from disk synchronously if downloader verify enabled")
+		}
 		d.spawn(func() {
 			err := d.AddTorrentsFromDisk(d.ctx)
 			if err == nil || ctx.Err() != nil {
@@ -504,10 +535,9 @@ func (d *Downloader) allTorrentsComplete() (ret bool) {
 	return
 }
 
-// Basic checks and fixes for a snapshot torrent claiming it's complete from experiments. If passed
-// is false, come back later and check again. You could ask why this isn't in the torrent lib. This
-// is an extra level of pedantry due to some file modification I saw from outside the torrent lib.
-// It may go away with only writing torrent files and preverified after completion. TODO: Revisit
+// Basic checks and fixes for a snapshot torrent claiming it's complete. If passed is false, come
+// back later and check again. You could ask why this isn't in the torrent lib. This is an extra
+// level of pedantry due to some file modification I saw from outside the torrent lib. TODO: Revisit
 // this now partial files support is stable. Should be sufficient to tell the Client to reverify
 // data.
 func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool) {
@@ -521,25 +551,15 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			if fi.Size() == f.Length() {
 				continue
 			}
-			d.logger.Crit(
+			d.logger.Warn(
 				"snapshot file has wrong size",
 				"name", f.Path(),
 				"expected", f.Length(),
 				"actual", fi.Size(),
 			)
-			if fi.Size() > f.Length() {
-				// This isn't concurrent-safe?
-				os.Chmod(fp, 0o644)
-				//err = os.Truncate(fp, f.Length())
-				//if err != nil {
-				//	d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
-				//}
-				os.Chmod(fp, 0o444)
-				// End not concurrent safe
-			}
-		} else {
+		} else if passed {
 			// In Erigon 3.1, .torrent files are only written when the data is complete.
-			d.logger.Crit("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
+			d.logger.Warn("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
 		}
 		passed = false
 		d.verifyFile(f)
@@ -625,13 +645,13 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 
 	var noMetadata []string
 
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.SnapshoFilesList{}).Enabled()
+	isDiagEnabled := diaglib.TypeOf(diaglib.SnapshoFilesList{}).Enabled()
 	if isDiagEnabled {
 		filesList := make([]string, 0, len(torrents))
 		for _, t := range torrents {
 			filesList = append(filesList, t.Name())
 		}
-		diagnostics.Send(diagnostics.SnapshoFilesList{Files: filesList})
+		diaglib.Send(diaglib.SnapshoFilesList{Files: filesList})
 	}
 
 	for _, t := range torrents {
@@ -672,7 +692,7 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 		_, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
 		_, segmentPeers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 
-		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+		diaglib.Send(diaglib.SegmentDownloadStatistics{
 			Name:            torrentName,
 			TotalBytes:      uint64(tLen),
 			DownloadedBytes: uint64(bytesCompleted),
@@ -722,15 +742,15 @@ func calculateRate(current, previous uint64, prevRate uint64, interval time.Dura
 }
 
 // Adds segment peer fields common to Peer instances.
-func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, segment *diagnostics.SegmentPeer) {
+func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, segment *diaglib.SegmentPeer) {
 	segment.DownloadRate = uint64(stats.DownloadRate)
 	segment.UploadRate = uint64(stats.LastWriteUploadRate)
 	segment.PiecesCount = uint64(stats.RemotePieceCount)
 	segment.RemoteAddr = peer.RemoteAddr.String()
 }
 
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diagnostics.SegmentPeer) {
-	seeds := make([]diagnostics.SegmentPeer, 0, len(weebseedPeersOfThisFile))
+func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diaglib.SegmentPeer) {
+	seeds := make([]diaglib.SegmentPeer, 0, len(weebseedPeersOfThisFile))
 	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 	webseedRates = append(webseedRates, "file", fName)
 	for _, peer := range weebseedPeersOfThisFile {
@@ -738,7 +758,7 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
 				stats := peer.Stats()
 				if !finished {
-					seed := diagnostics.SegmentPeer{
+					seed := diaglib.SegmentPeer{
 						Url:         peerUrl.Host,
 						TorrentName: fName,
 					}
@@ -762,15 +782,15 @@ func webPeerUrl(peer *torrent.Peer) (*url.URL, error) {
 	return url.Parse(root)
 }
 
-func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diagnostics.SegmentPeer) {
-	peers := make([]diagnostics.SegmentPeer, 0, len(peersOfThisFile))
+func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diaglib.SegmentPeer) {
+	peers := make([]diaglib.SegmentPeer, 0, len(peersOfThisFile))
 	rates := make([]interface{}, 0, len(peersOfThisFile)*2)
 	rates = append(rates, "file", fName)
 
 	for _, peer := range peersOfThisFile {
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
 		stats := peer.Stats()
-		segPeer := diagnostics.SegmentPeer{
+		segPeer := diaglib.SegmentPeer{
 			Url:         url,
 			PeerId:      peer.PeerID,
 			TorrentName: fName,
@@ -865,17 +885,8 @@ func (d *Downloader) VerifyData(
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
 	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
-		if isStateFile {
-			if !snaptype.E3Seedable(name) {
-				return nil
-			}
-		} else {
-			if ff.Type == nil {
-				return fmt.Errorf("nil ptr after parsing file: %s", name)
-			}
-			if !d.cfg.SnapshotConfig.Seedable(ff) {
-				return nil
-			}
+		if !isStateFile && ff.Type == nil {
+			return fmt.Errorf("nil ptr after parsing file: %s", name)
 		}
 	}
 
@@ -927,7 +938,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 	return slices.Values(d.cfg.WebSeedUrls)
 }
 
-// Add a torrent with a known info hash. Either someone else made it, or it was on disk.
+// RequestSnapshot Add a torrent with a known info hash. Either someone else made it, or it was on disk.
 func (d *Downloader) RequestSnapshot(
 	infoHash metainfo.Hash, // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	name string,
@@ -939,11 +950,15 @@ func (d *Downloader) RequestSnapshot(
 	if err != nil {
 		return err
 	}
+	d.addRequired(t)
+	return nil
+}
+
+func (d *Downloader) addRequired(t *torrent.Torrent) {
 	panicif.Nil(t)
 	g.MakeMapIfNil(&d.requiredTorrents)
 	g.MapInsert(d.requiredTorrents, t, struct{}{})
 	d.setStartTime()
-	return nil
 }
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
@@ -954,7 +969,7 @@ func (d *Downloader) addPreverifiedTorrent(
 ) (t *torrent.Torrent, err error) {
 	diskSpecOpt := d.loadSpecFromDisk(name)
 	if !diskSpecOpt.Ok && !infoHashHint.Ok {
-		err = errors.New("can't add torrent without infohash")
+		err = fmt.Errorf("can't add torrent without infohash. name=%s", name)
 		return
 	}
 	if diskSpecOpt.Ok && infoHashHint.Ok && diskSpecOpt.Value.InfoHash != infoHashHint.Value {
@@ -1003,6 +1018,10 @@ func (d *Downloader) addPreverifiedTorrent(
 	}
 	if !ok {
 		return
+	}
+
+	if d.cfg.VerifyTorrentData {
+		d.addRequired(t)
 	}
 
 	metainfoOnDisk := diskSpecOpt.Ok
@@ -1163,11 +1182,6 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	}
 
 	return slices.Concat(files, l1, l2, l3, l4, l5), nil
-}
-
-func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.PreverifiedItems) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
-	return err
 }
 
 func (d *Downloader) Stats() AggStats {
@@ -1380,7 +1394,7 @@ func (d *Downloader) logStats() {
 
 	log.Info(fmt.Sprintf("[%s] %s", cmp.Or(d.logPrefix, "snapshots"), state), logCtx...)
 
-	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+	diaglib.Send(diaglib.SnapshotDownloadStatistics{
 		Downloaded:           bytesDone,
 		Total:                d.stats.BytesTotal,
 		TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
@@ -1415,12 +1429,12 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d.torrentClient.WriteStatus(w)
 	})
-	p := "/downloader/torrentClientStatus"
+
 	// This is for gopprof.
 	defaultMux := http.DefaultServeMux
-	defaultMux.Handle(p, h)
+	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
-		debugMux.Handle(p, h)
+		debugMux.Handle(TorrentClientStatusPath, h)
 	}
 }
 
@@ -1437,30 +1451,31 @@ func (d *Downloader) updateVerificationOccurring() {
 }
 
 // Delete - stop seeding, remove file, remove .torrent.
-func (s *Downloader) Delete(name string) (err error) {
+func (s *Downloader) Delete(name string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	// This needs to occur first to prevent it being added again, and also even if it isn't actually
+	// in the Downloader right now.
+	err := s.torrentFS.Delete(name)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			err = nil
+		}
+		// Return the error, but try to remove everything from the client anyway.
+	}
 	t, ok := s.torrentsByName[name]
 	if !ok {
-		return
+		// Return torrent file deletion error.
+		return err
 	}
+	// Stop seeding. Erigon will remove data-file and .torrent by self
+	// But we also can delete .torrent: earlier is better (`kill -9` may come at any time)
 	t.Drop()
-	err = dir.RemoveFile(s.filePathForName(name))
-	if err != nil {
-		level := log.LvlError
-		if errors.Is(err, fs.ErrNotExist) {
-			level = log.LvlInfo
-		}
-		s.logger.Log(level, "error removing snapshot file data", "name", name, "err", err)
-	}
-	err = s.torrentFS.Delete(name)
-	if err != nil {
-		s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)
-	}
 	g.MustDelete(s.torrentsByName, name)
 	// I wonder if it's an issue if this occurs before initial sync has completed.
 	delete(s.requiredTorrents, t)
-	return nil
+	// Return torrent file deletion error.
+	return err
 }
 
 func (d *Downloader) filePathForName(name string) string {
