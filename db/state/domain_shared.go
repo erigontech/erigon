@@ -83,8 +83,9 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
-	domainWriters [kv.DomainLen]*DomainBufferedWriter
-	iiWriters     []*InvertedIndexBufferedWriter
+	domainWriters   [kv.DomainLen]*DomainBufferedWriter
+	iiWriters       []*InvertedIndexBufferedWriter
+	forkableWriters map[ForkableId]*UnmarkedBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -113,6 +114,13 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
 	}
+
+	sd.forkableWriters = make(map[ForkableId]*UnmarkedBufferedWriter)
+	for _, id := range tx.Debug().AllForkableIds() {
+		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter().(*UnmarkedBufferedWriter)
+	}
+
+	//for id, f := range
 
 	tv := commitment.VariantHexPatriciaTrie
 	if statecfg.ExperimentalConcurrentCommitment {
@@ -160,6 +168,24 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
 	return gt.sd.HasPrefix(name, prefix, gt.tx)
+}
+
+type unmarkedPutter struct {
+	sd         *SharedDomains
+	forkableId ForkableId
+}
+
+func (sd *SharedDomains) AsUnmarkedPutter(id ForkableId) kv.UnmarkedPutter {
+	return &unmarkedPutter{sd, id}
+}
+
+func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
+	f, ok := up.sd.forkableWriters[up.forkableId]
+	if !ok {
+		panic(fmt.Sprintf("forkable not found: %s", Registry.Name(up.forkableId)))
+	}
+
+	return f.Put(num, v)
 }
 
 func (sd *SharedDomains) AsGetter(tx kv.Tx) kv.TemporalGetter {
@@ -435,6 +461,9 @@ func (sd *SharedDomains) Close() {
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()
 	}
+	for _, fWriter := range sd.forkableWriters {
+		fWriter.Close()
+	}
 
 	sd.sdCtx.Close()
 	sd.sdCtx = nil
@@ -470,6 +499,15 @@ func (sd *SharedDomains) flushWriters(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 		w.close()
+	}
+	for _, w := range sd.forkableWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+		w.Close()
 	}
 	return nil
 }
@@ -642,6 +680,14 @@ func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s)
 func AggTx(tx kv.Tx) *AggregatorRoTx {
 	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
 		return withAggTx.AggTx().(*AggregatorRoTx)
+	}
+
+	return nil
+}
+
+func ForkAggTx(tx kv.Tx, id kv.ForkableId) *ForkableAggTemporalTx {
+	if withAggTx, ok := tx.(interface{ AggForkablesTx(kv.ForkableId) any }); ok {
+		return withAggTx.AggForkablesTx(id).(*ForkableAggTemporalTx)
 	}
 
 	return nil

@@ -73,6 +73,10 @@ func (m *unmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum) (bool, erro
 	return m.s.DebugDb().HasRootNumUpto(ctx, to, m.dbtx)
 }
 
+func (m *unmarkedTx) Id() kv.ForkableId {
+	return m.s.Id()
+}
+
 func (m *unmarkedTx) Type() kv.CanonicityStrategy {
 	return m.s.Type()
 }
@@ -97,4 +101,8 @@ func (m *unmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64) (uint6
 func (m *unmarkedTx) Unwind(ctx context.Context, from RootNum) error {
 	_, err := m.s.DebugDb().Unwind(ctx, from, m.dbtx.(kv.RwTx))
 	return err
+}
+
+func (m *unmarkedTx) BufferedWriter() any {
+	return m.s.(*state.UnmarkedTx).BufferedWriter()
 }

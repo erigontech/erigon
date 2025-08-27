@@ -1283,7 +1283,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(tx kv.TemporalRwTx, receipt *types.Receipt, txNum uint64) error {
+func WriteReceiptCacheV2(putter kv.UnmarkedPutter, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -1311,7 +1311,7 @@ func WriteReceiptCacheV2(tx kv.TemporalRwTx, receipt *types.Receipt, txNum uint6
 		toWrite = []byte{}
 	}
 
-	if err := tx.UnmarkedRw(forkables.RcacheForkable).Append(kv.Num(txNum), toWrite); err != nil {
+	if err := putter.Put(kv.Num(txNum), toWrite); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
 

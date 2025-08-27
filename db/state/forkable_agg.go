@@ -709,6 +709,19 @@ func (r *ForkableAggTemporalTx) Close() {
 	}
 }
 
+func (r ForkableAggTemporalTx) Ids() (ids []kv.ForkableId) {
+	for _, mt := range r.marked {
+		ids = append(ids, mt.Id())
+	}
+	for _, ut := range r.unmarked {
+		ids = append(ids, ut.Id())
+	}
+	for _, bt := range r.buffered {
+		ids = append(ids, bt.Id())
+	}
+	return
+}
+
 // loop over all forkables (with some variations)
 // assume AllForkableId when needed to exec for all forkables
 func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) error) error {

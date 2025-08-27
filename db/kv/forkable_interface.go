@@ -60,12 +60,18 @@ type UnmarkedTx interface {
 
 	Debug() ForkableTxCommons
 	RoDbDebug() UnmarkedDbTx
+	BufferedWriter() any
 }
 
 type UnmarkedRwTx interface {
 	UnmarkedTx
 	RwDbDebug() UnmarkedDbRwTx
 	Append(num Num, value []byte) error
+}
+
+// equivalent of TemporalPutDel
+type UnmarkedPutter interface {
+	Put(num Num, value []byte) error
 }
 
 // buffer: TODO

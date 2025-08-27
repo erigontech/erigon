@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -46,7 +47,8 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	if err != nil {
 		panic(err)
 	}
-	agg, err := state.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, rawDB, log.New())
+	logger := log.New()
+	agg, err := state.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, rawDB, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -57,7 +59,14 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 		tb.Cleanup(agg.Close)
 	}
 
-	db, err := temporal.New(rawDB, agg)
+	forkableAgg := state.NewForkableAgg(context.Background(), dirs, rawDB, logger)
+	rcacheForkable, err := forkables.NewRcacheForkable(nil, dirs, agg.StepSize(), logger)
+	if err != nil {
+		panic(err)
+	}
+	forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
+
+	db, err := temporal.New(rawDB, agg, forkableAgg)
 	if err != nil {
 		panic(err)
 	}

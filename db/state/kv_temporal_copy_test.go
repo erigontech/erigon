@@ -184,6 +184,7 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { db.agg.OnFilesCh
 type tx struct {
 	db               *DB
 	aggtx            *AggregatorRoTx
+	forkaggs         []*ForkableAggTemporalTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 	mu               sync.RWMutex
@@ -625,4 +626,16 @@ func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint6
 }
 func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
 	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
+}
+func (tx *Tx) AllForkableIds() (ids []kv.ForkableId) {
+	for _, forkagg := range tx.tx.forkaggs {
+		ids = append(ids, forkagg.Ids()...)
+	}
+	return
+}
+func (tx *RwTx) AllForkableIds() (ids []kv.ForkableId) {
+	for _, forkagg := range tx.tx.forkaggs {
+		ids = append(ids, forkagg.Ids()...)
+	}
+	return
 }
