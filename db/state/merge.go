@@ -66,7 +66,7 @@ func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
 	return minimax
 }
 func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
-	if h.snapshotsDisabled {
+	if h.SnapshotsDisabled {
 		return math.MaxUint64
 	}
 	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
@@ -802,7 +802,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.historyValuesOnCompressedPage, true)
+						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
 						break
 					}
 				}

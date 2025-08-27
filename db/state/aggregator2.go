@@ -176,14 +176,14 @@ var Schema = SchemaGen{
 
 		Accessors: statecfg.AccessorBTree | statecfg.AccessorExistence,
 
-		hist: histCfg{
-			valuesTable:   kv.TblAccountHistoryVals,
+		hist: statecfg.HistCfg{
+			ValuesTable:   kv.TblAccountHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
-			historyLargeValues: false,
-			historyIdx:         kv.AccountsHistoryIdx,
+			HistoryLargeValues: false,
+			HistoryIdx:         kv.AccountsHistoryIdx,
 
-			iiCfg: statecfg.InvIdx{
+			IiCfg: statecfg.InvIdx{
 				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
@@ -196,14 +196,14 @@ var Schema = SchemaGen{
 
 		Accessors: statecfg.AccessorBTree | statecfg.AccessorExistence,
 
-		hist: histCfg{
-			valuesTable:   kv.TblStorageHistoryVals,
+		hist: statecfg.HistCfg{
+			ValuesTable:   kv.TblStorageHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
-			historyLargeValues: false,
-			historyIdx:         kv.StorageHistoryIdx,
+			HistoryLargeValues: false,
+			HistoryIdx:         kv.StorageHistoryIdx,
 
-			iiCfg: statecfg.InvIdx{
+			IiCfg: statecfg.InvIdx{
 				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys, ValuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
@@ -217,14 +217,14 @@ var Schema = SchemaGen{
 		Accessors:   statecfg.AccessorBTree | statecfg.AccessorExistence,
 		largeValues: true,
 
-		hist: histCfg{
-			valuesTable:   kv.TblCodeHistoryVals,
+		hist: statecfg.HistCfg{
+			ValuesTable:   kv.TblCodeHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
 
-			historyLargeValues: true,
-			historyIdx:         kv.CodeHistoryIdx,
+			HistoryLargeValues: true,
+			HistoryIdx:         kv.CodeHistoryIdx,
 
-			iiCfg: statecfg.InvIdx{
+			IiCfg: statecfg.InvIdx{
 				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys, ValuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
@@ -238,18 +238,18 @@ var Schema = SchemaGen{
 		Accessors:           statecfg.AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
-		hist: histCfg{
-			valuesTable:   kv.TblCommitmentHistoryVals,
+		hist: statecfg.HistCfg{
+			ValuesTable:   kv.TblCommitmentHistoryVals,
 			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
-			historyIdx: kv.CommitmentHistoryIdx,
+			HistoryIdx: kv.CommitmentHistoryIdx,
 
-			historyLargeValues:            false,
-			historyValuesOnCompressedPage: 64,
+			HistoryLargeValues:            false,
+			HistoryValuesOnCompressedPage: 64,
 
-			snapshotsDisabled: true,
-			historyDisabled:   true,
+			SnapshotsDisabled: true,
+			HistoryDisabled:   true,
 
-			iiCfg: statecfg.InvIdx{
+			IiCfg: statecfg.InvIdx{
 				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
@@ -263,14 +263,14 @@ var Schema = SchemaGen{
 
 		Accessors: statecfg.AccessorBTree | statecfg.AccessorExistence,
 
-		hist: histCfg{
-			valuesTable:   kv.TblReceiptHistoryVals,
+		hist: statecfg.HistCfg{
+			ValuesTable:   kv.TblReceiptHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
-			historyLargeValues: false,
-			historyIdx:         kv.ReceiptHistoryIdx,
+			HistoryLargeValues: false,
+			HistoryIdx:         kv.ReceiptHistoryIdx,
 
-			iiCfg: statecfg.InvIdx{
+			IiCfg: statecfg.InvIdx{
 				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys, ValuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     statecfg.AccessorHashMap,
@@ -284,17 +284,17 @@ var Schema = SchemaGen{
 		Accessors:   statecfg.AccessorHashMap,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
-		hist: histCfg{
-			valuesTable: kv.TblRCacheHistoryVals,
+		hist: statecfg.HistCfg{
+			ValuesTable: kv.TblRCacheHistoryVals,
 			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
-			historyLargeValues: true,
-			historyIdx:         kv.RCacheHistoryIdx,
+			HistoryLargeValues: true,
+			HistoryIdx:         kv.RCacheHistoryIdx,
 
-			snapshotsDisabled:             true,
-			historyValuesOnCompressedPage: 16,
+			SnapshotsDisabled:             true,
+			HistoryValuesOnCompressedPage: 16,
 
-			iiCfg: statecfg.InvIdx{
+			IiCfg: statecfg.InvIdx{
 				Disable:      true, // disable everything by default
 				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
@@ -335,8 +335,8 @@ var Schema = SchemaGen{
 
 func EnableHistoricalCommitment() {
 	cfg := Schema.CommitmentDomain
-	cfg.hist.historyDisabled = false
-	cfg.hist.snapshotsDisabled = false
+	cfg.hist.HistoryDisabled = false
+	cfg.hist.SnapshotsDisabled = false
 	Schema.CommitmentDomain = cfg
 }
 
@@ -388,7 +388,7 @@ func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) e
 
 		// else v1.0 -- need to adjust version
 		Schema.ReceiptDomain.version.DataKV = version.V1_1_standart
-		Schema.ReceiptDomain.hist.version.DataV = version.V1_1_standart
+		Schema.ReceiptDomain.hist.Version.DataV = version.V1_1_standart
 
 		return nil
 	})
@@ -416,9 +416,9 @@ var HistoryCompressCfg = seg.Cfg{
 
 func EnableHistoricalRCache() {
 	cfg := Schema.RCacheDomain
-	cfg.hist.iiCfg.Disable = false
-	cfg.hist.historyDisabled = false
-	cfg.hist.snapshotsDisabled = false
+	cfg.hist.IiCfg.Disable = false
+	cfg.hist.HistoryDisabled = false
+	cfg.hist.SnapshotsDisabled = false
 	Schema.RCacheDomain = cfg
 }
 

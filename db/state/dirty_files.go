@@ -430,9 +430,9 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if fileVer.Less(h.version.DataV.MinSupported) {
+				if fileVer.Less(h.Version.DataV.MinSupported) {
 					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, h.version.DataV)
+					versionTooLowPanic(fName, h.Version.DataV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -471,9 +471,9 @@ func (h *History) openDirtyFiles() error {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(h.version.AccessorVI.MinSupported) {
+					if fileVer.Less(h.Version.AccessorVI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, h.version.AccessorVI)
+						versionTooLowPanic(fName, h.Version.AccessorVI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)

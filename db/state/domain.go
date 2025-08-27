@@ -93,7 +93,7 @@ type Domain struct {
 }
 
 type domainCfg struct {
-	hist histCfg
+	hist statecfg.HistCfg
 
 	name        kv.Domain
 	Compression seg.FileCompression
@@ -110,14 +110,14 @@ type domainCfg struct {
 }
 
 func (d domainCfg) Tables() []string {
-	return []string{d.valuesTable, d.hist.valuesTable, d.hist.iiCfg.KeysTable, d.hist.iiCfg.ValuesTable}
+	return []string{d.valuesTable, d.hist.ValuesTable, d.hist.IiCfg.KeysTable, d.hist.IiCfg.ValuesTable}
 }
 
 func (d domainCfg) GetVersions() statecfg.VersionTypes {
 	return statecfg.VersionTypes{
 		Domain: &d.version,
-		Hist:   &d.hist.version,
-		II:     &d.hist.iiCfg.Version,
+		Hist:   &d.hist.Version,
+		II:     &d.hist.IiCfg.Version,
 	}
 }
 
@@ -131,7 +131,7 @@ func NewDomain(cfg domainCfg, stepSize uint64, dirs datadir.Dirs, logger log.Log
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
-	if cfg.hist.iiCfg.FilenameBase == "" {
+	if cfg.hist.IiCfg.FilenameBase == "" {
 		panic("assert: emtpy `filenameBase`" + cfg.name.String())
 	}
 
@@ -422,7 +422,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
-	discardHistory := discard || dt.d.historyDisabled
+	discardHistory := discard || dt.d.HistoryDisabled
 
 	w := &DomainBufferedWriter{
 		discard:   discard,
@@ -1982,7 +1982,7 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 }
 
 func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.valuesTable, dt.ht.h.valuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	return []string{dt.d.valuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {

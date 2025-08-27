@@ -103,9 +103,9 @@ func pathPrefix(sec, dom string) string {
 	// ii
 	switch dom {
 	case "logaddrs", "logtopics", "tracesfrom", "tracesto":
-		return ".version"
+		return ".Version"
 	default:
-		return ".hist.iiCfg.Version"
+		return ".hist.IiCfg.Version"
 	}
 }
 

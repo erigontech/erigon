@@ -311,7 +311,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	checkAllEntities := func(expectedLen, expectedRefCnt int) {
 		for _, d := range agg.d {
 			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.name.String())
-			if d.snapshotsDisabled {
+			if d.SnapshotsDisabled {
 				continue
 			}
 			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.name.String())
@@ -1672,7 +1672,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		v_versions := agg.d[kv.ReceiptDomain].hist.Version.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1701,7 +1701,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		v_versions := agg.d[kv.ReceiptDomain].hist.Version.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1730,7 +1730,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		v_versions := agg.d[kv.ReceiptDomain].hist.Version.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1755,7 +1755,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		v_versions := agg.d[kv.ReceiptDomain].hist.Version.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)

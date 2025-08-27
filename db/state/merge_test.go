@@ -114,7 +114,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
-	cfg := Schema.AccountsDomain.hist.iiCfg
+	cfg := Schema.AccountsDomain.hist.IiCfg
 
 	dirs := datadir.New(os.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, dirs, log.New())
@@ -619,8 +619,8 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 		salt := uint32(1)
 		dirs := datadir.New(os.TempDir())
-		cfg.hist.iiCfg.Name = kv.InvertedIdx(0)
-		cfg.hist.iiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+		cfg.hist.IiCfg.Name = kv.InvertedIdx(0)
+		cfg.hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 
 		d, err := NewDomain(cfg, 1, dirs, log.New())
 		if err != nil {

@@ -259,7 +259,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	// ii has checker on history dirtyFiles (same domain)
 	dd := a.d[domain]
-	if dd.histCfg.snapshotsDisabled || dd.histCfg.historyDisabled || dd.Disable {
+	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || dd.Disable {
 		a.logger.Debug("history or ii disabled, can't register dependency", "domain", domain.String())
 		return
 	}
@@ -1154,7 +1154,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 // pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
 func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain, tx kv.RwTx) error {
 	cd := at.d[domain]
-	if cd.ht.h.historyDisabled {
+	if cd.ht.h.HistoryDisabled {
 		return nil
 	}
 
@@ -1550,8 +1550,8 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 // when we exec blocks from snapshots we can set it to 0, because no re-org on those blocks are possible
 func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64) *Aggregator {
 	for _, d := range a.d {
-		if d != nil && d.History.snapshotsDisabled {
-			d.History.keepRecentTxnInDB = recentTxs
+		if d != nil && d.History.SnapshotsDisabled {
+			d.History.KeepRecentTxnInDB = recentTxs
 		}
 	}
 	return a
@@ -1654,7 +1654,7 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
-		if d.d.historyIdx == name {
+		if d.d.HistoryIdx == name {
 			return d.ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 		}
 	}
@@ -1747,7 +1747,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
-	if d.d.historyDisabled {
+	if d.d.HistoryDisabled {
 		// this is not accurate, okay for reporting...
 		// if historyDisabled, there's no way to get progress in
 		// terms of exact txNum
