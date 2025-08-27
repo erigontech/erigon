@@ -43,7 +43,7 @@ func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts [
 		}
 	}
 	// determine exts to show
-	for selected, _ := range sel {
+	for selected := range sel {
 		for _, e := range extCfgMap[res[selected]] {
 			if slices.Contains(includeExts, e) {
 				sel[e] = struct{}{}
