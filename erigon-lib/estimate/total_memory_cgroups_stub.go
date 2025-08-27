@@ -14,11 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build debug
-// +build debug
+//go:build !linux
 
-package debug
+package estimate
 
 import (
-	_ "github.com/benesch/cgosymbolizer"
+	"errors"
 )
+
+func cgroupsMemoryLimit() (uint64, error) {
+	return 0, errors.New("cgroups not supported in this environment")
+}
