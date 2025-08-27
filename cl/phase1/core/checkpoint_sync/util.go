@@ -17,6 +17,7 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 	var syncer CheckpointSyncer
 
 	isDevnetAndIsDevnetNotSupported := caplinConfig.IsDevnet() && len(clparams.ConfigurableCheckpointsURLs) == 0
+	fmt.Println("isDevnetAndIsDevnetNotSupported", isDevnetAndIsDevnetNotSupported)
 	remoteSync := !caplinConfig.DisabledCheckpointSync && !isDevnetAndIsDevnetNotSupported
 
 	if remoteSync {
