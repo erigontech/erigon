@@ -26,12 +26,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/cmd/snapshots/cmp"
-	"github.com/erigontech/erigon/cmd/snapshots/copy"
-	"github.com/erigontech/erigon/cmd/snapshots/manifest"
-	"github.com/erigontech/erigon/cmd/snapshots/torrents"
-	"github.com/erigontech/erigon/cmd/snapshots/verify"
-
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
@@ -51,11 +45,6 @@ func main() {
 	app.Version = version.VersionWithCommit(version.GitCommit)
 
 	app.Commands = []*cli.Command{
-		&cmp.Command,
-		&copy.Command,
-		&verify.Command,
-		&torrents.Command,
-		&manifest.Command,
 		&genfromrpc.Command,
 	}
 
