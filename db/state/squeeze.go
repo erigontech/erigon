@@ -200,11 +200,6 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		cf.decompressor.MadvNormal()
 
 		err = func() error {
-			steps := cf.endTxNum/at.a.stepSize - cf.startTxNum/at.a.stepSize
-			compression := commitment.d.Compression
-			if steps < DomainMinStepsToCompress {
-				compression = seg.CompressNone
-			}
 			at.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg)
 
