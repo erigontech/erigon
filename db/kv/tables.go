@@ -201,14 +201,6 @@ const (
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
 
-	//State Reconstitution
-	PlainStateR    = "PlainStateR"    // temporary table for PlainState reconstitution
-	PlainStateD    = "PlainStateD"    // temporary table for PlainStare reconstitution, deletes
-	CodeR          = "CodeR"          // temporary table for Code reconstitution
-	CodeD          = "CodeD"          // temporary table for Code reconstitution, deletes
-	PlainContractR = "PlainContractR" // temporary table for PlainContract reconstitution
-	PlainContractD = "PlainContractD" // temporary table for PlainContract reconstitution, deletes
-
 	// Erigon-CL Objects
 
 	// [slot + block root] => [signature + block without execution payload]
@@ -481,14 +473,6 @@ var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
 }
-var ReconTables = []string{
-	PlainStateR,
-	PlainStateD,
-	CodeR,
-	CodeD,
-	PlainContractR,
-	PlainContractD,
-}
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
 var ChaindataDeprecatedTables = []string{}
@@ -614,11 +598,6 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
-var ReconTablesCfg = TableCfg{
-	PlainStateD:    {Flags: DupSort},
-	CodeD:          {Flags: DupSort},
-	PlainContractD: {Flags: DupSort},
-}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
@@ -697,13 +676,6 @@ func reinit() {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
 			DownloaderTablesCfg[name] = TableCfgItem{}
-		}
-	}
-
-	for _, name := range ReconTables {
-		_, ok := ReconTablesCfg[name]
-		if !ok {
-			ReconTablesCfg[name] = TableCfgItem{}
 		}
 	}
 

@@ -309,9 +309,9 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		wg.Add(1)
 		go func(sds *sidecarsPayload) {
 			defer wg.Done()
-			blobs := make([]gokzg4844.BlobRef, len(sds.sidecars))
+			blobs := make([]*gokzg4844.Blob, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				blobs[i] = sidecar.Blob[:]
+				blobs[i] = (*gokzg4844.Blob)(&sidecar.Blob)
 			}
 			kzgCommitments := make([]gokzg4844.KZGCommitment, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {

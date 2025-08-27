@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -160,7 +161,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
-			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			_, ibs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
