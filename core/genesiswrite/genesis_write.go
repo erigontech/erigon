@@ -17,12 +17,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package genesiswrite
 
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"math/big"
@@ -35,8 +34,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/config3"
@@ -115,7 +114,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	if err := WriteGenesisIfNotExist(tx, genesis); err != nil {
+	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
 
@@ -178,13 +177,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
 	}
-	storedCfg, storedErr := ReadChainConfig(tx, storedHash)
+	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil && newCfg.Bor == nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
 		logger.Warn("Found genesis block without chain config")
-		err1 := WriteChainConfig(tx, storedHash, newCfg)
+		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
 			return newCfg, nil, err1
 		}
@@ -206,7 +205,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
-	if err := WriteChainConfig(tx, storedHash, newCfg); err != nil {
+	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
@@ -273,7 +272,7 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	//	return err
 	//}
 
-	if err := WriteGenesisIfNotExist(tx, gen); err != nil {
+	if err := rawdb.WriteGenesisIfNotExist(tx, gen); err != nil {
 		return err
 	}
 	if err := rawdb.WriteBlock(tx, block); err != nil {
@@ -295,7 +294,7 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return err
 	}
-	if err := WriteChainConfig(tx, block.Hash(), cfg); err != nil {
+	if err := rawdb.WriteChainConfig(tx, block.Hash(), cfg); err != nil {
 		return err
 	}
 	return nil
@@ -330,33 +329,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return err
 	}
-	return WriteChainConfig(tx, block.Hash(), config)
-}
-
-// GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: chain.TestChainConfig}
-	block := MustCommitGenesis(&g, db, dirs, logger)
-	return block
-}
-
-type GenAccount struct {
-	Addr    common.Address
-	Balance *big.Int
-}
-
-// Pre-calculated version of:
-//
-//	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
-//	DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
-var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
-var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
-
-// DevnetSignKey is defined like this to allow the devnet process to pre-allocate keys
-// for nodes and then pass the address via --miner.etherbase - the function will be called
-// to retieve the mining key
-var DevnetSignKey = func(address common.Address) *ecdsa.PrivateKey {
-	return DevnetSignPrivateKey
+	return rawdb.WriteChainConfig(tx, block.Hash(), config)
 }
 
 // GenesisToBlock creates the genesis block and writes state of a genesis specification
@@ -517,7 +490,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			}
 
 			if len(account.Constructor) > 0 {
-				if _, err = SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
+				if _, err = core.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
 					return err
 				}
 			}

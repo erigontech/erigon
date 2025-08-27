@@ -1,4 +1,4 @@
-package core
+package genesiswrite
 
 import (
 	"math/big"
