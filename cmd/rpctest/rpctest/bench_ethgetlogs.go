@@ -275,6 +275,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 					return fmt.Errorf("eth_getLogs: at blockNum=%d, topic %x not indexed", bn, topic)
 				}
 				logs := filterLogsByTopic(resp.Result, topic)
+				fmt.Printf("[dbg] filtered %d -> %d\n", len(resp.Result), len(logs))
 				//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 				if len(logs) == 0 {
 					if failFast {
