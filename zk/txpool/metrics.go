@@ -41,16 +41,19 @@ func (m *Metrics) Update(pool *TxPool) {
 	currentPoolSize := uint64(pool.pending.Len() + pool.baseFee.Len() + pool.queued.Len())
 
 	out := m.lastPoolSize + m.txCounter - currentPoolSize
-	if out < 0 {
-		out = 0
-	}
 
+	pool.lock.Lock()
 	waitTimes := make([]time.Duration, 0, pool.all.tree.Len())
+	createdTimes := make([]int64, 0, pool.all.tree.Len())
 	pool.all.ascendAll(func(mt *metaTx) bool {
-		created := time.Unix(int64(mt.created), 0)
-		waitTimes = append(waitTimes, time.Since(created))
+		createdTimes = append(createdTimes, int64(mt.created))
 		return true
 	})
+	pool.lock.Unlock()
+
+	for _, created := range createdTimes {
+		waitTimes = append(waitTimes, time.Since(time.Unix(created, 0)))
+	}
 
 	medianWaitTime := 0
 	if len(waitTimes) > 0 {
