@@ -66,7 +66,7 @@ func Configure(a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger)
 	return nil
 }
 
-const AggregatorSqueezeCommitmentValues = true
+const AggregatorSqueezeCommitmentValues = false
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
