@@ -109,7 +109,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		return branch, nil
 	}
 
-	if !aggTx.d[kv.CommitmentDomain].d.replaceKeysInValues && aggTx.a.commitmentValuesTransform {
+	if !aggTx.d[kv.CommitmentDomain].d.ReplaceKeysInValues && aggTx.a.commitmentValuesTransform {
 		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
 	}
 
@@ -276,7 +276,7 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesIt
 	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
 		return dirty, nil
 	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.version.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.Version.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
 }
 
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
@@ -294,7 +294,7 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *Fil
 	}
 
 	if item == nil || item.bindex == nil {
-		fileStepsss := "" + dt.d.name.String() + ": "
+		fileStepsss := "" + dt.d.Name.String() + ": "
 		for _, item := range dt.d.dirtyFiles.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.stepSize, item.endTxNum/dt.d.stepSize)
 		}
@@ -386,7 +386,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.stepSize)%2 != 0 {
+		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.stepSize)%2 != 0 {
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {

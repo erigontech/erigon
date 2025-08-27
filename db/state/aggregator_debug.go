@@ -96,7 +96,7 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 	}
 
 	for _, d := range ac.domain {
-		mf.domain[d.d.name] = d.FilesWithMissedAccessors()
+		mf.domain[d.d.Name] = d.FilesWithMissedAccessors()
 	}
 
 	for _, ii := range ac.ii {

@@ -114,7 +114,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
-	cfg := Schema.AccountsDomain.hist.IiCfg
+	cfg := Schema.AccountsDomain.Hist.IiCfg
 
 	dirs := datadir.New(os.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, dirs, log.New())
@@ -619,8 +619,8 @@ func TestMergeFilesWithDependency(t *testing.T) {
 
 		salt := uint32(1)
 		dirs := datadir.New(os.TempDir())
-		cfg.hist.IiCfg.Name = kv.InvertedIdx(0)
-		cfg.hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
+		cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 
 		d, err := NewDomain(cfg, 1, dirs, log.New())
 		if err != nil {
@@ -638,21 +638,21 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		account, storage, commitment = newTestDomain(0), newTestDomain(1), newTestDomain(3)
 		checker := NewDependencyIntegrityChecker(account.dirs, log.New())
 		info := &DependentInfo{
-			entity: FromDomain(commitment.name),
+			entity: FromDomain(commitment.Name),
 			filesGetter: func() *btree2.BTreeG[*FilesItem] {
 				return commitment.dirtyFiles
 			},
 			accessors: commitment.Accessors,
 		}
-		checker.AddDependency(FromDomain(account.name), info)
-		checker.AddDependency(FromDomain(storage.name), info)
+		checker.AddDependency(FromDomain(account.Name), info)
+		checker.AddDependency(FromDomain(storage.Name), info)
 		account.SetChecker(checker)
 		storage.SetChecker(checker)
 		return
 	}
 
 	setupFiles := func(d *Domain, mergedMissing bool) {
-		kvf := fmt.Sprintf("v1.0-%s", d.name.String()) + ".%d-%d.kv"
+		kvf := fmt.Sprintf("v1.0-%s", d.Name.String()) + ".%d-%d.kv"
 		files := []string{fmt.Sprintf(kvf, 0, 1), fmt.Sprintf(kvf, 1, 2)}
 		if !mergedMissing {
 			files = append(files, fmt.Sprintf(kvf, 0, 2))

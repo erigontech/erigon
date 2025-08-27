@@ -83,7 +83,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, dirs, logger)
 	d.salt.Store(&salt)
@@ -1050,9 +1050,9 @@ func emptyTestDomain(aggStep uint64) *Domain {
 
 	salt := uint32(1)
 	dirs := datadir2.New(os.TempDir())
-	cfg.hist.IiCfg.Name = kv.InvertedIdx(0)
-	cfg.hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
-	cfg.hist.IiCfg.Accessors = statecfg.AccessorHashMap
+	cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
+	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
 
 	d, err := NewDomain(cfg, aggStep, dirs, log.New())
 	if err != nil {
@@ -1136,7 +1136,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1.1-accounts.0-1.v"))
-	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.hist.HistoryValuesOnCompressedPage), c.historyComp.Count())
+	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.Hist.HistoryValuesOnCompressedPage), c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1996,11 +1996,11 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
-	key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
+	key, err := GetExecV3PruneProgress(rwTx, dc.d.ValuesTable)
 	require.NoError(t, err)
 	require.NotNil(t, key)
 
-	keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
+	keysCursor, err := rwTx.RwCursorDupSort(dc.d.ValuesTable)
 	require.NoError(t, err)
 
 	k, istep, err := keysCursor.Seek(key)
@@ -2022,13 +2022,13 @@ func TestDomain_PruneProgress(t *testing.T) {
 		}
 		cancel()
 
-		key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
+		key, err := GetExecV3PruneProgress(rwTx, dc.d.ValuesTable)
 		require.NoError(t, err)
 		if step == 0 && key == nil {
 
 			fmt.Printf("pruned in %d iterations\n", i)
 
-			keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
+			keysCursor, err := rwTx.RwCursorDupSort(dc.d.ValuesTable)
 			require.NoError(t, err)
 
 			// check there are no keys with 0 step left

@@ -316,9 +316,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					continue
 				}
 
-				if fileVer.Less(d.version.DataKV.MinSupported) {
+				if fileVer.Less(d.Version.DataKV.MinSupported) {
 					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, d.version.DataKV)
+					versionTooLowPanic(fName, d.Version.DataKV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -344,9 +344,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(d.version.AccessorKVI.MinSupported) {
+					if fileVer.Less(d.Version.AccessorKVI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.AccessorKVI)
+						versionTooLowPanic(fName, d.Version.AccessorKVI)
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -363,9 +363,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(d.version.AccessorBT.MinSupported) {
+					if fileVer.Less(d.Version.AccessorBT.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.AccessorBT)
+						versionTooLowPanic(fName, d.Version.AccessorBT)
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -382,9 +382,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Less(d.version.AccessorKVEI.MinSupported) {
+					if fileVer.Less(d.Version.AccessorKVEI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.AccessorKVEI)
+						versionTooLowPanic(fName, d.Version.AccessorKVEI)
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)

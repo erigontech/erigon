@@ -94,12 +94,12 @@ func init() {
 }
 
 type SchemaGen struct {
-	AccountsDomain   domainCfg
-	StorageDomain    domainCfg
-	CodeDomain       domainCfg
-	CommitmentDomain domainCfg
-	ReceiptDomain    domainCfg
-	RCacheDomain     domainCfg
+	AccountsDomain   statecfg.DomainCfg
+	StorageDomain    statecfg.DomainCfg
+	CodeDomain       statecfg.DomainCfg
+	CommitmentDomain statecfg.DomainCfg
+	ReceiptDomain    statecfg.DomainCfg
+	RCacheDomain     statecfg.DomainCfg
 	LogAddrIdx       statecfg.InvIdx
 	LogTopicIdx      statecfg.InvIdx
 	TracesFromIdx    statecfg.InvIdx
@@ -129,8 +129,8 @@ func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	}
 }
 
-func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
-	var v domainCfg
+func (s *SchemaGen) GetDomainCfg(name kv.Domain) statecfg.DomainCfg {
+	var v statecfg.DomainCfg
 	switch name {
 	case kv.AccountsDomain:
 		v = s.AccountsDomain
@@ -145,7 +145,7 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 	case kv.RCacheDomain:
 		v = s.RCacheDomain
 	default:
-		v = domainCfg{}
+		v = statecfg.DomainCfg{}
 	}
 	return v
 }
@@ -170,13 +170,13 @@ func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) statecfg.InvIdx {
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
 
 var Schema = SchemaGen{
-	AccountsDomain: domainCfg{
-		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
+	AccountsDomain: statecfg.DomainCfg{
+		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
 		Accessors: statecfg.AccessorBTree | statecfg.AccessorExistence,
 
-		hist: statecfg.HistCfg{
+		Hist: statecfg.HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
@@ -190,13 +190,13 @@ var Schema = SchemaGen{
 			},
 		},
 	},
-	StorageDomain: domainCfg{
-		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
+	StorageDomain: statecfg.DomainCfg{
+		Name: kv.StorageDomain, ValuesTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		Accessors: statecfg.AccessorBTree | statecfg.AccessorExistence,
 
-		hist: statecfg.HistCfg{
+		Hist: statecfg.HistCfg{
 			ValuesTable:   kv.TblStorageHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
@@ -210,14 +210,14 @@ var Schema = SchemaGen{
 			},
 		},
 	},
-	CodeDomain: domainCfg{
-		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
+	CodeDomain: statecfg.DomainCfg{
+		Name: kv.CodeDomain, ValuesTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compressing Code with keys doesn't show any benefits. Compression of values shows 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		Accessors:   statecfg.AccessorBTree | statecfg.AccessorExistence,
-		largeValues: true,
+		LargeValues: true,
 
-		hist: statecfg.HistCfg{
+		Hist: statecfg.HistCfg{
 			ValuesTable:   kv.TblCodeHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
 
@@ -231,14 +231,14 @@ var Schema = SchemaGen{
 			},
 		},
 	},
-	CommitmentDomain: domainCfg{
-		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
+	CommitmentDomain: statecfg.DomainCfg{
+		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		Accessors:           statecfg.AccessorHashMap,
-		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
+		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
-		hist: statecfg.HistCfg{
+		Hist: statecfg.HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
 			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			HistoryIdx: kv.CommitmentHistoryIdx,
@@ -256,14 +256,14 @@ var Schema = SchemaGen{
 			},
 		},
 	},
-	ReceiptDomain: domainCfg{
-		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
+	ReceiptDomain: statecfg.DomainCfg{
+		Name: kv.ReceiptDomain, ValuesTable: kv.TblReceiptVals,
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
-		largeValues: false,
+		LargeValues: false,
 
 		Accessors: statecfg.AccessorBTree | statecfg.AccessorExistence,
 
-		hist: statecfg.HistCfg{
+		Hist: statecfg.HistCfg{
 			ValuesTable:   kv.TblReceiptHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
@@ -277,14 +277,14 @@ var Schema = SchemaGen{
 			},
 		},
 	},
-	RCacheDomain: domainCfg{
-		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
-		largeValues: true,
+	RCacheDomain: statecfg.DomainCfg{
+		Name: kv.RCacheDomain, ValuesTable: kv.TblRCacheVals,
+		LargeValues: true,
 
 		Accessors:   statecfg.AccessorHashMap,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
-		hist: statecfg.HistCfg{
+		Hist: statecfg.HistCfg{
 			ValuesTable: kv.TblRCacheHistoryVals,
 			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
@@ -335,8 +335,8 @@ var Schema = SchemaGen{
 
 func EnableHistoricalCommitment() {
 	cfg := Schema.CommitmentDomain
-	cfg.hist.HistoryDisabled = false
-	cfg.hist.SnapshotsDisabled = false
+	cfg.Hist.HistoryDisabled = false
+	cfg.Hist.SnapshotsDisabled = false
 	Schema.CommitmentDomain = cfg
 }
 
@@ -387,8 +387,8 @@ func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) e
 		logger.Info("adjusting receipt current version to v1.1")
 
 		// else v1.0 -- need to adjust version
-		Schema.ReceiptDomain.version.DataKV = version.V1_1_standart
-		Schema.ReceiptDomain.hist.Version.DataV = version.V1_1_standart
+		Schema.ReceiptDomain.Version.DataKV = version.V1_1_standart
+		Schema.ReceiptDomain.Hist.Version.DataV = version.V1_1_standart
 
 		return nil
 	})
@@ -416,9 +416,9 @@ var HistoryCompressCfg = seg.Cfg{
 
 func EnableHistoricalRCache() {
 	cfg := Schema.RCacheDomain
-	cfg.hist.IiCfg.Disable = false
-	cfg.hist.HistoryDisabled = false
-	cfg.hist.SnapshotsDisabled = false
+	cfg.Hist.IiCfg.Disable = false
+	cfg.Hist.HistoryDisabled = false
+	cfg.Hist.SnapshotsDisabled = false
 	Schema.RCacheDomain = cfg
 }
 

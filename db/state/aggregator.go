@@ -176,13 +176,13 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(cfg domainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	a.d[cfg.name], err = NewDomain(cfg, a.stepSize, dirs, logger)
+func (a *Aggregator) registerDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
+	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, dirs, logger)
 	if err != nil {
 		return err
 	}
-	a.d[cfg.name].salt.Store(salt)
-	a.AddDependencyBtwnHistoryII(cfg.name)
+	a.d[cfg.Name].salt.Store(salt)
+	a.AddDependencyBtwnHistoryII(cfg.Name)
 	return nil
 }
 
@@ -518,7 +518,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 	}
 
 	for _, d := range a.d {
-		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.name])
+		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.Name])
 	}
 
 	for _, ii := range a.iis {
@@ -871,7 +871,7 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 	return files
 }
 func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
-	return at.d[domain].d.version.DataKV.Current
+	return at.d[domain].d.Version.DataKV.Current
 }
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {

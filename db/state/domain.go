@@ -66,7 +66,7 @@ var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", "
 //  2. acc exists, then update/delete: .kv - yes, .v - yes
 //  3. acc doesn’t exist, then delete: .kv - no,  .v - no
 type Domain struct {
-	domainCfg // keep it above *History to avoid unexpected shadowing
+	statecfg.DomainCfg // keep it above *History to avoid unexpected shadowing
 	*History
 
 	// Schema:
@@ -92,71 +92,42 @@ type Domain struct {
 	checker *DependencyIntegrityChecker
 }
 
-type domainCfg struct {
-	hist statecfg.HistCfg
-
-	name        kv.Domain
-	Compression seg.FileCompression
-	CompressCfg seg.Cfg
-	Accessors   statecfg.Accessors // list of indexes for given domain
-	valuesTable string             // bucket to store domain values; key -> inverted_step + values (Dupsort)
-	largeValues bool
-
-	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
-	// for commitment domain only
-	replaceKeysInValues bool
-
-	version statecfg.DomainVersionTypes
-}
-
-func (d domainCfg) Tables() []string {
-	return []string{d.valuesTable, d.hist.ValuesTable, d.hist.IiCfg.KeysTable, d.hist.IiCfg.ValuesTable}
-}
-
-func (d domainCfg) GetVersions() statecfg.VersionTypes {
-	return statecfg.VersionTypes{
-		Domain: &d.version,
-		Hist:   &d.hist.Version,
-		II:     &d.hist.IiCfg.Version,
-	}
-}
-
 type domainVisible struct {
 	files  []visibleFile
 	name   kv.Domain
 	caches *sync.Pool
 }
 
-func NewDomain(cfg domainCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
-	if cfg.hist.IiCfg.FilenameBase == "" {
-		panic("assert: emtpy `filenameBase`" + cfg.name.String())
+	if cfg.Hist.IiCfg.FilenameBase == "" {
+		panic("assert: emtpy `filenameBase`" + cfg.Name.String())
 	}
 
 	d := &Domain{
-		domainCfg:  cfg,
+		DomainCfg:  cfg,
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newDomainVisible(cfg.name, []visibleFile{}),
+		_visible:   newDomainVisible(cfg.Name, []visibleFile{}),
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, stepSize, dirs, logger); err != nil {
+	if d.History, err = NewHistory(cfg.Hist, stepSize, dirs, logger); err != nil {
 		return nil, err
 	}
 
-	if d.version.DataKV.IsZero() {
-		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	if d.Version.DataKV.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
-	if d.Accessors.Has(statecfg.AccessorBTree) && d.version.AccessorBT.IsZero() {
-		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	if d.Accessors.Has(statecfg.AccessorBTree) && d.Version.AccessorBT.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
-	if d.Accessors.Has(statecfg.AccessorHashMap) && d.version.AccessorKVI.IsZero() {
-		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	if d.Accessors.Has(statecfg.AccessorHashMap) && d.Version.AccessorKVI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
-	if d.Accessors.Has(statecfg.AccessorExistence) && d.version.AccessorKVEI.IsZero() {
-		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	if d.Accessors.Has(statecfg.AccessorExistence) && d.Version.AccessorKVEI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
 
 	return d, nil
@@ -166,16 +137,16 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 }
 
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.version.DataKV.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.Version.DataKV.String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.version.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.Version.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kvExistenceIdxNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.version.AccessorKVEI.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.Version.AccessorKVEI.String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.version.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.Version.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
 func (d *Domain) kvFilePathMask(fromStep, toStep kv.Step) string {
@@ -203,7 +174,7 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 // maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
 // Does not use history table to find the latest step
 func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
-	firstKey, err := kv.FirstKey(tx, d.valuesTable)
+	firstKey, err := kv.FirstKey(tx, d.ValuesTable)
 	if err != nil {
 		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
@@ -211,11 +182,11 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
 	if len(firstKey) == 0 {
 		return 0
 	}
-	if d.largeValues {
+	if d.LargeValues {
 		stepBytes := firstKey[len(firstKey)-8:]
 		return kv.Step(^binary.BigEndian.Uint64(stepBytes))
 	}
-	firstVal, err := tx.GetOne(d.valuesTable, firstKey)
+	firstVal, err := tx.GetOne(d.ValuesTable, firstKey)
 	if err != nil {
 		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
@@ -369,16 +340,16 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	if d.checker != nil {
-		ue := FromDomain(d.name)
+		ue := FromDomain(d.Name)
 		checker = func(startTxNum, endTxNum uint64) bool {
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
-func (d *Domain) Tables() []string { return append(d.History.Tables(), d.valuesTable) }
+func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
 
 func (d *Domain) Close() {
 	if d == nil {
@@ -427,8 +398,8 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 	w := &DomainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
-		valsTable: dt.d.valuesTable,
-		largeVals: dt.d.largeValues,
+		valsTable: dt.d.ValuesTable,
+		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace),
 	}
@@ -643,7 +614,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 
 	return &DomainRoTx{
-		name:     d.name,
+		name:     d.Name,
 		stepSize: d.stepSize,
 		d:        d,
 		ht:       d.History.BeginFilesRo(),
@@ -737,7 +708,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 
 	//var stepInDB []byte
 	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if d.largeValues {
+		if d.LargeValues {
 			kvs = append(kvs, struct {
 				k, v []byte
 			}{k[:len(k)-8], v})
@@ -840,13 +811,13 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 
 	var valsCursor kv.Cursor
 
-	if d.largeValues {
-		valsCursor, err = roTx.Cursor(d.valuesTable)
+	if d.LargeValues {
+		valsCursor, err = roTx.Cursor(d.ValuesTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
 		}
 	} else {
-		valsCursor, err = roTx.CursorDupSort(d.valuesTable)
+		valsCursor, err = roTx.CursorDupSort(d.ValuesTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
 		}
@@ -863,7 +834,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			return coll, err
 		}
 
-		if d.largeValues {
+		if d.LargeValues {
 			stepInDB = k[len(k)-8:]
 		} else {
 			stepInDB = v[:8]
@@ -873,7 +844,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			continue
 		}
 
-		if d.largeValues {
+		if d.LargeValues {
 			kvs = append(kvs, struct {
 				k, v []byte
 			}{k[:len(k)-8], v})
@@ -1336,7 +1307,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
-	valsCursor, err := rwTx.RwCursorDupSort(d.valuesTable)
+	valsCursor, err := rwTx.RwCursorDupSort(d.ValuesTable)
 	if err != nil {
 		return err
 	}
@@ -1345,19 +1316,19 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	for i := range domainDiffs {
 		keyStr, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
 		key := toBytesZeroCopy(keyStr)
-		if dt.d.largeValues {
+		if dt.d.LargeValues {
 			if len(value) == 0 {
 				if !bytes.Equal(key[len(key)-8:], prevStepBytes) {
-					if err := rwTx.Delete(d.valuesTable, key); err != nil {
+					if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 						return err
 					}
 				} else {
-					if err := rwTx.Put(d.valuesTable, key, []byte{}); err != nil {
+					if err := rwTx.Put(d.ValuesTable, key, []byte{}); err != nil {
 						return err
 					}
 				}
 			} else {
-				if err := rwTx.Put(d.valuesTable, key, value); err != nil {
+				if err := rwTx.Put(d.ValuesTable, key, value); err != nil {
 					return err
 				}
 			}
@@ -1642,11 +1613,11 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if asserts {
 		dt.valCViewID = tx.ViewID()
 	}
-	if dt.d.largeValues {
-		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
+	if dt.d.LargeValues {
+		dt.valsC, err = tx.Cursor(dt.d.ValuesTable)
 		return dt.valsC, err
 	}
-	dt.valsC, err = tx.CursorDupSort(dt.d.valuesTable)
+	dt.valsC, err = tx.CursorDupSort(dt.d.ValuesTable)
 	return dt.valsC, err
 }
 
@@ -1662,7 +1633,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	}
 	var v, foundInvStep []byte
 
-	if dt.d.largeValues {
+	if dt.d.LargeValues {
 		var fullkey []byte
 		fullkey, v, err = valsC.Seek(key)
 		if err != nil {
@@ -1754,7 +1725,7 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 		orderAscend: order.Asc,
 		aggStep:     dt.stepSize,
 		roTx:        roTx,
-		valsTable:   dt.d.valuesTable,
+		valsTable:   dt.d.ValuesTable,
 		logger:      dt.d.logger,
 		h:           &CursorHeap{},
 	}
@@ -1788,7 +1759,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	if untilTx > 0 {
 		untilStep = kv.Step((untilTx - 1) / dt.stepSize)
 	}
-	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.valuesTable))
+	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.ValuesTable))
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
 		return false, maxStepToPrune
@@ -1885,13 +1856,13 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
 	defer ancientDomainValsCollector.Close()
 
-	if dt.d.largeValues {
-		valsCursor, err = rwTx.RwCursor(dt.d.valuesTable)
+	if dt.d.LargeValues {
+		valsCursor, err = rwTx.RwCursor(dt.d.ValuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
 	} else {
-		valsCursor, err = rwTx.RwCursorDupSort(dt.d.valuesTable)
+		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
@@ -1899,13 +1870,13 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	defer valsCursor.Close()
 
 	loadFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if dt.d.largeValues {
+		if dt.d.LargeValues {
 			return valsCursor.Delete(k)
 		}
 		return valsCursor.(kv.RwCursorDupSort).DeleteExact(k, v)
 	}
 
-	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.valuesTable)
+	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.ValuesTable)
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.name.String(), "error", err)
 	}
@@ -1925,7 +1896,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.name.String(), err)
 		}
 
-		if dt.d.largeValues {
+		if dt.d.LargeValues {
 			stepBytes = k[len(k)-8:]
 		} else {
 			stepBytes = v[:8]
@@ -1936,10 +1907,10 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 			continue
 		}
 		if limit == 0 {
-			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return stat, fmt.Errorf("load domain values: %w", err)
 			}
-			if err := SaveExecV3PruneProgress(rwTx, dt.d.valuesTable, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
 			}
 			return stat, nil
@@ -1963,14 +1934,14 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		}
 	}
 	mxPruneSizeDomain.AddUint64(stat.Values)
-	if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return stat, fmt.Errorf("load domain values: %w", err)
 	}
-	if err := SaveExecV3PruneProgress(rwTx, dt.d.valuesTable, nil); err != nil {
+	if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.FilenameBase, err)
 	}
 
-	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.valuesTable), step+1); err != nil {
+	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.ValuesTable), step+1); err != nil {
 		return stat, err
 	}
 	mxPruneTookDomain.ObserveDuration(st)
@@ -1982,7 +1953,7 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 }
 
 func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.valuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	return []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {
