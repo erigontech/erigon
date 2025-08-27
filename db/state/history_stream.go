@@ -455,7 +455,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			g.Reset(offset)
 			for i := 0; i < hi.hc.h.historyValuesOnCompressedPage && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
-				histKey := historyKeyInDB(txNum, hi.nextKey, hi.hc.h.aggregationStep, nil)
+				histKey := historyKeyInDB(txNum, hi.nextKey, hi.hc.h.stepSize, nil)
 				if bytes.Equal(histKey, k) {
 					hi.nextVal = v
 					break
