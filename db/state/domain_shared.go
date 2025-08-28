@@ -61,9 +61,17 @@ func (l *KvList) Swap(i, j int) {
 	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
+type iodir int
+
+const (
+	get iodir = iota
+	put
+)
+
 type dataWithPrevStep struct {
 	data     []byte
 	prevStep kv.Step
+	dir      iodir
 }
 
 type SharedDomainsMetrics struct {
@@ -247,7 +255,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize), dir: put}
 	if domain == kv.StorageDomain {
 		var estSize int
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
@@ -611,6 +619,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.Unlock()
 	}
 
+	sd.domains[domain][keyS] = dataWithPrevStep{data: v, prevStep: step, dir: read}
 	return v, step, nil
 }
 
