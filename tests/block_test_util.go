@@ -228,6 +228,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 			if canonical == cb.Hash() {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
+			roTx.Rollback()
 		}
 		if b.BlockHeader == nil {
 			continue
