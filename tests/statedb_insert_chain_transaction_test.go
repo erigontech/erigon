@@ -891,7 +891,7 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, m)
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, m)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(txs), func(i int, block *core.BlockGen) {
 		var txn types.Transaction
