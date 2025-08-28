@@ -19,13 +19,14 @@ package engine_helpers
 import "github.com/erigontech/erigon/rpc"
 
 const MaxBuilders = 128
-const INVALID_INCLUSION_LIST = "INVALID_INCLUSION_LIST"
+const INCLUSION_LIST_UNSATISFIED = "INCLUSION_LIST_UNSATISFIED"
 const MaxBytesPerInclusionList = 8192
 
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
 var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
 var TooLargeRequestErr = rpc.CustomError{Code: -38004, Message: "Too large request"}
+var UnknownParent = rpc.CustomError{Code: -38006, Message: "Unknown parent"}
 
 const PectraBanner = `
 '########::'########::'######::'########:'########:::::'###::::

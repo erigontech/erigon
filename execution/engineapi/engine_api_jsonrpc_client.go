@@ -142,6 +142,33 @@ func (c *JsonRpcClient) NewPayloadV4(
 	}, c.backOff(ctx))
 }
 
+func (c *JsonRpcClient) NewPayloadV5(
+	ctx context.Context,
+	executionPayload *enginetypes.ExecutionPayload,
+	expectedBlobHashes []common.Hash,
+	parentBeaconBlockRoot *common.Hash,
+	executionRequests []hexutil.Bytes,
+	inclusionListTransactions []hexutil.Bytes,
+) (*enginetypes.PayloadStatus, error) {
+	return backoff.RetryWithData(func() (*enginetypes.PayloadStatus, error) {
+		var result enginetypes.PayloadStatus
+		err := c.rpcClient.CallContext(
+			ctx,
+			&result,
+			"engine_newPayloadV5",
+			executionPayload,
+			expectedBlobHashes,
+			parentBeaconBlockRoot,
+			executionRequests,
+			inclusionListTransactions,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return &result, nil
+	}, c.backOff(ctx))
+}
+
 func (c *JsonRpcClient) ForkchoiceUpdatedV1(
 	ctx context.Context,
 	forkChoiceState *enginetypes.ForkChoiceState,

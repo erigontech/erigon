@@ -183,9 +183,49 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
+// validateInclusionList validates that the execution payload satisfies the inclusion list constraints
+func (s *EngineServer) validateInclusionList(payload *engine_types.ExecutionPayload, inclusionListTransactions []hexutil.Bytes) error {
+	if len(inclusionListTransactions) == 0 {
+		return nil // No inclusion list to validate
+	}
+
+	inclusionListTxHashes := make(map[common.Hash]bool)
+	for _, txBytes := range inclusionListTransactions {
+		// Decode the transaction to get its hash
+		inclusionTxns, err := engine_types.ConvertInclusionListToTransactions([][]byte{txBytes})
+		if err != nil {
+			s.logger.Debug("Failed to decode inclusion list transaction", "err", err)
+			continue // Skip invalid transactions
+		}
+		for _, tx := range inclusionTxns {
+			inclusionListTxHashes[tx.Hash()] = true
+		}
+	}
+
+	payloadTxHashes := make(map[common.Hash]bool)
+	for _, txBytes := range payload.Transactions {
+		payloadTxns, err := engine_types.ConvertInclusionListToTransactions([][]byte{txBytes})
+		if err != nil {
+			continue // skip invalid transactions
+		}
+		for _, tx := range payloadTxns {
+			payloadTxHashes[tx.Hash()] = true
+		}
+	}
+
+	// check that all inclusion list transactions are present in the payload
+	for txHash := range inclusionListTxHashes {
+		if !payloadTxHashes[txHash] {
+			return fmt.Errorf("inclusion list transaction %s not found in payload", txHash.Hex())
+		}
+	}
+
+	return nil
+}
+
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionListTransactions []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -332,6 +372,18 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
+			}, nil
+		}
+	}
+
+	if version >= clparams.FuluVersion && inclusionListTransactions != nil {
+		// validate inclusion list constraints
+		if err := s.validateInclusionList(req, inclusionListTransactions); err != nil {
+			s.logger.Warn("Inclusion list validation failed", "err", err)
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InclusionListUnsatisfiedStatus,
+				LatestValidHash: nil,
+				ValidationError: nil,
 			}, nil
 		}
 	}
