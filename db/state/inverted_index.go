@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon/db/snaptype"
 	"math"
 	"os"
 	"path"
@@ -32,6 +31,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon/db/snaptype"
 
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
