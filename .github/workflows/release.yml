@@ -11,7 +11,7 @@ env:
   DOCKER_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
-  BINARIES: "erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+  BINARIES: "erigon downloader evm caplin diag integration rpcdaemon sentry txpool"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   DOCKERHUB_REPOSITORY_DEV: "erigontech/dev-erigon"
   DOCKERFILE_PATH: "Dockerfile"

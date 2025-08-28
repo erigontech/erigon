@@ -47,7 +47,6 @@ RUN mkdir -p ~/.local/share/erigon
 # copy compiled artifacts from builder
 
 ## then give each binary its own layer
-COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
 COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
 COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
 COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
