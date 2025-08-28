@@ -3,11 +3,12 @@ package version
 import (
 	"errors"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Version struct {

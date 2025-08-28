@@ -141,7 +141,6 @@ COMMANDS += capcli
 COMMANDS += downloader
 COMMANDS += hack
 COMMANDS += integration
-COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
