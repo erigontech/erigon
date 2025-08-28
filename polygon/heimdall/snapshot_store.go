@@ -18,6 +18,10 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
+var (
+	ErrSpanNotFound = errors.New("span not found")
+)
+
 func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 	return &SnapshotStore{
 		Store:                       base,
