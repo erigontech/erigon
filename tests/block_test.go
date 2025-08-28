@@ -60,7 +60,7 @@ func TestLegacyBlockchain(t *testing.T) {
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
@@ -84,7 +84,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
@@ -109,7 +109,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
