@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -108,7 +109,11 @@ func NewSimulatedBackendWithConfig(t *testing.T, m *mock.MockSentry) *SimulatedB
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewTestSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
+	cc := chain.TestChainConfig
+	genesis := types.Genesis{Config: cc, GasLimit: gasLimit, Alloc: alloc}
+	engine := ethash.NewFaker()
+	m := mock.MockWithGenesisEngine(t, &genesis, engine, false)
+	b := NewTestSimulatedBackendWithConfig(t, m)
 	return b
 }
 
