@@ -304,7 +304,36 @@ func (a *Aggregator) OpenFolder() error {
 	return nil
 }
 
+// TODO: convert this func to `map` or struct instead of 4 return params
+func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
+	r = &ScanDirsResult{}
+	r.iiFiles, err = filesFromDir(dirs.SnapIdx)
+	if err != nil {
+		return
+	}
+	r.iiFiles, err = filesFromDir(dirs.SnapHistory)
+	if err != nil {
+		return
+	}
+	r.domainFiles, err = filesFromDir(dirs.SnapDomain)
+	if err != nil {
+		return
+	}
+	return r, nil
+}
+
+type ScanDirsResult struct {
+	domainFiles  []string
+	historyFiles []string
+	iiFiles      []string
+}
+
 func (a *Aggregator) openFolder() error {
+	scanDirsRes, err := scanDirs(a.dirs)
+	if err != nil {
+		return err
+	}
+
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		if d.Disable {
@@ -318,7 +347,7 @@ func (a *Aggregator) openFolder() error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.openFolder()
+			return d.openFolder(scanDirsRes)
 		})
 	}
 	for _, ii := range a.iis {
@@ -326,7 +355,7 @@ func (a *Aggregator) openFolder() error {
 			continue
 		}
 		ii := ii
-		eg.Go(func() error { return ii.openFolder() })
+		eg.Go(func() error { return ii.openFolder(scanDirsRes) })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
