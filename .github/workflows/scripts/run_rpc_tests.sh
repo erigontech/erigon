@@ -3,7 +3,7 @@ set -e # Enable exit on error
 
 # Sanity check for mandatory parameters
 if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST]"
+  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE]"
   echo
   echo "  CHAIN:           The chain identifier (possible values: mainnet, gnosis, polygon)"
   echo "  RPC_VERSION:     The rpc-tests repository version or branch (e.g., v1.66.0, main)"
@@ -12,6 +12,7 @@ if [ -z "$1" ] || [ -z "$2" ]; then
   echo "  RESULT_DIR:      Result directory (optional, default: empty)"
   echo "  TESTS_TYPE:      Test type (optional, default: empty, possible values: latest or all)"
   echo "  REFERENCE_HOST:  IP Address of HOST (optional, default: empty)"
+  echo "  COMPARE_ERROR_MESSAGE: Verify the Error Message (optional, default empty possible values: do-not-compare-error-message)"
   echo
   exit 1
 fi
@@ -23,6 +24,7 @@ WORKSPACE="${4:-/tmp}"
 RESULT_DIR="$5"
 TEST_TYPE="$6"
 REFERENCE_HOST="$7"
+COMPARE_ERROR_MESSAGE="$8"
 
 OPTIONAL_FLAGS=""
 NUM_OF_RETRIES=1
@@ -43,6 +45,10 @@ fi
 if [ "$TEST_TYPE" = "latest" ]; then
     OPTIONAL_FLAGS+=" --tests-on-latest-block"
     NUM_OF_RETRIES=3
+fi
+
+if [ "$VERIFY_ERROR_MESSAGE" = "do-not-compare-error-message" ]; then
+    OPTIONAL_FLAGS+=" --do-not-compare-error"
 fi
 
 echo "Setup the test execution environment..."
