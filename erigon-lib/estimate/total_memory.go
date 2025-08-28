@@ -14,27 +14,24 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commands
+package estimate
 
 import (
-	"github.com/erigontech/erigon/cmd/state/stats"
-	"github.com/spf13/cobra"
+	"runtime/debug"
+
+	"github.com/pbnjay/memory"
 )
 
-func init() {
-	withDataDir(indexStatsCmd)
-	withStatsfile(indexStatsCmd)
-	withIndexBucket(indexStatsCmd)
-	rootCmd.AddCommand(indexStatsCmd)
-}
+func TotalMemory() uint64 {
+	mem := memory.TotalMemory()
 
-var indexStatsCmd = &cobra.Command{
-	Use:   "indexStats",
-	Short: "Stats about index chunks",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if statsfile == "stateless.csv" {
-			statsfile = ""
-		}
-		return stats.IndexStats(chaindata, indexBucket, statsfile)
-	},
+	if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
+		mem = min(mem, cgroupsMemLimit)
+	}
+
+	if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
+		mem = min(mem, uint64(goMemLimit))
+	}
+
+	return mem
 }
