@@ -93,6 +93,7 @@ import (
 
 const MockInsertAsInitialCycle = false
 
+// MockSentry is a Netwrork Inverface mock. So, unit-tests can test many Erigon's components - but without net-interaction
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx                  context.Context
@@ -102,7 +103,6 @@ type MockSentry struct {
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
-	gspec                *types.Genesis
 	ChainConfig          *chain.Config
 	Sync                 *stagedsync.Sync
 	MiningSync           *stagedsync.Sync
@@ -239,9 +239,9 @@ func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey,
 	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader, checkStateRoot bool) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
+	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, withPosDownloader)
 }
 
 func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
@@ -253,14 +253,10 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 	default:
 		engine = ethash.NewFaker()
 	}
-
-	checkStateRoot := true
-	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode,
-	engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader, checkStateRoot bool,
-) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader bool) *MockSentry {
 	tmpdir := os.TempDir()
 	if tb != nil {
 		tmpdir = tb.TempDir()
@@ -311,7 +307,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		Log:            logger,
 		Dirs:           dirs,
 		Engine:         engine,
-		gspec:          gspec,
 		ChainConfig:    gspec.Config,
 		Key:            key,
 		Notifications:  shards.NewNotifications(erigonGrpcServeer),
@@ -445,22 +440,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	mock.sentriesClient.IsMock = true
 
-	var (
-		snapDownloader = proto_downloader.NewMockDownloaderClient(ctrl)
-	)
-
-	snapDownloader.EXPECT().
-		Add(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		SetLogPrefix(gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		Completed(gomock.Any(), gomock.Any()).
-		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
-		AnyTimes()
+	snapDownloader := mockDownloader(ctrl)
 
 	miningConfig := cfg.Miner
 	miningConfig.Enabled = true
@@ -497,7 +477,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
-					mock.gspec,
+					gspec,
 					cfg.Sync,
 					nil,
 				),
@@ -536,7 +516,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
-				mock.gspec,
+				gspec,
 				cfg.Sync,
 				nil,
 			), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
@@ -578,7 +558,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
-				mock.gspec,
+				gspec,
 				cfg.Sync,
 				nil,
 			),
@@ -615,6 +595,25 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	return mock
 }
 
+func mockDownloader(ctrl *gomock.Controller) *proto_downloader.MockDownloaderClient {
+	snapDownloader := proto_downloader.NewMockDownloaderClient(ctrl)
+
+	snapDownloader.EXPECT().
+		Add(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		SetLogPrefix(gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		Completed(gomock.Any(), gomock.Any()).
+		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
+		AnyTimes()
+
+	return snapDownloader
+}
+
 // Mock is convenience function to create a mock with some pre-set values
 func Mock(tb testing.TB) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
@@ -642,8 +641,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false)
 }
 
 func MockWithTxPoolCancun(t *testing.T) *MockSentry {
@@ -658,8 +656,7 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 		},
 	}
 
-	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false)
 }
 
 func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
@@ -675,8 +672,7 @@ func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
 		},
 	}
 
-	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false)
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
@@ -708,8 +704,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 		},
 	}
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), chainConfig, log.New())
-	checkStateRoot := true
-	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader, checkStateRoot)
+	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader)
 }
 
 func (ms *MockSentry) EnableLogs() {
