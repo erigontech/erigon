@@ -51,18 +51,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx) {
-	tb.Helper()
-	db := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
-
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return db, tx
-}
-
 func TestDefaults(t *testing.T) {
 	t.Parallel()
 	cfg := new(Config)
@@ -135,10 +123,9 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestTemporalDb(t)
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	db := testTemporalDB(t)
+	tx, domains := testTemporalTxSD(t, db)
+
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	address := common.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
@@ -290,12 +277,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	}
 
 	db := testTemporalDB(b)
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	tx, domains := testTemporalTxSD(b, db)
 
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
@@ -472,18 +454,13 @@ func TestBlockhash(t *testing.T) {
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
 func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
+	b.Helper()
 	cfg := new(Config)
 	setDefaults(cfg)
 	db := testTemporalDB(b)
-	defer db.Close()
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	tx, domains := testTemporalTxSD(b, db)
 
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
 	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
@@ -727,10 +704,8 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 		return contract
 	}
 
-	_, tx := NewTestTemporalDb(b)
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
