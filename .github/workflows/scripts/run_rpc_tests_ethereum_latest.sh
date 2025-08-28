@@ -11,9 +11,7 @@ REFERENCE_HOST="$3"
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
    #disbale temporaryy to be investigates
-   debug_traceBlockByNumber
-   eth_getBlockReceipts/test_07.json
-   eth_getProof/test_01.json
+   debug_traceBlockByNumber/test_30.json
 
    debug_traceCall/test_22.json
    debug_traceCallMany
