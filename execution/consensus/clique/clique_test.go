@@ -63,7 +63,6 @@ func TestReimportMirroredState(t *testing.T) {
 		Config: chainspec.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
-	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false)
 
 	// Generate a batch of blocks, each properly signed

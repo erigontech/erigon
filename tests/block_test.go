@@ -55,8 +55,6 @@ func TestLegacyBlockchain(t *testing.T) {
 	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
 	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 
-	checkStateRoot := true
-
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
@@ -78,8 +76,6 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
-
-	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
@@ -103,8 +99,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt := new(testMatcher)
 
 	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests_devnet")
-
-	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
