@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers/logger"
@@ -166,7 +165,7 @@ func testTemporalDB(t testing.TB) kv.TemporalRwDB {
 	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
-func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *dbstate.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.RwTx, *dbstate.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
@@ -565,7 +564,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	p, lbl = program.New().Jumpdest()
 	callEOA := p.
 		Call(nil, 0xE0, 0, 0, 0, 0, 0). // call addr of EOA
-		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
+		Op(vm.POP).Jump(lbl).Bytes()    // pop return value and jump to label
 
 	p, lbl = program.New().Jumpdest()
 	// Push as if we were making call, then pop it off again, and loop
