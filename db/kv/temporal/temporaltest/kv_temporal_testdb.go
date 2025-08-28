@@ -31,6 +31,10 @@ import (
 
 // nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
+	return NewTestDBWithStepSize(tb, dirs, config3.DefaultStepSize)
+}
+
+func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
@@ -46,13 +50,15 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	if err != nil {
 		panic(err)
 	}
-	agg, err := state.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, rawDB, log.New())
+	agg, err := state.NewAggregator2(context.Background(), dirs, stepSize, salt, rawDB, log.New())
 	if err != nil {
 		panic(err)
 	}
+	agg.DisableFsync()
 	if err := agg.OpenFolder(); err != nil {
 		panic(err)
 	}
+
 	if tb != nil {
 		tb.Cleanup(agg.Close)
 	}

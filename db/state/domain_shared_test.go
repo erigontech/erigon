@@ -83,7 +83,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Logf("expected hash: %x", expectedHash)
-	t.Logf("valueTransform enabled: %t", agg.commitmentValuesTransform)
+	t.Logf("key referencing enabled: %t", agg.d[kv.CommitmentDomain].ReplaceKeysInValues)
 	err = agg.BuildFiles(stepSize * 16)
 	require.NoError(t, err)
 

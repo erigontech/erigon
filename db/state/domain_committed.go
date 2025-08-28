@@ -99,25 +99,23 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
+// ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
+// Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
+func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
+	const minStepsForReferencing = 2
+
+	return ((to-from)/stepSize)%minStepsForReferencing == 0
+}
+
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
 // by looking them up in the account and storage domain files.
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
 	logger := log.Root()
 	aggTx := at
 
-	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		return branch, nil
-	}
-
-	if !aggTx.d[kv.CommitmentDomain].d.ReplaceKeysInValues && aggTx.a.commitmentValuesTransform {
-		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
-	}
-
-	if !aggTx.a.commitmentValuesTransform ||
-		len(branch) == 0 ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
-		bytes.Equal(prefix, keyCommitmentState) ||
-		((fEndTxNum-fStartTxNum)/at.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
+	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, keyCommitmentState) ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
 
 		return branch, nil // do not transform, return as is
 	}
@@ -386,7 +384,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.stepSize)%2 != 0 {
+		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, keyFromTxNum, keyEndTxNum) {
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {

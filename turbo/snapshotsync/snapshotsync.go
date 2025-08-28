@@ -449,6 +449,10 @@ func SyncSnapshots(
 				continue
 			}
 
+			if _, ok := blackListForPruning[p.Name]; ok {
+				continue
+			}
+
 			downloadRequest = append(downloadRequest, DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,

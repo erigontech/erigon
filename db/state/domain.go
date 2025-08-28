@@ -1111,8 +1111,12 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
+	versionOfRs := uint8(0)
+	if !d.Version.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+		versionOfRs = 1
+	}
 	cfg := recsplit.RecSplitArgs{
-		Version:            1,
+		Version:            versionOfRs,
 		Enums:              false,
 		LessFalsePositives: true,
 
@@ -1969,5 +1973,5 @@ func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
 
 func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon seg reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
 }

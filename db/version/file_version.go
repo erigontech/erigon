@@ -178,6 +178,20 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	return matches[0], ver, true, nil
 }
 
+func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {
+	_, fileVer, ok, err := FindFilesWithVersionsByPattern(pattern)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("file with this pattern not found")
+	}
+	if fileVer.Less(minSup) {
+		return fmt.Errorf("file version %s is less than supported version %s", fileVer.String(), minSup.String())
+	}
+	return nil
+}
+
 func ReplaceVersionWithMask(path string) (string, error) {
 	_, fName := filepath.Split(path)
 

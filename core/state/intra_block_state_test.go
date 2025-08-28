@@ -39,9 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -54,7 +53,10 @@ func TestSnapshotRandom(t *testing.T) {
 
 	t.Parallel()
 	config := &quick.Config{MaxCount: 10}
-	err := quick.Check((*snapshotTest).run, config)
+	ts := &snapshotTest{}
+	err := quick.Check(func() bool {
+		return ts.run(t)
+	}, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
 		test := cerr.In[0].(*snapshotTest)
 		t.Errorf("%v:\n%s", test.err, test)
@@ -239,25 +241,11 @@ func (test *snapshotTest) String() string {
 	return out.String()
 }
 
-func (test *snapshotTest) run() bool {
-	// Run all actions and create snapshots.
-	db := memdb.NewStateDB("")
-	defer db.Close()
+func (test *snapshotTest) run(t *testing.T) bool {
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		test.err = err
-		return false
-	}
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		test.err = err
 		return false
@@ -459,17 +447,10 @@ func TestTransientStorage(t *testing.T) {
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -548,17 +529,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 func TestVersionMapRevert(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -625,18 +599,10 @@ func TestVersionMapRevert(t *testing.T) {
 
 func TestVersionMapMarkEstimate(t *testing.T) {
 	t.Parallel()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -712,18 +678,10 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 func TestVersionMapOverwrite(t *testing.T) {
 	t.Parallel()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -817,18 +775,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 func TestVersionMapWriteNoConflict(t *testing.T) {
 	t.Parallel()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -956,17 +906,10 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
