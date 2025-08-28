@@ -117,14 +117,14 @@ type btHeaderMarshaling struct {
 	ExcessBlobGas *math.HexOrDecimal64
 }
 
-func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
+func (bt *BlockTest) Run(t *testing.T) error {
 	config, ok := testutil.Forks[bt.json.Network]
 	if !ok {
 		return testutil.UnsupportedForkError{Name: bt.json.Network}
 	}
 
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 	defer m.Close()
 
 	bt.br = m.BlockReader
