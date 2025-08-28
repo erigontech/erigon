@@ -58,7 +58,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 	}
 	dirs := datadir.New(path)
 	logger := log.New()
-	db := temporaltest.NewTestDB(t, dirs)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, aggStep)
 
 	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
 	require.NoError(t, err)
