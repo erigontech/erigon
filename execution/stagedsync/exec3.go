@@ -1471,10 +1471,12 @@ func ExecV3(ctx context.Context,
 											committedTransactions := uint64(float64(uncommittedTransactions) * progress)
 											commitedBlocks := uint64(float64(uncommittedBlocks) * progress)
 
-											pe.LogCommitted(commitStart,
-												commitedBlocks-prevCommitedBlocks,
-												committedTransactions-prevCommittedTransactions,
-												committedGas-prevCommitedGas, stepsInDb, commitProgress)
+											if committedTransactions-prevCommittedTransactions > 0 {
+												pe.LogCommitted(commitStart,
+													commitedBlocks-prevCommitedBlocks,
+													committedTransactions-prevCommittedTransactions,
+													committedGas-prevCommitedGas, stepsInDb, commitProgress)
+											}
 
 											lastCommitedLog = time.Now()
 											prevCommitedBlocks = commitedBlocks
