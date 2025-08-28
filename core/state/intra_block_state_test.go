@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -54,7 +55,10 @@ func TestSnapshotRandom(t *testing.T) {
 
 	t.Parallel()
 	config := &quick.Config{MaxCount: 10}
-	err := quick.Check((*snapshotTest).run, config)
+	ts := &snapshotTest{}
+	err := quick.Check(func() bool {
+		return ts.run(t)
+	}, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
 		test := cerr.In[0].(*snapshotTest)
 		t.Errorf("%v:\n%s", test.err, test)
@@ -239,27 +243,11 @@ func (test *snapshotTest) String() string {
 	return out.String()
 }
 
-func (test *snapshotTest) run() bool {
-	aggStep := uint64(16)
+func (test *snapshotTest) run(t *testing.T) bool {
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	// Run all actions and create snapshots.
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), aggStep, db, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		test.err = err
-		return false
-	}
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		test.err = err
 		return false
