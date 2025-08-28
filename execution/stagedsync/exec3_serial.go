@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 
@@ -159,6 +159,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			}
 		}
 		if !txTask.HistoryExecution {
+			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx.(kv.TemporalTx)) {
+				logIndexAfterTx -= uint32(len(txTask.Logs))
+			}
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
@@ -201,7 +204,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 	if !ok {
 		return t2, errors.New("tx is not a temporal tx")
 	}
-	se.doms, err = state2.NewSharedDomains(temporalTx, se.logger)
+	se.doms, err = dbstate.NewSharedDomains(temporalTx, se.logger)
 	if err != nil {
 		return t2, err
 	}

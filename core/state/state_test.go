@@ -28,24 +28,25 @@ import (
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {
-	kv    kv.TemporalRwDB
+	db    kv.TemporalRwDB
 	tx    kv.TemporalTx
 	state *IntraBlockState
 	r     StateReader
@@ -79,7 +80,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := s.kv.BeginTemporalRo(context.Background())
+	tx, err1 := s.db.BeginTemporalRo(context.Background())
 	if err1 != nil {
 		c.Fatalf("create tx: %v", err1)
 	}
@@ -116,33 +117,20 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	//var agg *state.Aggregator
-	//s.kv, s.tx, agg = memdb.NewTestTemporalDb(c.Logf)
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	stepSize := uint64(16)
 
-	agg, err := state.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	db := temporaltest.NewTestDBWithStepSize(nil, datadir.New(c.MkDir()), stepSize)
+	s.db = db
+
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		panic(err)
 	}
-	defer agg.Close()
-
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		panic(err)
-	}
-
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	if err != nil {
 		panic(err)
 	}
-	defer domains.Close()
 
 	txNum := uint64(1)
 	//domains.SetTxNum(txNum)
@@ -159,7 +147,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 
 func (s *StateSuite) TearDownTest(c *checker.C) {
 	s.tx.Rollback()
-	s.kv.Close()
+	s.db.Close()
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {

@@ -32,19 +32,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	state2 "github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
@@ -56,24 +56,8 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 		path = fpath
 	}
 	dirs := datadir.New(path)
-
-	logger := log.New()
-	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
-	t.Cleanup(db.Close)
-
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(t, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-	err = agg.OpenFolder()
-	agg.DisableFsync()
-	require.NoError(t, err)
-
-	tdb, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	t.Cleanup(tdb.Close)
-	return tdb, agg, path
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, aggStep)
+	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 
 func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
@@ -196,7 +180,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	for _, d := range dirs {
 		if strings.HasPrefix(d.Name(), "db") {
-			err = os.RemoveAll(path.Join(datadir, d.Name()))
+			err = dir.RemoveAll(path.Join(datadir, d.Name()))
 			t.Logf("remove DB %q err %v", d.Name(), err)
 			require.NoError(t, err)
 			break
@@ -375,7 +359,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	// ======== delete datadir and restart domains ========
 	t.Run("delete_datadir", func(t *testing.T) {
-		err := os.RemoveAll(datadir)
+		err := dir.RemoveAll(datadir)
 		require.NoError(t, err)
 		//t.Logf("datadir has been removed")
 

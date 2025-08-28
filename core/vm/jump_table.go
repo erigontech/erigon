@@ -22,7 +22,7 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 type (
@@ -294,7 +294,6 @@ func newHomesteadInstructionSet() JumpTable {
 func newOsakaInstructionSet() JumpTable {
 	instructionSet := newPragueInstructionSet()
 	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
-	enable7907(&instructionSet) // EIP-7907: Meter Contract Code Size And Increase Limit
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

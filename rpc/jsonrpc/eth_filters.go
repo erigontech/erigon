@@ -21,10 +21,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -151,7 +151,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		headers, id := api.filters.SubscribeNewHeads(32)
 		defer api.filters.UnsubscribeHeads(id)
 		for {
@@ -189,7 +189,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context, fullTx *bool) (*
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		txsCh, id := api.filters.SubscribePendingTxs(256)
 		defer api.filters.UnsubscribePendingTxs(id)
 
@@ -236,7 +236,7 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		txsCh, id := api.filters.SubscribePendingTxs(512)
 		defer api.filters.UnsubscribePendingTxs(id)
 
@@ -277,7 +277,7 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit)
 		defer api.filters.UnsubscribeLogs(id)
 

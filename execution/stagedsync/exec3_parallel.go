@@ -10,19 +10,19 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/types"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -77,16 +77,16 @@ type executor interface {
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
 	readState() *state.ParallelExecutionState
-	domains() *state2.SharedDomains
+	domains() *dbstate.SharedDomains
 }
 
 type txExecutor struct {
 	sync.RWMutex
 	cfg            ExecuteBlockCfg
 	execStage      *StageState
-	agg            *state2.Aggregator
+	agg            *dbstate.Aggregator
 	rs             *state.ParallelExecutionState
-	doms           *state2.SharedDomains
+	doms           *dbstate.SharedDomains
 	accumulator    *shards.Accumulator
 	u              Unwinder
 	isMining       bool
@@ -106,7 +106,7 @@ func (te *txExecutor) readState() *state.ParallelExecutionState {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *state2.SharedDomains {
+func (te *txExecutor) domains() *dbstate.SharedDomains {
 	return te.doms
 }
 

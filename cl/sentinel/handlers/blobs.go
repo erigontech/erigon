@@ -19,13 +19,15 @@ package handlers
 import (
 	"math"
 
+	"github.com/libp2p/go-libp2p/core/network"
+
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/libp2p/go-libp2p/core/network"
 )
 
 const maxBlobsThroughoutputPerRequest = 72
@@ -134,6 +136,15 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 		if err != nil {
 			return err
 		}
+
+		if exist, err := c.blobsStorage.BlobSidecarExists(c.ctx, *slot, id.BlockRoot, id.Index); err != nil {
+			log.Debug("failed to check if blob sidecar exists", "error", err)
+			continue
+		} else if !exist {
+			// skip
+			continue
+		}
+		// exists, write successful response and blob sidecar
 		if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
 			return err
 		}

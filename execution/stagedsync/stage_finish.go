@@ -19,31 +19,36 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/params"
 )
 
 type FinishCfg struct {
-	db            kv.RwDB
-	tmpDir        string
-	forkValidator *engine_helpers.ForkValidator
+	db                kv.RwDB
+	tmpDir            string
+	forkValidator     *engine_helpers.ForkValidator
+	initialCycleStart *time.Time
 }
 
 func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
+	initialCycleStart := time.Now()
 	return FinishCfg{
-		db:            db,
-		tmpDir:        tmpDir,
-		forkValidator: forkValidator,
+		db:                db,
+		tmpDir:            tmpDir,
+		forkValidator:     forkValidator,
+		initialCycleStart: &initialCycleStart,
 	}
 }
 
 func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
+	defer updateInitialCycleDuration(s, cfg)
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -76,7 +81,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	}
 
 	if s.CurrentSyncCycle.IsInitialCycle {
-		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
+		if err := rawdb.SetErigonVersion(tx, version.VersionKeyFinished); err != nil {
 			return err
 		}
 	}
@@ -88,6 +93,15 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	}
 
 	return nil
+}
+
+func updateInitialCycleDuration(s *StageState, cfg FinishCfg) {
+	if s.CurrentSyncCycle.IsInitialCycle {
+		initialCycleDurationSecs.Set(time.Since(*cfg.initialCycleStart).Seconds())
+	} else {
+		*cfg.initialCycleStart = time.Now()
+		initialCycleDurationSecs.Set(0)
+	}
 }
 
 func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {

@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
@@ -81,10 +81,10 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeHeader: %s", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}
 		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeTd: %s", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
 		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
@@ -92,7 +92,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not commit: %s", err)
 	}
 
 	return &execution.InsertionResult{

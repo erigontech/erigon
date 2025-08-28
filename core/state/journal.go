@@ -160,9 +160,6 @@ type (
 		address common.Address
 		slot    common.Hash
 	}
-	accessListAddCodeAccessChange struct {
-		codeAddr common.Address
-	}
 
 	transientStorageChange struct {
 		account  common.Address
@@ -426,14 +423,5 @@ func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
 }
 
 func (ch accessListAddSlotChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch accessListAddCodeAccessChange) revert(s *IntraBlockState) error {
-	s.accessList.DeleteCodeAccess(ch.codeAddr)
-	return nil
-}
-
-func (ch accessListAddCodeAccessChange) dirtied() *common.Address {
 	return nil
 }

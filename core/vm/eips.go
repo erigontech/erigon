@@ -26,8 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -341,18 +341,8 @@ func enable7702(jt *JumpTable) {
 func enable7939(jt *JumpTable) {
 	jt[CLZ] = &operation{
 		execute:     opCLZ,
-		constantGas: GasFastestStep,
+		constantGas: GasFastStep,
 		numPop:      1,
 		numPush:     1,
 	}
-}
-
-func enable7907(jt *JumpTable) {
-	jt[CALL].dynamicGas = gasCallEIP7907
-	jt[CALLCODE].dynamicGas = gasCallCodeEIP7907
-	jt[STATICCALL].dynamicGas = gasStaticCallEIP7907
-	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7907
-	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7907
-	jt[CREATE].dynamicGas = gasCreateEIP7907
-	jt[CREATE2].dynamicGas = gasCreate2EIP7907
 }

@@ -7,16 +7,16 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/abi"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func ValidateAATransaction(
@@ -53,7 +53,7 @@ func ValidateAATransaction(
 	}
 
 	vmConfig := evm.Config()
-	rules := chainConfig.Rules(header.Number.Uint64(), header.Time)
+	rules := evm.ChainRules()
 	hasEIP3860 := vmConfig.HasEip3860(rules)
 
 	preTxCost, err := tx.PreTransactionGasCost(rules, hasEIP3860)

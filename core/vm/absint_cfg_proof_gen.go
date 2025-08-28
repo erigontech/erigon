@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/emicklei/dot"
 	"github.com/holiman/uint256"
 )
@@ -584,7 +586,7 @@ func (cfg *Cfg) PrintAnlyState() {
 	}
 
 	path := "cfg.dot"
-	_ = os.Remove(path)
+	_ = dir.RemoveFile(path)
 
 	f, errcr := os.Create(path)
 	if errcr != nil {

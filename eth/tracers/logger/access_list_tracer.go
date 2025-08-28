@@ -24,11 +24,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
@@ -215,7 +215,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		// contract address for CREATE can only be generated with state
 		if a.state != nil {
 			nonce, _ := a.state.GetNonce(scope.Address())
-			addr := crypto.CreateAddress(scope.Address(), nonce)
+			addr := types.CreateAddress(scope.Address(), nonce)
 			if _, ok := a.excl[addr]; !ok {
 				a.createdContracts[addr] = struct{}{}
 			}
@@ -231,7 +231,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		}
 		inithash := crypto.Keccak256(init)
 		salt := stackData[stackLen-4]
-		addr := crypto.CreateAddress2(scope.Address(), salt.Bytes32(), inithash)
+		addr := types.CreateAddress2(scope.Address(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {
 			a.createdContracts[addr] = struct{}{}
 		}

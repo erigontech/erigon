@@ -21,17 +21,16 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"os"
 	"runtime"
+	"runtime/pprof"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -39,10 +38,13 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/tests/bor/helper"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 const (
@@ -80,12 +82,27 @@ func TestMiningBenchmark(t *testing.T) {
 	}
 
 	//usually 15sec is enough
-	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
+	timeout := time.Minute
+	ctx, clean := context.WithTimeout(context.Background(), timeout)
 	defer clean()
 
-	logger := testlog.Logger(t, log.LvlInfo)
-	fdlimit.Raise(2048)
+	logger := testlog.Logger(t, log.LvlDebug)
+	goroutineDumpTimer := time.NewTimer(timeout - 5*time.Second)
+	defer goroutineDumpTimer.Stop()
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-goroutineDumpTimer.C:
+			logger.Error("goroutine dump timer expired")
+			err := pprof.Lookup("goroutine").WriteTo(os.Stderr, 2)
+			if err != nil {
+				logger.Error("failed to dump goroutines", "err", err)
+			}
+		}
+	}()
 
+	debug.RaiseFdLimit()
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)
 	var stacks []*node.Node
 	var ethbackends []*eth.Ethereum
@@ -94,7 +111,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(ctx, logger, t.TempDir(), &genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(ctx, logger, t.TempDir(), &genesis, pkeys[i], true)
 		if err != nil {
 			panic(err)
 		}
@@ -141,12 +158,15 @@ func TestMiningBenchmark(t *testing.T) {
 
 	start := time.Now()
 
-	for _, txn := range txs {
+	for i, txn := range txs {
 		buf := bytes.NewBuffer(nil)
 		txV := *txn
 		err := txV.MarshalBinary(buf)
 		if err != nil {
 			panic(err)
+		}
+		if i%1000 == 0 {
+			logger.Debug("Adding txn", "num", i)
 		}
 		_, err = ethbackends[0].TxpoolServer().Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 		if err != nil {

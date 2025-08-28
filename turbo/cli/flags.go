@@ -27,16 +27,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -140,24 +139,6 @@ var (
 		Name:  "sync.parallel-state-flushing",
 		Usage: "Enables parallel state flushing",
 		Value: true,
-	}
-
-	UploadLocationFlag = cli.StringFlag{
-		Name:  "upload.location",
-		Usage: "Location to upload snapshot segments to",
-		Value: "",
-	}
-
-	UploadFromFlag = cli.StringFlag{
-		Name:  "upload.from",
-		Usage: "Blocks to upload from: number, or 'earliest' (start of the chain), 'latest' (last segment previously uploaded)",
-		Value: "latest",
-	}
-
-	FrozenBlockLimitFlag = cli.UintFlag{
-		Name:  "upload.snapshot.limit",
-		Usage: "Sets the maximum number of snapshot blocks to hold on the local disk when uploading",
-		Value: 1500000,
 	}
 
 	BadBlockFlag = cli.StringFlag{
@@ -317,20 +298,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopBlockLimit = limit
 	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
-
-	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
-		cfg.Sync.UploadLocation = location
-	}
-
-	if blockno := ctx.String(UploadFromFlag.Name); len(blockno) > 0 {
-		cfg.Sync.UploadFrom = rpc.AsBlockNumber(blockno)
-	} else {
-		cfg.Sync.UploadFrom = rpc.LatestBlockNumber
-	}
-
-	if limit := ctx.Uint(FrozenBlockLimitFlag.Name); limit > 0 {
-		cfg.Sync.FrozenBlockLimit = uint64(limit)
-	}
 
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))

@@ -21,11 +21,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	stateLib "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbstate "github.com/erigontech/erigon/db/state"
 )
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
@@ -88,7 +87,7 @@ func TestAccessList(t *testing.T) {
 
 	_, tx, _ := NewTestTemporalDb(t)
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -193,31 +192,4 @@ func TestAccessList(t *testing.T) {
 	if got, exp := len(state.accessList.addresses), 0; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
-
-	require.Len(t, state.accessList.codeAccesses, 0)
-	require.Len(t, state.journal.entries, 0)
-	changed := state.AddCodeAddressToAccessList(addr("0x0001"))
-	require.True(t, changed)
-	require.Len(t, state.accessList.codeAccesses, 1)
-	require.Len(t, state.journal.entries, 1)
-	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
-	changed = state.AddCodeAddressToAccessList(addr("0x0002"))
-	require.True(t, changed)
-	require.Len(t, state.accessList.codeAccesses, 2)
-	require.Len(t, state.journal.entries, 2)
-	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
-	require.Contains(t, state.accessList.codeAccesses, addr("0x0002"))
-	changed = state.AddCodeAddressToAccessList(addr("0x0001"))
-	require.False(t, changed)
-	require.Len(t, state.accessList.codeAccesses, 2)
-	require.Len(t, state.journal.entries, 2)
-	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
-	require.Contains(t, state.accessList.codeAccesses, addr("0x0002"))
-	state.journal.revert(state, 1)
-	require.Len(t, state.accessList.codeAccesses, 1)
-	require.Len(t, state.journal.entries, 1)
-	require.Contains(t, state.accessList.codeAccesses, addr("0x0001"))
-	state.journal.revert(state, 0)
-	require.Len(t, state.accessList.codeAccesses, 0)
-	require.Len(t, state.journal.entries, 0)
 }

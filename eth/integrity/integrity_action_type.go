@@ -29,15 +29,13 @@ const (
 	BorEvents          Check = "BorEvents"
 	BorSpans           Check = "BorSpans"
 	BorCheckpoints     Check = "BorCheckpoints"
-	BorMilestones      Check = "BorMilestones" // this check is informational, and we don't run it by default (e.g. gaps may exist but that is ok)
+	Publishable        Check = "Publishable"
 	Commitment         Check = "Commitment"
 )
 
 var AllChecks = []Check{
-	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents, BorSpans, BorCheckpoints, Commitment,
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents,
+	BorSpans, BorCheckpoints, RCacheNoDups, Commitment, Publishable,
 }
 
-var NonDefaultChecks = []Check{
-	BorMilestones,
-	RCacheNoDups,
-}
+var NonDefaultChecks = []Check{}

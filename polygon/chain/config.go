@@ -21,10 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
@@ -53,9 +53,16 @@ var (
 	BorDevnetChainConfig  = readChainSpec("chainspecs/bor-devnet.json")
 )
 
+var (
+	BorKurtosisDevnetChainId uint64 = 4927
+)
+
 func init() {
-	chainspec.RegisterChain(networkname.Amoy, AmoyChainConfig, AmoyGenesisBlock(), AmoyGenesisHash, AmoyBootnodes, "")
-	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil, "")
+	chainspec.RegisterChain(networkname.Amoy, AmoyChainConfig, AmoyGenesisBlock(), AmoyGenesisHash, AmoyBootnodes,
+		"enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io")
 	chainspec.RegisterChain(networkname.BorMainnet, BorMainnetChainConfig, BorMainnetGenesisBlock(), BorMainnetGenesisHash, BorMainnetBootnodes,
 		"enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io")
+
+	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil, "")
+	delete(chainspec.NetworkNameByID, BorDevnetChainConfig.ChainID.Uint64()) // chain ID 1337 is used in non-Bor testing (e.g. Hive)
 }

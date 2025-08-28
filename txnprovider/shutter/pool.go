@@ -22,16 +22,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 var _ txnprovider.TxnProvider = (*Pool)(nil)
@@ -48,6 +49,7 @@ type Pool struct {
 	encryptedTxnsPool       *EncryptedTxnsPool
 	decryptedTxnsPool       *DecryptedTxnsPool
 	slotCalculator          SlotCalculator
+	stopped                 atomic.Bool
 }
 
 func NewPool(
@@ -57,14 +59,34 @@ func NewPool(
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
 	currentBlockNumReader currentBlockNumReader,
+	opts ...Option,
 ) *Pool {
 	logger = logger.New("component", "shutter")
-	slotCalculator := NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
+	flatOpts := options{}
+	for _, opt := range opts {
+		opt(&flatOpts)
+	}
+
 	blockListener := NewBlockListener(logger, stateChangesClient)
 	blockTracker := NewBlockTracker(logger, blockListener, currentBlockNumReader)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
+
+	var slotCalculator SlotCalculator
+	if flatOpts.slotCalculator != nil {
+		slotCalculator = flatOpts.slotCalculator
+	} else {
+		slotCalculator = NewBeaconChainSlotCalculator(config.BeaconChainGenesisTimestamp, config.SecondsPerSlot)
+	}
+
 	decryptionKeysValidator := NewDecryptionKeysExtendedValidator(logger, config, slotCalculator, eonTracker)
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysValidator)
+	var decryptionKeysSource DecryptionKeysSource
+	if flatOpts.decryptionKeysSourceFactory != nil {
+		decryptionKeysSource = flatOpts.decryptionKeysSourceFactory(decryptionKeysValidator)
+	} else {
+		decryptionKeysSource = NewPubSubDecryptionKeysSource(logger, config.P2pConfig, decryptionKeysValidator)
+	}
+
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysSource)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
 	decryptedTxnsPool := NewDecryptedTxnsPool()
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(
@@ -90,10 +112,13 @@ func NewPool(
 	}
 }
 
-func (p Pool) Run(ctx context.Context) error {
-	defer p.logger.Info("pool stopped")
-	p.logger.Info("running pool")
+func (p *Pool) Run(ctx context.Context) error {
+	defer func() {
+		p.stopped.Store(true)
+		p.logger.Info("pool stopped")
+	}()
 
+	p.logger.Info("running pool")
 	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {
 		p.decryptionKeysProcessor.Enqueue(msg)
 	})
@@ -152,7 +177,12 @@ func (p Pool) Run(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if p.stopped.Load() {
+		p.logger.Error("cannot provide shutter transactions - pool stopped")
+		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+	}
+
 	provideOpts := txnprovider.ApplyProvideOptions(opts...)
 	blockTime := provideOpts.BlockTime
 	if blockTime == 0 {
@@ -188,25 +218,21 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 		return nil, err
 	}
 
-	// Note: specs say to produce empty block in case decryption keys do not arrive on time.
-	// However, upon discussion with Shutter and Nethermind it was agreed that this is not
-	// practical at this point in time as it can hurt validator rewards across the network,
-	// and also it doesn't in any way prevent any cheating from happening.
-	// To properly address cheating, we need a mechanism for slashing which is a future
-	// work stream item for the Shutter team. For now, we follow what Nethermind does
-	// and fallback to the public devp2p mempool - any changes to this should be
-	// co-ordinated with them.
 	blockNum := parentBlockNum + 1
 	decryptionMark := DecryptionMark{Slot: slot, Eon: eon.Index}
-	slotAge := p.slotCalculator.CalcSlotAge(slot)
-	if slotAge < p.config.MaxDecryptionKeysDelay {
-		decryptionMarkWaitTimeout := p.config.MaxDecryptionKeysDelay - slotAge
+	slotStartTime := p.slotCalculator.CalcSlotStartTimestamp(slot)
+	cutoffTime := time.Unix(int64(slotStartTime), 0).Add(p.config.MaxDecryptionKeysDelay)
+	if time.Now().Before(cutoffTime) {
+		decryptionMarkWaitTimeout := time.Until(cutoffTime)
+		// enforce the max cap for malicious inputs with slot times far ahead in the future
+		decryptionMarkWaitTimeout = min(decryptionMarkWaitTimeout, p.config.MaxDecryptionKeysDelay)
 		p.logger.Debug(
 			"waiting for decryption keys",
 			"slot", slot,
 			"blockNum", blockNum,
 			"eon", eon.Index,
-			"age", slotAge,
+			"slotStart", slotStartTime,
+			"cutoffTime", cutoffTime.Unix(),
 			"timeout", decryptionMarkWaitTimeout,
 		)
 
@@ -224,7 +250,8 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 					"slot", slot,
 					"blockNum", blockNum,
 					"eon", eon.Index,
-					"age", slotAge,
+					"slotStart", slotStartTime,
+					"cutoffTime", cutoffTime.Unix(),
 					"timeout", decryptionMarkWaitTimeout,
 				)
 
@@ -244,7 +271,8 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 			"decryption keys missing, falling back to base txn provider",
 			"slot", slot,
 			"eon", eon.Index,
-			"age", slotAge,
+			"slotStart", slotStartTime,
+			"cutoffTime", cutoffTime.Unix(),
 			"blockNum", blockNum,
 		)
 
@@ -252,25 +280,59 @@ func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
-	decryptedTxnsGas := decryptedTxns.TotalGasLimit
-	totalGasTarget := provideOpts.GasTarget
-	if decryptedTxnsGas > totalGasTarget {
-		// note this should never happen because EncryptedGasLimit must always be <= gasLimit for a block
-		return nil, fmt.Errorf("decrypted txns gas gt target: %d > %d", decryptedTxnsGas, totalGasTarget)
+	availableGas := provideOpts.GasTarget
+	txnsIdFilter := provideOpts.TxnIdsFilter
+	txns := make([]types.Transaction, 0, len(decryptedTxns.Transactions))
+	decryptedTxnsGas := uint64(0)
+	for _, txn := range decryptedTxns.Transactions {
+		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
+			continue
+		}
+		if txn.GetGasLimit() > availableGas {
+			continue
+		}
+		availableGas -= txn.GetGasLimit()
+		decryptedTxnsGas += txn.GetGasLimit()
+		txns = append(txns, txn)
+		if txnsIdFilter != nil {
+			txnsIdFilter.Add(txn.Hash())
+		}
 	}
 
-	p.logger.Debug("providing decrypted txns", "count", len(decryptedTxns.Transactions), "gas", decryptedTxnsGas)
-	if decryptedTxnsGas == totalGasTarget {
-		return decryptedTxns.Transactions, nil
-	}
-
-	remGasTarget := totalGasTarget - decryptedTxnsGas
-	opts = append(opts, txnprovider.WithGasTarget(remGasTarget)) // overrides option
+	p.logger.Debug("providing decrypted txns", "count", len(txns), "gas", decryptedTxnsGas)
+	opts = append(opts, txnprovider.WithGasTarget(availableGas)) // overrides option
 	additionalTxns, err := p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	p.logger.Debug("providing additional public txns", "count", len(additionalTxns))
-	return append(decryptedTxns.Transactions, additionalTxns...), nil
+	return append(txns, additionalTxns...), nil
+}
+
+func (p *Pool) AllEncryptedTxns() []EncryptedTxnSubmission {
+	return p.encryptedTxnsPool.AllSubmissions()
+}
+
+func (p *Pool) AllDecryptedTxns() []types.Transaction {
+	return p.decryptedTxnsPool.AllDecryptedTxns()
+}
+
+type Option func(opts *options)
+
+func WithSlotCalculator(slotCalculator SlotCalculator) Option {
+	return func(opts *options) {
+		opts.slotCalculator = slotCalculator
+	}
+}
+
+func WithDecryptionKeysSourceFactory(factory DecryptionKeysSourceFactory) Option {
+	return func(opts *options) {
+		opts.decryptionKeysSourceFactory = factory
+	}
+}
+
+type options struct {
+	slotCalculator              SlotCalculator
+	decryptionKeysSourceFactory DecryptionKeysSourceFactory
 }

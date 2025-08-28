@@ -19,14 +19,14 @@ package freezeblocks
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 
 	"github.com/erigontech/erigon-lib/common"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -72,7 +72,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 			if snap.Enum() == heimdall.Events.Enum() {
 				firstKeyGetter = func(ctx context.Context) uint64 {
-					return blockReader.LastFrozenEventId() + 1
+					return br.bridgeStore.LastFrozenEventId() + 1
 				}
 			}
 
@@ -134,7 +134,7 @@ func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewS
 	}
 
 	{
-		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), br.borSnapshots().SegmentsMin(), heimdall.SnapshotTypes(), false)
+		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), heimdall.SnapshotTypes(), false)
 		if err != nil {
 			return true, err
 		}
@@ -202,11 +202,11 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	}
 
 	for _, f := range toDel {
-		_ = os.Remove(f)
-		_ = os.Remove(f + ".torrent")
+		_ = dir2.RemoveFile(f)
+		_ = dir2.RemoveFile(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		_ = os.Remove(withoutExt + ".idx.torrent")
+		_ = dir2.RemoveFile(withoutExt + ".idx")
+		_ = dir2.RemoveFile(withoutExt + ".idx.torrent")
 	}
 }

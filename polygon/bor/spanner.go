@@ -18,25 +18,21 @@ package bor
 
 import (
 	"encoding/hex"
-	"errors"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain"
-	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 //go:generate mockgen -typed=true -destination=./spanner_mock.go -package=bor . Spanner
 type Spanner interface {
 	GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error)
-	GetCurrentValidators(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error)
-	GetCurrentProducers(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error)
 	CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error
 }
 
@@ -102,42 +98,9 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.S
 }
 
 type ChainHeaderReader interface {
-	// bor span with given ID
-	BorSpan(spanId uint64) *heimdall.Span
 	GetHeaderByNumber(number uint64) *types.Header
 	GetHeader(hash common.Hash, number uint64) *types.Header
 	FrozenBlocks() uint64
-}
-
-func (c *ChainSpanner) GetCurrentValidators(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error) {
-	// Use hardcoded bor devnet valset if chain-name = bor-devnet
-	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
-		return NetworkNameVals[c.chainConfig.ChainName], nil
-	}
-
-	span := chain.BorSpan(spanId)
-
-	return span.ValidatorSet.Validators, nil
-}
-
-func (c *ChainSpanner) GetCurrentProducers(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error) {
-	// Use hardcoded bor devnet valset if chain-name = bor-devnet
-	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
-		return NetworkNameVals[c.chainConfig.ChainName], nil
-	}
-
-	span := chain.BorSpan(spanId)
-
-	if span == nil {
-		return nil, errors.New("no span found")
-	}
-
-	producers := make([]*valset.Validator, len(span.SelectedProducers))
-	for i := range span.SelectedProducers {
-		producers[i] = &span.SelectedProducers[i]
-	}
-
-	return producers, nil
 }
 
 func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
@@ -145,7 +108,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 	const method = "commitSpan"
 
 	// get validators bytes
-	validators := make([]valset.MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
+	validators := make([]heimdall.MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
 	for _, val := range heimdallSpan.ValidatorSet.Validators {
 		validators = append(validators, val.MinimalVal())
 	}
@@ -155,7 +118,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 	}
 
 	// get producers bytes
-	producers := make([]valset.MinimalVal, 0, len(heimdallSpan.SelectedProducers))
+	producers := make([]heimdall.MinimalVal, 0, len(heimdallSpan.SelectedProducers))
 	for _, val := range heimdallSpan.SelectedProducers {
 		producers = append(producers, val.MinimalVal())
 	}
