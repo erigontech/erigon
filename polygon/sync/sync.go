@@ -229,6 +229,7 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 			"milestoneRootHash", milestone.RootHash(),
 			"tipBlockNumber", ccb.Tip().Number.Uint64(),
 		)
+		return nil
 	}
 
 	s.logger.Info(
