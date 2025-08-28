@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var ( // Compile time interface checks
@@ -73,6 +74,7 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles      *state.Aggregator
+	blockFiles      *freezeblocks.RoSnapshots
 	forkaggs        []*state.ForkableAgg
 	forkaggsEnabled bool
 }
@@ -103,6 +105,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blockFilesTx = db.blockFiles.View()
 
 	if db.forkaggsEnabled {
 		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
@@ -142,6 +145,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blockFilesTx = db.blockFiles.View()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -199,6 +203,7 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 func (db *DB) Close() {
 	db.stateFiles.Close()
 	db.RwDB.Close()
+	db.blockFiles.Close()
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
@@ -208,6 +213,7 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 type tx struct {
 	db               *DB
 	aggtx            *state.AggregatorRoTx
+	blockFilesTx     *freezeblocks.View
 	forkaggs         []*state.ForkableAggTemporalTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
@@ -227,11 +233,16 @@ type RwTx struct {
 func (tx *tx) ForceReopenAggCtx() {
 	tx.aggtx.Close()
 	tx.aggtx = tx.Agg().BeginFilesRo()
+	tx.blockFilesTx = tx.BlockFiles().View()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
-func (tx *tx) AggTx() any             { return tx.aggtx }
-func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+func (tx *tx) AggTx() any        { return tx.aggtx }
+func (tx *tx) BlockFilesTx() any { return tx.blockFilesTx }
+
+func (tx *tx) Agg() *state.Aggregator                { return tx.db.stateFiles }
+func (tx *tx) BlockFiles() *freezeblocks.RoSnapshots { return tx.db.blockFiles }
+
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
@@ -387,6 +398,7 @@ func (tx *tx) autoClose() {
 		closer.Close()
 	}
 	tx.aggtx.Close()
+	tx.blockFilesTx.Close()
 }
 
 func (tx *RwTx) Commit() error {
