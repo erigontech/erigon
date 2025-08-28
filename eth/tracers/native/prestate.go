@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -180,6 +181,10 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
+	t.lookupAccount(params.HistoryStorageAddress)
+	if env.ChainConfig.IsArbitrum() {
+		t.lookupAccount(types.ArbosStateAddress)
+	}
 
 	// Add accounts with authorizations to the prestate before they get applied.
 	var b [32]byte
