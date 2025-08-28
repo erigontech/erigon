@@ -133,7 +133,7 @@ jobs:
           if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
             echo "Erigon stopping..."
             kill $ERIGON_PID
-            wait $ERIGON_PID
+            sleep 5
             echo "Erigon stopped"
           else
             echo "Erigon has already terminated"
