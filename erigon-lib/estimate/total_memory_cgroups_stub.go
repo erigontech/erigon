@@ -14,25 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package node_utils
+//go:build !linux
+
+package estimate
 
 import (
 	"errors"
-	"fmt"
-	"net/url"
-
-	"github.com/erigontech/erigon/cmd/observer/database"
-	"github.com/erigontech/erigon/p2p/enode"
 )
 
-func NodeID(node *enode.Node) (database.NodeID, error) {
-	if node.Incomplete() {
-		return "", errors.New("NodeID not implemented for incomplete nodes")
-	}
-	nodeURL, err := url.Parse(node.URLv4())
-	if err != nil {
-		return "", fmt.Errorf("failed to parse node URL: %w", err)
-	}
-	id := nodeURL.User.Username()
-	return database.NodeID(id), nil
+func cgroupsMemoryLimit() (uint64, error) {
+	return 0, errors.New("cgroups not supported in this environment")
 }

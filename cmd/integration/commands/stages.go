@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -1097,7 +1098,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-	sconf := dbstate.Schema.CommitmentDomain
+	sconf := statecfg.Schema.CommitmentDomain
 	for _, tn := range sconf.Tables() {
 		log.Info("Clearing", "table", tn)
 		if err := rwTx.ClearTable(tn); err != nil {
