@@ -597,8 +597,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller) (snapDownloader *proto_downloader.MockDownloaderClient) {
-	snapDownloader = proto_downloader.NewMockDownloaderClient(ctrl)
+func mockDownloader(ctrl *gomock.Controller) *proto_downloader.MockDownloaderClient {
+	snapDownloader := proto_downloader.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
 		Add(gomock.Any(), gomock.Any(), gomock.Any()).
