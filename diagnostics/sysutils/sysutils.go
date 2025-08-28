@@ -19,10 +19,11 @@ package sysutils
 import (
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/process"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type ProcessInfo struct {

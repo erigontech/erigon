@@ -26,9 +26,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"

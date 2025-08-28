@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestEventFetchReponse(t *testing.T) {

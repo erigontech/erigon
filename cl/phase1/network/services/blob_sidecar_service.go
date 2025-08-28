@@ -24,6 +24,7 @@ import (
 	"time"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+
 	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/common"

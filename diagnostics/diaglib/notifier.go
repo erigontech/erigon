@@ -3,8 +3,9 @@ package diaglib
 import (
 	"net/http"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/gorilla/websocket"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type DiagMessages struct {

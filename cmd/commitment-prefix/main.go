@@ -220,11 +220,13 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if depth > len(key) {
 			continue
 		}
-		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
-		if stat == nil {
-			fmt.Printf("failed to decode branch: %x %x\n", key, val)
+		stat, err := commitment.DecodeBranchAndCollectStat(key, val, tv)
+		if err != nil {
+			// show and continue
+			fmt.Printf("\n\n%w: failed to decode branch: %x %x\n", err, key, val)
+		} else {
+			keysSink <- *stat
 		}
-		keysSink <- *stat
 	}
 	return nil
 }

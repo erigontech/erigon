@@ -21,12 +21,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/emicklei/dot"
 	"github.com/holiman/uint256"

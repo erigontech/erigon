@@ -20,9 +20,10 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSpanListResponse(t *testing.T) {

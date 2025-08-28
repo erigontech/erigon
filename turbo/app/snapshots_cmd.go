@@ -882,6 +882,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
+		case integrity.Commitment:
+			if err := integrity.CommitmentFilesSanity(ctx, db, blockReader, agg); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}

@@ -21,13 +21,14 @@ import (
 	"fmt"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/jellydator/ttlcache/v3"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/jellydator/ttlcache/v3"
 )
 
 var VeBlopBlockTimeout = 4 * time.Second            // timeout for waiting for a new span
