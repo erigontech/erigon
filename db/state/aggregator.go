@@ -207,11 +207,6 @@ func (a *Aggregator) DisableFsync() {
 	}
 }
 
-func (a *Aggregator) ForceCommitmentValTransformForTests(v bool) {
-	a.commitmentValuesTransform = v
-	a.d[kv.CommitmentDomain].ReplaceKeysInValues = v
-}
-
 func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {
