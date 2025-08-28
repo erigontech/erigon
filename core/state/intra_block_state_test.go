@@ -449,17 +449,10 @@ func TestTransientStorage(t *testing.T) {
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
