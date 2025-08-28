@@ -1329,6 +1329,10 @@ func (d *Downloader) state() DownloaderState {
 
 // Currently only called if not all torrents are complete.
 func (d *Downloader) logStats() {
+	d.lock.RLock()
+	// This is set externally. Everything else here is only modified by the caller.
+	startTime := d.startTime
+	d.lock.RUnlock()
 	stats := d.stats
 	bytesDone := stats.BytesCompleted
 	percentDone := float32(100) * (float32(bytesDone) / float32(stats.BytesTotal))
@@ -1373,8 +1377,8 @@ func (d *Downloader) logStats() {
 				}
 			}(),
 			// TODO: Reset on each stage.
-			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
 			"time-left", calculateTime(remainingBytes, stats.CompletionRate),
+			"total-time", time.Since(startTime).Truncate(time.Second).String(),
 			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(stats.ClientWebseedBytesDownloadRate)),
 			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(stats.PeerConnBytesDownloadRate)),
 			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
@@ -1396,8 +1400,8 @@ func (d *Downloader) logStats() {
 
 	diaglib.Send(diaglib.SnapshotDownloadStatistics{
 		Downloaded:           bytesDone,
-		TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
 		Total:                stats.BytesTotal,
+		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
 		DownloadRate:         stats.DownloadRate,
 		UploadRate:           stats.UploadRate,
 		Peers:                stats.PeersUnique,
