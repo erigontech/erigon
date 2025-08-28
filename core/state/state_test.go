@@ -168,14 +168,10 @@ func TestTouchDelete(t *testing.T) {
 	state.GetOrNewStateObject(common.Address{})
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal("error while finalize", err)
-	}
+	require.NoError(t, err)
 
 	err = state.CommitBlock(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal("error while commit", err)
-	}
+	require.NoError(t, err)
 
 	state.Reset()
 
@@ -283,9 +279,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// db, trie are already non-empty values
 	so0, err := state.getStateObject(stateobjaddr0)
-	if err != nil {
-		t.Fatal("getting state", err)
-	}
+	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
@@ -294,20 +288,14 @@ func TestSnapshot2(t *testing.T) {
 	state.setStateObject(stateobjaddr0, so0)
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal("error while finalizing transaction", err)
-	}
+	require.NoError(t, err)
 
 	err = state.CommitBlock(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal("error while committing state", err)
-	}
+	require.NoError(t, err)
 
 	// and one with deleted == true
 	so1, err := state.getStateObject(stateobjaddr1)
-	if err != nil {
-		t.Fatal("getting state", err)
-	}
+	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
@@ -316,9 +304,7 @@ func TestSnapshot2(t *testing.T) {
 	state.setStateObject(stateobjaddr1, so1)
 
 	so1, err = state.getStateObject(stateobjaddr1)
-	if err != nil {
-		t.Fatal("getting state", err)
-	}
+	require.NoError(t, err)
 	if so1 != nil && !so1.deleted {
 		t.Fatalf("deleted object not nil when getting")
 	}
@@ -327,9 +313,7 @@ func TestSnapshot2(t *testing.T) {
 	state.RevertToSnapshot(snapshot, nil)
 
 	so0Restored, err := state.getStateObject(stateobjaddr0)
-	if err != nil {
-		t.Fatal("getting restored state", err)
-	}
+	require.NoError(t, err)
 	// Update lazily-loaded values before comparing.
 	var tmp uint256.Int
 	so0Restored.GetState(storageaddr, &tmp)
@@ -339,9 +323,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// deleted should be nil, both before and after restore of state copy
 	so1Restored, err := state.getStateObject(stateobjaddr1)
-	if err != nil {
-		t.Fatal("getting restored state", err)
-	}
+	require.NoError(t, err)
 	if so1Restored != nil && !so1Restored.deleted {
 		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
 	}
@@ -404,23 +386,15 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 
 	dirs, logger := datadir.New(tb.TempDir()), log.New()
 	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	tb.Cleanup(agg.Close)
 
 	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 	return _db, tx, agg
 }
