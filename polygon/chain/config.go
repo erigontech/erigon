@@ -50,6 +50,7 @@ var (
 		Config:      amoyChainConfig,
 		Genesis:     AmoyGenesisBlock(),
 		Bootnodes:   amoyBootnodes,
+		DNSNetwork:  "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io",
 	}
 	BorMainnet = chainspec.Spec{
 		Name:        networkname.BorMainnet,

@@ -1281,9 +1281,10 @@ func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, erro
 			s, err := chainspec.ChainSpecByGenesisHash(genesisHash)
 			if err != nil {
 				ss.logger.Debug("[sentry] Could not get chain spec for genesis hash", "genesisHash", genesisHash, "err", err)
-			}
-			if url := s.DNSNetwork; url != "" {
-				ss.p2p.DiscoveryDNS = []string{url}
+			} else {
+				if url := s.DNSNetwork; url != "" {
+					ss.p2p.DiscoveryDNS = []string{url}
+				}
 			}
 
 			for _, p := range ss.Protocols {
