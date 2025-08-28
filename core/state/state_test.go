@@ -43,77 +43,6 @@ import (
 
 var toAddr = common.BytesToAddress
 
-func TestDump(t *testing.T) {
-	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
-
-	st := New(NewReaderV3(domains.AsGetter(tx)))
-
-	// generate a few entries
-	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
-	require.NoError(t, err)
-	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
-	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
-	require.NoError(t, err)
-	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
-	obj2.setIncarnation(1)
-	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
-	require.NoError(t, err)
-	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
-
-	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
-	// write some of them to the trie
-	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
-	require.NoError(t, err)
-	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
-	require.NoError(t, err)
-	err = st.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
-	err = st.CommitBlock(&chain.Rules{}, blockWriter)
-	require.NoError(t, err)
-	err = domains.Flush(context.Background(), tx)
-	require.NoError(t, err)
-
-	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
-	want := `{
-    "root": "0000000000000000000000000000000000000000000000000000000000000000",
-    "accounts": {
-        "0x0000000000000000000000000000000000000001": {
-            "balance": "22",
-            "nonce": 0,
-            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-        },
-        "0x0000000000000000000000000000000000000002": {
-            "balance": "44",
-            "nonce": 0,
-            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-        },
-        "0x0000000000000000000000000000000000000102": {
-            "balance": "0",
-            "nonce": 0,
-            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "0x87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
-            "code": "0x03030303030303"
-        }
-    }
-}`
-	if got != want {
-		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
-	}
-}
-
 func TestNull(t *testing.T) {
 	t.Parallel()
 	_, tx, _ := NewTestTemporalDb(t)
@@ -397,4 +326,75 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 	return _db, tx, agg
+}
+
+func TestDump(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	st := New(NewReaderV3(domains.AsGetter(tx)))
+
+	// generate a few entries
+	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
+	require.NoError(t, err)
+	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	require.NoError(t, err)
+	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj2.setIncarnation(1)
+	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
+	require.NoError(t, err)
+	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+
+	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	// write some of them to the trie
+	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	require.NoError(t, err)
+	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
+	require.NoError(t, err)
+	err = st.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	err = st.CommitBlock(&chain.Rules{}, blockWriter)
+	require.NoError(t, err)
+	err = domains.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	// check that dump contains the state objects that are in trie
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
+	want := `{
+    "root": "0000000000000000000000000000000000000000000000000000000000000000",
+    "accounts": {
+        "0x0000000000000000000000000000000000000001": {
+            "balance": "22",
+            "nonce": 0,
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000002": {
+            "balance": "44",
+            "nonce": 0,
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000102": {
+            "balance": "0",
+            "nonce": 0,
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "0x87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
+            "code": "0x03030303030303"
+        }
+    }
+}`
+	if got != want {
+		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
+	}
 }
