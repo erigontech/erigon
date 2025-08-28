@@ -112,23 +112,6 @@ type UnmarkedTxI interface {
 	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 }
 
-// buffer values before writing to db supposed to store only canonical values
-// Note that values in buffer are not reflected in Get call.
-type BufferedDbTxI interface {
-	ForkableDbCommonTxI
-	GetDb(Num, kv.Tx) (Bytes, error)
-	Put(Num, Bytes) error
-	Flush(context.Context, kv.RwTx) error
-}
-
-type BufferedTxI interface {
-	ForkableBaseTxI
-	ForkableDebugAPI[BufferedDbTxI]
-	Get(Num, kv.Tx) (Bytes, error)
-	Put(Num, Bytes) error
-	Flush(context.Context, kv.RwTx) error
-}
-
 /////////////////// config
 
 // A non-generic interface that any Forkable can implement

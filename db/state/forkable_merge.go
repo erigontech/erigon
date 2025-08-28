@@ -26,14 +26,12 @@ import (
 type ForkableMergeFiles struct {
 	marked   []*FilesItem
 	unmarked []*FilesItem
-	buffered []*FilesItem
 }
 
-func NewForkableMergeFiles(markedSize, unmarkedSize, bufferedSize int) *ForkableMergeFiles {
+func NewForkableMergeFiles(markedSize, unmarkedSize int) *ForkableMergeFiles {
 	return &ForkableMergeFiles{
 		marked:   make([]*FilesItem, markedSize),
 		unmarked: make([]*FilesItem, unmarkedSize),
-		buffered: make([]*FilesItem, bufferedSize),
 	}
 }
 
@@ -45,7 +43,6 @@ func (f ForkableMergeFiles) Close() {
 	}
 	fn(f.marked)
 	fn(f.unmarked)
-	fn(f.buffered)
 }
 
 func (f ForkableMergeFiles) MergedFilePresent() bool {
@@ -58,7 +55,7 @@ func (f ForkableMergeFiles) MergedFilePresent() bool {
 		return false
 	}
 
-	return fn(f.marked) || fn(f.unmarked) || fn(f.buffered)
+	return fn(f.marked) || fn(f.unmarked)
 }
 
 func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleFile, compressWorkers int, ps *background.ProgressSet) (mergedFile *FilesItem, err error) {
@@ -150,14 +147,6 @@ func (r *ForkableAgg) IntegrateMergeFiles(mf *ForkableMergeFiles) {
 
 	for i, ap := range r.unmarked {
 		fi := mf.unmarked[i]
-		if fi == nil {
-			continue
-		}
-		ap.snaps.IntegrateDirtyFile(fi)
-	}
-
-	for i, ap := range r.buffered {
-		fi := mf.buffered[i]
 		if fi == nil {
 			continue
 		}

@@ -25,7 +25,6 @@ type ForkableAgg struct {
 
 	marked          []*Forkable[MarkedTxI]
 	unmarked        []*Forkable[UnmarkedTxI]
-	buffered        []*Forkable[BufferedTxI]
 	alignedEntities []ForkableId
 
 	dirtyFilesLock             sync.Mutex
@@ -81,13 +80,6 @@ func (r *ForkableAgg) RegisterMarkedForkable(ap *Forkable[MarkedTxI]) {
 
 func (r *ForkableAgg) RegisterUnmarkedForkable(ap *Forkable[UnmarkedTxI]) {
 	r.unmarked = append(r.unmarked, ap)
-	if !ap.unaligned {
-		r.alignedEntities = append(r.alignedEntities, ap.a)
-	}
-}
-
-func (r *ForkableAgg) RegisterBufferedForkable(ap *Forkable[BufferedTxI]) {
-	r.buffered = append(r.buffered, ap)
 	if !ap.unaligned {
 		r.alignedEntities = append(r.alignedEntities, ap.a)
 	}
@@ -208,7 +200,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	aggTx := r.BeginTemporalTx()
 	defer aggTx.Close()
 
-	mf := NewForkableMergeFiles(len(r.marked), len(r.unmarked), len(r.buffered))
+	mf := NewForkableMergeFiles(len(r.marked), len(r.unmarked))
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(r.mergeWorkers)
 	closeFiles := true
@@ -269,9 +261,6 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	for i, ap := range aggTx.unmarked {
 		mergeFn(r.unmarked[i].ProtoForkable, ap.DebugFiles().VisibleFiles(), r.unmarked[i].Repo(), &mf.unmarked[i])
 	}
-	for i, ap := range aggTx.buffered {
-		mergeFn(r.buffered[i].ProtoForkable, ap.DebugFiles().VisibleFiles(), r.buffered[i].Repo(), &mf.buffered[i])
-	}
 
 	if err := g.Wait(); err != nil {
 		r.logger.Debug("[fork_agg] merge", "err", err)
@@ -279,7 +268,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	}
 
 	closeFiles = false
-	r.logger.Debug("[fork_agg] merge", "marked", len(mf.marked), "unmarked", len(mf.unmarked), "buffered", len(mf.buffered))
+	r.logger.Debug("[fork_agg] merge", "marked", len(mf.marked), "unmarked", len(mf.unmarked))
 
 	r.IntegrateMergeFiles(mf)
 
@@ -292,10 +281,6 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 
 	for i, mf := range mf.unmarked {
 		r.unmarked[i].snaps.CleanAfterMerge(mf, atx.unmarked[i].DebugFiles().vfs())
-	}
-
-	for i, mf := range mf.buffered {
-		r.buffered[i].snaps.CleanAfterMerge(mf, atx.buffered[i].DebugFiles().vfs())
 	}
 
 	return mf.MergedFilePresent(), nil
@@ -519,12 +504,6 @@ func (r *ForkableAgg) loop(fn func(p *ProtoForkable) error) error {
 		}
 	}
 
-	for _, ap := range r.buffered {
-		if err := fn(ap.ProtoForkable); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -532,8 +511,6 @@ type ForkableAggTemporalTx struct {
 	f        *ForkableAgg
 	marked   []MarkedTxI
 	unmarked []UnmarkedTxI
-	buffered []BufferedTxI
-
 	// TODO _leakId logic
 
 	mp map[ForkableId]uint32
@@ -543,7 +520,6 @@ type ForkableAggTemporalTx struct {
 func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 	marked := make([]MarkedTxI, 0, len(r.marked))
 	unmarked := make([]UnmarkedTxI, 0, len(r.unmarked))
-	buffered := make([]BufferedTxI, 0, len(r.buffered))
 	mp := make(map[ForkableId]uint32)
 
 	for i, ap := range r.marked {
@@ -556,16 +532,10 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Unmarked)
 	}
 
-	for i, ap := range r.buffered {
-		buffered = append(buffered, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Buffered)
-	}
-
 	return &ForkableAggTemporalTx{
 		f:        r,
 		marked:   marked,
 		unmarked: unmarked,
-		buffered: buffered,
 		mp:       mp,
 	}
 }
@@ -590,14 +560,6 @@ func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
 		panic(fmt.Errorf("forkable %s not found", Registry.Name(id)))
 	}
 	return r.unmarked[index>>2]
-}
-
-func (r *ForkableAggTemporalTx) Buffered(id ForkableId) BufferedTxI {
-	index, ok := r.mp[id]
-	if !ok {
-		panic(fmt.Errorf("forkable %s not found", Registry.Name(id)))
-	}
-	return r.buffered[index>>2]
 }
 
 func (r *ForkableAgg) BeginTemporalTx() *ForkableAggTemporalTx {
@@ -701,12 +663,6 @@ func (r *ForkableAggTemporalTx) Close() {
 			ut.Close()
 		}
 	}
-
-	for _, bt := range r.buffered {
-		if bt != nil {
-			bt.Close()
-		}
-	}
 }
 
 func (r ForkableAggTemporalTx) Ids() (ids []kv.ForkableId) {
@@ -715,9 +671,6 @@ func (r ForkableAggTemporalTx) Ids() (ids []kv.ForkableId) {
 	}
 	for _, ut := range r.unmarked {
 		ids = append(ids, ut.Id())
-	}
-	for _, bt := range r.buffered {
-		ids = append(ids, bt.Id())
 	}
 	return
 }
@@ -743,15 +696,6 @@ func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(Fo
 		}
 	}
 
-	for i, bt := range r.buffered {
-		if forId.MatchAll() && r.f.buffered[i].a == forId {
-			dbg := bt.(ForkableDebugAPI[BufferedDbTxI])
-			if err := fn(dbg.DebugDb()); err != nil {
-				return err
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -767,13 +711,6 @@ func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func
 	for i, ut := range r.unmarked {
 		if r.f.unmarked[i].a == forId {
 			dbg := ut.(ForkableDebugAPI[UnmarkedDbTxI])
-			return fn(dbg.DebugDb())
-		}
-	}
-
-	for i, bt := range r.buffered {
-		if r.f.buffered[i].a == forId {
-			dbg := bt.(ForkableDebugAPI[BufferedDbTxI])
 			return fn(dbg.DebugDb())
 		}
 	}
@@ -798,16 +735,6 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 		}
 		if forId.MatchAll() || r.f.unmarked[i].a == forId {
 			dbg := ut.(ForkableDebugAPI[UnmarkedDbTxI])
-			return fn(dbg.DebugFiles())
-		}
-	}
-
-	for i, bt := range r.buffered {
-		if skipUnaligned && r.f.marked[i].unaligned {
-			continue
-		}
-		if forId.MatchAll() || r.f.buffered[i].a == forId {
-			dbg := bt.(ForkableDebugAPI[BufferedDbTxI])
 			return fn(dbg.DebugFiles())
 		}
 	}

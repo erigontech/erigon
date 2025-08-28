@@ -75,5 +75,3 @@ type UnmarkedRwTx interface {
 type UnmarkedPutter interface {
 	Put(num Num, value []byte) error
 }
-
-// buffer: TODO
