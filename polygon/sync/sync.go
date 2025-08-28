@@ -78,7 +78,7 @@ func NewSync(
 	ccBuilderFactory CanonicalChainBuilderFactory,
 	heimdallSync heimdallSynchronizer,
 	bridgeSync bridgeSynchronizer,
-	events <-chan Event,
+	events chan Event,
 	notifications *shards.Notifications,
 	wiggleCalculator wiggleCalculator,
 	engineAPISwitcher EngineAPISwitcher,
@@ -120,7 +120,7 @@ type Sync struct {
 	ccBuilderFactory  CanonicalChainBuilderFactory
 	heimdallSync      heimdallSynchronizer
 	bridgeSync        bridgeSynchronizer
-	events            <-chan Event
+	events            chan Event
 	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	notifications     *shards.Notifications
 	wiggleCalculator  wiggleCalculator
@@ -222,13 +222,15 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 
 	// milestone is ahead of our current tip
 	if milestone.EndBlock().Uint64() > ccb.Tip().Number.Uint64() {
-		s.logger.Warn(syncLogPrefix("ignoring new milestone event because our tip is behind the milestone"),
+		s.logger.Warn(syncLogPrefix("putting milestone event back in the queue because our tip is behind the milestone"),
 			"milestoneId", milestone.RawId(),
 			"milestoneStart", milestone.StartBlock().Uint64(),
 			"milestoneEnd", milestone.EndBlock().Uint64(),
 			"milestoneRootHash", milestone.RootHash(),
 			"tipBlockNumber", ccb.Tip().Number.Uint64(),
 		)
+		// put the milestone back in the queue, so it can be processed at a later time
+		s.events <- Event{Type: EventTypeNewMilestone, newMilestone: event}
 		return nil
 	}
 

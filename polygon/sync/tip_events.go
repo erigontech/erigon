@@ -142,7 +142,7 @@ type TipEvents struct {
 	blockEventsSpamGuard        blockEventsSpamGuard
 }
 
-func (te *TipEvents) Events() <-chan Event {
+func (te *TipEvents) Events() chan Event {
 	return te.events.Events()
 }
 
@@ -244,7 +244,7 @@ type TipEventsCompositeChannel struct {
 	events                chan Event
 }
 
-func (c TipEventsCompositeChannel) Events() <-chan Event {
+func (c TipEventsCompositeChannel) Events() chan Event {
 	return c.events
 }
 
