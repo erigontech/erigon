@@ -318,7 +318,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
-	tx, errBegin := db.BeginTemporalRw(context.Background())
+	tx, errBegin := db.BeginTemporalRo(context.Background())
 	if errBegin != nil {
 		return nil, errBegin
 	}
@@ -380,18 +380,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 
 			var err error
-			//To use `CalcHashRootForTests` need flush before, but to use `domains.ComputeCommitment` need flush after
-			//if err = domains.Flush(ctx, tx); err != nil {
-			//	return nil, nil, err
-			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
 			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), uint64(txNum), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
-			if err = domains.Flush(ctx, tx); err != nil {
-				return nil, nil, err
-			}
+			//don't need `domains.Flush` because we are working on RoTx
+
 			b.header.Root = common.BytesToHash(stateRoot)
 
 			// Recreating block to make sure Root makes it into the header
