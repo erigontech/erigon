@@ -311,7 +311,7 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = chain.TestChainConfig
 	}
