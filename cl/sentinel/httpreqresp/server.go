@@ -48,7 +48,7 @@ the following headers have meaning when passed in to the request:
 func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	// TODO: there potentially extra alloc here (responses are bufferd)
 	// is that a big deal? not sure. maybe can reuse these buffers since they are read once (and known when close) if so
-	ans := make(chan *http.Response)
+	ans := make(chan *http.Response, 1)
 	go func() {
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, r)
