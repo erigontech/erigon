@@ -230,7 +230,7 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 			"tipBlockNumber", ccb.Tip().Number.Uint64(),
 		)
 		// put the milestone back in the queue, so it can be processed at a later time
-		go func() { s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event}) }()
+		s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event})
 		return nil
 	}
 
