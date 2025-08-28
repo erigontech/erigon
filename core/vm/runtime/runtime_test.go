@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/program"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -163,18 +162,8 @@ func TestCall(t *testing.T) {
 	}
 }
 
-func testTemporalDB(t testing.TB) *temporal.DB {
-	db := memdb.NewStateDB(t.TempDir())
-
-	t.Cleanup(db.Close)
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	return _db
+func testTemporalDB(t testing.TB) kv.TemporalRwDB {
+	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
 func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *dbstate.SharedDomains) {
@@ -576,7 +565,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	p, lbl = program.New().Jumpdest()
 	callEOA := p.
 		Call(nil, 0xE0, 0, 0, 0, 0, 0). // call addr of EOA
-		Op(vm.POP).Jump(lbl).Bytes()    // pop return value and jump to label
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
 	p, lbl = program.New().Jumpdest()
 	// Push as if we were making call, then pop it off again, and loop
