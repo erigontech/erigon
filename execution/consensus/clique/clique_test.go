@@ -64,7 +64,7 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
 	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, genspec, engine, false)
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash common.Hash, number uint64) (h *types.Header, err error) {

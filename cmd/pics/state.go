@@ -294,7 +294,7 @@ func initialState1() error {
 	m := mock.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(nil, m, gspec.GasLimit)
+	contractBackend := backends.NewSimulatedBackendWithConfig(nil, m)
 	defer contractBackend.Close()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	if err != nil {

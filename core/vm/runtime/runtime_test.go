@@ -324,7 +324,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	}
 
 	db := testTemporalDB(b)
-	tx, err := db.BeginTemporalRw(context.Background())
+	tx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(b, err)
 	defer tx.Rollback()
 	domains, err := dbstate.NewSharedDomains(tx, log.New())
