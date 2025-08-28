@@ -220,6 +220,17 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 		return nil
 	}
 
+	// milestone is ahead of our current tip
+	if milestone.EndBlock().Uint64() > ccb.Tip().Number.Uint64() {
+		s.logger.Warn(syncLogPrefix("ignoring new milestone event because our tip is behind the milestone"),
+			"milestoneId", milestone.RawId(),
+			"milestoneStart", milestone.StartBlock().Uint64(),
+			"milestoneEnd", milestone.EndBlock().Uint64(),
+			"milestoneRootHash", milestone.RootHash(),
+			"tipBlockNumber", ccb.Tip().Number.Uint64(),
+		)
+	}
+
 	s.logger.Info(
 		syncLogPrefix("applying new milestone event"),
 		"milestoneId", milestone.RawId(),
