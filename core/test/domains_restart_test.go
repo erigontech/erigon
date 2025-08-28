@@ -59,6 +59,13 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 	dirs := datadir.New(path)
 	logger := log.New()
 	db := temporaltest.NewTestDB(t, dirs)
+
+	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+	err = agg.OpenFolder()
 	agg.DisableFsync()
 	require.NoError(t, err)
 
