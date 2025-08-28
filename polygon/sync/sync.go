@@ -44,6 +44,8 @@ import (
 // The current constant value is chosen based on observed metrics in production as twice the doubled value of the maximum observed waypoint length.
 const maxFinalizationHeight = 512
 
+var futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
+
 type heimdallSynchronizer interface {
 	IsCatchingUp(ctx context.Context) (bool, error)
 	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, ok bool, err error)
@@ -230,7 +232,10 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 			"tipBlockNumber", ccb.Tip().Number.Uint64(),
 		)
 		// put the milestone back in the queue, so it can be processed at a later time
-		s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event})
+		go func() {
+			time.Sleep(futureMilestoneDelay)
+			s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event})
+		}()
 		return nil
 	}
 
