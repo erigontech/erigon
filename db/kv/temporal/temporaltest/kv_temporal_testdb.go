@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // nolint:thelper
@@ -57,7 +59,13 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 		tb.Cleanup(agg.Close)
 	}
 
-	db, err := temporal.New(rawDB, agg)
+	blockFilesCfg := ethconfig.Defaults.Snapshot
+	blockFiles := freezeblocks.NewRoSnapshots(blockFilesCfg, dirs.Snap, log.New())
+	if tb != nil {
+		tb.Cleanup(blockFiles.Close)
+	}
+
+	db, err := temporal.New(rawDB, agg, blockFiles)
 	if err != nil {
 		panic(err)
 	}

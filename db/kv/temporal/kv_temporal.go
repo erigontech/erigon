@@ -79,8 +79,8 @@ type DB struct {
 	forkaggsEnabled bool
 }
 
-func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
-	tdb := &DB{RwDB: db, stateFiles: agg}
+func New(db kv.RwDB, agg *state.Aggregator, blockFiles *freezeblocks.RoSnapshots, forkaggs ...*state.ForkableAgg) (*DB, error) {
+	tdb := &DB{RwDB: db, stateFiles: agg, blockFiles: blockFiles}
 	if len(forkaggs) > 0 {
 		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
 		for i, forkagg := range forkaggs {
@@ -239,8 +239,8 @@ func (tx *tx) ForceReopenAggCtx() {
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
-func (tx *tx) AggTx() any        { return tx.aggtx }
-func (tx *tx) BlockFilesTx() any { return tx.blockFilesTx }
+func (tx *tx) AggTx() any                       { return tx.aggtx }
+func (tx *tx) BlockFilesTx() *freezeblocks.View { return tx.blockFilesTx }
 
 func (tx *tx) Agg() *state.Aggregator                { return tx.db.stateFiles }
 func (tx *tx) BlockFiles() *freezeblocks.RoSnapshots { return tx.db.blockFiles }

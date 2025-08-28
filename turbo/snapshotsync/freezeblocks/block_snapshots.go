@@ -1074,6 +1074,9 @@ func (v *View) BodiesSegment(blockNum uint64) (*snapshotsync.VisibleSegment, boo
 func (v *View) TxsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(snaptype2.Transactions, blockNum)
 }
+func (v *View) Segment(t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
+	return v.base.Segment(t, blockNum)
+}
 
 func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 	l, err := dir2.ListFiles(dirs.Snap, ".idx")

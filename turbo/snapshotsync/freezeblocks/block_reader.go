@@ -348,6 +348,10 @@ func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReade
 	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
 }
 
+type HasFilesTx interface {
+	BlockFilesTx() *View
+}
+
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 	sn           *RoSnapshots
@@ -368,6 +372,25 @@ func NewBlockReader(snapshots snapshotsync.BlockSnapshots, borSnapshots snapshot
 	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
 	br.txBlockIndex = txnumReader
 	return br
+}
+
+// viewSegment helper to extract View from `tx` object
+func (r *BlockReader) viewSegment(tx kv.Getter, t snaptype.Type, blockNum uint64) (segment *snapshotsync.VisibleSegment, ok bool) {
+	view, ok := r.view(tx)
+	if !ok {
+		return nil, false
+	}
+	return view.Segment(t, blockNum)
+}
+
+// view helper to extract View from `tx` object
+func (r *BlockReader) view(tx kv.Getter) (*View, bool) {
+	casted, ok := tx.(HasFilesTx)
+	if !ok {
+		panic(fmt.Sprintf("assert: view is nil, but tx implements HasFilesTx %T", tx))
+		return nil, false
+	}
+	return casted.BlockFilesTx(), true
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
@@ -765,6 +788,7 @@ func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter,
 	b, _, err := r.bodyForStorageFromSnapshot(blockNum, bodySeg, buf)
 	return b, err
 }
+
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
@@ -810,14 +834,15 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 
-	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
+	//seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
+	seg, ok := r.viewSegment(tx, snaptype2.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no header files for this block num")
 		}
 		return
 	}
-	defer release()
+	//defer release()
 
 	var buf []byte
 	h, buf, err := r.headerFromSnapshot(blockHeight, seg, buf)
@@ -832,25 +857,26 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	} else {
 		hash = h.Hash()
 	}
-	release()
+	//release()
 
 	var b *types.Body
 	var baseTxnId uint64
 	var txCount uint32
-	bodySeg, ok, release := r.sn.ViewSingleFile(snaptype2.Bodies, blockHeight)
+	//bodySeg, ok, release := r.sn.ViewSingleFile(snaptype2.Bodies, blockHeight)
+	bodySeg, ok := r.viewSegment(tx, snaptype2.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
 		}
 		return
 	}
-	defer release()
+	//defer release()
 
 	b, baseTxnId, txCount, buf, err = r.bodyFromSnapshot(blockHeight, bodySeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
-	release()
+	//release()
 
 	if b == nil {
 		if dbgLogs {
@@ -861,17 +887,18 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 
 	var txs []types.Transaction
 	if txCount != 0 {
-		txnSeg, ok, release := r.sn.ViewSingleFile(snaptype2.Transactions, blockHeight)
+		//txnSeg, ok, release := r.sn.ViewSingleFile(snaptype2.Transactions, blockHeight)
+		txnSeg, ok := r.viewSegment(tx, snaptype2.Transactions, blockHeight)
 		if !ok {
 			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
 			return nil, nil, err
 		}
-		defer release()
+		//defer release()
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
 		if err != nil {
 			return nil, nil, err
 		}
-		release()
+		//release()
 	}
 
 	if h.WithdrawalsHash == nil && len(b.Withdrawals) == 0 {

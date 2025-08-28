@@ -47,11 +47,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 	polygonchain "github.com/erigontech/erigon/polygon/chain"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // GenesisMismatchError is raised when trying to overwrite an existing
@@ -327,7 +329,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 		defer agg.Close()
 
-		tdb, err := temporal.New(genesisTmpDB, agg)
+		blockFiles := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, log.New())
+		defer blockFiles.Close()
+
+		tdb, err := temporal.New(genesisTmpDB, agg, blockFiles)
 		if err != nil {
 			return err
 		}

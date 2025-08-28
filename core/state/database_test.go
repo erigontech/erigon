@@ -72,7 +72,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, m)
 	defer contractBackend.Close()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	)
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, m)
 	defer contractBackend.Close()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
@@ -519,7 +519,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, m)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
@@ -1087,7 +1087,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, m)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
@@ -1501,7 +1501,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	)
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, m)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
