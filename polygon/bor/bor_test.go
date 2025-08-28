@@ -341,9 +341,8 @@ func newValidator(t *testing.T, testHeimdall *test_heimdall, blocks map[uint64]*
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
-	checkStateRoot := true
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
+		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false),
 		testHeimdall,
 		blocks,
 	}
