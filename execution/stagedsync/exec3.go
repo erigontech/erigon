@@ -650,7 +650,7 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 
 	commitVals := []any{
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
-		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CacheSize)),
+		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
 	}
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,

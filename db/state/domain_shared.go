@@ -83,8 +83,10 @@ type SharedDomainsMetrics struct {
 type DomainIOMetrics struct {
 	CacheReadCount    int64
 	CacheReadDuration time.Duration
-	CacheWriteCount   int64
-	CacheSize         int
+	CacheGetCount     int64
+	CachePutCount     int64
+	CacheGetSize      int
+	CachePutSize      int
 	DbReadCount       int64
 	DbReadDuration    time.Duration
 	FileReadCount     int64
@@ -249,7 +251,8 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	sd.metrics.CacheSize = 0
+	sd.metrics.CacheGetSize = 0
+	sd.metrics.CachePutSize = 0
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
@@ -263,14 +266,15 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uin
 		} else {
 			estSize = len(key) + len(val)
 		}
-		sd.metrics.CacheSize += estSize
+		sd.metrics.CachePutSize += estSize
+		sd.metrics.CachePutCount++
 		if dm, ok := sd.metrics.Domains[kv.StorageDomain]; ok {
-			dm.CacheSize += estSize
-			dm.CacheWriteCount++
+			dm.CachePutSize += estSize
+			dm.CachePutCount++
 		} else {
 			sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
-				CacheWriteCount: 1,
-				CacheSize:       estSize,
+				CachePutCount: 1,
+				CachePutSize:  estSize,
 			}
 		}
 		return
@@ -282,12 +286,15 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uin
 	} else {
 		estSize += len(key) + len(val)
 	}
-	sd.metrics.CacheSize += estSize
+	sd.metrics.CachePutSize += estSize
+	sd.metrics.CachePutCount++
 	if dm, ok := sd.metrics.Domains[kv.StorageDomain]; ok {
-		dm.CacheSize += estSize
+		dm.CachePutSize += estSize
+		dm.CachePutCount++
 	} else {
 		sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
-			CacheSize: estSize,
+			CachePutCount: 1,
+			CachePutSize:  estSize,
 		}
 	}
 	sd.domains[domain][key] = valWithPrevStep
@@ -316,7 +323,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.metrics.CacheSize) * 2
+	return uint64((sd.metrics.CachePutSize * 4) + (sd.metrics.CacheGetSize * 2))
 }
 
 func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
@@ -587,14 +594,15 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.domains[domain][keyS] = valWithPrevStep
 	}
 
-	sd.metrics.CacheSize += estSize
+	sd.metrics.CacheGetSize += estSize
+	sd.metrics.CacheGetCount++
 	if dm, ok := sd.metrics.Domains[domain]; ok {
-		dm.CacheSize += estSize
-		dm.CacheWriteCount++
+		dm.CacheGetSize += estSize
+		dm.CacheGetCount++
 	} else {
 		sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
-			CacheWriteCount: 1,
-			CacheSize:       estSize,
+			CacheGetCount: 1,
+			CacheGetSize:  estSize,
 		}
 	}
 
@@ -612,7 +620,10 @@ func (sd *SharedDomains) LogMetrics() []any {
 	defer sd.metrics.RUnlock()
 
 	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
-		metrics = append(metrics, "cache", common.PrettyCounter(readCount), "writes", common.PrettyCounter(sd.metrics.CacheWriteCount), "size", common.PrettyCounter(sd.metrics.CacheSize), "cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
+		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
+			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"gets", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
 	if readCount := sd.metrics.DbReadCount; readCount > 0 {
