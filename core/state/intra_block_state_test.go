@@ -240,11 +240,13 @@ func (test *snapshotTest) String() string {
 }
 
 func (test *snapshotTest) run() bool {
+	aggStep := uint64(16)
+
 	// Run all actions and create snapshots.
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), aggStep, db, log.New())
 	if err != nil {
 		test.err = err
 		return false

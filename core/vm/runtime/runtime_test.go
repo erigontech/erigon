@@ -535,7 +535,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	p, lbl = program.New().Jumpdest()
 	callEOA := p.
 		Call(nil, 0xE0, 0, 0, 0, 0, 0). // call addr of EOA
-		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
+		Op(vm.POP).Jump(lbl).Bytes()    // pop return value and jump to label
 
 	p, lbl = program.New().Jumpdest()
 	// Push as if we were making call, then pop it off again, and loop
