@@ -442,7 +442,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	mock.sentriesClient.IsMock = true
 
-	snapDownloader := mockDownloader(ctrl)
+	snapDownloader := mockDownloader(ctrl) // downloader is also NetworkInterface - so, mock it as Sentry
 
 	miningConfig := cfg.Miner
 	miningConfig.Enabled = true
