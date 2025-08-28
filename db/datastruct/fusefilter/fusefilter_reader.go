@@ -68,7 +68,7 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	features := Features(binary.BigEndian.Uint32(featuresBytes))
 	fileIsLittleEndian := features&IsLittleEndianFeature != 0
 	if fileIsLittleEndian != IsLittleEndian {
-		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon seg index`", fName)
+		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`", fName)
 	}
 
 	filter.SegmentCount = binary.BigEndian.Uint32(header[4+4:])
