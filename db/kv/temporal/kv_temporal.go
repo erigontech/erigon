@@ -183,6 +183,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blockFilesTx = db.blockFiles.View()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -232,6 +233,7 @@ type RwTx struct {
 
 func (tx *tx) ForceReopenAggCtx() {
 	tx.aggtx.Close()
+	tx.blockFilesTx.Close()
 	tx.aggtx = tx.Agg().BeginFilesRo()
 	tx.blockFilesTx = tx.BlockFiles().View()
 }
