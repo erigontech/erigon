@@ -442,22 +442,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	mock.sentriesClient.IsMock = true
 
-	var (
-		snapDownloader = proto_downloader.NewMockDownloaderClient(ctrl)
-	)
-
-	snapDownloader.EXPECT().
-		Add(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		SetLogPrefix(gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		Completed(gomock.Any(), gomock.Any()).
-		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
-		AnyTimes()
+	snapDownloader := mockDownloader(ctrl)
 
 	miningConfig := cfg.Miner
 	miningConfig.Enabled = true
@@ -610,6 +595,25 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 
 	return mock
+}
+
+func mockDownloader(ctrl *gomock.Controller) (snapDownloader *proto_downloader.MockDownloaderClient) {
+	snapDownloader = proto_downloader.NewMockDownloaderClient(ctrl)
+
+	snapDownloader.EXPECT().
+		Add(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		SetLogPrefix(gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		Completed(gomock.Any(), gomock.Any()).
+		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
+		AnyTimes()
+
+	return snapDownloader
 }
 
 // Mock is convenience function to create a mock with some pre-set values
