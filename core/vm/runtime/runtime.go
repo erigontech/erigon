@@ -36,10 +36,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/memdb"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -128,24 +126,10 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 
 	externalState := cfg.State != nil
 	if !externalState {
-		db := memdb.NewStateDB(tempdir)
-		defer db.Close()
 		dirs := datadir.New(tempdir)
-		logger := log.New()
-		salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		agg, err := dbstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, nil, err
-		}
-		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		db := temporaltest.NewTestDB(nil, dirs)
+		defer db.Close()
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, nil, err
 		}
@@ -199,18 +183,9 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		tmp := filepath.Join(os.TempDir(), "create-vm")
 		defer dir.RemoveAll(tmp) //nolint
 
-		db := memdb.NewStateDB(tmp)
+		db := temporaltest.NewTestDB(nil, datadir.New(tmp))
 		defer db.Close()
-		agg, err := dbstate.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}

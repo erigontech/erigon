@@ -41,9 +41,8 @@ import (
 	"github.com/erigontech/erigon/core/vm/program"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/abi"
@@ -52,33 +51,16 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *dbstate.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
-	tb.Cleanup(db.Close)
+	db := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
 
-	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-
-	agg, err := dbstate.NewAggregator2(context.Background(), dirs, 16, salt, db, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
 	tb.Cleanup(tx.Rollback)
-	return _db, tx, agg
+	return db, tx
 }
 
 func TestDefaults(t *testing.T) {
@@ -153,7 +135,7 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -178,22 +160,7 @@ func TestCall(t *testing.T) {
 		t.Error("Expected 10, got", num)
 	}
 }
-
-func testTemporalDB(t testing.TB) *temporal.DB {
-	db := memdb.NewStateDB(t.TempDir())
-
-	t.Cleanup(db.Close)
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	return _db
-}
-
-func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *dbstate.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.RwTx, *dbstate.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
@@ -228,14 +195,14 @@ func BenchmarkCall(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
-	db := testTemporalDB(b)
+	tmpdir := b.TempDir()
+	db := temporaltest.NewTestDB(b, datadir.New(tmpdir))
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
 	//cfg.w = state.NewWriter(sd, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
-	tmpdir := b.TempDir()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
@@ -247,7 +214,7 @@ func BenchmarkCall(b *testing.B) {
 }
 
 func benchmarkEVM_Create(b *testing.B, code string) {
-	db := testTemporalDB(b)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
 	defer tx.Rollback()
@@ -323,7 +290,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 		return contract
 	}
 
-	db := testTemporalDB(b)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	tx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(b, err)
 	defer tx.Rollback()
@@ -508,7 +475,7 @@ func TestBlockhash(t *testing.T) {
 func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	db := testTemporalDB(b)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	defer db.Close()
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
@@ -761,7 +728,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 		return contract
 	}
 
-	_, tx, _ := NewTestTemporalDb(b)
+	_, tx := NewTestTemporalDb(b)
 	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
