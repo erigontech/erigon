@@ -58,6 +58,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *dbstate.Aggreg
 	tb.Cleanup(db.Close)
 
 	dirs, logger := datadir.New(tb.TempDir()), log.New()
+
 	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
 	if err != nil {
 		tb.Fatal(err)
