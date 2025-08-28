@@ -27,9 +27,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
@@ -185,7 +185,7 @@ func (r *TxResult) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		if err != nil {
 			return nil, err
 		}
-		receipt.ContractAddress = crypto.CreateAddress(*txSender, r.Tx().GetNonce())
+		receipt.ContractAddress = types.CreateAddress(*txSender, r.Tx().GetNonce())
 	}
 
 	return receipt, nil
@@ -462,7 +462,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if txTask.BlockNumber() == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = core.GenesisToBlock(genesis, dirs, txTask.Logger)
+			_, ibs, err = genesiswrite.GenesisToBlock(genesis, dirs, txTask.Logger)
 			if err != nil {
 				panic(err)
 			}
