@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -52,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/bordb"
@@ -74,8 +74,8 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, snaptype2.BlockSnapshotTypes, segmentsMin, true, logger)}
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
+	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, snaptype2.BlockSnapshotTypes, true, logger)}
 }
 
 // headers
@@ -92,7 +92,7 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 // transaction_hash  -> block_number
 
 func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
-	return snapshotsync.TypedSegments(dir, minBlock, snaptype2.BlockSnapshotTypes, true)
+	return snapshotsync.TypedSegments(dir, snaptype2.BlockSnapshotTypes, true)
 }
 
 func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {

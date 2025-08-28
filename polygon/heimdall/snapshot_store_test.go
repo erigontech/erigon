@@ -32,7 +32,7 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 5_000, 132, dir, logger)
 	createTestSegmentFile(t, 0, 5_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 0, 4_000, Spans.Name()))
 	err := dir2.RemoveFile(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
 	t.Cleanup(borRoSnapshots.Close)
 	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestHeimdallStoreEntity(t *testing.T) {
 	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataForTesting, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -127,9 +127,9 @@ func TestHeimdallStoreEntity(t *testing.T) {
 		actualSpan, ok, err := heimdallStore.spans.Entity(t.Context(), expectedSpan.RawId())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, actualSpan.Id, expectedSpan.Id)
-		require.Equal(t, actualSpan.StartBlock, expectedSpan.StartBlock)
-		require.Equal(t, actualSpan.EndBlock, expectedSpan.EndBlock)
+		require.Equal(t, expectedSpan.Id, actualSpan.Id)
+		require.Equal(t, expectedSpan.StartBlock, actualSpan.StartBlock)
+		require.Equal(t, expectedSpan.EndBlock, actualSpan.EndBlock)
 	}
 }
 
@@ -143,7 +143,7 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -157,7 +157,7 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 	lastFrozenId, found, err := heimdallStore.spans.LastFrozenEntityId()
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, lastFrozenId, uint64(9))
+	require.Equal(t, uint64(9), lastFrozenId)
 }
 
 func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
@@ -170,7 +170,7 @@ func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
 	createTestSegmentFile(t, 4_000, 6_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 6_000, 8_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
 	createTestSegmentFile(t, 8_000, 10_000, Enums.Spans, spanDataWithRotations, dir, version.V1_0, logger)
-	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, 0, logger)
+	borRoSnapshots := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet, NoDownloader: true}, dir, logger)
 	t.Cleanup(borRoSnapshots.Close)
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -304,52 +304,52 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 }
 
 var spanDataForTesting = []Span{
-	Span{
+	{
 		Id:         0,
 		StartBlock: 0,
 		EndBlock:   999,
 	},
-	Span{
+	{
 		Id:         1,
 		StartBlock: 1000,
 		EndBlock:   1999,
 	},
-	Span{
+	{
 		Id:         2,
 		StartBlock: 2000,
 		EndBlock:   2999,
 	},
-	Span{
+	{
 		Id:         3,
 		StartBlock: 3000,
 		EndBlock:   3999,
 	},
-	Span{
+	{
 		Id:         4,
 		StartBlock: 4000,
 		EndBlock:   4999,
 	},
-	Span{
+	{
 		Id:         5,
 		StartBlock: 5000,
 		EndBlock:   5999,
 	},
-	Span{
+	{
 		Id:         6,
 		StartBlock: 6000,
 		EndBlock:   6999,
 	},
-	Span{
+	{
 		Id:         7,
 		StartBlock: 7000,
 		EndBlock:   7999,
 	},
-	Span{
+	{
 		Id:         8,
 		StartBlock: 8000,
 		EndBlock:   8999,
 	},
-	Span{
+	{
 		Id:         9,
 		StartBlock: 9000,
 		EndBlock:   9999,
@@ -358,54 +358,54 @@ var spanDataForTesting = []Span{
 
 // span data that is irregular, containing possible span rotations
 var spanDataWithRotations = []Span{
-	Span{
+	{ // first  span
 		Id:         0,
 		StartBlock: 0,
 		EndBlock:   999,
 	},
-	Span{
+	{ // new span announced
 		Id:         1,
+		StartBlock: 1000,
+		EndBlock:   1999,
+	},
+	{ // span rotation
+		Id:         2,
+		StartBlock: 4,
+		EndBlock:   1999,
+	},
+	{ // span rotation
+		Id:         3,
 		StartBlock: 5,
 		EndBlock:   1999,
 	},
-	Span{
-		Id:         2,
-		StartBlock: 1988,
+	{ // span rotation
+		Id:         4,
+		StartBlock: 6,
+		EndBlock:   1999,
+	},
+	{ // new span announced
+		Id:         5,
+		StartBlock: 2000,
 		EndBlock:   2999,
 	},
-	Span{
-		Id:         3,
-		StartBlock: 3000,
-		EndBlock:   3999,
+	{ // span rotation
+		Id:         6,
+		StartBlock: 11,
+		EndBlock:   1999,
 	},
-	Span{
-		Id:         4,
-		StartBlock: 3500,
+	{ // new span announced, this will have duplicate StartBlock
+		Id:         7,
+		StartBlock: 2000,
+		EndBlock:   2999,
+	},
+	{ // span rotation
+		Id:         8,
+		StartBlock: 3100,
 		EndBlock:   4999,
 	},
-	Span{
-		Id:         5,
-		StartBlock: 5000,
-		EndBlock:   5999,
-	},
-	Span{
-		Id:         6,
-		StartBlock: 5500,
-		EndBlock:   6999,
-	},
-	Span{
-		Id:         7,
-		StartBlock: 7000,
-		EndBlock:   7999,
-	},
-	Span{
-		Id:         8,
-		StartBlock: 7001,
-		EndBlock:   8999,
-	},
-	Span{
+	{ // span rotation
 		Id:         9,
-		StartBlock: 7002,
-		EndBlock:   9999,
+		StartBlock: 4600,
+		EndBlock:   5999,
 	},
 }

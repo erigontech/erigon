@@ -201,14 +201,6 @@ const (
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
 
-	//State Reconstitution
-	PlainStateR    = "PlainStateR"    // temporary table for PlainState reconstitution
-	PlainStateD    = "PlainStateD"    // temporary table for PlainStare reconstitution, deletes
-	CodeR          = "CodeR"          // temporary table for Code reconstitution
-	CodeD          = "CodeD"          // temporary table for Code reconstitution, deletes
-	PlainContractR = "PlainContractR" // temporary table for PlainContract reconstitution
-	PlainContractD = "PlainContractD" // temporary table for PlainContract reconstitution, deletes
-
 	// Erigon-CL Objects
 
 	// [slot + block root] => [signature + block without execution payload]
@@ -475,19 +467,11 @@ var ConsensusTables = append([]string{
 },
 	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
 )
-var HeimdallTables = []string{}
-var PolygonBridgeTables = []string{}
+var HeimdallTables = ChaindataTables
+var PolygonBridgeTables = ChaindataTables
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
-}
-var ReconTables = []string{
-	PlainStateR,
-	PlainStateD,
-	CodeR,
-	CodeD,
-	PlainContractR,
-	PlainContractD,
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
@@ -614,11 +598,6 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
-var ReconTablesCfg = TableCfg{
-	PlainStateD:    {Flags: DupSort},
-	CodeD:          {Flags: DupSort},
-	PlainContractD: {Flags: DupSort},
-}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
@@ -697,13 +676,6 @@ func reinit() {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
 			DownloaderTablesCfg[name] = TableCfgItem{}
-		}
-	}
-
-	for _, name := range ReconTables {
-		_, ok := ReconTablesCfg[name]
-		if !ok {
-			ReconTablesCfg[name] = TableCfgItem{}
 		}
 	}
 
@@ -799,6 +771,10 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 		return RCacheHistoryIdx, nil
 	case "logaddrs":
 		return LogAddrIdx, nil
+	case "logaddr":
+		return LogAddrIdx, nil
+	case "logtopic":
+		return LogTopicIdx, nil
 	case "logtopics":
 		return LogTopicIdx, nil
 	case "tracesfrom":
@@ -808,6 +784,18 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 	default:
 		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
 	}
+}
+
+func String2Enum(in string) (uint16, error) {
+	ii, err := String2InvertedIdx(in)
+	if err != nil {
+		d, errD := String2Domain(in)
+		if errD != nil {
+			return 0, errD
+		}
+		return uint16(d), nil
+	}
+	return uint16(ii), nil
 }
 
 const (

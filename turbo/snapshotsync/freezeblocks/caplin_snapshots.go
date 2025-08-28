@@ -71,8 +71,6 @@ type CaplinSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
-	// allows for pruning segments - this is the minimum available segment
-	segmentsMin atomic.Uint64
 	// chain cfg
 	beaconCfg *clparams.BeaconChainConfig
 }
@@ -307,7 +305,7 @@ func (s *CaplinSnapshots) idxAvailability() uint64 {
 }
 
 func (s *CaplinSnapshots) OpenFolder() error {
-	files, _, err := snapshotsync.SegmentsCaplin(s.dir, s.segmentsMin.Load())
+	files, _, err := snapshotsync.SegmentsCaplin(s.dir)
 	if err != nil {
 		return err
 	}
@@ -625,7 +623,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	// }
 
 	// wait for Downloader service to download all expected snapshots
-	segments, _, err := snapshotsync.SegmentsCaplin(s.dir, 0)
+	segments, _, err := snapshotsync.SegmentsCaplin(s.dir)
 	if err != nil {
 		return err
 	}

@@ -296,7 +296,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *exec.TxTask, tracer *calltrac
 			result.Err = outerErr
 			return result
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
 
 		result.ValidationResults = validationResults
 	}

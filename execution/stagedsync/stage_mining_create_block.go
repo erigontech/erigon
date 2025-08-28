@@ -26,9 +26,8 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/kv"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -263,7 +263,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 			"headerParentHash", header.ParentHash.String(),
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
-			"callers", debug.Callers(10))
+			"stack", dbg.Stack())
 		return err
 	}
 

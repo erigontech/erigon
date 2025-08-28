@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 type CursorType uint8
@@ -129,13 +130,13 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
-	hi.largeVals = dc.d.largeValues
+	hi.largeVals = dc.d.LargeValues
 	heap.Init(hi.h)
 	var key, value []byte
 
 	err := hi.roTx.Apply(context.Background(), func(tx kv.Tx) error {
-		if dc.d.largeValues {
-			valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable) //nolint:gocritic
+		if dc.d.LargeValues {
+			valsCursor, err := hi.roTx.Cursor(dc.d.ValuesTable) //nolint:gocritic
 			if err != nil {
 				return err
 			}
@@ -151,7 +152,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
 			}
 		} else {
-			valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable) //nolint:gocritic
+			valsCursor, err := hi.roTx.CursorDupSort(dc.d.ValuesTable) //nolint:gocritic
 			if err != nil {
 				return err
 			}
@@ -337,7 +338,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		}
 	}
 
-	valsCursor, err := roTx.CursorDupSort(dt.d.valuesTable)
+	valsCursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
 	if err != nil {
 		return err
 	}
@@ -392,7 +393,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 				}
 			case FILE_CURSOR:
 				indexList := dt.d.Accessors
-				if indexList.Has(AccessorBTree) {
+				if indexList.Has(statecfg.AccessorBTree) {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -403,7 +404,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 						ci1.btCursor.Close()
 					}
 				}
-				if indexList.Has(AccessorHashMap) {
+				if indexList.Has(statecfg.AccessorHashMap) {
 					ci1.idx.Reset(ci1.latestOffset)
 					if !ci1.idx.HasNext() {
 						break

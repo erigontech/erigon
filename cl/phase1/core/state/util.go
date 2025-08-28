@@ -17,7 +17,7 @@
 package state
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
@@ -43,9 +43,7 @@ func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *l
 
 func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
 	// Sort the attestation indicies.
-	sort.Slice(attestingIndicies, func(i, j int) bool {
-		return attestingIndicies[i] < attestingIndicies[j]
-	})
+	slices.Sort(attestingIndicies)
 	return &cltypes.IndexedAttestation{
 		AttestingIndices: solid.NewRawUint64List(2048*64, attestingIndicies),
 		Data:             attestation.Data,

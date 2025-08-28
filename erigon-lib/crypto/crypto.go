@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // SignatureLength indicates the byte length required to carry a signature with recovery id.
@@ -108,24 +107,6 @@ func Keccak512(data ...[]byte) []byte {
 		d.Write(b)
 	}
 	return d.Sum(nil)
-}
-
-// CreateAddress creates an ethereum address given the bytes and the nonce
-// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress(a common.Address, nonce uint64) common.Address {
-	listLen := 21 + rlp.U64Len(nonce)
-	data := make([]byte, listLen+1)
-	pos := rlp.EncodeListPrefix(listLen, data)
-	pos += rlp.EncodeAddress(a[:], data[pos:])
-	rlp.EncodeU64(nonce, data[pos:])
-	return common.BytesToAddress(Keccak256(data)[12:])
-}
-
-// CreateAddress2 creates an ethereum address given the address bytes, initial
-// contract code hash and a salt.
-// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress2(b common.Address, salt [32]byte, inithash []byte) common.Address {
-	return common.BytesToAddress(Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
 }
 
 // ToECDSA creates a private key with the given D value.
