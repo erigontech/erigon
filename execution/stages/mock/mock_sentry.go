@@ -93,6 +93,7 @@ import (
 
 const MockInsertAsInitialCycle = false
 
+// MockSentry is a Netwrork Inverface mock. So, unit-tests can test many Erigon's components - but without net-interaction
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx                  context.Context
@@ -102,7 +103,6 @@ type MockSentry struct {
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
-	gspec                *types.Genesis
 	ChainConfig          *chain.Config
 	Sync                 *stagedsync.Sync
 	MiningSync           *stagedsync.Sync
@@ -308,7 +308,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		Log:            logger,
 		Dirs:           dirs,
 		Engine:         engine,
-		gspec:          gspec,
 		ChainConfig:    gspec.Config,
 		Key:            key,
 		Notifications:  shards.NewNotifications(erigonGrpcServeer),
@@ -442,22 +441,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	mock.sentriesClient.IsMock = true
 
-	var (
-		snapDownloader = proto_downloader.NewMockDownloaderClient(ctrl)
-	)
-
-	snapDownloader.EXPECT().
-		Add(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		SetLogPrefix(gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
-	snapDownloader.EXPECT().
-		Completed(gomock.Any(), gomock.Any()).
-		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
-		AnyTimes()
+	snapDownloader := mockDownloader(ctrl)
 
 	miningConfig := cfg.Miner
 	miningConfig.Enabled = true
@@ -494,7 +478,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
-					mock.gspec,
+					gspec,
 					cfg.Sync,
 					nil,
 				),
@@ -533,7 +517,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
-				mock.gspec,
+				gspec,
 				cfg.Sync,
 				nil,
 			), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
@@ -575,7 +559,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
-				mock.gspec,
+				gspec,
 				cfg.Sync,
 				nil,
 			),
@@ -610,6 +594,25 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 
 	return mock
+}
+
+func mockDownloader(ctrl *gomock.Controller) *proto_downloader.MockDownloaderClient {
+	snapDownloader := proto_downloader.NewMockDownloaderClient(ctrl)
+
+	snapDownloader.EXPECT().
+		Add(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		SetLogPrefix(gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		Completed(gomock.Any(), gomock.Any()).
+		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
+		AnyTimes()
+
+	return snapDownloader
 }
 
 // Mock is convenience function to create a mock with some pre-set values
