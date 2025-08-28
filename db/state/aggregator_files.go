@@ -67,7 +67,7 @@ func (sf *SelectedStaticFiles) Close() {
 func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) {
 	sf := &SelectedStaticFiles{ii: make([][]*FilesItem, len(r.invertedIndex))}
 	for id := range at.d {
-		if at.d[id].d.disable {
+		if at.d[id].d.Disable {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -76,7 +76,7 @@ func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) 
 		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
-		if at.iis[id].ii.disable {
+		if at.iis[id].ii.Disable {
 			continue
 		}
 		if rng == nil || !rng.needMerge {

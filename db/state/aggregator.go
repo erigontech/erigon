@@ -34,7 +34,6 @@ import (
 	rand2 "golang.org/x/exp/rand"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -50,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -69,8 +69,6 @@ type Aggregator struct {
 
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
-
-	commitmentValuesTransform bool // enables squeezing commitment values in CommitmentDomain
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -97,9 +95,6 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-const AggregatorSqueezeCommitmentValues = true
-const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
-
 func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
@@ -115,8 +110,6 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, d
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
-
-		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
 		produce: true,
 	}, nil
@@ -175,19 +168,19 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(cfg domainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	a.d[cfg.name], err = NewDomain(cfg, a.stepSize, dirs, logger)
+func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
+	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, dirs, logger)
 	if err != nil {
 		return err
 	}
-	a.d[cfg.name].salt.Store(salt)
-	a.AddDependencyBtwnHistoryII(cfg.name)
+	a.d[cfg.Name].salt.Store(salt)
+	a.AddDependencyBtwnHistoryII(cfg.Name)
 	return nil
 }
 
-func (a *Aggregator) registerII(cfg iiCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
-	if ii := a.searchII(cfg.name); ii != nil {
-		return fmt.Errorf("inverted index %s already registered", cfg.name)
+func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
+	if ii := a.searchII(cfg.Name); ii != nil {
+		return fmt.Errorf("inverted index %s already registered", cfg.Name)
 	}
 	ii, err := NewInvertedIndex(cfg, a.stepSize, dirs, logger)
 	if err != nil {
@@ -236,7 +229,7 @@ func (a *Aggregator) reloadSalt() error {
 
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
-	if dd.disable || a.d[dependency].disable {
+	if dd.Disable || a.d[dependency].Disable {
 		a.logger.Debug("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
 		return
 	}
@@ -258,7 +251,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	// ii has checker on history dirtyFiles (same domain)
 	dd := a.d[domain]
-	if dd.histCfg.snapshotsDisabled || dd.histCfg.historyDisabled || dd.disable {
+	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || dd.Disable {
 		a.logger.Debug("history or ii disabled, can't register dependency", "domain", domain.String())
 		return
 	}
@@ -268,7 +261,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	}
 
 	h := dd.History
-	ue := FromII(dd.InvertedIndex.iiCfg.name)
+	ue := FromII(dd.InvertedIndex.InvIdxCfg.Name)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity: ue,
 		filesGetter: func() *btree.BTreeG[*FilesItem] {
@@ -314,7 +307,7 @@ func (a *Aggregator) OpenFolder() error {
 func (a *Aggregator) openFolder() error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
-		if d.disable {
+		if d.Disable {
 			continue
 		}
 
@@ -329,7 +322,7 @@ func (a *Aggregator) openFolder() error {
 		})
 	}
 	for _, ii := range a.iis {
-		if ii.disable {
+		if ii.Disable {
 			continue
 		}
 		ii := ii
@@ -395,7 +388,7 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].disable = false }
+func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].Disable = false }
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
@@ -517,11 +510,11 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 	}
 
 	for _, d := range a.d {
-		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.name])
+		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.Name])
 	}
 
 	for _, ii := range a.iis {
-		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
+		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.Name])
 	}
 
 	err := g.Wait()
@@ -627,7 +620,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
-		if d.disable {
+		if d.Disable {
 			continue
 		}
 
@@ -648,7 +641,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
 				return err
 			}); err != nil {
-				return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
 			}
 			collListMu.Lock()
 			collations = append(collations, collation)
@@ -661,7 +654,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 				return err
 			}
 
-			dd, err := kv.String2Domain(d.filenameBase)
+			dd, err := kv.String2Domain(d.FilenameBase)
 			if err != nil {
 				return err
 			}
@@ -673,7 +666,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
-		if ii.disable {
+		if ii.Disable {
 			continue
 		}
 
@@ -695,7 +688,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 				return err
 			})
 			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", ii.filenameBase, err)
+				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
 			}
 			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
@@ -870,7 +863,7 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 	return files
 }
 func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
-	return at.d[domain].d.version.DataKV.Current
+	return at.d[domain].d.Version.DataKV.Current
 }
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
@@ -884,7 +877,7 @@ func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []stri
 
 func (a *Aggregator) searchII(name kv.InvertedIdx) *InvertedIndex {
 	for _, ii := range a.iis {
-		if ii.name == name {
+		if ii.Name == name {
 			return ii
 		}
 	}
@@ -1000,7 +993,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			if err != nil {
 				return false, err
 			}
-			if spaceDirty > uint64(MaxNonFuriousDirtySpacePerTx) {
+			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
 				return false, nil
 			}
 		}
@@ -1064,11 +1057,11 @@ func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
 	steps := make([]string, 0, len(at.d)+len(at.iis))
 	for _, dt := range at.d {
 		a1, a2 := dt.stepsRangeInDB(tx)
-		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.filenameBase, a2-a1))
+		steps = append(steps, fmt.Sprintf("%s:%.1f", dt.d.FilenameBase, a2-a1))
 	}
 	for _, iit := range at.iis {
 		a1, a2 := iit.stepsRangeInDB(tx)
-		steps = append(steps, fmt.Sprintf("%s:%.1f", iit.ii.filenameBase, a2-a1))
+		steps = append(steps, fmt.Sprintf("%s:%.1f", iit.ii.FilenameBase, a2-a1))
 	}
 	return strings.Join(steps, ", ")
 }
@@ -1154,7 +1147,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 // pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
 func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain, tx kv.RwTx) error {
 	cd := at.d[domain]
-	if cd.ht.h.historyDisabled {
+	if cd.ht.h.HistoryDisabled {
 		return nil
 	}
 
@@ -1206,7 +1199,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
 		var err error
-		aggStat.Domains[at.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
 		if err != nil {
 			return aggStat, err
 		}
@@ -1221,7 +1214,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 		stats[iikey] = stat
 	}
 	for iikey := range at.a.iis {
-		aggStat.Indices[at.iis[iikey].ii.filenameBase] = stats[iikey]
+		aggStat.Indices[at.iis[iikey].ii.FilenameBase] = stats[iikey]
 	}
 
 	return aggStat, nil
@@ -1313,7 +1306,8 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	r := &Ranges{invertedIndex: make([]*MergeRange, len(at.a.iis))}
-	if at.a.commitmentValuesTransform {
+	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	if commitmentUseReferencedBranches {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange()
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange()
 		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange()
@@ -1326,13 +1320,13 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		}
 	}
 	for id, d := range at.d {
-		if d.d.disable {
+		if d.d.Disable {
 			continue
 		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
-	if at.a.commitmentValuesTransform && r.domain[kv.CommitmentDomain].values.needMerge {
+	if commitmentUseReferencedBranches && r.domain[kv.CommitmentDomain].values.needMerge {
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
@@ -1350,7 +1344,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
 					r.domain[k].values = MergeRange{}
 					at.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
-						at.d[k].d.filenameBase, dr.values.String("vals", at.StepSize()),
+						at.d[k].d.FilenameBase, dr.values.String("vals", at.StepSize()),
 						"commitment", cr.values.String("vals", at.StepSize()))
 					continue
 				}
@@ -1362,13 +1356,13 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 			for k, dr := range &r.domain {
 				r.domain[k].values = MergeRange{}
 				at.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
-					at.d[k].d.filenameBase, dr.values.String("", at.StepSize()))
+					at.d[k].d.FilenameBase, dr.values.String("", at.StepSize()))
 			}
 		}
 	}
 
 	for id, ii := range at.iis {
-		if ii.ii.disable {
+		if ii.ii.Disable {
 			continue
 		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
@@ -1396,11 +1390,12 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}()
 
 	at.a.logger.Info("[snapshots] merge state " + r.String())
+	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
 
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
-		if at.d[id].d.disable {
+		if at.d[id].d.Disable {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -1409,15 +1404,16 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 
 		id := id
 		kid := kv.Domain(id)
-		if at.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
+		if commitmentUseReferencedBranches && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 			accStorageMerged.Add(1)
 		}
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if at.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
+			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain {
 				accStorageMerged.Wait()
 
+				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
 				vt, err = at.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, at.d[kv.AccountsDomain], at.d[kv.StorageDomain],
 					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
 
@@ -1427,7 +1423,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 			}
 
 			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, at.a.ps)
-			if at.a.commitmentValuesTransform {
+			if commitmentUseReferencedBranches {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
 				}
@@ -1437,7 +1433,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}
 
 	for id, rng := range r.invertedIndex {
-		if at.iis[id].ii.disable {
+		if at.iis[id].ii.Disable {
 			continue
 		}
 
@@ -1470,14 +1466,14 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		if d.disable {
+		if d.Disable {
 			continue
 		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.iis {
-		if ii.disable {
+		if ii.Disable {
 			continue
 		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
@@ -1499,7 +1495,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	// ToDo: call only `.garbage()` and remove `dryRun` parameter from `cleanAfterMerge`. Also remove return parameter from `cleanAfterMerge`
 	dryRun := true
 	for id, d := range at.d {
-		if d.d.disable {
+		if d.d.Disable {
 			continue
 		}
 		if in == nil {
@@ -1509,7 +1505,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 	for id, ii := range at.iis {
-		if ii.ii.disable {
+		if ii.ii.Disable {
 			continue
 		}
 		if in == nil {
@@ -1523,7 +1519,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	// Step 2: delete
 	dryRun = false
 	for id, d := range at.d {
-		if d.d.disable {
+		if d.d.Disable {
 			continue
 		}
 		if in == nil {
@@ -1533,7 +1529,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 	for id, ii := range at.iis {
-		if ii.ii.disable {
+		if ii.ii.Disable {
 			continue
 		}
 		if in == nil {
@@ -1548,13 +1544,12 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 // Affects only domains with dontProduceHistoryFiles=true.
 // Usually equal to one a.stepSize, but could be set to step/2 or step/4 to reduce size of history tables.
 // when we exec blocks from snapshots we can set it to 0, because no re-org on those blocks are possible
-func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64) *Aggregator {
+func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64) {
 	for _, d := range a.d {
-		if d != nil && d.History.snapshotsDisabled {
-			d.History.keepRecentTxnInDB = recentTxs
+		if d != nil && d.History.SnapshotsDisabled {
+			d.History.KeepRecentTxnInDB = recentTxs
 		}
 	}
-	return a
 }
 
 func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
@@ -1654,7 +1649,7 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
-		if d.d.historyIdx == name {
+		if d.d.HistoryIdx == name {
 			return d.ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
 		}
 	}
@@ -1747,7 +1742,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
-	if d.d.historyDisabled {
+	if d.d.HistoryDisabled {
 		// this is not accurate, okay for reporting...
 		// if historyDisabled, there's no way to get progress in
 		// terms of exact txNum

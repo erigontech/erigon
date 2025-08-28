@@ -518,11 +518,9 @@ type BlockSnapshots interface {
 	OpenFolder() error
 	OpenSegments(types []snaptype.Type, allowGaps, allignMin bool) error
 	SegmentsMax() uint64
-	SegmentsMin() uint64
 	Delete(fileName string) error
 	Types() []snaptype.Type
 	Close()
-	SetSegmentsMin(uint64)
 
 	DownloadComplete()
 	RemoveOverlaps(onDelete func(l []string) error) error
@@ -553,11 +551,9 @@ type RoSnapshots struct {
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 
-	// allows for pruning segments - this is the minimum available segment
-	segmentsMin atomic.Uint64
-	ready       ready
-	operators   map[snaptype.Enum]*retireOperators
-	alignMin    bool // do we want to align all visible segments to the minimum available
+	ready     ready
+	operators map[snaptype.Enum]*retireOperators
+	alignMin  bool // do we want to align all visible segments to the minimum available
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -565,11 +561,11 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
-	return newRoSnapshots(cfg, snapDir, types, segmentsMin, alignMin, logger)
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *RoSnapshots {
+	return newRoSnapshots(cfg, snapDir, types, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *RoSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -587,7 +583,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
 
-	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles(s.alignMin)
 
 	if cfg.NoDownloader {
@@ -603,8 +598,6 @@ func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Lo
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
-func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
-func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -1023,7 +1016,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	return nil
 }
 
-func TypedSegments(dir string, _ uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 
 	if err != nil {
@@ -1072,7 +1065,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
-		if !ok || isState {
+		if !ok || isState || snaptype.IsTorrentPartial(f.Ext) {
 			continue
 		}
 		if !s.HasType(f.Type) {
@@ -1166,7 +1159,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
 
-		files, _, err := TypedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+		files, _, err := TypedSegments(s.dir, s.Types(), false)
 		if err != nil {
 			return err
 		}
@@ -1198,7 +1191,7 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bo
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	files, _, err := TypedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
+	files, _, err := TypedSegments(s.dir, types, allowGaps)
 
 	if err != nil {
 		return err
@@ -1646,7 +1639,7 @@ func removeOldFiles(toDel []string) {
 	}
 }
 
-func SegmentsCaplin(dir string, _ uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err

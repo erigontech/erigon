@@ -132,14 +132,14 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
-			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
+			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.FilenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 		if !ok {
 			continue
 		}
-		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
+		if hi.hc.h.HistoryValuesOnCompressedPage <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
 			_, hi.nextVal, _, _, _ = g.Next2Copy(nil, nil)
@@ -417,7 +417,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
-			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
+			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.FilenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
@@ -425,7 +425,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			continue
 		}
 
-		if hi.hc.h.historyValuesOnCompressedPage <= 1 {
+		if hi.hc.h.HistoryValuesOnCompressedPage <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
 			_, hi.nextVal, _, _, _ = g.Next2Copy(nil, nil)
