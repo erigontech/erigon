@@ -128,7 +128,6 @@ jobs:
         run: |
           # the erigon pid is stored in /tmp/erigon.pid file
           ERIGON_PID=$(cat /tmp/erigon.pid)
-          echo $ERIGON_PID
           # Clean up rpcdaemon process if it's still running
           if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
             echo "Erigon stopping..."
