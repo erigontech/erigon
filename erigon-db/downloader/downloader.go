@@ -303,6 +303,7 @@ func configureHttp2(t *http.Transport) {
 	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") != "" {
 		// Disable h2 being added automatically.
 		g.MakeMap(&t.TLSNextProto)
+		return
 	}
 	// Don't set the http2.Transport as the RoundTripper. It's hooked into the http.Transport by
 	// this call. Need to use external http2 library to get access to some config fields that
