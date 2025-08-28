@@ -266,9 +266,11 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uin
 		sd.metrics.CacheSize += estSize
 		if dm, ok := sd.metrics.Domains[kv.StorageDomain]; ok {
 			dm.CacheSize += estSize
+			dm.CacheWriteCount++
 		} else {
 			sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
-				CacheSize: estSize,
+				CacheWriteCount: 1,
+				CacheSize:       estSize,
 			}
 		}
 		return
@@ -314,7 +316,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.metrics.CacheSize) * 4
+	return uint64(sd.metrics.CacheSize) * 2
 }
 
 func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
@@ -567,7 +569,35 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.Unlock()
 	}
 
-	sd.domains[domain][toStringZeroCopy(k)] = dataWithPrevStep{data: v, prevStep: step, dir: put}
+	valWithPrevStep := dataWithPrevStep{data: v, prevStep: step, dir: get}
+	keyS := toStringZeroCopy(k)
+	var estSize int
+	if domain == kv.StorageDomain {
+		if old, ok := sd.storage.Set(keyS, valWithPrevStep); ok {
+			estSize = len(v) - len(old.data)
+		} else {
+			estSize = len(k) + len(v)
+		}
+	} else {
+		if old, ok := sd.domains[domain][keyS]; ok {
+			estSize += len(v) - len(old.data)
+		} else {
+			estSize += len(k) + len(v)
+		}
+		sd.domains[domain][keyS] = valWithPrevStep
+	}
+
+	sd.metrics.CacheSize += estSize
+	if dm, ok := sd.metrics.Domains[domain]; ok {
+		dm.CacheSize += estSize
+		dm.CacheWriteCount++
+	} else {
+		sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
+			CacheWriteCount: 1,
+			CacheSize:       estSize,
+		}
+	}
+
 	return v, step, nil
 }
 
