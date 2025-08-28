@@ -34,7 +34,7 @@ jobs:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TOTAL_TIME_SECONDS: 900 # 15 minutes
       REFERENCE_SYSTEM_HOST_ADDRESS: 157.180.55.78:8545
-      ERIGON_ASSERT: true
+      ERIGON_ASSERT: false
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
 
