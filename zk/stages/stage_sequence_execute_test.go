@@ -196,6 +196,11 @@ func TestSpawnSequencingStage(t *testing.T) {
 
 	cfg.txYielder = &sequencer.RecoveryTransactionYielder{}
 
+	// Stop syncer on timeout, because normally it is stopped only in case of error, but we have no error here
+	time.AfterFunc(500*time.Millisecond, func() {
+		l1Syncer.StopQueryBlocks()
+	})
+
 	// Act
 	err = SpawnSequencingStage(s, u, ctx, cfg, historyCfg, quiet)
 	require.NoError(t, err)

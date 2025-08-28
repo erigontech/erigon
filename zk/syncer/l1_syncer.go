@@ -23,6 +23,7 @@ import (
 const (
 	batchWorkers    = 4
 	getLogsMaxRetry = 20
+	logsChannelSize = 100
 )
 
 var errorShortResponseLT32 = fmt.Errorf("response too short to contain hash data")
@@ -83,10 +84,10 @@ type L1Syncer struct {
 	flagStop           atomic.Bool
 
 	// Channels
-	logsChan         chan []ethTypes.Log
-	logsQueue        []ethTypes.Log
+	logsConsumChan   chan []ethTypes.Log
+	logsProduceChan  chan []ethTypes.Log
+	logsSwapMutex    sync.Mutex
 	logsChanProgress chan string
-	logsChanMutex    sync.Mutex
 
 	highestBlockType string   // finalized, latest, safe
 	headersCache     sync.Map // map[uint64]*ethTypes.Header // cache for headers
@@ -104,6 +105,7 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
+		logsProduceChan:     make(chan []ethTypes.Log, logsChannelSize),
 		logsChanProgress:    make(chan string, 1),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
@@ -137,7 +139,7 @@ func (s *L1Syncer) StopQueryBlocks() {
 func (s *L1Syncer) ConsumeQueryBlocks() {
 	for {
 		select {
-		case <-s.logsChan:
+		case <-s.logsProduceChan:
 		case <-s.logsChanProgress:
 		default:
 			if !s.isSyncStarted.Load() {
@@ -154,31 +156,11 @@ func (s *L1Syncer) WaitQueryBlocksToFinish() {
 
 // Channels
 func (s *L1Syncer) GetLogsChan() <-chan []ethTypes.Log {
-	s.logsChanMutex.Lock()
-	defer s.logsChanMutex.Unlock()
+	s.logsSwapMutex.Lock()
+	defer s.logsSwapMutex.Unlock()
 
-	if s.logsChan == nil {
-		s.logsChan = make(chan []ethTypes.Log, 100)
-	}
-
-	// Flush the queue if there are any logs
-	if len(s.logsQueue) > 0 {
-		go func() {
-			s.logsChanMutex.Lock()
-			defer s.logsChanMutex.Unlock()
-
-			s.flushQueuedLogs()
-		}()
-	}
-
-	return s.logsChan
-}
-
-func (s *L1Syncer) flushQueuedLogs() {
-	if s.logsChan != nil {
-		s.logsChan <- s.logsQueue
-		s.logsQueue = nil
-	}
+	s.logsConsumChan = s.logsProduceChan
+	return s.logsConsumChan
 }
 
 func (s *L1Syncer) GetProgressMessageChan() <-chan string {
@@ -199,7 +181,7 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 	s.wgRunLoopDone.Add(1)
 	s.flagStop.Store(false)
 
-	//start a thread to cheack for new l1 block in interval
+	//start a thread to check for new l1 block in interval
 	go func() {
 		defer s.isSyncStarted.Store(false)
 		defer s.wgRunLoopDone.Done()
@@ -209,6 +191,7 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 
 		for {
 			if s.flagStop.Load() {
+				s.resetChannels()
 				return
 			}
 
@@ -229,7 +212,7 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 					}
 				}
 
-				s.closeLogsChannel()
+				s.resetChannels()
 			}
 			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
@@ -463,7 +446,7 @@ loop:
 						s.l1QueryHeaders(res.Logs)
 					}
 
-					s.storeLogs(res.Logs)
+					s.logsProduceChan <- res.Logs
 				}()
 			}
 
@@ -670,24 +653,11 @@ func (s *L1Syncer) SetFetchHeaders(fetchHeaders bool) {
 	s.fetchHeaders = fetchHeaders
 }
 
-func (s *L1Syncer) closeLogsChannel() {
-	s.logsChanMutex.Lock()
-	if s.logsChan != nil {
-		if len(s.logsQueue) > 0 {
-			s.flushQueuedLogs()
-		}
-		close(s.logsChan)
-		s.logsChan = nil
+func (s *L1Syncer) resetChannels() {
+	s.logsSwapMutex.Lock()
+	if s.logsConsumChan == s.logsProduceChan {
+		close(s.logsConsumChan)
+		s.logsProduceChan = make(chan []ethTypes.Log, logsChannelSize)
 	}
-	s.logsChanMutex.Unlock()
-}
-
-func (s *L1Syncer) storeLogs(logs []ethTypes.Log) {
-	s.logsChanMutex.Lock()
-	if s.logsChan != nil {
-		s.logsChan <- logs
-	} else {
-		s.logsQueue = append(s.logsQueue, logs...)
-	}
-	s.logsChanMutex.Unlock()
+	s.logsSwapMutex.Unlock()
 }
