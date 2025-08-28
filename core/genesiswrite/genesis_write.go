@@ -274,7 +274,7 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	//	return err
 	//}
 
-	if err := WriteGenesisIfNotExist(tx, gen); err != nil {
+	if err := rawdb.WriteGenesisIfNotExist(tx, gen); err != nil {
 		return err
 	}
 	if err := rawdb.WriteBlock(tx, block); err != nil {
@@ -296,7 +296,7 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return err
 	}
-	if err := WriteChainConfig(tx, block.Hash(), cfg); err != nil {
+	if err := rawdb.WriteChainConfig(tx, block.Hash(), cfg); err != nil {
 		return err
 	}
 	return nil
@@ -343,7 +343,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	}
 	_ = g.Alloc //nil-check
 
-	head, withdrawals := rawdb.GenesisWithoutStateToBlock(g)
+	head, withdrawals := GenesisWithoutStateToBlock(g)
 	var root common.Hash
 	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
 

@@ -15,7 +15,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/chain"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -743,7 +743,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 			gen := chain.ArbSepoliaRollupGenesisBlock()
 
-			b := core.MustCommitGenesis(gen, db, dirs, log.New())
+			b := genesiswrite.MustCommitGenesis(gen, db, dirs, log.New())
 			log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
 		} else {
 			start = curBlock
