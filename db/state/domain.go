@@ -1111,8 +1111,12 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
+	versionOfRs := uint8(0)
+	if !d.Version.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+		versionOfRs = 1
+	}
 	cfg := recsplit.RecSplitArgs{
-		Version:            1,
+		Version:            versionOfRs,
 		Enums:              false,
 		LessFalsePositives: true,
 
