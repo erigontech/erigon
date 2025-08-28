@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -91,12 +90,7 @@ type SimulatedBackend struct {
 
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
-func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
-	engine := ethash.NewFaker()
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, checkStateRoot)
-
+func NewSimulatedBackendWithConfig(t *testing.T, m *mock.MockSentry) *SimulatedBackend {
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
@@ -118,8 +112,8 @@ func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64
 	return b
 }
 
-func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(t, alloc, config, gasLimit)
+func NewTestSimulatedBackendWithConfig(t *testing.T, m *mock.MockSentry) *SimulatedBackend {
+	b := NewSimulatedBackendWithConfig(t, m)
 	t.Cleanup(b.Close)
 	return b
 }
