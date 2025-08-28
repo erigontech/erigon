@@ -37,13 +37,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/execution/types"
@@ -117,14 +117,14 @@ type btHeaderMarshaling struct {
 	ExcessBlobGas *math.HexOrDecimal64
 }
 
-func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
+func (bt *BlockTest) Run(t *testing.T) error {
 	config, ok := testutil.Forks[bt.json.Network]
 	if !ok {
 		return testutil.UnsupportedForkError{Name: bt.json.Network}
 	}
 
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 	defer m.Close()
 
 	bt.br = m.BlockReader

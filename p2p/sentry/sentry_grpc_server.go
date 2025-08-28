@@ -41,18 +41,18 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -323,7 +323,7 @@ func handShake(
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		status := &eth.StatusPacket{
 			ProtocolVersion: uint32(version),
 			NetworkID:       status.NetworkId,
@@ -342,7 +342,7 @@ func handShake(
 	}()
 
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		status, err := readAndValidatePeerStatusMessage(rw, status, version, minVersion)
 
 		if err == nil {

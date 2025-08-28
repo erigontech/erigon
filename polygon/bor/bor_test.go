@@ -26,15 +26,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -341,9 +341,8 @@ func newValidator(t *testing.T, testHeimdall *test_heimdall, blocks map[uint64]*
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
-	checkStateRoot := true
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
+		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false),
 		testHeimdall,
 		blocks,
 	}

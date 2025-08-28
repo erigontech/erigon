@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -186,7 +185,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 
 	// if the transaction created a contract, store the creation address in the receipt.
 	if t.TxAsMessage != nil && t.TxAsMessage.To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
+		receipt.ContractAddress = types.CreateAddress(*t.Sender(), t.Tx.GetNonce())
 	}
 
 	return receipt

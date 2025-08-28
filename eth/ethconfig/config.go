@@ -43,7 +43,6 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -289,10 +288,6 @@ type Sync struct {
 	BreakAfterStage            string
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
-
-	UploadLocation   string
-	UploadFrom       rpc.BlockNumber
-	FrozenBlockLimit uint64
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool

@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -309,16 +310,16 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 
 	checkAllEntities := func(expectedLen, expectedRefCnt int) {
 		for _, d := range agg.d {
-			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
-			if d.snapshotsDisabled {
+			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.Name.String())
+			if d.SnapshotsDisabled {
 				continue
 			}
-			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
-			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
+			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.Name.String())
+			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.Disable, d.Name.String())
 		}
 
 		for _, ii := range agg.iis {
-			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt, ii.disable, ii.filenameBase)
+			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt, ii.Disable, ii.FilenameBase)
 		}
 	}
 
@@ -343,9 +344,6 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if !AggregatorSqueezeCommitmentValues {
-		t.Skip()
-	}
 
 	t.Parallel()
 	_db, agg := testDbAndAggregatorv3(t, 5)
@@ -354,14 +352,14 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
+	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = true
+
 	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	txs := uint64(100)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	agg.commitmentValuesTransform = true
 
 	state := make(map[string][]byte)
 
@@ -1237,7 +1235,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -1651,9 +1649,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 
 	t.Run("v1.0 files", func(t *testing.T) {
 		// Schema is global and edited by subtests
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1670,8 +1668,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1680,9 +1678,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("v1.1 files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1699,8 +1697,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.Equal(kv_versions.Current, version.V1_1)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1709,9 +1707,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("v2.0 files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1728,8 +1726,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1738,9 +1736,9 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 	})
 
 	t.Run("empty files", func(t *testing.T) {
-		backup := Schema
+		backup := statecfg.Schema
 		t.Cleanup(func() {
-			Schema = backup
+			statecfg.Schema = backup
 		})
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
@@ -1753,8 +1751,8 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.NoError(err)
 		t.Cleanup(agg.Close)
 
-		kv_versions := agg.d[kv.ReceiptDomain].version.DataKV
-		v_versions := agg.d[kv.ReceiptDomain].hist.version.DataV
+		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
+		v_versions := agg.d[kv.ReceiptDomain].Hist.Version.DataV
 
 		require.True(kv_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(kv_versions.MinSupported, version.V1_0)
@@ -1767,7 +1765,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := AccessorBTree | AccessorExistence
+		accessors := statecfg.AccessorBTree | statecfg.AccessorExistence
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
 			BtIndex().Existence().
@@ -1778,7 +1776,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	populateFiles2(t, dirs, domainR, ranges)
 
 	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := AccessorHashMap
+		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone).
 			Accessor(dirs.SnapAccessors).
@@ -1789,7 +1787,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	populateFiles2(t, dirs, domainHR, ranges)
 
 	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := AccessorHashMap
+		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone).
 			Accessor(dirs.SnapAccessors).
@@ -1818,7 +1816,7 @@ func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange
 func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
 	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
-		accessors := AccessorHashMap
+		accessors := statecfg.AccessorHashMap
 		name = "commitment"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).

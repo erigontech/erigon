@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/config3"
@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -81,6 +82,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/app"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
@@ -417,30 +419,10 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		dbPaths := map[kv.Label]string{kv.ChainDB: chaindata}
-		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
-		// (see kv/tables.go).
-		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
-		if exists, err := dir.Exist(consensus); err == nil && exists {
-			dbPaths[kv.ConsensusDB] = consensus
-		} else {
-			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
-			if exists, err := dir.Exist(consensus); err == nil && exists {
-				dbPaths[kv.ConsensusDB] = consensus
-			}
-		}
-		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
-		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
-		if exists, err := dir.Exist(heimdall); err == nil && exists {
-			dbPaths[kv.HeimdallDB] = heimdall
-		}
-		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
-		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
-			dbPaths[kv.PolygonBridgeDB] = polygonBridge
-		}
-		for dbLabel, dbPath := range dbPaths {
-			//non-accede and exclusive mode - to apply create new tables if need.
-			cfg := dbCfg(dbLabel, dbPath).RemoveFlags(mdbx.Accede).Exclusive(true)
+		migrateDB := func(label kv.Label, path string) {
+			logger.Info("Opening DB", "label", label, "path", path)
+			// Non-accede and exclusive mode - to apply creation of new tables if needed.
+			cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
 			db, err := openDB(cfg, true, logger)
 			if err != nil {
 				logger.Error("Opening DB", "error", err)
@@ -448,6 +430,31 @@ var cmdRunMigrations = &cobra.Command{
 			}
 			defer db.Close()
 			// Nothing to do, migrations will be applied automatically
+		}
+
+		// Chaindata DB *must* be the first one because guaranteed to contain data in Config table
+		// (see openSnapshotOnce in allSnapshots below).
+		migrateDB(kv.ChainDB, chaindata)
+
+		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
+		// (see kv/tables.go).
+		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
+		if exists, err := dir.Exist(consensus); err == nil && exists {
+			migrateDB(kv.ConsensusDB, consensus)
+		} else {
+			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
+			if exists, err := dir.Exist(consensus); err == nil && exists {
+				migrateDB(kv.ConsensusDB, consensus)
+			}
+		}
+		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
+		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
+		if exists, err := dir.Exist(heimdall); err == nil && exists {
+			migrateDB(kv.HeimdallDB, heimdall)
+		}
+		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
+		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
+			migrateDB(kv.PolygonBridgeDB, polygonBridge)
 		}
 	},
 }
@@ -540,6 +547,7 @@ func init() {
 	withReset(cmdCommitmentRebuild)
 	withSqueeze(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
+	withConcurrentCommitment(cmdCommitmentRebuild)
 	withUnwind(cmdCommitmentRebuild)
 	withPruneTo(cmdCommitmentRebuild)
 	withIntegrityChecks(cmdCommitmentRebuild)
@@ -1085,7 +1093,34 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
 
+	rwTx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer rwTx.Rollback()
+
+	// remove all existing state commitment snapshots
+	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
+		return err
+	}
+
+	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
+	sconf := statecfg.Schema.CommitmentDomain
+	for _, tn := range sconf.Tables() {
+		log.Info("Clearing", "table", tn)
+		if err := rwTx.ClearTable(tn); err != nil {
+			return fmt.Errorf("failed to clear table %s: %w", tn, err)
+		}
+	}
+	if err := rwTx.Commit(); err != nil {
+		return err
+	}
+
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	if err = agg.OpenFolder(); err != nil { // reopen after snapshot file deletions
+		return fmt.Errorf("failed to re-open aggregator: %w", err)
+	}
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
@@ -1197,8 +1232,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		chainConfig := fromdb.ChainConfig(db)
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 
-		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
+		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, logger)
+		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, logger)
 		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
 		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
@@ -1298,7 +1333,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	events := shards.NewEvents()
 
 	genesis := readGenesis(chain)
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, dirs, logger)
+	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, dirs, logger)
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}

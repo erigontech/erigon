@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -257,7 +258,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if txTask.BlockNum == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs, rw.logger)
+			_, ibs, err = genesiswrite.GenesisToBlock(rw.genesis, rw.dirs, rw.logger)
 			if err != nil {
 				panic(err)
 			}
@@ -449,13 +450,14 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 			txTask.Error = outerErr
 			return
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
 
 		txTask.ValidationResults = validationResults
 	}
 
 	if len(txTask.ValidationResults) == 0 {
 		txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+		return
 	}
 
 	aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
