@@ -3,10 +3,10 @@ package commitment
 import (
 	"encoding/csv"
 	"fmt"
-	"maps"
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +52,7 @@ type Metrics struct {
 }
 
 type MetricValues struct {
+	*sync.RWMutex
 	Accounts        map[string]*AccountStats
 	Updates         uint64
 	AddressKeys     uint64
@@ -74,10 +75,9 @@ func NewMetrics() *Metrics {
 }
 
 func (m *Metrics) AsValues() MetricValues {
-	accounts := map[string]*AccountStats{}
-	maps.Copy(accounts, m.Accounts.AccountStats)
 	return MetricValues{
-		Accounts:        accounts,
+		RWMutex:         &m.Accounts.m,
+		Accounts:        m.Accounts.AccountStats,
 		Updates:         m.updates.Load(),
 		AddressKeys:     m.addressKeys.Load(),
 		StorageKeys:     m.storageKeys.Load(),
@@ -288,25 +288,24 @@ type AccountStats struct {
 }
 
 type AccountMetrics struct {
-	//m sync.Mutex
+	m sync.RWMutex
 	// will be separate value for each key in parallel processing
 	AccountStats map[string]*AccountStats
 }
 
 func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
-	//am.m.Lock()
-	//defer am.m.Unlock()
-
 	var addr string
 	if len(plainKey) > 0 {
 		addr = toStringZeroCopy(plainKey[:min(length.Addr, len(plainKey))])
 	}
+	am.m.Lock()
+	defer am.m.Unlock()
 	as, ok := am.AccountStats[addr]
 	if !ok {
 		as = &AccountStats{}
+		am.AccountStats[addr] = as
 	}
 	fn(as)
-	am.AccountStats[addr] = as
 }
 
 func (am *AccountMetrics) Headers() []string {
@@ -324,9 +323,8 @@ func (am *AccountMetrics) Headers() []string {
 }
 
 func (am *AccountMetrics) Values() [][]string {
-	//am.m.Lock()
-	//defer am.m.Unlock()
-
+	am.m.Lock()
+	defer am.m.Unlock()
 	values := make([][]string, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
 	vi := 1
 	for addr, stat := range am.AccountStats {
@@ -347,8 +345,8 @@ func (am *AccountMetrics) Values() [][]string {
 }
 
 func (am *AccountMetrics) Reset() {
-	//am.m.Lock()
-	//defer am.m.Unlock()
+	am.m.Lock()
+	defer am.m.Unlock()
 	am.AccountStats = make(map[string]*AccountStats)
 }
 

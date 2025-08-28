@@ -1465,20 +1465,22 @@ func ExecV3(ctx context.Context,
 									logCommitted := func(commitProgress commitment.CommitProgress) {
 										// this is an approximation of blcok prgress - it assumnes an
 										// even distribution of keys to blocks
-										progress := float64(commitProgress.KeyIndex) / float64(commitProgress.UpdateCount)
-										committedGas := uint64(float64(uncommittedGas) * progress)
-										committedTransactions := uint64(float64(uncommittedTransactions) * progress)
-										commitedBlocks := uint64(float64(uncommittedBlocks) * progress)
+										if commitProgress.KeyIndex > 0 {
+											progress := float64(commitProgress.KeyIndex) / float64(commitProgress.UpdateCount)
+											committedGas := uint64(float64(uncommittedGas) * progress)
+											committedTransactions := uint64(float64(uncommittedTransactions) * progress)
+											commitedBlocks := uint64(float64(uncommittedBlocks) * progress)
 
-										pe.LogCommitted(commitStart,
-											commitedBlocks-prevCommitedBlocks,
-											committedTransactions-prevCommittedTransactions,
-											committedGas-prevCommitedGas, stepsInDb, commitProgress)
+											pe.LogCommitted(commitStart,
+												commitedBlocks-prevCommitedBlocks,
+												committedTransactions-prevCommittedTransactions,
+												committedGas-prevCommitedGas, stepsInDb, commitProgress)
 
-										lastCommitedLog = time.Now()
-										prevCommitedBlocks = commitedBlocks
-										prevCommittedTransactions = committedTransactions
-										prevCommitedGas = committedGas
+											lastCommitedLog = time.Now()
+											prevCommitedBlocks = commitedBlocks
+											prevCommittedTransactions = committedTransactions
+											prevCommitedGas = committedGas
+										}
 
 										if pe.agg.HasBackgroundFilesBuild() {
 											logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
