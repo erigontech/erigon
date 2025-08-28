@@ -92,6 +92,7 @@ func NewService(
 		heimdallService,
 		bridgeService,
 		events.Events(),
+		events,
 		notifications,
 		NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 		engineAPISwitcher,

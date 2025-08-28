@@ -78,7 +78,8 @@ func NewSync(
 	ccBuilderFactory CanonicalChainBuilderFactory,
 	heimdallSync heimdallSynchronizer,
 	bridgeSync bridgeSynchronizer,
-	events chan Event,
+	events <-chan Event,
+	tipEvents *TipEvents,
 	notifications *shards.Notifications,
 	wiggleCalculator wiggleCalculator,
 	engineAPISwitcher EngineAPISwitcher,
@@ -101,6 +102,7 @@ func NewSync(
 		heimdallSync:      heimdallSync,
 		bridgeSync:        bridgeSync,
 		events:            events,
+		tipEvents:         tipEvents,
 		badBlocks:         badBlocksLru,
 		notifications:     notifications,
 		wiggleCalculator:  wiggleCalculator,
@@ -120,7 +122,8 @@ type Sync struct {
 	ccBuilderFactory  CanonicalChainBuilderFactory
 	heimdallSync      heimdallSynchronizer
 	bridgeSync        bridgeSynchronizer
-	events            chan Event
+	events            <-chan Event
+	tipEvents         *TipEvents
 	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	notifications     *shards.Notifications
 	wiggleCalculator  wiggleCalculator
@@ -230,7 +233,7 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 			"tipBlockNumber", ccb.Tip().Number.Uint64(),
 		)
 		// put the milestone back in the queue, so it can be processed at a later time
-		s.events <- Event{Type: EventTypeNewMilestone, newMilestone: event}
+		s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event})
 		return nil
 	}
 

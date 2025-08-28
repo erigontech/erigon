@@ -154,6 +154,7 @@ func NewPolygonSyncStageCfg(
 		heimdallService,
 		bridgeService,
 		events.Events(),
+		events,
 		notifications,
 		sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 		engineAPISwitcher,
