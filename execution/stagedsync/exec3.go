@@ -484,6 +484,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	curTaskGasPerSec := int64(float64(curTaskGas) / interval.Seconds())
 
 	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas)
+	sizeEstimate := rs.SizeEstimate()
 
 	switch ex.(type) {
 	case *parallelExecutor:
@@ -556,6 +557,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"wrt", common.PrettyCounter(curWriteCount),
 			"rd/s", common.PrettyCounter(curReadRate),
 			"wrt/s", common.PrettyCounter(curWriteRate),
+			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
 		}
 
 		mxExecRepeats.SetInt(repeats)
@@ -578,6 +580,7 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"rd", common.PrettyCounter(curReadCount),
 			"rd/s", common.PrettyCounter(uint64(float64(curReadCount) / interval.Seconds())),
+			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
 		}
 	}
 
@@ -647,6 +650,7 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 
 	commitVals := []any{
 		"updating", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
+		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CacheSize)),
 	}
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
@@ -709,7 +713,6 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	sizeEstimate := rs.SizeEstimate()
 	mxExecStepsInDB.Set(stepsInDb * 100)
 
 	if len(suffix) > 0 {
@@ -743,7 +746,6 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	}
 
 	vals = append(vals, []interface{}{
-		"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		"inMem", te.inMemExec,
 	}...)
