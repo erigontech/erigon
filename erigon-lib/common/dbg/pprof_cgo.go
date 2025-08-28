@@ -14,27 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commands
+//go:build debug
+// +build debug
+
+package dbg
 
 import (
-	"github.com/erigontech/erigon/cmd/state/stats"
-	"github.com/spf13/cobra"
+	_ "github.com/benesch/cgosymbolizer"
 )
-
-func init() {
-	withDataDir(indexStatsCmd)
-	withStatsfile(indexStatsCmd)
-	withIndexBucket(indexStatsCmd)
-	rootCmd.AddCommand(indexStatsCmd)
-}
-
-var indexStatsCmd = &cobra.Command{
-	Use:   "indexStats",
-	Short: "Stats about index chunks",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if statsfile == "stateless.csv" {
-			statsfile = ""
-		}
-		return stats.IndexStats(chaindata, indexBucket, statsfile)
-	},
-}
