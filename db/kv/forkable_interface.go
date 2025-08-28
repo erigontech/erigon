@@ -16,6 +16,8 @@ type ForkableTxCommons interface {
 	GetFromFile(entityNum Num, idx int) (v []byte, found bool, err error)
 
 	HasRootNumUpto(ctx context.Context, to RootNum) (bool, error)
+	Progress() (Num, error)
+	StepSize() uint64
 	Type() CanonicityStrategy
 }
 

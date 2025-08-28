@@ -34,6 +34,10 @@ func (b *forkableBaseTx) GetFromFile(entityNum Num, idx int) (v []byte, found bo
 	return b.f.GetFromFile(entityNum, idx)
 }
 
+func (b *forkableBaseTx) StepSize() uint64 {
+	return b.f.StepSize()
+}
+
 // implements both UnmarkedRoTx and UnmarkedRwTx
 type unmarkedTx struct {
 	forkableBaseTx
@@ -105,4 +109,8 @@ func (m *unmarkedTx) Unwind(ctx context.Context, from RootNum) error {
 
 func (m *unmarkedTx) BufferedWriter() any {
 	return m.s.(*state.UnmarkedTx).BufferedWriter()
+}
+
+func (m *unmarkedTx) Progress() (Num, error) {
+	return m.s.Progress(m.dbtx)
 }

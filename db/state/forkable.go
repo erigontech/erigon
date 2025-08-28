@@ -309,6 +309,10 @@ func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bo
 	return iLastNum+1 >= eto.Uint64(), nil
 }
 
+func (m *MarkedTx) Progress(tx kv.Tx) (Num, error) {
+	return progress(m.ap.canonicalTbl, tx, m)
+}
+
 func (m *MarkedTx) DebugFiles() ForkableFilesTxI {
 	return m
 }
@@ -385,6 +389,10 @@ func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (
 	return iLastNum >= eto.Uint64(), nil
 }
 
+func (m *UnmarkedTx) Progress(tx kv.Tx) (Num, error) {
+	return progress(m.ap.valsTbl, tx, m)
+}
+
 func (m *UnmarkedTx) DebugFiles() ForkableFilesTxI {
 	return m
 }
@@ -429,6 +437,24 @@ func (w *UnmarkedBufferedWriter) Close() {
 }
 
 ////////////////////////
+
+func progress(tbl string, tx kv.Tx, f ForkableFilesTxI) (Num, error) {
+	c, err := tx.Cursor(tbl)
+	if err != nil {
+		return 0, err
+	}
+
+	defer c.Close()
+	k, _, err := c.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	num := binary.BigEndian.Uint64(k)
+	return max(Num(num), f.VisibleFilesMaxNum()), nil
+}
+
+////
 
 type BufferedTx struct {
 	*ProtoForkableTx

@@ -62,6 +62,7 @@ type ForkableFilesTxI interface {
 	VisibleFiles() VisibleFiles
 	vfs() visibleFiles
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
+	StepSize() uint64
 
 	Garbage(merged *FilesItem) (outs []*FilesItem)
 }
@@ -79,6 +80,7 @@ type ForkableBaseTxI interface {
 	ForkableDbCommonTxI
 	ForkableTemporalCommonTxI
 	Get(num Num, tx kv.Tx) (Bytes, error)
+	Progress(tx kv.Tx) (Num, error)
 }
 
 type ForkableDebugAPI[T ForkableDbCommonTxI] interface {

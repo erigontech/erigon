@@ -355,3 +355,7 @@ func (a *ProtoForkableTx) NoFilesCheck() {
 		panic("snapshot read attempt on noFiles mode")
 	}
 }
+
+func (a *ProtoForkableTx) StepSize() uint64 {
+	return a.a.snaps.stepSize
+}

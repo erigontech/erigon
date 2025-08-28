@@ -445,7 +445,11 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 		txNum = min(txNum, dbg.DomainProgress(kv.ReceiptDomain))
 	}
 	if produce.RCacheDomain {
-		txNum = min(txNum, dbg.DomainProgress(kv.RCacheDomain))
+		progress, err := tx.Unmarked(forkables.RcacheForkable).Debug().Progress()
+		if err != nil {
+			panic(err)
+		}
+		txNum = min(txNum, progress.Uint64())
 	}
 	if produce.LogAddr {
 		txNum = min(txNum, dbg.IIProgress(kv.LogAddrIdx))
@@ -462,7 +466,7 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 	return txNum
 }
 
-func firstStepNotInFiles(tx kv.Tx, produce Produce) kv.Step {
+func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	ac := dbstate.AggTx(tx)
 	fromStep := kv.Step(math.MaxUint64)
@@ -470,7 +474,11 @@ func firstStepNotInFiles(tx kv.Tx, produce Produce) kv.Step {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
 	}
 	if produce.RCacheDomain {
-		fromStep = min(fromStep, ac.DbgDomain(kv.RCacheDomain).FirstStepNotInFiles())
+		rcacheDbg := tx.Unmarked(forkables.RcacheForkable).Debug()
+		stepSize := rcacheDbg.StepSize()
+		firstNumNotInFiles := rcacheDbg.VisibleFilesMaxNum()
+		firstStepNotInFiles := firstNumNotInFiles.Uint64() / stepSize
+		fromStep = min(fromStep, kv.Step(firstStepNotInFiles))
 	}
 	if produce.LogAddr {
 		fromStep = min(fromStep, ac.DbgII(kv.LogAddrIdx).FirstStepNotInFiles())
