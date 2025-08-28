@@ -26,7 +26,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -44,129 +43,213 @@ import (
 
 var toAddr = common.BytesToAddress
 
-type StateSuite struct {
-	suite.Suite
-	kv    kv.TemporalRwDB
-	tx    kv.TemporalTx
-	state *IntraBlockState
-	r     StateReader
-	w     StateWriter
-}
+func TestDump(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
 
-func TestStateSuite(t *testing.T) {
-	suite.Run(t, new(StateSuite))
-}
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
 
-func (s *StateSuite) TestDump() {
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	st := New(NewReaderV3(domains.AsGetter(tx)))
+
 	// generate a few entries
-	// This test is challenging to get working in the suite context
-	// For now, we'll skip it as the standalone TestDump function works correctly
-	s.T().Skip("TestDump functionality is tested in the standalone TestDump function")
+	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
+	require.NoError(t, err)
+	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	require.NoError(t, err)
+	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj2.setIncarnation(1)
+	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
+	require.NoError(t, err)
+	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+
+	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	// write some of them to the trie
+	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	require.NoError(t, err)
+	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
+	require.NoError(t, err)
+	err = st.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	err = st.CommitBlock(&chain.Rules{}, blockWriter)
+	require.NoError(t, err)
+	err = domains.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	// check that dump contains the state objects that are in trie
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
+	want := `{
+    "root": "0000000000000000000000000000000000000000000000000000000000000000",
+    "accounts": {
+        "0x0000000000000000000000000000000000000001": {
+            "balance": "22",
+            "nonce": 0,
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000002": {
+            "balance": "44",
+            "nonce": 0,
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000102": {
+            "balance": "0",
+            "nonce": 0,
+            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "0x87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
+            "code": "0x03030303030303"
+        }
+    }
+}`
+	if got != want {
+		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
+	}
 }
 
-func (s *StateSuite) SetupTest() {
-	s.kv, s.tx, _ = NewTestTemporalDb(s.T())
+func TestNull(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
 
-	domains, err := state.NewSharedDomains(s.tx, log.New())
-	if err != nil {
-		panic(err)
-	}
-	s.T().Cleanup(domains.Close)
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
 
 	txNum := uint64(1)
-	err = rawdbv3.TxNums.Append(s.tx.(kv.RwTx), 1, 1)
-	if err != nil {
-		panic(err)
-	}
-	s.r = NewReaderV3(domains.AsGetter(s.tx))
-	s.w = NewWriter(domains.AsPutDel(s.tx), nil, txNum)
-	s.state = New(s.r)
-}
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
 
-func (s *StateSuite) TearDownTest() {
-	// Cleanup is handled by s.T().Cleanup() in SetupTest
-}
+	r := NewReaderV3(domains.AsGetter(tx))
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	state := New(r)
 
-func (s *StateSuite) TestNull() {
 	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
-	s.state.CreateAccount(address, true)
+	state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, common.Hash{}, value)
+	state.SetState(address, common.Hash{}, value)
 
-	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
-	s.Require().NoError(err)
+	err = state.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
 
-	err = s.state.CommitBlock(&chain.Rules{}, s.w)
-	s.Require().NoError(err)
+	err = state.CommitBlock(&chain.Rules{}, w)
+	require.NoError(t, err)
 
-	s.state.GetCommittedState(address, common.Hash{}, &value)
+	state.GetCommittedState(address, common.Hash{}, &value)
 	if !value.IsZero() {
-		s.T().Errorf("expected empty hash. got %x", value)
+		t.Errorf("expected empty hash. got %x", value)
 	}
 }
 
-func (s *StateSuite) TestTouchDelete() {
-	s.state.GetOrNewStateObject(common.Address{})
+func TestTouchDelete(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
 
-	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txNum := uint64(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	r := NewReaderV3(domains.AsGetter(tx))
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	state := New(r)
+
+	state.GetOrNewStateObject(common.Address{})
+
+	err = state.FinalizeTx(&chain.Rules{}, w)
 	if err != nil {
-		s.T().Fatal("error while finalize", err)
+		t.Fatal("error while finalize", err)
 	}
 
-	err = s.state.CommitBlock(&chain.Rules{}, s.w)
+	err = state.CommitBlock(&chain.Rules{}, w)
 	if err != nil {
-		s.T().Fatal("error while commit", err)
+		t.Fatal("error while commit", err)
 	}
 
-	s.state.Reset()
+	state.Reset()
 
-	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
+	snapshot := state.Snapshot()
+	state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
 
-	if len(s.state.journal.dirties) != 1 {
-		s.T().Fatal("expected one dirty state object")
+	if len(state.journal.dirties) != 1 {
+		t.Fatal("expected one dirty state object")
 	}
-	s.state.RevertToSnapshot(snapshot, nil)
-	if len(s.state.journal.dirties) != 0 {
-		s.T().Fatal("expected no dirty state object")
+	state.RevertToSnapshot(snapshot, nil)
+	if len(state.journal.dirties) != 0 {
+		t.Fatal("expected no dirty state object")
 	}
 }
 
-func (s *StateSuite) TestSnapshot() {
+func TestSnapshot(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	r := NewReaderV3(domains.AsGetter(tx))
+	state := New(r)
+
 	stateobjaddr := toAddr([]byte("aa"))
 	var storageaddr common.Hash
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
 	// snapshot the genesis state
-	genesis := s.state.Snapshot()
+	genesis := state.Snapshot()
 
 	// set initial state object value
-	s.state.SetState(stateobjaddr, storageaddr, *data1)
-	snapshot := s.state.Snapshot()
+	state.SetState(stateobjaddr, storageaddr, *data1)
+	snapshot := state.Snapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	s.state.SetState(stateobjaddr, storageaddr, *data2)
-	s.state.RevertToSnapshot(snapshot, nil)
+	state.SetState(stateobjaddr, storageaddr, *data2)
+	state.RevertToSnapshot(snapshot, nil)
 
 	var value uint256.Int
-	s.state.GetState(stateobjaddr, storageaddr, &value)
-	s.Assert().Equal(*data1, value)
-	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
-	s.Assert().Equal(uint256.Int{}, value)
+	state.GetState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, *data1, value)
+	state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, uint256.Int{}, value)
 
 	// revert up to the genesis state and ensure correct content
-	s.state.RevertToSnapshot(genesis, nil)
-	s.state.GetState(stateobjaddr, storageaddr, &value)
-	s.Assert().Equal(uint256.Int{}, value)
-	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
-	s.Assert().Equal(uint256.Int{}, value)
+	state.RevertToSnapshot(genesis, nil)
+	state.GetState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, uint256.Int{}, value)
+	state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, uint256.Int{}, value)
 }
 
-func (s *StateSuite) TestSnapshotEmpty() {
-	s.state.RevertToSnapshot(s.state.Snapshot(), nil)
+func TestSnapshotEmpty(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	r := NewReaderV3(domains.AsGetter(tx))
+	state := New(r)
+
+	state.RevertToSnapshot(state.Snapshot(), nil)
 }
 
 // use testing instead of checker because checker does not support
@@ -340,75 +423,4 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 	}
 	tb.Cleanup(tx.Rollback)
 	return _db, tx, agg
-}
-
-func TestDump(t *testing.T) {
-	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(t, err)
-
-	st := New(NewReaderV3(domains.AsGetter(tx)))
-
-	// generate a few entries
-	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
-	require.NoError(t, err)
-	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
-	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
-	require.NoError(t, err)
-	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
-	obj2.setIncarnation(1)
-	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
-	require.NoError(t, err)
-	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
-
-	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
-	// write some of them to the trie
-	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
-	require.NoError(t, err)
-	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
-	require.NoError(t, err)
-	err = st.FinalizeTx(&chain.Rules{}, w)
-	require.NoError(t, err)
-
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
-	err = st.CommitBlock(&chain.Rules{}, blockWriter)
-	require.NoError(t, err)
-	err = domains.Flush(context.Background(), tx)
-	require.NoError(t, err)
-
-	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
-	want := `{
-    "root": "0000000000000000000000000000000000000000000000000000000000000000",
-    "accounts": {
-        "0x0000000000000000000000000000000000000001": {
-            "balance": "22",
-            "nonce": 0,
-            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-        },
-        "0x0000000000000000000000000000000000000002": {
-            "balance": "44",
-            "nonce": 0,
-            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-        },
-        "0x0000000000000000000000000000000000000102": {
-            "balance": "0",
-            "nonce": 0,
-            "root": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "0x87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
-            "code": "0x03030303030303"
-        }
-    }
-}`
-	if got != want {
-		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
-	}
 }
