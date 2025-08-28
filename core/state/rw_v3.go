@@ -270,10 +270,6 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 	return r
 }
 
-func (rs *StateV3) ReadsValid(readLists map[string]*dbstate.KvList) bool {
-	return rs.domains.ReadsValid(readLists)
-}
-
 type storageItem struct {
 	key   common.Hash
 	value uint256.Int
@@ -1001,7 +997,6 @@ var readListPool = sync.Pool{
 		return ReadLists{
 			kv.AccountsDomain.String(): {},
 			kv.CodeDomain.String():     {},
-			dbstate.CodeSizeTableFake:  {},
 			kv.StorageDomain.String():  {},
 		}
 	},

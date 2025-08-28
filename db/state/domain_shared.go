@@ -317,58 +317,6 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 	return uint64(sd.metrics.CacheSize) * 4
 }
 
-const CodeSizeTableFake = "CodeSize"
-
-func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
-	sd.muMaps.RLock()
-	defer sd.muMaps.RUnlock()
-
-	for table, list := range readLists {
-		switch table {
-		case kv.AccountsDomain.String():
-			m := sd.domains[kv.AccountsDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case kv.CodeDomain.String():
-			m := sd.domains[kv.CodeDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case kv.StorageDomain.String():
-			m := sd.storage
-			for i, key := range list.Keys {
-				if val, ok := m.Get(key); ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case CodeSizeTableFake:
-			m := sd.domains[kv.CodeDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val.data)) {
-						return false
-					}
-				}
-			}
-		default:
-			panic(table)
-		}
-	}
-
-	return true
-}
-
 func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
 	addr := toBytesZeroCopy(addrS)
 	sd.put(kv.CodeDomain, addrS, code, txNum)
