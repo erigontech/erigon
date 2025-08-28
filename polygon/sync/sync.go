@@ -44,6 +44,8 @@ import (
 // The current constant value is chosen based on observed metrics in production as twice the doubled value of the maximum observed waypoint length.
 const maxFinalizationHeight = 512
 
+var futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
+
 type heimdallSynchronizer interface {
 	IsCatchingUp(ctx context.Context) (bool, error)
 	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, ok bool, err error)
@@ -78,7 +80,7 @@ func NewSync(
 	ccBuilderFactory CanonicalChainBuilderFactory,
 	heimdallSync heimdallSynchronizer,
 	bridgeSync bridgeSynchronizer,
-	events <-chan Event,
+	tipEvents *TipEvents,
 	notifications *shards.Notifications,
 	wiggleCalculator wiggleCalculator,
 	engineAPISwitcher EngineAPISwitcher,
@@ -100,7 +102,7 @@ func NewSync(
 		ccBuilderFactory:  ccBuilderFactory,
 		heimdallSync:      heimdallSync,
 		bridgeSync:        bridgeSync,
-		events:            events,
+		tipEvents:         tipEvents,
 		badBlocks:         badBlocksLru,
 		notifications:     notifications,
 		wiggleCalculator:  wiggleCalculator,
@@ -120,7 +122,7 @@ type Sync struct {
 	ccBuilderFactory  CanonicalChainBuilderFactory
 	heimdallSync      heimdallSynchronizer
 	bridgeSync        bridgeSynchronizer
-	events            <-chan Event
+	tipEvents         *TipEvents
 	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	notifications     *shards.Notifications
 	wiggleCalculator  wiggleCalculator
@@ -217,6 +219,23 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilestone, ccb *CanonicalChainBuilder) error {
 	milestone := event
 	if milestone.EndBlock().Uint64() <= ccb.Root().Number.Uint64() {
+		return nil
+	}
+
+	// milestone is ahead of our current tip
+	if milestone.EndBlock().Uint64() > ccb.Tip().Number.Uint64() {
+		s.logger.Debug(syncLogPrefix("putting milestone event back in the queue because our tip is behind the milestone"),
+			"milestoneId", milestone.RawId(),
+			"milestoneStart", milestone.StartBlock().Uint64(),
+			"milestoneEnd", milestone.EndBlock().Uint64(),
+			"milestoneRootHash", milestone.RootHash(),
+			"tipBlockNumber", ccb.Tip().Number.Uint64(),
+		)
+		// put the milestone back in the queue, so it can be processed at a later time
+		go func() {
+			time.Sleep(futureMilestoneDelay)
+			s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event})
+		}()
 		return nil
 	}
 
@@ -737,7 +756,7 @@ func (s *Sync) Run(ctx context.Context) error {
 	defer inactivityTicker.Stop()
 	for {
 		select {
-		case event := <-s.events:
+		case event := <-s.tipEvents.Events():
 			if s.config.PolygonPosSingleSlotFinality {
 				block, err := s.execution.CurrentHeader(ctx)
 				if err != nil {
