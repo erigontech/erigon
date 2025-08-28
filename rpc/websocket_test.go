@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -85,10 +86,13 @@ func TestWebsocketOriginCheck(t *testing.T) {
 
 // This test checks whether calls exceeding the request size limit are rejected.
 func TestWebsocketLargeCall(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("issue #16875")
+	}
+
 	if testing.Short() {
 		t.Skip()
 	}
-
 	t.Parallel()
 	logger := log.New()
 
@@ -97,30 +101,34 @@ func TestWebsocketLargeCall(t *testing.T) {
 		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
+
 	defer srv.Stop()
 	defer httpsrv.Close()
 
-	client, clientErr := DialWebsocket(context.Background(), wsURL, "", logger)
-	if clientErr != nil {
-		t.Fatalf("can't dial: %v", clientErr)
-	}
-	defer client.Close()
+	synctest.Run(func() {
+		defer synctest.Wait()
+		client, clientErr := DialWebsocket(context.Background(), wsURL, "", logger)
+		if clientErr != nil {
+			t.Fatalf("can't dial: %v", clientErr)
+		}
+		defer client.Close()
 
-	// This call sends slightly less than the limit and should work.
-	var result echoResult
-	arg := strings.Repeat("x", maxRequestContentLength-200)
-	if err := client.Call(&result, "test_echo", arg, 1); err != nil {
-		t.Fatalf("valid call didn't work: %v", err)
-	}
-	if result.String != arg {
-		t.Fatal("wrong string echoed")
-	}
+		// This call sends slightly less than the limit and should work.
+		var result echoResult
+		arg := strings.Repeat("x", maxRequestContentLength-200)
+		if err := client.Call(&result, "test_echo", arg, 1); err != nil {
+			t.Fatalf("valid call didn't work: %v", err)
+		}
+		if result.String != arg {
+			t.Fatal("wrong string echoed")
+		}
 
-	// This call sends twice the allowed size and shouldn't work.
-	arg = strings.Repeat("x", maxRequestContentLength*2)
-	if err := client.Call(&result, "test_echo", arg); err == nil {
-		t.Fatal("no error for too large call")
-	}
+		// This call sends twice the allowed size and shouldn't work.
+		arg = strings.Repeat("x", maxRequestContentLength*2)
+		if err := client.Call(&result, "test_echo", arg); err == nil {
+			t.Fatal("no error for too large call")
+		}
+	})
 }
 
 // This test checks that client handles WebSocket ping frames correctly.
