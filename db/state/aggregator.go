@@ -311,7 +311,7 @@ func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
 	if err != nil {
 		return
 	}
-	r.iiFiles, err = filesFromDir(dirs.SnapHistory)
+	r.historyFiles, err = filesFromDir(dirs.SnapHistory)
 	if err != nil {
 		return
 	}
