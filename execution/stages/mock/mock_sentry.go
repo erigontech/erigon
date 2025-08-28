@@ -103,7 +103,6 @@ type MockSentry struct {
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
-	gspec                *types.Genesis
 	ChainConfig          *chain.Config
 	Sync                 *stagedsync.Sync
 	MiningSync           *stagedsync.Sync
@@ -308,7 +307,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		Log:            logger,
 		Dirs:           dirs,
 		Engine:         engine,
-		gspec:          gspec,
 		ChainConfig:    gspec.Config,
 		Key:            key,
 		Notifications:  shards.NewNotifications(erigonGrpcServeer),
@@ -479,7 +477,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
-					mock.gspec,
+					gspec,
 					cfg.Sync,
 					nil,
 				),
@@ -518,7 +516,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
-				mock.gspec,
+				gspec,
 				cfg.Sync,
 				nil,
 			), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
@@ -560,7 +558,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
-				mock.gspec,
+				gspec,
 				cfg.Sync,
 				nil,
 			),
