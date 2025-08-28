@@ -619,7 +619,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.Unlock()
 	}
 
-	sd.domains[domain][keyS] = dataWithPrevStep{data: v, prevStep: step, dir: read}
+	sd.domains[domain][toStringZeroCopy(k)] = dataWithPrevStep{data: v, prevStep: step, dir: put}
 	return v, step, nil
 }
 
