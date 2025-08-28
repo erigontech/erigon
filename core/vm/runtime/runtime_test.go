@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/abi"
@@ -52,33 +53,16 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *dbstate.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
-	tb.Cleanup(db.Close)
+	db := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
 
-	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-
-	agg, err := dbstate.NewAggregator2(context.Background(), dirs, 16, salt, db, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
 	tb.Cleanup(tx.Rollback)
-	return _db, tx, agg
+	return db, tx
 }
 
 func TestDefaults(t *testing.T) {
@@ -153,7 +137,7 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -761,7 +745,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 		return contract
 	}
 
-	_, tx, _ := NewTestTemporalDb(b)
+	_, tx := NewTestTemporalDb(b)
 	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()

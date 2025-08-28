@@ -50,9 +50,11 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	if err != nil {
 		panic(err)
 	}
+	agg.DisableFsync()
 	if err := agg.OpenFolder(); err != nil {
 		panic(err)
 	}
+
 	if tb != nil {
 		tb.Cleanup(agg.Close)
 	}
