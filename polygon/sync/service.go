@@ -91,7 +91,6 @@ func NewService(
 		ccBuilderFactory,
 		heimdallService,
 		bridgeService,
-		events.Events(),
 		events,
 		notifications,
 		NewWiggleCalculator(borConfig, signaturesCache, heimdallService),

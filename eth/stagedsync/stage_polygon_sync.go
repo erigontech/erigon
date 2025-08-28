@@ -153,7 +153,6 @@ func NewPolygonSyncStageCfg(
 		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache, logger),
 		heimdallService,
 		bridgeService,
-		events.Events(),
 		events,
 		notifications,
 		sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService),

@@ -78,7 +78,6 @@ func NewSync(
 	ccBuilderFactory CanonicalChainBuilderFactory,
 	heimdallSync heimdallSynchronizer,
 	bridgeSync bridgeSynchronizer,
-	events <-chan Event,
 	tipEvents *TipEvents,
 	notifications *shards.Notifications,
 	wiggleCalculator wiggleCalculator,
@@ -101,7 +100,6 @@ func NewSync(
 		ccBuilderFactory:  ccBuilderFactory,
 		heimdallSync:      heimdallSync,
 		bridgeSync:        bridgeSync,
-		events:            events,
 		tipEvents:         tipEvents,
 		badBlocks:         badBlocksLru,
 		notifications:     notifications,
@@ -122,7 +120,6 @@ type Sync struct {
 	ccBuilderFactory  CanonicalChainBuilderFactory
 	heimdallSync      heimdallSynchronizer
 	bridgeSync        bridgeSynchronizer
-	events            <-chan Event
 	tipEvents         *TipEvents
 	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	notifications     *shards.Notifications
@@ -233,7 +230,7 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 			"tipBlockNumber", ccb.Tip().Number.Uint64(),
 		)
 		// put the milestone back in the queue, so it can be processed at a later time
-		s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event})
+		go func() { s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event}) }()
 		return nil
 	}
 
@@ -754,7 +751,7 @@ func (s *Sync) Run(ctx context.Context) error {
 	defer inactivityTicker.Stop()
 	for {
 		select {
-		case event := <-s.events:
+		case event := <-s.tipEvents.Events():
 			if s.config.PolygonPosSingleSlotFinality {
 				block, err := s.execution.CurrentHeader(ctx)
 				if err != nil {
