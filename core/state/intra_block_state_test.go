@@ -39,9 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
@@ -531,17 +529,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 func TestVersionMapRevert(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -608,18 +599,10 @@ func TestVersionMapRevert(t *testing.T) {
 
 func TestVersionMapMarkEstimate(t *testing.T) {
 	t.Parallel()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -695,18 +678,10 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 func TestVersionMapOverwrite(t *testing.T) {
 	t.Parallel()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -800,18 +775,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 func TestVersionMapWriteNoConflict(t *testing.T) {
 	t.Parallel()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
@@ -939,17 +906,10 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
