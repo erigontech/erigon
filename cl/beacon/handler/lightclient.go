@@ -82,20 +82,20 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 
 	startPeriod, err := beaconhttp.Uint64FromQueryParams(r, "start_period")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	if startPeriod == nil {
-		http.Error(w, "start_period is required", http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("start_period is required")).WriteTo(w)
 		return
 	}
 	count, err := beaconhttp.Uint64FromQueryParams(r, "count")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	if count == nil {
-		http.Error(w, "count is required", http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("count is required")).WriteTo(w)
 		return
 	}
 
@@ -125,7 +125,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 }

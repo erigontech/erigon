@@ -10,17 +10,18 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -95,7 +96,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	)
 	removeFunc := func(path string) error {
 		logger.Debug("Removing snapshot dir file", "path", path)
-		return os.Remove(filepath.Join(dirs.Snap, path))
+		return dir.RemoveFile(filepath.Join(dirs.Snap, path))
 	}
 	if dryRun {
 		removeFunc = dryRunRemove
@@ -123,14 +124,14 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 			kv.PolygonBridgeDB,
 		} {
 			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
-			err = os.RemoveAll(extraFullPath)
+			err = dir.RemoveAll(extraFullPath)
 			if err != nil {
 				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
 			}
 		}
 		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
 		if !dryRun {
-			err = os.RemoveAll(dirs.Chaindata)
+			err = dir.RemoveAll(dirs.Chaindata)
 		}
 		if err != nil {
 			err = fmt.Errorf("removing chaindata dir: %w", err)
@@ -168,7 +169,7 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 			return
 		}
 		// Do we need genesis block hash here?
-		chainCfg, err = core.ReadChainConfig(tx, genesis)
+		chainCfg, err = rawdb.ReadChainConfig(tx, genesis)
 		if err != nil {
 			err = fmt.Errorf("reading chain config: %w", err)
 			return

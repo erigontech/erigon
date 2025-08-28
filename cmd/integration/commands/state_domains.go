@@ -31,20 +31,22 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	downloadertype "github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/seg"
+	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/nodecfg"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -188,7 +190,7 @@ var compactDomains = &cobra.Command{
 			logger.Error("Error creating temporary directory", "error", err)
 			return
 		}
-		defer os.RemoveAll(tmpDir)
+		defer dir.RemoveAll(tmpDir)
 		// make a temporary DB to store the keys
 
 		compactionDB := mdbx.MustOpen(tmpDir)
@@ -340,8 +342,8 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 }
 
 func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingCompacted bool, err error) {
-	compressionType := dbstate.Schema.GetDomainCfg(domain).Compression
-	compressCfg := dbstate.Schema.GetDomainCfg(domain).CompressCfg
+	compressionType := statecfg.Schema.GetDomainCfg(domain).Compression
+	compressCfg := statecfg.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
 	switch domain {
@@ -538,6 +540,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 func removeManyIgnoreError(filePaths ...string) {
 	for _, filePath := range filePaths {
-		os.Remove(filePath)
+		dir.RemoveFile(filePath)
 	}
 }

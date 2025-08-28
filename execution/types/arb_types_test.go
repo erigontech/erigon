@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 func TestArbitrumInternalTx(t *testing.T) {

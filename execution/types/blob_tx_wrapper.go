@@ -27,11 +27,11 @@ import (
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const (
@@ -226,12 +226,12 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 
 	kzgCtx := libkzg.Ctx()
 	for i := 0; i < len(blobs); i++ {
-		commitment, err := kzgCtx.BlobToKZGCommitment(blobs[i][:], 1 /*numGoRoutines*/)
+		commitment, err := kzgCtx.BlobToKZGCommitment((*gokzg4844.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %w", err)
 		}
 
-		proof, err := kzgCtx.ComputeBlobKZGProof(blobs[i][:], commitment, 1 /*numGoRoutnes*/)
+		proof, err := kzgCtx.ComputeBlobKZGProof((*gokzg4844.Blob)(&blobs[i]), commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %w", err)
 		}
@@ -243,10 +243,10 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
-func toBlobs(_blobs Blobs) []gokzg4844.BlobRef {
-	blobs := make([]gokzg4844.BlobRef, len(_blobs))
-	for i, _blob := range _blobs {
-		blobs[i] = _blob[:]
+func toBlobs(_blobs Blobs) []*gokzg4844.Blob {
+	blobs := make([]*gokzg4844.Blob, len(_blobs))
+	for i, _ := range _blobs {
+		blobs[i] = (*gokzg4844.Blob)(&_blobs[i])
 	}
 	return blobs
 }
@@ -316,8 +316,25 @@ func (txw *BlobTxWrapper) GetTo() *common.Address { return txw.Tx.GetTo() }
 func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
 }
+
 func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction, error) {
-	return txw.Tx.WithSignature(signer, sig)
+	signedCopy, err := txw.Tx.WithSignature(signer, sig)
+	if err != nil {
+		return nil, err
+	}
+	//goland:noinspection GoVetCopyLock
+	blobTxnWrapper := &BlobTxWrapper{
+		// it's ok to copy here - because it's constructor of object - no parallel access yet
+		Tx:             *signedCopy.(*BlobTx), //nolint
+		WrapperVersion: txw.WrapperVersion,
+		Blobs:          make(Blobs, len(txw.Blobs)),
+		Commitments:    make(BlobKzgs, len(txw.Commitments)),
+		Proofs:         make(KZGProofs, len(txw.Proofs)),
+	}
+	copy(blobTxnWrapper.Blobs, txw.Blobs)
+	copy(blobTxnWrapper.Commitments, txw.Commitments)
+	copy(blobTxnWrapper.Proofs, txw.Proofs)
+	return blobTxnWrapper, nil
 }
 
 func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
@@ -329,6 +346,10 @@ func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
 func (txw *BlobTxWrapper) GetData() []byte { return txw.Tx.GetData() }
 
 func (txw *BlobTxWrapper) GetAccessList() AccessList { return txw.Tx.GetAccessList() }
+
+func (txw *BlobTxWrapper) GetAuthorizations() []Authorization {
+	return nil
+}
 
 func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
 

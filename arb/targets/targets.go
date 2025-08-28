@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
 var CodePrefix = []byte("c") // CodePrefix + code hash -> account code

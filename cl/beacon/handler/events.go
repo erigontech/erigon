@@ -18,6 +18,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
 	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
 var validTopics = map[event.EventTopic]struct{}{
@@ -33,6 +35,7 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.OpAttestation:       {},
 	event.OpAttesterSlashing:  {},
 	event.OpBlobSidecar:       {},
+	event.OpDataColumnSidecar: {},
 	event.OpBlsToExecution:    {},
 	event.OpContributionProof: {},
 	event.OpProposerSlashing:  {},
@@ -50,7 +53,7 @@ var validTopics = map[event.EventTopic]struct{}{
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
 	if _, ok := w.(http.Flusher); !ok {
-		http.Error(w, "streaming unsupported", http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("streaming unsupported")).WriteTo(w)
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -65,7 +68,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	for _, v := range topics {
 		topic := event.EventTopic(v)
 		if _, ok := validTopics[topic]; !ok {
-			http.Error(w, "invalid Topic: "+v, http.StatusBadRequest)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Topic: %s", v)).WriteTo(w)
 			return
 		}
 		subscribeTopics.Add(topic)
@@ -111,10 +114,10 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			w.(http.Flusher).Flush()
 		case err := <-stateSub.Err():
 			log.Warn("event error", "err", err)
-			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %v", err)).WriteTo(w)
 		case err := <-opSub.Err():
 			log.Warn("event error", "err", err)
-			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %v", err)).WriteTo(w)
 			return
 		case <-r.Context().Done():
 			log.Info("Client disconnected from event stream")

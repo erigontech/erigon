@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // Defines the `internal_` JSON-RPC namespace.

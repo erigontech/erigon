@@ -5,14 +5,15 @@ import (
 	"math"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/db/kv"
+	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type testAggConfig struct {
@@ -36,8 +37,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	db := wrapDbWithCtx(_db, agg)
 
-	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
-	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
+	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = !cfg.disableCommitmentBranchTransform
 
 	ctx := context.Background()
 	agg.logger = log.Root().New()
@@ -116,8 +116,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	domains.Close()
 
 	// now do the squeeze
-	agg.commitmentValuesTransform = true
-	agg.d[kv.CommitmentDomain].replaceKeysInValues = true
+	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = true
 	err = SqueezeCommitmentFiles(context.Background(), AggTx(rwTx), log.New())
 	require.NoError(t, err)
 

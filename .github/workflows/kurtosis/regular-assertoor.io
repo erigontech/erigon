@@ -6,7 +6,7 @@ participants_matrix:
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v7.0.1
     - cl_type: teku
-      cl_image: consensys/teku:develop
+      cl_image: consensys/teku:25.7
 network_params:
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1

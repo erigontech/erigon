@@ -46,7 +46,7 @@ type peer struct {
 func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) {
 	syncingStatus, err := beaconhttp.Uint64FromQueryParams(r, "syncing_status")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	syncingCode := http.StatusOK

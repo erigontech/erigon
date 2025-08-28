@@ -29,12 +29,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
@@ -160,6 +160,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	_db, agg := testFuzzDbAndAggregatorv3(f, 10)
 	db := wrapDbWithCtx(_db, agg)
+	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = true
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(f, err)
@@ -170,8 +171,6 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	defer domains.Close()
 
 	const txs = uint64(1000)
-
-	agg.commitmentValuesTransform = true
 
 	state := make(map[string][]byte)
 

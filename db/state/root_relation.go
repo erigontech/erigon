@@ -1,6 +1,6 @@
 package state
 
-import "github.com/erigontech/erigon-lib/kv"
+import "github.com/erigontech/erigon/db/kv"
 
 type RootRelationI interface {
 	RootNum2Num(from RootNum, tx kv.Tx) (Num, error)

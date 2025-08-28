@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/mmap"
 )
 
 var (
@@ -83,6 +83,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	TraceDeletion        = EnvBool("TRACE_DELETION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -202,7 +203,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		ReadMemStats(&memStats)
 	}
 
-	totalMemory := mmap.TotalMemory()
+	totalMemory := estimate.TotalMemory()
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap profile threshold check",

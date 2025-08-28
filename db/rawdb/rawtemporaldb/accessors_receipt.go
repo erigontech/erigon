@@ -3,8 +3,8 @@ package rawtemporaldb
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var (
@@ -90,9 +90,9 @@ func uvarint(in []byte) (res uint64) {
 
 func ReceiptStoresFirstLogIdx(tx kv.TemporalTx) bool {
 	// this stored firstLogIdx;
-	// latter versions (v1_1 onwards) stores lastLogIdx
+	// latter versions (v2_0 onwards) stores lastLogIdx
 	// this check allows to put some ifchecks to handle
 	// both cases and maintain backward compatibility of
 	// snapshots.
-	return tx.Debug().CurrentDomainVersion(kv.ReceiptDomain).Eq(version.V1_0)
+	return tx.Debug().CurrentDomainVersion(kv.ReceiptDomain).Less(version.V1_1)
 }

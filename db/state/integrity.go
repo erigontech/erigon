@@ -7,17 +7,18 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/db/version"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
-	"golang.org/x/sync/errgroup"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 )
 
 // search key in all files of all domains and print file names
@@ -97,7 +98,11 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			}
 			accessor := item.index
 			if accessor == nil {
-				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.aggStep, item.endTxNum/dt.aggStep)
+				fPath, _, _, err := version.FindFilesWithVersionsByPattern(dt.d.efAccessorFilePathMask(kv.Step(item.startTxNum/dt.stepSize), kv.Step(item.endTxNum/dt.stepSize)))
+				if err != nil {
+					panic(err)
+				}
+
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -142,7 +147,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 }
 
 func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
-	fromTxNum := fromStep * iit.ii.aggregationStep
+	fromTxNum := fromStep * iit.ii.stepSize
 	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 

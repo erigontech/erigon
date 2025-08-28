@@ -250,13 +250,13 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) {
 	req := cltypes.SignedVoluntaryExit{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
 	encodedSSZ, err := req.EncodeSSZ(nil)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
 	}
 
@@ -264,7 +264,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		SignedVoluntaryExit:   &req,
 		ImmediateVerification: true,
 	}); err != nil && !errors.Is(err, services.ErrIgnore) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
@@ -285,18 +285,18 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 
 	req := cltypes.NewAttesterSlashing(clVersion)
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	// Broadcast to gossip
 	if a.sentinel != nil {
 		encodedSSZ, err := req.EncodeSSZ(nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
 		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
@@ -313,18 +313,18 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter, r *http.Request) {
 	req := cltypes.ProposerSlashing{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	if err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	// Broadcast to gossip
 	if a.sentinel != nil {
 		encodedSSZ, err := req.EncodeSSZ(nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
 		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
@@ -352,14 +352,14 @@ type poolingError struct {
 func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWriter, r *http.Request) {
 	req := []*cltypes.SignedBLSToExecutionChange{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	failures := []poolingFailure{}
 	for _, v := range req {
 		encodedSSZ, err := v.EncodeSSZ(nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
 
@@ -392,7 +392,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 	req := []*cltypes.SignedAggregateAndProof{}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
@@ -400,7 +400,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 	for _, v := range req {
 		encodedSSZ, err := v.EncodeSSZ(nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
 			return
 		}
@@ -439,7 +439,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r *http.Request) {
 	msgs := []*cltypes.SyncCommitteeMessage{}
 	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	var err error
@@ -466,7 +466,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 
 			encodedSSZ, err := syncCommitteeMessageWithGossipData.SyncCommitteeMessage.EncodeSSZ(nil)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
 
@@ -502,7 +502,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWriter, r *http.Request) {
 	msgs := []*cltypes.SignedContributionAndProof{}
 	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	failures := []poolingFailure{}
@@ -517,7 +517,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 
 		encodedSSZ, err := signedContributionAndProofWithGossipData.SignedContributionAndProof.EncodeSSZ(nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
 			return
 		}

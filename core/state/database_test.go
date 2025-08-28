@@ -30,18 +30,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -1527,7 +1527,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
-			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
+			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
 				panic(err)
 			}
@@ -1589,7 +1589,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
-			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
+			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
 				panic(err)
 			}

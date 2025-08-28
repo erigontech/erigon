@@ -21,13 +21,13 @@ import (
 	"encoding/binary"
 	"errors"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
-
-	"github.com/erigontech/erigon-lib/kv"
 )
 
 type RangeIndex interface {
 	Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error)
+	Last(ctx context.Context) (uint64, bool, error)
 }
 
 type TransactionalRangeIndexer interface {
@@ -129,6 +129,18 @@ func (i *dbRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, boo
 	return id, ok, err
 }
 
+func (i *dbRangeIndex) Last(ctx context.Context) (uint64, bool, error) {
+	var lastKey uint64
+	var ok bool
+
+	err := i.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		lastKey, ok, err = i.WithTx(tx).Last(ctx)
+		return err
+	})
+	return lastKey, ok, err
+}
+
 func (i *txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
@@ -148,6 +160,26 @@ func (i *txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, boo
 
 	id := rangeIndexValueParse(value)
 	return id, true, err
+}
+
+// last key in the index
+func (i *txRangeIndex) Last(ctx context.Context) (uint64, bool, error) {
+	cursor, err := i.tx.Cursor(i.table)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+	key, value, err := cursor.Last()
+	if err != nil {
+		return 0, false, err
+	}
+
+	if value == nil || key == nil {
+		return 0, false, nil
+	}
+
+	lastKey := rangeIndexKeyParse(key)
+	return lastKey, true, nil
 }
 
 // Lookup ids for the given range [blockFrom, blockTo). Return boolean which checks if the result is reliable to use, because

@@ -22,9 +22,9 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 var ErrPeerNotFound = errors.New("peer not found")
@@ -69,7 +69,7 @@ func (ms *MessageSender) sendMessageToPeer(ctx context.Context, messageId sentry
 		},
 	})
 	if err != nil {
-		if sentry.IsPeerNotFoundErr(err) {
+		if libsentry.IsPeerNotFoundErr(err) {
 			return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
 		}
 		return err

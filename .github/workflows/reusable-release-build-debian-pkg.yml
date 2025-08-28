@@ -17,12 +17,12 @@ jobs:
 
     steps:
       - name: Download arm64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar
 
       - name: Download amd64v2 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar
 

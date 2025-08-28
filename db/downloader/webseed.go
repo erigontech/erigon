@@ -31,8 +31,8 @@ import (
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // WebSeeds - allow use HTTP-based infrastructure to support Bittorrent network

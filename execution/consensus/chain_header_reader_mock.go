@@ -13,8 +13,8 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	chain "github.com/erigontech/erigon-lib/chain"
 	common "github.com/erigontech/erigon-lib/common"
+	chain "github.com/erigontech/erigon/execution/chain"
 	types "github.com/erigontech/erigon/execution/types"
 	gomock "go.uber.org/mock/gomock"
 )
