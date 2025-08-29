@@ -197,7 +197,7 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	db.stateFiles.Close()
+	//db.stateFiles.Close()
 	db.RwDB.Close()
 }
 

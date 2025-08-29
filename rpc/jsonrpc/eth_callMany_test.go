@@ -84,7 +84,8 @@ func TestCallMany(t *testing.T) {
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainID)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainID)
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+
+	contractBackend := backends.NewSimulatedBackend(t, gspec.Alloc, gspec.GasLimit)
 	defer contractBackend.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tokenAddr, _, tokenContract, _ := contracts.DeployToken(transactOpts, contractBackend, address1)
