@@ -55,12 +55,10 @@ func TestLegacyBlockchain(t *testing.T) {
 	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
 	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 
-	checkStateRoot := true
-
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
@@ -79,12 +77,10 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 
-	checkStateRoot := true
-
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
@@ -104,12 +100,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests_devnet")
 
-	checkStateRoot := true
-
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})

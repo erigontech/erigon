@@ -25,8 +25,9 @@ var (
 )
 
 var renameCmd = &cobra.Command{
-	Use:   "rename",
-	Short: "Rename versioned files to match schema versions",
+	Use:     "rename",
+	Short:   "Rename versioned files to match schema versions",
+	Example: `To start rename TUI in the datadir: go run ./cmd/bumper rename --datadir /path/to/your/datadir`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if datadir == "" {
 			return fmt.Errorf("--datadir flag is required")

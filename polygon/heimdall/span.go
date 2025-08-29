@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 )
 
+type SpanId uint64
+
 type Span struct {
 	Id                SpanId       `json:"span_id" yaml:"span_id"`
 	StartBlock        uint64       `json:"start_block" yaml:"start_block"`
