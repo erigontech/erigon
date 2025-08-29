@@ -18,7 +18,7 @@ require (
 	github.com/FastFilter/xorfilter v0.2.1
 	github.com/RoaringBitmap/roaring/v2 v2.9.0
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.58.2-0.20250812132736-231b02a64d10
+	github.com/anacrolix/torrent v1.59.2-0.20250828104414-ef5d822b7ffd
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/consensys/gnark-crypto v0.17.0
@@ -80,7 +80,7 @@ require (
 )
 
 require (
-	github.com/anacrolix/generics v0.0.4-0.20250708073025-68393b391647 // indirect
+	github.com/anacrolix/generics v0.1.0 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
