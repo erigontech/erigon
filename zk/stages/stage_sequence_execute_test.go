@@ -197,7 +197,7 @@ func TestSpawnSequencingStage(t *testing.T) {
 	cfg.txYielder = &sequencer.RecoveryTransactionYielder{}
 
 	// Act
-	err = SpawnSequencingStage(s, u, ctx, cfg, historyCfg, quiet)
+	err = SpawnSequencingStage(s, u, ctx, cfg, historyCfg, quiet, log.New())
 	require.NoError(t, err)
 
 	// Assert

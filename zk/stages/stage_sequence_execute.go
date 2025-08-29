@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/consensus/misc"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -40,6 +41,7 @@ func SpawnSequencingStage(
 	cfg SequenceBlockCfg,
 	historyCfg stagedsync.HistoryCfg,
 	quiet bool,
+	logger log.Logger,
 ) (err error) {
 	roTx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
@@ -79,7 +81,7 @@ func SpawnSequencingStage(
 				return err
 			}
 		} else {
-			return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs)
+			return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs, logger)
 		}
 	}
 
@@ -89,7 +91,7 @@ func SpawnSequencingStage(
 		return nil
 	}
 
-	return sequencingBatchStep(s, u, ctx, cfg, historyCfg, nil)
+	return sequencingBatchStep(s, u, ctx, cfg, historyCfg, nil, logger)
 }
 
 func sequencingBatchStep(
@@ -99,6 +101,7 @@ func sequencingBatchStep(
 	cfg SequenceBlockCfg,
 	historyCfg stagedsync.HistoryCfg,
 	resequenceBatchJob *ResequenceBatchJob,
+	logger log.Logger,
 ) (err error) {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting sequencing stage", logPrefix))
@@ -393,6 +396,10 @@ func sequencingBatchStep(
 		coinbase := batchState.getCoinbase(&cfg)
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, &coinbase, cfg.chainConfig)
 		batchState.blockState.builtBlockElements.resetBlockBuildingArrays()
+
+		if cfg.chainConfig.IsPrague(header.Time) {
+			misc.StoreBlockHashesEip2935(header, ibs, cfg.chainConfig, stagedsync.ChainReader{Cfg: *cfg.chainConfig, Db: sdb.tx, BlockReader: cfg.blockReader, Logger: logger})
+		}
 
 		parentRoot := parentBlock.Root()
 		if err := handleStateForNewBlockStarting(batchContext, ibs, blockNumber, batchState.batchNumber, header.Time, &parentRoot, l1TreeUpdate, shouldWriteGerToContract); err != nil {
