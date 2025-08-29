@@ -20,43 +20,25 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/zk/contracts"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/l1infotree"
 	"github.com/erigontech/erigon/zk/sequencer"
 	"github.com/erigontech/erigon/zk/types"
 )
 
-type IL1Syncer interface {
-	// atomic
-	IsSyncStarted() bool
-	IsDownloading() bool
-	GetLastCheckedL1Block() uint64
-
-	// Channels
-	GetLogsChan() chan []ethTypes.Log
-	GetProgressMessageChan() chan string
-
-	L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error)
-	GetBlock(number uint64) (*ethTypes.Block, error)
-	GetHeader(number uint64) (*ethTypes.Header, error)
-	RunQueryBlocks(lastCheckedBlock uint64)
-	StopQueryBlocks()
-	ConsumeQueryBlocks()
-	WaitQueryBlocksToFinish()
-	CheckL1BlockFinalized(blockNo uint64) (bool, uint64, error)
-}
-
 var (
 	ErrStateRootMismatch      = errors.New("state root mismatch")
 	lastCheckedL1BlockCounter = metrics.GetOrCreateGauge(`last_checked_l1_block`)
+	noActivityTimeout         = 5 * time.Minute
 )
 
 type L1SyncerCfg struct {
 	db     kv.RwDB
-	syncer IL1Syncer
+	syncer l1infotree.Syncer
 
 	zkCfg *ethconfig.Zk
 }
 
-func StageL1SyncerCfg(db kv.RwDB, syncer IL1Syncer, zkCfg *ethconfig.Zk) L1SyncerCfg {
+func StageL1SyncerCfg(db kv.RwDB, syncer l1infotree.Syncer, zkCfg *ethconfig.Zk) L1SyncerCfg {
 	return L1SyncerCfg{
 		db:     db,
 		syncer: syncer,
@@ -131,10 +113,20 @@ func SpawnStageL1Syncer(
 	newVerificationsCount := 0
 	newSequencesCount := 0
 	highestWrittenL1BlockNo := uint64(0)
+
+	idleTicker := time.NewTimer(10 * time.Second)
+	latestActivity := time.Now()
+
 Loop:
 	for {
 		select {
-		case logs := <-logsChan:
+		case logs, ok := <-logsChan:
+			if !ok {
+				break Loop
+			}
+
+			latestActivity = time.Now()
+
 			for _, l := range logs {
 				l := l
 				info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
@@ -185,11 +177,17 @@ Loop:
 			}
 		case progressMessage := <-progressMessageChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
-		default:
-			if !cfg.syncer.IsDownloading() {
+		case <-ctx.Done():
+			break Loop
+		case <-idleTicker.C:
+			if time.Since(latestActivity) > noActivityTimeout {
+				log.Warn(fmt.Sprintf("[%s] No activity for %s", logPrefix, noActivityTimeout))
+
+				cfg.syncer.StopQueryBlocks()
+				cfg.syncer.ConsumeQueryBlocks()
+				cfg.syncer.WaitQueryBlocksToFinish()
 				break Loop
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 

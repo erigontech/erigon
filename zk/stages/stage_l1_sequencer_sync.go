@@ -15,16 +15,17 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/zk/contracts"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/l1infotree"
 	"github.com/erigontech/erigon/zk/types"
 )
 
 type L1SequencerSyncCfg struct {
 	db     kv.RwDB
 	zkCfg  *ethconfig.Zk
-	syncer IL1Syncer
+	syncer l1infotree.Syncer
 }
 
-func StageL1SequencerSyncCfg(db kv.RwDB, zkCfg *ethconfig.Zk, sync IL1Syncer) L1SequencerSyncCfg {
+func StageL1SequencerSyncCfg(db kv.RwDB, zkCfg *ethconfig.Zk, sync l1infotree.Syncer) L1SequencerSyncCfg {
 	return L1SequencerSyncCfg{
 		db:     db,
 		zkCfg:  zkCfg,
@@ -94,22 +95,25 @@ func SpawnL1SequencerSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
+	defer cfg.syncer.ClearHeaderCache()
+
+	idleTicker := time.NewTimer(10 * time.Second)
+	latestActivity := time.Now()
 
 Loop:
 	for {
 		select {
-		case logs := <-logChan:
-			headersMap, err := cfg.syncer.L1QueryHeaders(logs)
-			if err != nil {
-				funcErr = err
-				return funcErr
+		case logs, ok := <-logChan:
+			if !ok {
+				break Loop
 			}
 
+			latestActivity = time.Now()
+
 			for _, l := range logs {
-				header := headersMap[l.BlockNumber]
 				switch l.Topics[0] {
 				case contracts.InitialSequenceBatchesTopic:
-					if funcErr = HandleInitialSequenceBatches(cfg.syncer, hermezDb, l, header); funcErr != nil {
+					if funcErr = HandleInitialSequenceBatches(cfg.syncer, hermezDb, l); funcErr != nil {
 						return funcErr
 					}
 				case contracts.AddNewRollupTypeTopic, contracts.AddNewRollupTypeTopicBanana:
@@ -184,11 +188,17 @@ Loop:
 			}
 		case progMsg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progMsg))
-		default:
-			if !cfg.syncer.IsDownloading() {
+		case <-ctx.Done():
+			break Loop
+		case <-idleTicker.C:
+			if time.Since(latestActivity) > noActivityTimeout {
+				log.Warn(fmt.Sprintf("[%s] No activity for %s", logPrefix, noActivityTimeout))
+
+				cfg.syncer.StopQueryBlocks()
+				cfg.syncer.ConsumeQueryBlocks()
+				cfg.syncer.WaitQueryBlocksToFinish()
 				break Loop
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 
@@ -220,18 +230,15 @@ const (
 )
 
 func HandleInitialSequenceBatches(
-	syncer IL1Syncer,
+	syncer l1infotree.Syncer,
 	db *hermez_db.HermezDb,
 	l ethTypes.Log,
-	header *ethTypes.Header,
 ) error {
 	var err error
 
-	if header == nil {
-		header, err = syncer.GetHeader(l.BlockNumber)
-		if err != nil {
-			return err
-		}
+	header, err := syncer.GetHeader(l.BlockNumber)
+	if err != nil {
+		return err
 	}
 
 	// the log appears to have some trailing some bytes of all 0s in it.  Not sure why but we can't handle the

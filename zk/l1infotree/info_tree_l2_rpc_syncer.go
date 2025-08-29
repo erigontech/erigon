@@ -59,7 +59,10 @@ func (s *InfoTreeL2RpcSyncer) RunSyncInfoTree() <-chan []zkTypes.L1InfoTreeUpdat
 	batchSize := s.zkCfg.L2InfoTreeUpdatesBatchSize
 
 	go func() {
-		defer close(s.infoTreeChan)
+		defer func() {
+			close(s.infoTreeChan)
+			s.isSyncStarted.Store(false)
+		}()
 
 		retry := 0
 		for {

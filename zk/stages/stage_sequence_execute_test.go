@@ -139,7 +139,7 @@ func TestSpawnSequencingStage(t *testing.T) {
 	ethermanMock.EXPECT().BlockByNumber(gomock.Any(), nil).Return(latestL1Block, nil).AnyTimes()
 
 	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{ethermanMock}, l1ContractAddresses, l1ContractTopics, 10, 0, "latest", 0)
-	updater := l1infotree.NewUpdater(&ethconfig.Zk{}, l1Syncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, &ethconfig.Zk{}))
+	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{}, l1Syncer, l1infotree.NewInfoTreeL2RpcSyncer(ctx, &ethconfig.Zk{}))
 
 	cacheMock := cMocks.NewMockCache(mockCtrl)
 	cacheMock.EXPECT().View(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
@@ -195,6 +195,11 @@ func TestSpawnSequencingStage(t *testing.T) {
 	quiet := true
 
 	cfg.txYielder = &sequencer.RecoveryTransactionYielder{}
+
+	// Stop syncer on timeout, because normally it is stopped only in case of error, but we have no error here
+	time.AfterFunc(500*time.Millisecond, func() {
+		l1Syncer.StopQueryBlocks()
+	})
 
 	// Act
 	err = SpawnSequencingStage(s, u, ctx, cfg, historyCfg, quiet, log.New())

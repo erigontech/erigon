@@ -80,6 +80,11 @@ func (l *L1InfoTreeUpdate) Unmarshall(input []byte) {
 	}
 }
 
+type L1InfoTreeUpdateWithLeafHash struct {
+	L1InfoTreeUpdate
+	LeafHash common.Hash `json:"leaf_hash,omitempty"`
+}
+
 type L1InjectedBatch struct {
 	L1BlockNumber      uint64         `json:"l1BlockNumber,omitempty"`
 	Timestamp          uint64         `json:"timestamp,omitempty"`
