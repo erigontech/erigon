@@ -868,7 +868,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, err
 		}
 
-		if index, err = recsplit.OpenIndex(idxPath); err != nil {
+		if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.filenameBase, err)
 		}
 		historyIn = newFilesItem(r.history.from, r.history.to, ht.aggStep)

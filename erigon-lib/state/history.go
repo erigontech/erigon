@@ -943,7 +943,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
 	}
 
-	if historyIdx, err = recsplit.OpenIndex(historyIdxPath); err != nil {
+	if historyIdx, err = h.openHashMapAccessor(historyIdxPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
 	closeComp = false
