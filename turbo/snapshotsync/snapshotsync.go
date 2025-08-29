@@ -402,6 +402,19 @@ func SyncSnapshots(
 			}
 		}
 
+		maxStateStep := uint64(math.MaxUint64)
+		if !headerchain && syncCfg.SnapshotDownloadToBlock > 0 {
+			maxTxNumPrevBlock, err := txNumsReader.Max(tx, syncCfg.SnapshotDownloadToBlock-1)
+			if err != nil {
+				return err
+			}
+			maxTxNum := maxTxNumPrevBlock + 1
+			maxStateStep = maxTxNum / uint64(config3.DefaultStepSize)
+			if maxStateStep > 0 {
+				maxStateStep-- //  we don't want to download the step of maxTxNum so that we don't include data after it
+			}
+		}
+
 		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
 		if syncCfg.PersistReceiptsCacheV2 {
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
@@ -453,6 +466,10 @@ func SyncSnapshots(
 				continue
 			}
 
+			if filterToBlock(p.Name, syncCfg.SnapshotDownloadToBlock, maxStateStep) {
+				continue
+			}
+
 			downloadRequest = append(downloadRequest, DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
@@ -497,4 +514,24 @@ func SyncSnapshots(
 	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
 	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
+}
+
+func filterToBlock(name string, toBlock uint64, toStep uint64) bool {
+	if toBlock == 0 {
+		return false // toBlock filtering is not enabled
+	}
+	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
+	if !ok {
+		return true
+	}
+	if strings.HasPrefix(name, "salt") {
+		return false // not applicable
+	}
+	if strings.HasPrefix(name, "caplin/") {
+		return false // not applicable, caplin files are slot-based
+	}
+	if stateFile {
+		return fileInfo.To > toStep
+	}
+	return fileInfo.To > toBlock
 }

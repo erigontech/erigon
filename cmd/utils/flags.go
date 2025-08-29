@@ -681,6 +681,11 @@ var (
 		Usage: "Skip state download and start from genesis block",
 		Value: false,
 	}
+	SnapDownloadToBlockFlag = cli.Uint64Flag{
+		Name:    "snap.download.to.block",
+		Usage:   "Download snapshots up to the given block number but not beyond (default downloads up to latest)",
+		Aliases: []string{"shadow.fork.block"},
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,
