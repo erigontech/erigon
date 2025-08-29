@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/FastFilter/xorfilter"
+	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -51,7 +52,7 @@ func NewReader(filePath string) (*Reader, error) {
 	var m mmap.MMap
 	var content []byte
 	if fuseMem {
-		content, err = io.ReadAll(bufio.NewReader(f))
+		content, err = io.ReadAll(bufio.NewReaderSize(f, int(64*datasize.KB)))
 		if err != nil {
 			_ = f.Close() //nolint
 			return nil, err
