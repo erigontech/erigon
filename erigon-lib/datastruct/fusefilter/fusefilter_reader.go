@@ -36,10 +36,11 @@ type Reader struct {
 	version uint8
 }
 
-var fuseMem = dbg.EnvBool("FUSE_MEM", true)
-
-var fuseMadvWillNeed = dbg.EnvBool("FUSE_MADV_WILLNEED", false)
-var fuseMadvNormal = dbg.EnvBool("FUSE_MADV_NORMAL", false)
+var (
+	InMemByDefault        = dbg.EnvBool("FUSE_MEM", true)
+	MadvWillNeedByDefault = dbg.EnvBool("FUSE_MADV_WILLNEED", false)
+	MadvNormalByDefault   = dbg.EnvBool("FUSE_MADV_NORMAL", false)
+)
 
 func NewReader(filePath string) (*Reader, error) {
 	f, err := os.Open(filePath)
@@ -54,7 +55,7 @@ func NewReader(filePath string) (*Reader, error) {
 	sz := int(st.Size())
 	var m mmap.MMap
 	var content []byte
-	if fuseMem {
+	if InMemByDefault {
 		content, err = io.ReadAll(bufio.NewReaderSize(f, int(128*datasize.KB)))
 		if err != nil {
 			_ = f.Close() //nolint
@@ -76,7 +77,7 @@ func NewReader(filePath string) (*Reader, error) {
 	}
 	r.f = f
 	r.m = m
-	r.keepInMem = fuseMem
+	r.keepInMem = InMemByDefault
 	r.fileName = fileName
 	r.Init()
 	return r, nil
@@ -110,10 +111,10 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 }
 
 func (r *Reader) Init() {
-	if fuseMadvWillNeed {
+	if MadvWillNeedByDefault {
 		r.MadvWillNeed()
 	}
-	if fuseMadvNormal {
+	if MadvNormalByDefault {
 		r.MadvNormal()
 	}
 }

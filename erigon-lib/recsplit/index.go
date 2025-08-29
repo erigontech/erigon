@@ -244,7 +244,11 @@ func (idx *Index) init() (err error) {
 
 	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		var sz int
-		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
+		fuseContent := idx.data[offset:]
+		if fusefilter.InMemByDefault {
+			fuseContent = bytes.Clone(fuseContent)
+		}
+		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(fuseContent, idx.fileName)
 		if err != nil {
 			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
 		}
