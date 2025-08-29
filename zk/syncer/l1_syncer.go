@@ -502,15 +502,6 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 				if err != nil {
 					log.Debug("getSequencedLogs retry error", "err", err)
 					retry++
-					if retry > getLogsMaxRetry {
-						log.Error(fmt.Sprintf("L1 syncer (getSequencedLogs) exceeded %d retries", retry), "err", err)
-						results <- jobResult{
-							Size:  j.To - j.From,
-							Error: err,
-							Logs:  logs,
-						}
-						return
-					}
 					time.Sleep(time.Duration(retry*2) * time.Second)
 					continue
 				}

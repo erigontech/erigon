@@ -208,12 +208,18 @@ func (worker *L1InfoWorker) Start() {
 				time.AfterFunc(1*time.Second, func() {
 					defer worker.waitGroup.Done()
 
-					select {
-					case <-worker.ctx.Done():
-						return
-					case worker.taskChan <- task:
-					case <-time.After(10 * time.Second):
-						log.Debug("Still trying to requeue L1 info task", "logKey", res.logKey)
+					tick := time.NewTicker(1 * time.Second)
+					defer tick.Stop()
+
+					for {
+						select {
+						case <-worker.ctx.Done():
+							return
+						case worker.taskChan <- task:
+							return
+						case <-tick.C:
+							log.Debug("Still trying to requeue L1 info task", "logKey", res.logKey)
+						}
 					}
 				})
 				continue

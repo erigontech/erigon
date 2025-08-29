@@ -264,6 +264,7 @@ func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
 	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
 
 	env := newStageEnv(t)
+	env.l1Syncer.SetFetchHeaders(true)
 
 	logs := makeV1V2Pairs(t, 1, env.contracts[0], env.blockNumber.Uint64(), env.parentHash, env.blockTime)
 	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(logs, nil).AnyTimes()
