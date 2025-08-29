@@ -77,8 +77,8 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 	const prefix = "block hash: "
 	for _, subErr := range uw.Unwrap() {
 		msg := subErr.Error()
-		if strings.HasPrefix(msg, prefix) {
-			hashStr = strings.TrimPrefix(msg, prefix)
+		if after, ok := strings.CutPrefix(msg, prefix); ok {
+			hashStr = after
 			break
 		}
 	}
