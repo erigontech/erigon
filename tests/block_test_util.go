@@ -122,10 +122,8 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	if !ok {
 		return testutil.UnsupportedForkError{Name: bt.json.Network}
 	}
-
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
-	defer m.Close()
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -228,6 +226,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 			if canonical == cb.Hash() {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
+			roTx.Rollback()
 		}
 		if b.BlockHeader == nil {
 			continue

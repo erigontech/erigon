@@ -92,7 +92,7 @@ func NewService(config ServiceConfig) *Service {
 		"spans",
 		store.Spans(),
 		spanFetcher,
-		1*time.Second,
+		200*time.Millisecond,
 		poshttp.TransientErrors,
 		logger,
 	)
