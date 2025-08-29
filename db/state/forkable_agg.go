@@ -165,6 +165,27 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 	return fin
 }
 
+func (a *ForkableAgg) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
+	res := make(chan struct{})
+	go func() {
+		defer close(res)
+
+		chkEvery := time.NewTicker(3 * time.Second)
+		defer chkEvery.Stop()
+		for a.buildingFiles.Load() || a.mergingFiles.Load() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-chkEvery.C:
+				a.logger.Trace("[fork_agg] waiting for files",
+					"building files", a.buildingFiles.Load(),
+					"merging files", a.mergingFiles.Load())
+			}
+		}
+	}()
+	return res
+}
+
 func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || r.mergeDisabled.Load() || !r.mergingFiles.CompareAndSwap(false, true) {
 		r.logger.Debug("MergeLoop disabled or already in progress. Skipping...")
@@ -411,6 +432,16 @@ func (r *ForkableAgg) closeDirtyFiles() {
 	wg.Wait()
 }
 
+func (r *ForkableAgg) Tables() (tables []string) {
+	for _, m := range r.marked {
+		tables = append(tables, m.canonicalTbl, m.valsTbl)
+	}
+	for _, u := range r.unmarked {
+		tables = append(tables, u.valsTbl)
+	}
+	return
+}
+
 ////
 
 func (r *ForkableAgg) openFolder() error {
@@ -505,6 +536,21 @@ func (r *ForkableAgg) loop(fn func(p *ProtoForkable) error) error {
 	}
 
 	return nil
+}
+
+func (r *ForkableAgg) IsForkablePresent(id ForkableId) bool {
+	for i := range r.marked {
+		if r.marked[i].a == id {
+			return true
+		}
+	}
+
+	for i := range r.unmarked {
+		if r.unmarked[i].a == id {
+			return true
+		}
+	}
+	return false
 }
 
 type ForkableAggTemporalTx struct {

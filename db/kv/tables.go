@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/types/forkables"
 )
 
 // DBSchemaVersion versions list
@@ -842,6 +843,15 @@ func String2Domain(in string) (Domain, error) {
 		return RCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
+	}
+}
+
+func String2Forkable(in string) (ForkableId, error) {
+	switch in {
+	case "rcache":
+		return forkables.RcacheForkable, nil
+	default:
+		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
 	}
 }
 

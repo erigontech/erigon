@@ -18,7 +18,7 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/holiman/uint256 v1.3.2
-	github.com/mattn/go-colorable v0.1.13
+	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/prometheus/client_golang v1.22.0
@@ -27,7 +27,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/btree v1.6.0
-	github.com/ugorji/go/codec v1.2.12
+	github.com/ugorji/go/codec v1.2.13
 	go.uber.org/mock v0.5.2
 	golang.org/x/crypto v0.41.0
 	golang.org/x/exp v0.0.0-20250811191247-51f88131bc50
@@ -40,7 +40,7 @@ require (
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.20.0 // indirect
+	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.16.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect

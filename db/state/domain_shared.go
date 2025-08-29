@@ -93,6 +93,7 @@ type SharedDomains struct {
 
 type HasAgg interface {
 	Agg() any
+	ForkableAgg(ForkableId) any
 }
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {

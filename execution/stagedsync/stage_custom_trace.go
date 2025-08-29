@@ -72,7 +72,7 @@ func NewProduce(produceList []string) Produce {
 		switch p {
 		case kv.ReceiptDomain.String():
 			produce.ReceiptDomain = true
-		case kv.RCacheDomain.String():
+		case dbstate.Registry.Name(forkables.RcacheForkable):
 			produce.RCacheDomain = true
 		case kv.LogAddrIdx.String():
 			produce.LogAddr = true
@@ -169,13 +169,19 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	chkEvery := time.NewTicker(3 * time.Second)
 	defer chkEvery.Stop()
 
+	var aggDone, forkAggDone bool
 Loop:
 	for {
+		if aggDone && forkAggDone {
+			break Loop
+		}
 		select {
 		case <-ctx.Done():
 			logger.Warn("[snapshots] user has interrupted process but anyway waiting for build & merge files")
 		case <-cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForBuildAndMerge(context.Background()):
-			break Loop // Here we don't quit due to ctx because it's not safe for files.
+			aggDone = true
+		case <-cfg.db.(dbstate.HasAgg).ForkableAgg(forkables.RcacheForkable).(*dbstate.ForkableAgg).WaitForBuildAndMerge(context.Background()):
+			forkAggDone = true
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
@@ -290,6 +296,29 @@ func AssertNotBehindAccounts(db kv.TemporalRoDB, domain kv.Domain, txNumsReader 
 		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
 
 		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
+		log.Warn(err.Error())
+		return nil
+	}
+	return nil
+}
+
+func AssertNotBehindAccountsForkable(db kv.TemporalRoDB, forkable kv.ForkableId, txNumsReader rawdbv3.TxNumsReader) (err error) {
+	tx, err := db.BeginTemporalRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	progress, err := tx.Unmarked(forkable).Debug().Progress()
+	if err != nil {
+		return err
+	}
+	accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
+	if accProgress != progress.Uint64() {
+		e1, _, _ := txNumsReader.FindBlockNum(tx, progress.Uint64())
+		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", dbstate.Registry.Name(forkable), progress, e1, accProgress, e2)
 		log.Warn(err.Error())
 		return nil
 	}
@@ -507,7 +536,7 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
 	}
 	if produce.RCacheDomain {
-		tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
+		tables = append(tables, db.Debug().ForkableTables(forkables.RcacheForkable)...)
 	}
 	if produce.LogAddr {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)

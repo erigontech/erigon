@@ -188,6 +188,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ForkableTables(domain ...kv.ForkableId) []string     { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
 func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }

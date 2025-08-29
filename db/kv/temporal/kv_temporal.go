@@ -212,6 +212,15 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
 }
 
+func (db *DB) searchForkableAggIdx(forkableId kv.ForkableId) int {
+	for i, forkagg := range db.forkaggs {
+		if forkagg.IsForkablePresent(forkableId) {
+			return i
+		}
+	}
+	panic(fmt.Sprintf("forkable not found: %d", forkableId))
+}
+
 type tx struct {
 	db               *DB
 	aggtx            *state.AggregatorRoTx
@@ -242,15 +251,6 @@ func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
-func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range tx.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
-}
-
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
@@ -288,6 +288,15 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 		return errors.New("can't apply: transaction closed")
 	}
 	return applyTx.Apply(ctx, f)
+}
+
+func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
+	for i, forkagg := range tx.forkaggs {
+		if forkagg.IsForkablePresent(forkableId) {
+			return i
+		}
+	}
+	panic(fmt.Sprintf("forkable not found: %d", forkableId))
 }
 
 func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
@@ -582,6 +591,13 @@ func (db *DB) DomainTables(domain ...kv.Domain) []string {
 }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
+}
+func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
+	for _, name := range names {
+		tables = append(tables, db.forkaggs[db.searchForkableAggIdx(name)].Tables()...)
+
+	}
+	return
 }
 func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
