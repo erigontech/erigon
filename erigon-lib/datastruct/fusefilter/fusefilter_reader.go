@@ -24,7 +24,9 @@ const (
 )
 
 type Reader struct {
-	inner    *xorfilter.BinaryFuse[uint8]
+	inner     *xorfilter.BinaryFuse[uint8]
+	keepInMem bool
+
 	fileName string
 	f        *os.File
 	m        mmap.MMap
@@ -50,7 +52,10 @@ func NewReader(filePath string) (*Reader, error) {
 	var content []byte
 	if fuseMem {
 		content, err = io.ReadAll(bufio.NewReader(f))
-
+		if err != nil {
+			_ = f.Close() //nolint
+			return nil, err
+		}
 	} else {
 		m, err = mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 		if err != nil {
@@ -67,6 +72,7 @@ func NewReader(filePath string) (*Reader, error) {
 	}
 	r.f = f
 	r.m = m
+	r.keepInMem = fuseMem
 	r.fileName = fileName
 
 	return r, nil
