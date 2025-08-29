@@ -110,6 +110,10 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
 }
 
+func (r *Reader) ForceInMem() {
+	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
+}
+
 func (r *Reader) Init() {
 	if MadvWillNeedByDefault {
 		r.MadvWillNeed()

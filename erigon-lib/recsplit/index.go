@@ -244,11 +244,7 @@ func (idx *Index) init() (err error) {
 
 	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		var sz int
-		fuseContent := idx.data[offset:]
-		if fusefilter.InMemByDefault {
-			fuseContent = bytes.Clone(fuseContent)
-		}
-		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(fuseContent, idx.fileName)
+		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
 		if err != nil {
 			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
 		}
@@ -278,6 +274,12 @@ func (idx *Index) init() (err error) {
 	idx.ef.Read(idx.data[offset:])
 	validationPassed = true
 	return nil
+}
+
+func (idx *Index) ForceExistenceFilterInRAM() {
+	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		idx.existenceV1.ForceInMem()
+	}
 }
 
 func onlyKnownFeatures(features Features) error {

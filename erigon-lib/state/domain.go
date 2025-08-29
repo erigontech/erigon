@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
+	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -393,7 +394,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.version.AccessorKVI)
 					}
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					if item.index, err = d.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -448,6 +449,17 @@ func (d *Domain) openDirtyFiles() (err error) {
 	}
 
 	return nil
+}
+
+func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
+	accessor, err := recsplit.OpenIndex(fPath)
+	if err != nil {
+		return nil, err
+	}
+	if fusefilter.InMemByDefault {
+		accessor.ForceExistenceFilterInRAM()
+	}
+	return accessor, nil
 }
 
 func (d *Domain) closeWhatNotInList(fNames []string) {
@@ -1100,7 +1112,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(stepFrom, stepTo))
+		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(stepFrom, stepTo))
 		if err != nil {
 			return StaticFiles{}, err
 		}
@@ -1202,7 +1214,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(step, step+1))
+		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
 		if err != nil {
 			return StaticFiles{}, err
 		}
