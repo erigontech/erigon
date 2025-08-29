@@ -3,6 +3,7 @@ package txpool
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -232,6 +233,7 @@ func TestMedianTimeMetrics(t *testing.T) {
 		baseFee: NewSubPool(BaseFeeSubPool, 100),
 		queued:  NewSubPool(QueuedSubPool, 100),
 		metrics: &Metrics{},
+		lock:    &sync.Mutex{},
 	}
 
 	newMtx := &metaTx{
