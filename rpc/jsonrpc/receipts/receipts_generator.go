@@ -339,7 +339,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		receipt.BlockHash = blockHash
 		if len(receipt.Logs) > 0 {
 			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
-		} else if (i > 0) {
+		} else if i > 0 {
 			receipt.FirstLogIndexWithinBlock = receipts[i-1].FirstLogIndexWithinBlock + uint32(len(receipts[i-1].Logs))
 		}
 		receipts[i] = receipt
