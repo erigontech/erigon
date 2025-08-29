@@ -459,11 +459,23 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 	if err != nil {
 		return err
 	}
-	req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, custodyColumns)
-	if err != nil {
-		return err
+
+	wg := sync.WaitGroup{}
+	for i := 0; i < len(blocks); i += 4 {
+		blocks := blocks[i:min(i+4, len(blocks))]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, custodyColumns)
+			if err != nil {
+				log.Warn("failed to initialize download request", "err", err)
+				return
+			}
+			d.runDownload(ctx, req, false)
+		}()
 	}
-	return d.runDownload(ctx, req, false)
+	wg.Wait()
+	return nil
 }
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
@@ -504,12 +516,22 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	}()
 
 	// initialize the download request
-	req, err := initializeDownloadRequest(blocksToProcess, d.beaconConfig, d.columnStorage, allColumns)
-	if err != nil {
-		return err
+	wg := sync.WaitGroup{}
+	for i := 0; i < len(blocksToProcess); i += 4 {
+		blocks := blocksToProcess[i:min(i+4, len(blocksToProcess))]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, allColumns)
+			if err != nil {
+				log.Warn("failed to initialize download request", "err", err)
+				return
+			}
+			d.runDownload(ctx, req, true)
+		}()
 	}
-
-	return d.runDownload(ctx, req, true)
+	wg.Wait()
+	return nil
 }
 
 func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
@@ -529,7 +551,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 	go func(req *downloadRequest) {
 		// send the request in a loop with a ticker to avoid overwhelming the peer
 		// keep trying until the request is done
-		ticker := time.NewTicker(100 * time.Millisecond)
+		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		wg := sync.WaitGroup{}
 	loop:
