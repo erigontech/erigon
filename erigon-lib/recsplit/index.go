@@ -281,10 +281,11 @@ func (idx *Index) init() (err error) {
 	return nil
 }
 
-func (idx *Index) ForceExistenceFilterInRAM() {
+func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		idx.existenceV1.ForceInMem()
+		return idx.existenceV1.ForceInMem()
 	}
+	return 0
 }
 
 func onlyKnownFeatures(features Features) error {

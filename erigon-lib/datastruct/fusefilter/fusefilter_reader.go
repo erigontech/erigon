@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/FastFilter/xorfilter"
+	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -95,9 +96,10 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
 }
 
-func (r *Reader) ForceInMem() {
+func (r *Reader) ForceInMem() datasize.ByteSize {
 	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
 	r.keepInMem = true
+	return datasize.ByteSize(len(r.inner.Fingerprints))
 }
 
 func (r *Reader) MadvWillNeed() {
