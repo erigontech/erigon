@@ -92,7 +92,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 
 	overrideBlockHash := transactions.BlockHashOverrides{}
 
-	var simulatedBlockResults []SimulatedBlockResult
+	simulatedBlockResults := make([]SimulatedBlockResult, 0, len(req.BlockStateCalls))
 
 	// Iterate over each given SimulatedBlock
 	for _, bsc := range req.BlockStateCalls {
