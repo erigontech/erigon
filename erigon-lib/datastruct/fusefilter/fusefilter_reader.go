@@ -65,7 +65,6 @@ func NewReader(filePath string) (*Reader, error) {
 	r.f = f
 	r.m = m
 	r.fileName = fileName
-	r.Init()
 	return r, nil
 }
 
