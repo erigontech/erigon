@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -43,6 +44,7 @@ import (
 // Waypoints may be absent in case if it's an early stage of the chain's evolution, starting from the genesis block.
 // The current constant value is chosen based on observed metrics in production as twice the doubled value of the maximum observed waypoint length.
 const maxFinalizationHeight = 512
+const downloadRequestsCacheSize = 1024
 
 var (
 	futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
@@ -92,44 +94,57 @@ func NewSync(
 	if err != nil {
 		panic(err)
 	}
+	blockRequestsCache, err := lru.NewARC[libcommon.Hash, struct{}](downloadRequestsCacheSize)
+	if err != nil {
+		panic(err)
+	}
+
+	blockHashesRequestsCache, err := lru.NewARC[libcommon.Hash, struct{}](downloadRequestsCacheSize)
+	if err != nil {
+		panic(err)
+	}
 
 	return &Sync{
-		config:            config,
-		logger:            logger,
-		store:             store,
-		execution:         execution,
-		milestoneVerifier: milestoneVerifier,
-		blocksVerifier:    blocksVerifier,
-		p2pService:        p2pService,
-		blockDownloader:   blockDownloader,
-		ccBuilderFactory:  ccBuilderFactory,
-		heimdallSync:      heimdallSync,
-		bridgeSync:        bridgeSync,
-		tipEvents:         tipEvents,
-		badBlocks:         badBlocksLru,
-		notifications:     notifications,
-		wiggleCalculator:  wiggleCalculator,
-		engineAPISwitcher: engineAPISwitcher,
+		config:                   config,
+		logger:                   logger,
+		store:                    store,
+		execution:                execution,
+		milestoneVerifier:        milestoneVerifier,
+		blocksVerifier:           blocksVerifier,
+		p2pService:               p2pService,
+		blockDownloader:          blockDownloader,
+		ccBuilderFactory:         ccBuilderFactory,
+		heimdallSync:             heimdallSync,
+		bridgeSync:               bridgeSync,
+		tipEvents:                tipEvents,
+		badBlocks:                badBlocksLru,
+		notifications:            notifications,
+		wiggleCalculator:         wiggleCalculator,
+		engineAPISwitcher:        engineAPISwitcher,
+		blockRequestsCache:       blockRequestsCache,
+		blockHashesRequestsCache: blockHashesRequestsCache,
 	}
 }
 
 type Sync struct {
-	config            *ethconfig.Config
-	logger            log.Logger
-	store             Store
-	execution         ExecutionClient
-	milestoneVerifier WaypointHeadersVerifier
-	blocksVerifier    BlocksVerifier
-	p2pService        p2pService
-	blockDownloader   *BlockDownloader
-	ccBuilderFactory  CanonicalChainBuilderFactory
-	heimdallSync      heimdallSynchronizer
-	bridgeSync        bridgeSynchronizer
-	tipEvents         *TipEvents
-	badBlocks         *simplelru.LRU[common.Hash, struct{}]
-	notifications     *shards.Notifications
-	wiggleCalculator  wiggleCalculator
-	engineAPISwitcher EngineAPISwitcher
+	config                   *ethconfig.Config
+	logger                   log.Logger
+	store                    Store
+	execution                ExecutionClient
+	milestoneVerifier        WaypointHeadersVerifier
+	blocksVerifier           BlocksVerifier
+	p2pService               p2pService
+	blockDownloader          *BlockDownloader
+	ccBuilderFactory         CanonicalChainBuilderFactory
+	heimdallSync             heimdallSynchronizer
+	bridgeSync               bridgeSynchronizer
+	tipEvents                *TipEvents
+	badBlocks                *simplelru.LRU[common.Hash, struct{}]
+	notifications            *shards.Notifications
+	wiggleCalculator         wiggleCalculator
+	engineAPISwitcher        EngineAPISwitcher
+	blockRequestsCache       *lru.ARCCache[libcommon.Hash, struct{}]
+	blockHashesRequestsCache *lru.ARCCache[libcommon.Hash, struct{}]
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
@@ -493,7 +508,12 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccb.Root().Number.Uint64()
 	amount := newBlockHeaderNum - rootNum + 1
-	var blockChain = make([]*types.Block, 0, amount) // the return value
+	var blockChain = make([]*types.Block, 0, amount)       // the return value
+	if s.blockRequestsCache.Contains(newBlockHeaderHash) { // we've already seen this download request before
+		return blockChain, nil
+	}
+	s.blockRequestsCache.Add(newBlockHeaderHash, struct{}{})
+
 	s.logger.Debug(
 		syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
 		"rootNum", rootNum,
@@ -531,7 +551,7 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 
 				return nil, nil
 			}
-
+			s.blockRequestsCache.Remove(newBlockHeaderHash)
 			return nil, err
 		}
 
@@ -560,6 +580,12 @@ func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlock
 			continue
 		}
 
+		if s.blockHashesRequestsCache.Contains(hashOrNum.Hash) { // we've already seen this request before, can skip it
+			continue
+		}
+
+		s.blockHashesRequestsCache.Add(hashOrNum.Hash, struct{}{})
+
 		s.logger.Debug(
 			syncLogPrefix("downloading block from block hash event"),
 			"blockNum", hashOrNum.Number,
@@ -580,7 +606,7 @@ func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlock
 
 				continue
 			}
-
+			s.blockHashesRequestsCache.Remove(hashOrNum.Hash)
 			return nil, err
 		}
 		blockChain = append(blockChain, newBlocks.Data[0])
