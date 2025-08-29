@@ -11,12 +11,8 @@ import (
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	mm "github.com/erigontech/erigon-lib/mmap"
 )
-
-var madvWillNeed = dbg.EnvBool("FUSE_MADV_WILLNEED", true)
-var madvNormal = dbg.EnvBool("FUSE_MADV_NORMAL", false)
 
 type Features uint32
 
@@ -58,12 +54,6 @@ func NewReader(filePath string) (*Reader, error) {
 	}
 	r.f = f
 	r.fileName = fileName
-	if madvWillNeed {
-		r.MadvWillNeed()
-	}
-	if madvNormal {
-		r.MadvNormal()
-	}
 
 	return r, nil
 }

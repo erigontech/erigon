@@ -23,11 +23,12 @@ import (
 	"os"
 	"path/filepath"
 
+	bloomfilter "github.com/holiman/bloomfilter/v2"
+
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon-lib/log/v3"
-	bloomfilter "github.com/holiman/bloomfilter/v2"
 )
 
 type Filter struct {
@@ -199,6 +200,12 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 			return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 		}
 		validationPassed = true
+		if fuseMadvWillNeed {
+			idx.fuseReader.MadvWillNeed()
+		}
+		if fuseMadvNormal {
+			idx.fuseReader.MadvWillNeed()
+		}
 		return idx, nil
 	}
 	filter := new(bloomfilter.Filter)
@@ -217,3 +224,6 @@ func (b *Filter) Close() {
 	}
 	b.fuseReader.Close()
 }
+
+var fuseMadvWillNeed = dbg.EnvBool("FUSE_MADV_WILLNEED", true)
+var fuseMadvNormal = dbg.EnvBool("FUSE_MADV_NORMAL", false)
