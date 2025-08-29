@@ -27,20 +27,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/c2h5oh/datasize"
-	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/tests"
 )
@@ -129,26 +123,8 @@ func aggregateResultsFromStateTests(
 	stateTests map[string]tests.StateTest, cfg vm.Config,
 	jsonOut bool, bench bool) ([]StatetestResult, error) {
 	dirs := datadir.New(filepath.Join(os.TempDir(), "erigon-statetest"))
-	//this DB is shared. means:
-	// - faster sequential tests: don't need create/delete db
-	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
-	_db := mdbx.New(kv.ChainDB, log.New()).
-		Path(dirs.Chaindata).
-		AddFlags(mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap).
-		GrowthStep(1 * datasize.MB).
-		MustOpen()
-	defer _db.Close()
 
-	agg, err := dbstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, _db, log.New())
-	if err != nil {
-		return nil, err
-	}
-	defer agg.Close()
-
-	db, err := temporal.New(_db, agg)
-	if err != nil {
-		return nil, err
-	}
+	db := temporaltest.NewTestDB(nil, dirs)
 	defer db.Close()
 
 	tx, txErr := db.BeginTemporalRw(context.Background())

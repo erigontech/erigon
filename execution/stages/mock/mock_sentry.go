@@ -253,6 +253,7 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 	default:
 		engine = ethash.NewFaker()
 	}
+
 	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader)
 }
 

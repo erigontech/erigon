@@ -407,7 +407,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		receipts[i] = receipt
 		parent = block
 	}
-	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
