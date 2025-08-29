@@ -765,7 +765,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	engine := api.engine()
 
-	header, latest, err := headerByNumberOrHash(ctx, tx, *blockNrOrHash, api)
+	header, latest, err := headerByNumberOrHash(ctx, tx, bNrOrHash, api)
 	if err != nil {
 		return nil, err
 	}
@@ -826,7 +826,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
-	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(ctx, engine, header, tx, api._blockReader, chainConfig)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
 	// Add 'from', 'to', precompiles to the exclusion list
