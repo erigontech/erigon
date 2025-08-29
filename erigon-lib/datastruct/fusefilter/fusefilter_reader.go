@@ -52,7 +52,7 @@ func NewReader(filePath string) (*Reader, error) {
 	var m mmap.MMap
 	var content []byte
 	if fuseMem {
-		content, err = io.ReadAll(bufio.NewReaderSize(f, int(64*datasize.KB)))
+		content, err = io.ReadAll(bufio.NewReaderSize(f, int(128*datasize.KB)))
 		if err != nil {
 			_ = f.Close() //nolint
 			return nil, err
