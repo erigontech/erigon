@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -43,14 +42,11 @@ func TestCreation(t *testing.T) {
 		want ID
 	}
 	tests := []struct {
-		config  *chain.Config
-		genesis common.Hash
-		cases   []testcase
+		spec  chainspec.Spec
+		cases []testcase
 	}{
-		// Mainnet test cases
 		{
-			chainspec.MainnetChainConfig,
-			chainspec.MainnetGenesisHash,
+			chainspec.Mainnet,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xfc64ec04), Activation: 0, Next: 1150000}},                             // Unsynced
 				{1149999, 1457981342, ID{Hash: ChecksumToBytes(0xfc64ec04), Activation: 0, Next: 1150000}},              // Last Frontier block
@@ -86,10 +82,8 @@ func TestCreation(t *testing.T) {
 				{30000000, 1900000000, ID{Hash: ChecksumToBytes(0xc376cf8b), Activation: 1746612311, Next: 0}},          // Future Prague block (mock)
 			},
 		},
-		// Sepolia test cases
 		{
-			chainspec.SepoliaChainConfig,
-			chainspec.SepoliaGenesisHash,
+			chainspec.Sepolia,
 			[]testcase{
 				{0, 1633267481, ID{Hash: ChecksumToBytes(0xfe3366e7), Activation: 0, Next: 1735371}},                   // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople, Petersburg, Istanbul, Berlin and first London block
 				{1735370, 1661130096, ID{Hash: ChecksumToBytes(0xfe3366e7), Activation: 0, Next: 1735371}},             // Last pre-MergeNetsplit block
@@ -103,11 +97,8 @@ func TestCreation(t *testing.T) {
 				{12000000, 1800000000, ID{Hash: ChecksumToBytes(0xed88b5fd), Activation: 1741159776, Next: 0}},         // Future Prague block (mock)
 			},
 		},
-
-		// Holesky test cases
 		{
-			chainspec.HoleskyChainConfig,
-			chainspec.HoleskyGenesisHash,
+			chainspec.Holesky,
 			[]testcase{
 				{0, 1696000704, ID{Hash: ChecksumToBytes(0xfd4f016b), Activation: 1696000704, Next: 1707305664}},       // First Shanghai block
 				{0, 1707305652, ID{Hash: ChecksumToBytes(0xfd4f016b), Activation: 1696000704, Next: 1707305664}},       // Last Shanghai block
@@ -117,11 +108,8 @@ func TestCreation(t *testing.T) {
 				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0xdfbd9bed), Activation: 1740434112, Next: 0}},          // Future Prague block (mock)
 			},
 		},
-
-		// Hoodi test cases
 		{
-			chainspec.HoodiChainConfig,
-			chainspec.HoodiGenesisHash,
+			chainspec.Hoodi,
 			[]testcase{
 				{0, 174221200, ID{Hash: ChecksumToBytes(0xbef71d30), Activation: 0, Next: 1742999832}},        // First Cancun block
 				{50000, 1742999820, ID{Hash: ChecksumToBytes(0xbef71d30), Activation: 0, Next: 1742999832}},   // Last Cancun block (approx)
@@ -129,10 +117,8 @@ func TestCreation(t *testing.T) {
 				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0x0929e24e), Activation: 1742999832, Next: 0}}, // Future Prague block (mock)
 			},
 		},
-		// Gnosis test cases
 		{
-			chainspec.GnosisChainConfig,
-			chainspec.GnosisGenesisHash,
+			chainspec.Gnosis,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xf64909b1), Activation: 0, Next: 1604400}},                             // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium
 				{1604399, 1547205885, ID{Hash: ChecksumToBytes(0xf64909b1), Activation: 0, Next: 1604400}},              // Last Byzantium block
@@ -157,10 +143,8 @@ func TestCreation(t *testing.T) {
 				{50000000, 1800000000, ID{Hash: ChecksumToBytes(0x2f095d4a), Activation: 1746021820, Next: 0}},          // Future Prague block (mock)
 			},
 		},
-		// Chiado test cases
 		{
-			chainspec.ChiadoChainConfig,
-			chainspec.ChiadoGenesisHash,
+			chainspec.Chiado,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0x50d39d7b), Activation: 0, Next: 1684934220}},
 				{4100418, 1684934215, ID{Hash: ChecksumToBytes(0x50d39d7b), Activation: 0, Next: 1684934220}},           // Last pre-Shanghai block
@@ -172,19 +156,15 @@ func TestCreation(t *testing.T) {
 				{20000000, 1800000000, ID{Hash: ChecksumToBytes(0x8ba51786), Activation: 1741254220, Next: 0}},          // Future Prague block (mock)
 			},
 		},
-		// Amoy test cases
 		{
-			polychain.AmoyChainConfig,
-			polychain.AmoyGenesisHash,
+			polychain.Amoy,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0xbe06a477), Activation: 0, Next: 73100}},
 				{73100, 0, ID{Hash: ChecksumToBytes(0x135d2cd5), Activation: 73100, Next: 5423600}}, // First London, Jaipur, Delhi, Indore, Agra
 			},
 		},
-		// Bor mainnet test cases
 		{
-			polychain.BorMainnetChainConfig,
-			polychain.BorMainnetGenesisHash,
+			polychain.BorMainnet,
 			[]testcase{
 				{0, 0, ID{Hash: ChecksumToBytes(0x0e07e722), Activation: 0, Next: 3395000}},
 				{3395000, 0, ID{Hash: ChecksumToBytes(0x27806576), Activation: 3395000, Next: 14750000}},   // First Istanbul block
@@ -197,8 +177,8 @@ func TestCreation(t *testing.T) {
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {
-			heightForks, timeForks := GatherForks(tt.config, 0 /* genesisTime */)
-			if have := NewIDFromForks(heightForks, timeForks, tt.genesis, ttt.head, ttt.time); have != ttt.want {
+			heightForks, timeForks := GatherForks(tt.spec.Config, 0 /* genesisTime */)
+			if have := NewIDFromForks(heightForks, timeForks, tt.spec.GenesisHash, ttt.head, ttt.time); have != ttt.want {
 				t.Errorf("test %d, case %d: fork ID mismatch: have %x, want %x", i, j, have, ttt.want)
 			}
 		}
@@ -276,9 +256,9 @@ func TestValidation(t *testing.T) {
 		// fork) at block 7279999, before Petersburg. Local is incompatible.
 		{7279999, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 7279999}, ErrLocalIncompatibleOrStale},
 	}
-	heightForks, timeForks := GatherForks(chainspec.MainnetChainConfig, 0 /* genesisTime */)
+	heightForks, timeForks := GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	for i, tt := range tests {
-		filter := newFilter(heightForks, timeForks, chainspec.MainnetGenesisHash, tt.head, 0)
+		filter := newFilter(heightForks, timeForks, chainspec.Mainnet.GenesisHash, tt.head, 0)
 		if err := filter(tt.id); err != tt.err {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}

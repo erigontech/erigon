@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -31,8 +31,8 @@ import (
 //go:embed chainspecs
 var chainspecs embed.FS
 
-func readChainSpec(filename string) *chain.Config {
-	spec := chainspec.ReadChainSpec(chainspecs, filename)
+func readBorChainSpec(filename string) *chain.Config {
+	spec := chainspec.ReadChainConfig(chainspecs, filename)
 	if spec.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
 		if err := json.Unmarshal(spec.BorJSON, borConfig); err != nil {
@@ -44,21 +44,36 @@ func readChainSpec(filename string) *chain.Config {
 }
 
 var (
-	AmoyGenesisHash       = common.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697")
-	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
-	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
+	Amoy = chainspec.Spec{
+		Name:        networkname.Amoy,
+		GenesisHash: common.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697"),
+		Config:      amoyChainConfig,
+		Genesis:     AmoyGenesisBlock(),
+		Bootnodes:   amoyBootnodes,
+		DNSNetwork:  "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io",
+	}
+	BorMainnet = chainspec.Spec{
+		Name:        networkname.BorMainnet,
+		GenesisHash: common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b"),
+		Config:      borMainnetChainConfig,
+		Bootnodes:   borMainnetBootnodes,
+		Genesis:     BorMainnetGenesisBlock(),
+		DNSNetwork:  "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io",
+	}
+	BorDevnet = chainspec.Spec{
+		Name:        networkname.BorDevnet,
+		GenesisHash: common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87"),
+		Config:      borDevnetChainConfig,
+		Genesis:     BorDevnetGenesisBlock(),
+	}
+)
 
-	AmoyChainConfig       = readChainSpec("chainspecs/amoy.json")
-	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
-	BorDevnetChainConfig  = readChainSpec("chainspecs/bor-devnet.json")
+var (
+	BorKurtosisDevnetChainId uint64 = 4927
 )
 
 func init() {
-	chainspec.RegisterChain(networkname.Amoy, AmoyChainConfig, AmoyGenesisBlock(), AmoyGenesisHash, AmoyBootnodes,
-		"enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@amoy.polygon-peers.io")
-	chainspec.RegisterChain(networkname.BorMainnet, BorMainnetChainConfig, BorMainnetGenesisBlock(), BorMainnetGenesisHash, BorMainnetBootnodes,
-		"enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io")
-
-	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil, "")
-	delete(chainspec.NetworkNameByID, BorDevnetChainConfig.ChainID.Uint64()) // chain ID 1337 is used in non-Bor testing (e.g. Hive)
+	chainspec.RegisterChainSpec(networkname.Amoy, Amoy)
+	chainspec.RegisterChainSpec(networkname.BorMainnet, BorMainnet)
+	chainspec.RegisterChainSpec(networkname.BorDevnet, BorDevnet)
 }

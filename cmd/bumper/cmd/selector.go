@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"slices"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/erigontech/erigon/db/state"
-	"slices"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // SelectorModel is a Bubble Tea model for selecting domains and extensions
@@ -26,7 +28,7 @@ type SelectorModel struct {
 
 // NewSelectorModel initializes based on include/exclude lists
 func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts []string) *SelectorModel {
-	res, domains := getNames(&state.Schema)
+	res, domains := getNames(&statecfg.Schema)
 	exts := make([]string, 0, 10)
 	exts = append(exts, extCfgMap[domainType]...)
 	exts = append(exts, extCfgMap[idxType]...)
@@ -43,7 +45,7 @@ func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts [
 		}
 	}
 	// determine exts to show
-	for selected, _ := range sel {
+	for selected := range sel {
 		for _, e := range extCfgMap[res[selected]] {
 			if slices.Contains(includeExts, e) {
 				sel[e] = struct{}{}

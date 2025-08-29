@@ -2,17 +2,18 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"os"
+
+	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "schema-tool",
+	Use:   "bumper",
 	Short: "Manage schema versions and file renaming",
-	Long: `schema-tool is a CLI to:
- 1) Rename files with version mismatches
+	Long: `bumper is a CLI to:
+ 1) Rename files with version mismatches 
  2) Bump schema versions in code
- 3) Inspect schema fields via reflection
+ 3) Inspect schema fields and exts
 `,
 }
 
