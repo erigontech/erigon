@@ -468,9 +468,9 @@ func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockB
 func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
 	firstBlockHash := event.NewBlockHashes[0].Hash
 	firstBlockNum := event.NewBlockHashes[0].Number
-	s.logger.Debug(syncLogPrefix("applyNewBlockHashesOnTip: backward downloading"), "blockNum", firstBlockNum, "blockhash", firstBlockHash)
+	s.logger.Debug(syncLogPrefix("applyNewBlockHashesOnTip: schedule blocks download from hashes"), "blockNum", firstBlockNum, "blockhash", firstBlockHash)
 	go func() { // asynchronously download blocks and in the end place the blocks batch in the event queue
-		blockchain, err := s.backwardDownloadBlocksFromHashes(ctx, event, ccb)
+		blockchain, err := s.downloadBlocksFromHashes(ctx, event, ccb)
 		if err != nil {
 			s.logger.Error(syncLogPrefix("couldn't fetch blocks from block hashes"), "err", err)
 		}
@@ -542,7 +542,7 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 	return blockChain, nil
 }
 
-func (s *Sync) backwardDownloadBlocksFromHashes(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) ([]*types.Block, error) {
+func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) ([]*types.Block, error) {
 	blockChain := make([]*types.Block, 0, len(event.NewBlockHashes))
 	for _, hashOrNum := range event.NewBlockHashes {
 		if (hashOrNum.Number <= ccb.Root().Number.Uint64()) || ccb.ContainsHash(hashOrNum.Hash) {
