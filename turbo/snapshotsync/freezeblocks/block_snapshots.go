@@ -357,7 +357,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 			break
 		}
 		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
-			br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
+			br.logger.Trace("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 			deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, 1)
 			if err != nil {
 				return deleted, err
