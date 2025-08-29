@@ -9,7 +9,6 @@ endif
 
 GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
 GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath
-GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=nofuzz
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -108,7 +107,7 @@ lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
 test-short:
-	$(GOTEST_NOFUZZ) -short ./...
+	$(GOTEST) -short ./...
 
 test-all:
 	$(GOTEST) -coverprofile=coverage-test-all.out ./...
