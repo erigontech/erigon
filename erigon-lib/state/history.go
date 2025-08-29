@@ -159,6 +159,14 @@ func (h *History) vAccessorFilePathMask(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 }
 
+func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
+	accessor, err := recsplit.OpenIndex(fPath)
+	if err != nil {
+		return nil, err
+	}
+	return accessor, nil
+}
+
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
@@ -268,7 +276,7 @@ func (h *History) openDirtyFiles() error {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, h.version.AccessorVI)
 					}
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					if item.index, err = h.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -919,7 +927,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, h.InvertedIndex.dataReader(efHistoryDecomp), ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.filenameBase, err)
 		}
-		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
+		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
 			return HistoryFiles{}, err
 		}
 	}
@@ -935,7 +943,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
 	}
 
-	if historyIdx, err = recsplit.OpenIndex(historyIdxPath); err != nil {
+	if historyIdx, err = h.openHashMapAccessor(historyIdxPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
 	closeComp = false

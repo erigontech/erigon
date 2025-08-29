@@ -1,17 +1,14 @@
 package fusefilter
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"unsafe"
 
 	"github.com/FastFilter/xorfilter"
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -37,7 +34,6 @@ type Reader struct {
 }
 
 var (
-	InMemByDefault        = dbg.EnvBool("FUSE_MEM", true)
 	MadvWillNeedByDefault = dbg.EnvBool("FUSE_MADV_WILLNEED", false)
 	MadvNormalByDefault   = dbg.EnvBool("FUSE_MADV_NORMAL", false)
 )
@@ -53,22 +49,13 @@ func NewReader(filePath string) (*Reader, error) {
 		return nil, err
 	}
 	sz := int(st.Size())
-	var m mmap.MMap
 	var content []byte
-	if InMemByDefault {
-		content, err = io.ReadAll(bufio.NewReaderSize(f, int(128*datasize.KB)))
-		if err != nil {
-			_ = f.Close() //nolint
-			return nil, err
-		}
-	} else {
-		m, err = mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
-		if err != nil {
-			_ = f.Close() //nolint
-			return nil, err
-		}
-		content = m
+	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
+	if err != nil {
+		_ = f.Close() //nolint
+		return nil, err
 	}
+	content = m
 
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderOnBytes(content, fileName)
@@ -77,9 +64,7 @@ func NewReader(filePath string) (*Reader, error) {
 	}
 	r.f = f
 	r.m = m
-	r.keepInMem = InMemByDefault
 	r.fileName = fileName
-	r.Init()
 	return r, nil
 }
 
@@ -110,13 +95,9 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
 }
 
-func (r *Reader) Init() {
-	if MadvWillNeedByDefault {
-		r.MadvWillNeed()
-	}
-	if MadvNormalByDefault {
-		r.MadvNormal()
-	}
+func (r *Reader) ForceInMem() {
+	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
+	r.keepInMem = true
 }
 
 func (r *Reader) MadvWillNeed() {
