@@ -316,6 +316,12 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	if ccb.ContainsHash(newBlockHeader.ParentHash) {
 		blockChain = []*types.Block{event.NewBlock}
 	} else {
+		if s.blockRequestsCache.Contains(newBlockHeaderHash) { // we've already seen this download request before
+			s.logger.Debug(syncLogPrefix("ignoring duplicate backward download"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
+				"source", event.Source,
+				"parentBlockHash", newBlockHeader.ParentHash)
+			return nil
+		}
 		// we need to do a backward download. so schedule the download in a goroutine and have it  push an `EventNewBlockBatch` which can be processed later,
 		// so that we don't block the event processing loop
 		s.logger.Debug(syncLogPrefix("scheduling backward download"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
@@ -508,10 +514,7 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccb.Root().Number.Uint64()
 	amount := newBlockHeaderNum - rootNum + 1
-	var blockChain = make([]*types.Block, 0, amount)       // the return value
-	if s.blockRequestsCache.Contains(newBlockHeaderHash) { // we've already seen this download request before
-		return blockChain, nil
-	}
+	var blockChain = make([]*types.Block, 0, amount) // the return value
 	s.blockRequestsCache.Add(newBlockHeaderHash, struct{}{})
 
 	s.logger.Debug(
@@ -541,6 +544,7 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 
 		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, fetchHeaderHash, fetchAmount, event.PeerId, opts...)
 		if err != nil || len(blocks.Data) == 0 {
+			s.blockRequestsCache.Remove(newBlockHeaderHash)
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("backwardDownloadBlocksFromHash: failed to fetch complete blocks, ignoring event"),
@@ -551,7 +555,6 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 
 				return nil, nil
 			}
-			s.blockRequestsCache.Remove(newBlockHeaderHash)
 			return nil, err
 		}
 
@@ -581,6 +584,7 @@ func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlock
 		}
 
 		if s.blockHashesRequestsCache.Contains(hashOrNum.Hash) { // we've already seen this request before, can skip it
+			s.logger.Debug(syncLogPrefix("ignoring block download from hash"), "blockNum", hashOrNum.Number, "blockHash", hashOrNum.Hash)
 			continue
 		}
 
@@ -596,6 +600,7 @@ func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlock
 		// newBlocks should be a singleton
 		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, event.PeerId, fetchOpts...)
 		if err != nil {
+			s.blockHashesRequestsCache.Remove(hashOrNum.Hash)
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("backwardDownloadBlocksFromHashes: failed to fetch complete blocks, ignoring event"),
@@ -606,7 +611,6 @@ func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlock
 
 				continue
 			}
-			s.blockHashesRequestsCache.Remove(hashOrNum.Hash)
 			return nil, err
 		}
 		blockChain = append(blockChain, newBlocks.Data[0])
