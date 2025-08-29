@@ -97,6 +97,9 @@ func SpawnL1SequencerSyncStage(
 	progressChan := cfg.syncer.GetProgressMessageChan()
 	defer cfg.syncer.ClearHeaderCache()
 
+	idleTicker := time.NewTimer(10 * time.Second)
+	latestActivity := time.Now()
+
 Loop:
 	for {
 		select {
@@ -104,6 +107,9 @@ Loop:
 			if !ok {
 				break Loop
 			}
+
+			latestActivity = time.Now()
+
 			for _, l := range logs {
 				switch l.Topics[0] {
 				case contracts.InitialSequenceBatchesTopic:
@@ -184,6 +190,15 @@ Loop:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progMsg))
 		case <-ctx.Done():
 			break Loop
+		case <-idleTicker.C:
+			if time.Since(latestActivity) > noActivityTimeout {
+				log.Warn(fmt.Sprintf("[%s] No activity for %s", logPrefix, noActivityTimeout))
+
+				cfg.syncer.StopQueryBlocks()
+				cfg.syncer.ConsumeQueryBlocks()
+				cfg.syncer.WaitQueryBlocksToFinish()
+				break Loop
+			}
 		}
 	}
 

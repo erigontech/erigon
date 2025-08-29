@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -27,6 +28,7 @@ import (
 var (
 	ErrStateRootMismatch      = errors.New("state root mismatch")
 	lastCheckedL1BlockCounter = metrics.GetOrCreateGauge(`last_checked_l1_block`)
+	noActivityTimeout         = 5 * time.Minute
 )
 
 type L1SyncerCfg struct {
@@ -111,6 +113,10 @@ func SpawnStageL1Syncer(
 	newVerificationsCount := 0
 	newSequencesCount := 0
 	highestWrittenL1BlockNo := uint64(0)
+
+	idleTicker := time.NewTimer(10 * time.Second)
+	latestActivity := time.Now()
+
 Loop:
 	for {
 		select {
@@ -118,6 +124,8 @@ Loop:
 			if !ok {
 				break Loop
 			}
+
+			latestActivity = time.Now()
 
 			for _, l := range logs {
 				l := l
@@ -171,6 +179,15 @@ Loop:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
 		case <-ctx.Done():
 			break Loop
+		case <-idleTicker.C:
+			if time.Since(latestActivity) > noActivityTimeout {
+				log.Warn(fmt.Sprintf("[%s] No activity for %s", logPrefix, noActivityTimeout))
+
+				cfg.syncer.StopQueryBlocks()
+				cfg.syncer.ConsumeQueryBlocks()
+				cfg.syncer.WaitQueryBlocksToFinish()
+				break Loop
+			}
 		}
 	}
 
