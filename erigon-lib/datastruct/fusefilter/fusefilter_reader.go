@@ -1,9 +1,11 @@
 package fusefilter
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -11,6 +13,7 @@ import (
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	mm "github.com/erigontech/erigon-lib/mmap"
 )
 
@@ -30,6 +33,8 @@ type Reader struct {
 	version uint8
 }
 
+var fuseMem = dbg.EnvBool("FUSE_MEM", false)
+
 func NewReader(filePath string) (*Reader, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -41,18 +46,27 @@ func NewReader(filePath string) (*Reader, error) {
 		return nil, err
 	}
 	sz := int(st.Size())
-	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
-	if err != nil {
-		_ = f.Close() //nolint
-		return nil, err
+	var m mmap.MMap
+	var content []byte
+	if fuseMem {
+		content, err = io.ReadAll(bufio.NewReader(f))
+
+	} else {
+		m, err = mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
+		if err != nil {
+			_ = f.Close() //nolint
+			return nil, err
+		}
+		content = m
 	}
 
 	_, fileName := filepath.Split(filePath)
-	r, _, err := NewReaderOnBytes(m, fileName)
+	r, _, err := NewReaderOnBytes(content, fileName)
 	if err != nil {
 		return nil, err
 	}
 	r.f = f
+	r.m = m
 	r.fileName = fileName
 
 	return r, nil
