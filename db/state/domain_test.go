@@ -140,7 +140,9 @@ func TestDomain_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = d.openFolder()
+	scanDirsRes, err := scanDirs(d.dirs)
+	require.NoError(t, err)
+	err = d.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	d.Close()
 }
@@ -618,7 +620,9 @@ func TestDomain_ScanFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	d.closeWhatNotInList([]string{})
-	require.NoError(t, d.openFolder())
+	scanDirsRes, err := scanDirs(d.dirs)
+	require.NoError(t, err)
+	require.NoError(t, d.openFolder(scanDirsRes))
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -1010,7 +1014,9 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	}
 	dom.Close()
 
-	err = dom.openFolder()
+	scanDirsRes, err := scanDirs(dom.dirs)
+	require.NoError(t, err)
+	err = dom.openFolder(scanDirsRes)
 	dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
 
 	require.NoError(t, err)

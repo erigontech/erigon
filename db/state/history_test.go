@@ -983,7 +983,9 @@ func TestHistoryScanFiles(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
-		require.NoError(h.openFolder())
+		scanDirsRes, err := scanDirs(h.dirs)
+		require.NoError(err)
+		require.NoError(h.openFolder(scanDirsRes))
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1546,7 +1548,9 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = h.openFolder()
+	scanDirsRes, err := scanDirs(h.dirs)
+	require.NoError(t, err)
+	err = h.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }

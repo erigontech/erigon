@@ -315,7 +315,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 		return "", err
 	}
 	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, commitmentValuesTransform enabled %t\n", a.StepSize(), a.d[kv.CommitmentDomain].ReplaceKeysInValues)
+	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", a.StepSize(), a.d[kv.CommitmentDomain].ReplaceKeysInValues)
 	return s, nil
 }
 
