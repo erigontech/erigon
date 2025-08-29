@@ -308,8 +308,9 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		syncLogPrefix("applying new block event"),
 		"blockNum", newBlockHeaderNum,
 		"blockHash", newBlockHeaderHash,
-		"source", event.Source,
 		"parentBlockHash", newBlockHeader.ParentHash,
+		"source", event.Source,
+		"peerId", event.PeerId,
 	)
 
 	var blockChain []*types.Block
@@ -489,7 +490,7 @@ func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockB
 func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
 	firstBlockHash := event.NewBlockHashes[0].Hash
 	firstBlockNum := event.NewBlockHashes[0].Number
-	s.logger.Debug(syncLogPrefix("applyNewBlockHashesOnTip: schedule blocks download from hashes"), "blockNum", firstBlockNum, "blockhash", firstBlockHash)
+	s.logger.Debug(syncLogPrefix("applyNewBlockHashesOnTip: schedule blocks download from hashes"), "blockNum", firstBlockNum, "blockhash", firstBlockHash, "peerId", "peerId", event.PeerId)
 	go func() { // asynchronously download blocks and in the end place the blocks batch in the event queue
 		blockchain, err := s.downloadBlocksFromHashes(ctx, event, ccb)
 		if err != nil {
@@ -584,7 +585,7 @@ func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlock
 		}
 
 		if s.blockHashesRequestsCache.Contains(hashOrNum.Hash) { // we've already seen this request before, can skip it
-			s.logger.Debug(syncLogPrefix("ignoring block download from hash"), "blockNum", hashOrNum.Number, "blockHash", hashOrNum.Hash)
+			s.logger.Debug(syncLogPrefix("ignoring duplicate block download from hash"), "blockNum", hashOrNum.Number, "blockHash", hashOrNum.Hash)
 			continue
 		}
 
