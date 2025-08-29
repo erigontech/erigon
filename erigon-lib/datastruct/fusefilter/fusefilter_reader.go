@@ -78,13 +78,7 @@ func NewReader(filePath string) (*Reader, error) {
 	r.m = m
 	r.keepInMem = fuseMem
 	r.fileName = fileName
-
-	if fuseMadvWillNeed {
-		r.MadvWillNeed()
-	}
-	if fuseMadvNormal {
-		r.MadvNormal()
-	}
+	r.Init()
 	return r, nil
 }
 
@@ -113,6 +107,15 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 
 	filter.Fingerprints = data[:fingerprintsLen]
 	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
+}
+
+func (r *Reader) Init() {
+	if fuseMadvWillNeed {
+		r.MadvWillNeed()
+	}
+	if fuseMadvNormal {
+		r.MadvNormal()
+	}
 }
 
 func (r *Reader) MadvWillNeed() {

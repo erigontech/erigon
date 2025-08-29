@@ -248,6 +248,7 @@ func (idx *Index) init() (err error) {
 		if err != nil {
 			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
 		}
+		idx.existenceV1.Init()
 		offset += sz
 	}
 
