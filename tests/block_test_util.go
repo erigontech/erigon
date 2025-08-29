@@ -125,7 +125,6 @@ func (bt *BlockTest) Run(t *testing.T) error {
 
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
-	defer m.Close()
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root

@@ -614,7 +614,10 @@ func TestInvIndexScanFiles(t *testing.T) {
 	require.NoError(err)
 	defer ii.Close()
 	ii.salt.Store(&salt)
-	err = ii.openFolder()
+
+	scanDirsRes, err := scanDirs(ii.dirs)
+	require.NoError(err)
+	err = ii.openFolder(scanDirsRes)
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
@@ -802,7 +805,9 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = ii.openFolder()
+	scanDirsRes, err := scanDirs(ii.dirs)
+	require.NoError(t, err)
+	err = ii.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	ii.Close()
 }
