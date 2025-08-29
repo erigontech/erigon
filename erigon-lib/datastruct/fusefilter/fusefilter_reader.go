@@ -26,7 +26,7 @@ const (
 
 type Reader struct {
 	inner     *xorfilter.BinaryFuse[uint8]
-	keepInMem bool
+	keepInMem bool // keep it in mem insted of mmap
 
 	fileName string
 	f        *os.File
@@ -116,7 +116,7 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 }
 
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 {
+	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
@@ -124,7 +124,7 @@ func (r *Reader) MadvWillNeed() {
 	}
 }
 func (r *Reader) MadvNormal() {
-	if r == nil || r.m == nil || len(r.m) == 0 {
+	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
