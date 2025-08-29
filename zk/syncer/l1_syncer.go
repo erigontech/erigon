@@ -419,6 +419,7 @@ func (s *L1Syncer) queryBlocks(startBlock, endBlock uint64) (numLogs uint64, err
 	aimingFor := endBlock - startBlock
 	complete := 0
 	var progress uint64 = 0
+	var prevProgress uint64 = 0
 loop:
 	for {
 		select {
@@ -459,6 +460,10 @@ loop:
 				continue
 			}
 			s.logsChanProgress <- fmt.Sprintf("L1 Blocks processed progress (amounts): %d/%d (%d%%)", progress, aimingFor, (progress*100)/aimingFor)
+			if progress > prevProgress {
+				prevProgress = progress
+				s.logsProduceChan <- nil // send a nil log to indicate activity in case no logs for long in big range
+			}
 		}
 	}
 

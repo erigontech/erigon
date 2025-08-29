@@ -51,12 +51,13 @@ type L2Syncer interface {
 }
 
 type Updater struct {
-	ctx          context.Context
-	cfg          *ethconfig.Zk
-	syncer       Syncer
-	progress     uint64
-	latestUpdate *zkTypes.L1InfoTreeUpdate
-	l2Syncer     L2Syncer
+	ctx            context.Context
+	cfg            *ethconfig.Zk
+	syncer         Syncer
+	progress       uint64
+	latestUpdate   *zkTypes.L1InfoTreeUpdate
+	l2Syncer       L2Syncer
+	latestActivity time.Time
 }
 
 func NewUpdater(ctx context.Context, cfg *ethconfig.Zk, syncer Syncer, l2Syncer L2Syncer) *Updater {
@@ -280,6 +281,8 @@ func (u *Updater) startLogProcessing(logPrefix string, workerPool *L1InfoWorkerP
 					return
 				}
 
+				u.latestActivity = time.Now()
+
 				if len(logs) == 0 {
 					continue
 				}
@@ -310,7 +313,6 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 	taskResChan := workerPool.GetTaskResChannel()
 	var numLogs uint64
 	stop := false
-	lastActivity := time.Now()
 
 	indexUpdates := make(map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash)
 
@@ -327,7 +329,7 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 
 			// Note: taskResChan is not closed until workerPool.Wait() below,
 			// so we don't check the 'ok' flag here.
-			lastActivity = time.Now()
+			u.latestActivity = time.Now()
 			tasksDone++
 			if res.err != nil {
 				// Workers requeue on error, so this should be rare. Keep for safety.
@@ -346,7 +348,7 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 		case numLogs = <-logsInputDone:
 			// No more tasks will be added; wait until all current tasks are done.
 			logsInputDone = nil // Stop waiting for more logs
-			lastActivity = time.Now()
+			u.latestActivity = time.Now()
 			if tasksDone == numLogs {
 				return indexUpdates, nil
 			}
@@ -354,7 +356,7 @@ func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWork
 
 		case <-idleTicker.C:
 			// Avoid blocking forever when no logs/results are received.
-			if time.Since(lastActivity) > NoActivityTimeout {
+			if time.Since(u.latestActivity) > NoActivityTimeout {
 				log.Warn(fmt.Sprintf("[%s] No activity for %s; exiting drain loop", logPrefix, NoActivityTimeout),
 					"tasksDone", tasksDone)
 				return nil, ErrNoActivity
@@ -373,6 +375,8 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 		}
 		u.syncer.ClearHeaderCache()
 	}()
+
+	u.latestActivity = time.Now()
 
 	hermezDb := hermez_db.NewHermezDb(tx)
 	allLogs, indexUpdateMap, err := u.getLogs(logPrefix)
