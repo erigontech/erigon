@@ -164,6 +164,8 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	return idx, nil
 }
 
+var a atomic.Int64
+
 func (idx *Index) init() (err error) {
 	var validationPassed = false
 	defer func() {
@@ -248,6 +250,8 @@ func (idx *Index) init() (err error) {
 		if fusefilter.InMemByDefault {
 			fuseContent = bytes.Clone(fuseContent)
 		}
+		a.Add(int64(len(fuseContent)))
+		log.Warn("[dbg] fusefilter", "file", idx.fileName, "sz", datasize.ByteSize(len(fuseContent)).HR(), "total", datasize.ByteSize(a.Load()).HR())
 		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(fuseContent, idx.fileName)
 		if err != nil {
 			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
