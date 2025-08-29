@@ -32,8 +32,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/snaptype"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -53,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -170,21 +169,6 @@ func filesFromDir(dir string) ([]string, error) {
 	}
 	return filtered, nil
 }
-func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err error) {
-	idx, err = filesFromDir(ii.dirs.SnapIdx)
-	if err != nil {
-		return
-	}
-	hist, err = filesFromDir(ii.dirs.SnapHistory)
-	if err != nil {
-		return
-	}
-	domain, err = filesFromDir(ii.dirs.SnapDomain)
-	if err != nil {
-		return
-	}
-	return
-}
 
 func (ii *InvertedIndex) openList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
@@ -195,15 +179,11 @@ func (ii *InvertedIndex) openList(fNames []string) error {
 	return nil
 }
 
-func (ii *InvertedIndex) openFolder() error {
+func (ii *InvertedIndex) openFolder(r *ScanDirsResult) error {
 	if ii.Disable {
 		return nil
 	}
-	idxFiles, _, _, err := ii.fileNamesOnDisk()
-	if err != nil {
-		return err
-	}
-	return ii.openList(idxFiles)
+	return ii.openList(r.iiFiles)
 }
 
 func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
@@ -213,7 +193,7 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.stepSize, ii.FilenameBase, "ef", ii.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.FilenameBase, "ef", ii.logger) {
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
 			ii.dirtyFiles.Set(dirtyFile)
 		}

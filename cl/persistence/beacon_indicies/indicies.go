@@ -31,8 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-
-	_ "modernc.org/sqlite"
 )
 
 // make a buffer pool
