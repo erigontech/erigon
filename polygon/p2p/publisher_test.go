@@ -177,9 +177,8 @@ func newPublisherTest(t *testing.T) publisherTest {
 	t.Cleanup(cancel)
 	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
-	peerProvider := NewMockpeerProvider(ctrl)
 	peerEventRegistrar := NewMockpeerEventRegistrar(ctrl)
-	peerTracker := NewPeerTracker(logger, peerProvider, peerEventRegistrar, WithPreservingPeerShuffle)
+	peerTracker := NewPeerTracker(logger, peerEventRegistrar, WithPreservingPeerShuffle)
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	messageSender := NewMessageSender(sentryClient)
 	publisher := NewPublisher(logger, messageSender, peerTracker)
@@ -189,7 +188,6 @@ func newPublisherTest(t *testing.T) publisherTest {
 		ctxCancel:            cancel,
 		t:                    t,
 		peerTracker:          peerTracker,
-		peerProvider:         peerProvider,
 		peerEventRegistrar:   peerEventRegistrar,
 		publisher:            publisher,
 		peerEventStream:      make(chan *sentryproto.PeerEvent),
@@ -200,7 +198,6 @@ func newPublisherTest(t *testing.T) publisherTest {
 		capturedSendsMu:      &sync.Mutex{},
 	}
 
-	test.mockPeerProvider(&sentryproto.PeersReply{})
 	test.mockPeerEvents(test.peerEventStream)
 	test.mockNewBlockHashesEvents(test.newBlockHashesStream)
 	test.mockNewBlockEvents(test.newBlockStream)
@@ -213,7 +210,6 @@ type publisherTest struct {
 	ctxCancel            context.CancelFunc
 	t                    *testing.T
 	peerTracker          *PeerTracker
-	peerProvider         *MockpeerProvider
 	peerEventRegistrar   *MockpeerEventRegistrar
 	peerEventStream      chan *sentryproto.PeerEvent
 	newBlockHashesStream chan *DecodedInboundMessage[*eth.NewBlockHashesPacket]
@@ -224,17 +220,10 @@ type publisherTest struct {
 	publisher            *Publisher
 }
 
-func (pt publisherTest) mockPeerProvider(peerReply *sentryproto.PeersReply) {
-	pt.peerProvider.EXPECT().
-		Peers(gomock.Any(), gomock.Any()).
-		Return(peerReply, nil).
-		Times(1)
-}
-
 func (pt publisherTest) mockPeerEvents(events <-chan *sentryproto.PeerEvent) {
 	pt.peerEventRegistrar.EXPECT().
-		RegisterPeerEventObserver(gomock.Any()).
-		DoAndReturn(func(observer event.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+		RegisterPeerEventObserver(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(observer event.Observer[*sentryproto.PeerEvent], opts ...RegisterOpt) UnregisterFunc {
 			ctx, cancel := context.WithCancel(context.Background())
 			go func() {
 				for {

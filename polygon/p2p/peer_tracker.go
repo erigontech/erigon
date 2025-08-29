@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/event"
@@ -30,15 +29,9 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-func NewPeerTracker(
-	logger log.Logger,
-	peerProvider peerProvider,
-	peerEventRegistrar peerEventRegistrar,
-	opts ...PeerTrackerOption,
-) *PeerTracker {
+func NewPeerTracker(logger log.Logger, peerEventRegistrar peerEventRegistrar, opts ...PeerTrackerOption) *PeerTracker {
 	pt := &PeerTracker{
 		logger:                  logger,
-		peerProvider:            peerProvider,
 		peerEventRegistrar:      peerEventRegistrar,
 		peerSyncProgresses:      map[PeerId]*peerSyncProgress{},
 		peerKnownBlockAnnounces: map[PeerId]simplelru.LRUCache[common.Hash, struct{}]{},
@@ -54,7 +47,6 @@ func NewPeerTracker(
 
 type PeerTracker struct {
 	logger                  log.Logger
-	peerProvider            peerProvider
 	peerEventRegistrar      peerEventRegistrar
 	mu                      sync.Mutex
 	peerSyncProgresses      map[PeerId]*peerSyncProgress
@@ -65,40 +57,8 @@ type PeerTracker struct {
 func (pt *PeerTracker) Run(ctx context.Context) error {
 	pt.logger.Info(peerTrackerLogPrefix("running peer tracker component"))
 
-	var peerEventUnreg event.UnregisterFunc
-	defer func() { peerEventUnreg() }()
-
-	err := func() error {
-		// we lock the pt for updates so that we:
-		//   1. register the peer connection observer but buffer the updates coming from it until we do 2.
-		//   2. replay the current state of connected peers
-		pt.mu.Lock()
-		defer pt.mu.Unlock()
-
-		// 1. register the observer
-		peerEventUnreg = pt.peerEventRegistrar.RegisterPeerEventObserver(newPeerEventObserver(pt))
-
-		// 2. replay the current state of connected peers
-		reply, err := pt.peerProvider.Peers(ctx, &emptypb.Empty{})
-		if err != nil {
-			return err
-		}
-
-		for _, peer := range reply.Peers {
-			peerId, err := PeerIdFromEnode(peer.Enode)
-			if err != nil {
-				return err
-			}
-
-			pt.peerConnected(peerId)
-		}
-
-		pt.logger.Debug(peerTrackerLogPrefix("replayed current state of connected peers"), "count", len(reply.Peers))
-		return nil
-	}()
-	if err != nil {
-		return err
-	}
+	peerEventUnreg := pt.peerEventRegistrar.RegisterPeerEventObserver(newPeerEventObserver(pt), WithReplayConnected(ctx))
+	defer peerEventUnreg()
 
 	hashAnnouncesUnreg := pt.peerEventRegistrar.RegisterNewBlockHashesObserver(newBlockHashAnnouncesObserver(pt))
 	defer hashAnnouncesUnreg()
