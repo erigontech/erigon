@@ -35,6 +35,7 @@ import (
 type EventType string
 
 const EventTypeNewBlock EventType = "new-block"
+const EventTypeNewBlockBatch EventType = "new-block-batch"
 const EventTypeNewBlockHashes EventType = "new-block-hashes"
 const EventTypeNewMilestone EventType = "new-milestone"
 
@@ -59,6 +60,12 @@ type EventNewBlock struct {
 	Source   EventSource
 }
 
+type EventNewBlockBatch struct { // new batch of blocks from peer
+	NewBlocks []*types.Block
+	PeerId    *p2p.PeerId
+	Source    EventSource
+}
+
 type EventNewBlockHashes struct {
 	NewBlockHashes eth.NewBlockHashesPacket
 	PeerId         *p2p.PeerId
@@ -70,6 +77,7 @@ type Event struct {
 	Type EventType
 
 	newBlock       EventNewBlock
+	newBlockBatch  EventNewBlockBatch
 	newBlockHashes EventNewBlockHashes
 	newMilestone   EventNewMilestone
 }
@@ -78,7 +86,7 @@ func (e Event) Topic() EventTopic {
 	switch e.Type {
 	case EventTypeNewMilestone:
 		return EventTopicHeimdall
-	case EventTypeNewBlock, EventTypeNewBlockHashes:
+	case EventTypeNewBlock, EventTypeNewBlockBatch, EventTypeNewBlockHashes:
 		return EventTopicP2P
 	default:
 		panic(fmt.Sprintf("unknown event type: %s", e.Type))

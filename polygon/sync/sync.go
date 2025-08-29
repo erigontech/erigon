@@ -472,6 +472,23 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 }
 
 func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
+	go func() { // asynchronously download blocks and in the end place the blocks batch in the event queue
+		blockchain, err := s.backwardDownloadBlocksFromHashes(ctx, event, ccb)
+		if err != nil {
+			s.logger.Error("couldn't fetch blocks from block hashes ", "err", err)
+		}
+		newBlockBatchEvent := EventNewBlockBatch{
+			NewBlocks: blockchain,
+			PeerId:    event.PeerId,
+			Source:    EventSourceP2PNewBlockHashes,
+		}
+		s.tipEvents.events.PushEvent(Event{Type: EventTypeNewBlockBatch, newBlockBatch: newBlockBatchEvent})
+	}()
+	return nil
+}
+
+func (s *Sync) backwardDownloadBlocksFromHashes(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) ([]*types.Block, error) {
+	blockChain := make([]*types.Block, 0, len(event.NewBlockHashes))
 	for _, hashOrNum := range event.NewBlockHashes {
 		if (hashOrNum.Number <= ccb.Root().Number.Uint64()) || ccb.ContainsHash(hashOrNum.Hash) {
 			continue
@@ -485,16 +502,17 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlock
 				"blockNum", hashOrNum.Number,
 				"peerId", event.PeerId,
 			)
-			return nil
+			continue
 		}
 
 		s.logger.Debug(
-			syncLogPrefix("applying new block hash event"),
+			syncLogPrefix("downloading block from block hash event"),
 			"blockNum", hashOrNum.Number,
 			"blockHash", hashOrNum.Hash,
 		)
 
 		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		// newBlocks should be a singleton
 		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, event.PeerId, fetchOpts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
@@ -508,21 +526,11 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlock
 				continue
 			}
 
-			return err
+			return nil, err
 		}
-
-		newBlockEvent := EventNewBlock{
-			NewBlock: newBlocks.Data[0],
-			PeerId:   event.PeerId,
-			Source:   EventSourceP2PNewBlockHashes,
-		}
-
-		err = s.applyNewBlockOnTip(ctx, newBlockEvent, ccb)
-		if err != nil {
-			return err
-		}
+		blockChain = append(blockChain, newBlocks.Data[0])
 	}
-	return nil
+	return blockChain, nil
 }
 
 func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
@@ -778,6 +786,8 @@ func (s *Sync) Run(ctx context.Context) error {
 				if err = s.applyNewBlockOnTip(ctx, event.AsNewBlock(), ccBuilder); err != nil {
 					return err
 				}
+			case EventTypeNewBlockBatch:
+
 			case EventTypeNewBlockHashes:
 				if err = s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
