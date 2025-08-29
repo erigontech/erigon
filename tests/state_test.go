@@ -48,10 +48,6 @@ func TestStateCornerCases(t *testing.T) {
 
 	st := new(testMatcher)
 
-	// Very time consuming
-	//st.skipLoad(`^stTimeConsuming/`)
-	//st.skipLoad(`.*vmPerformance/loop.*`)
-
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, cornersDir, func(t *testing.T, name string, test *StateTest) {
@@ -79,6 +75,27 @@ func TestStateCornerCases(t *testing.T) {
 
 }
 
+func initMatcher(st *testMatcher) {
+	// Long tests:
+	st.slow(`^stAttackTest/ContractCreationSpam`)
+	st.slow(`^stBadOpcode/badOpcodes`)
+	st.slow(`^stPreCompiledContracts/modexp`)
+	st.slow(`^stQuadraticComplexityTest/`)
+	st.slow(`^stStaticCall/static_Call50000`)
+	st.slow(`^stStaticCall/static_Return50000`)
+	st.slow(`^stSystemOperationsTest/CallRecursiveBomb`)
+	st.slow(`^stTransactionTest/Opcodes_TransactionInit`)
+	// Very time consuming
+	st.skipLoad(`^stTimeConsuming/`)
+	st.skipLoad(`.*vmPerformance/loop.*`)
+	// Uses 1GB RAM per tested fork
+	st.skipLoad(`^stStaticCall/static_Call1MB`)
+
+	// Broken tests:
+	// EOF is not part of cancun
+	st.skipLoad(`^stEOF/`)
+}
+
 func TestState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -91,14 +108,53 @@ func TestState(t *testing.T) {
 	}
 
 	st := new(testMatcher)
-
-	// Very time consuming
-	st.skipLoad(`^stTimeConsuming/`)
-	st.skipLoad(`.*vmPerformance/loop.*`)
+	initMatcher(st)
 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
+		for _, subtest := range test.Subtests() {
+			subtest := subtest
+			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
+			t.Run(key, func(t *testing.T) {
+				withTrace(t, func(vmconfig vm.Config) error {
+					tx, err := db.BeginTemporalRw(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					_, _, err = test.Run(tx, subtest, vmconfig, dirs)
+					tx.Rollback()
+					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+						// Ignore expected errors
+						return nil
+					}
+					return st.checkFailure(t, err)
+				})
+			})
+		}
+	})
+}
+
+// TestLegacyState tests some older tests, which were moved to the folder
+// 'LegacyTests' for the Istanbul fork.
+func TestLegacyState(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
+	}
+
+	st := new(testMatcher)
+	initMatcher(st)
+
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	st.walk(t, legacyStateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
