@@ -32,6 +32,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
@@ -143,16 +144,16 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	}
 
 	// dontt know how to madv part of file in golang yet
-	//if idx.version == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
-	//	if len(idx.existence) > 0 {
+	//if idx.version == 1 && idx.lessFalsePositives {
+	//	if len(idx.existenceV1) > 0 {
 	//		if err := mmap.MadviseWillNeed(idx.existence); err != nil {
 	//			panic(err)
 	//		}
 	//	}
-	//	pos := 1 + 8 + idx.bytesPerRec*int(idx.keyCount)
-	//	if err := mmap.MadviseWillNeed(idx.data[:pos]); err != nil {
-	//		panic(err)
-	//	}
+	//	//pos := 1 + 8 + idx.bytesPerRec*int(idx.keyCount)
+	//	//if err := mmap.MadviseWillNeed(idx.data[:pos]); err != nil {
+	//	//	panic(err)
+	//	//}
 	//}
 
 	idx.readers = &sync.Pool{
@@ -247,6 +248,12 @@ func (idx *Index) init() (err error) {
 		if err != nil {
 			return fmt.Errorf("NewReaderOnBytes: %w, %s", err, idx.fileName)
 		}
+		if fusefilter.MadvWillNeedByDefault {
+			idx.existenceV1.MadvWillNeed()
+		}
+		if fusefilter.MadvNormalByDefault {
+			idx.existenceV1.MadvNormal()
+		}
 		offset += sz
 	}
 
@@ -272,6 +279,13 @@ func (idx *Index) init() (err error) {
 	idx.ef.Read(idx.data[offset:])
 	validationPassed = true
 	return nil
+}
+
+func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
+	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		return idx.existenceV1.ForceInMem()
+	}
+	return 0
 }
 
 func onlyKnownFeatures(features Features) error {
