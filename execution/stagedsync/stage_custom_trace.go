@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -72,7 +71,7 @@ func NewProduce(produceList []string) Produce {
 		switch p {
 		case kv.ReceiptDomain.String():
 			produce.ReceiptDomain = true
-		case dbstate.Registry.Name(forkables.RcacheForkable):
+		case dbstate.Registry.Name(kv.RCacheForkable):
 			produce.RCacheDomain = true
 		case kv.LogAddrIdx.String():
 			produce.LogAddr = true
@@ -180,7 +179,7 @@ Loop:
 			logger.Warn("[snapshots] user has interrupted process but anyway waiting for build & merge files")
 		case <-cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForBuildAndMerge(context.Background()):
 			aggDone = true
-		case <-cfg.db.(dbstate.HasAgg).ForkableAgg(forkables.RcacheForkable).(*dbstate.ForkableAgg).WaitForBuildAndMerge(context.Background()):
+		case <-cfg.db.(dbstate.HasAgg).ForkableAgg(kv.RCacheForkable).(*dbstate.ForkableAgg).WaitForBuildAndMerge(context.Background()):
 			forkAggDone = true
 		case <-logEvery.C:
 			var m runtime.MemStats
@@ -410,7 +409,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
-				rcachePutter := doms.AsUnmarkedPutter(forkables.RcacheForkable)
+				rcachePutter := doms.AsUnmarkedPutter(kv.RCacheForkable)
 				if err := rawdb.WriteReceiptCacheV2(rcachePutter, receipt, txTask.TxNum); err != nil {
 					return err
 				}
@@ -474,7 +473,7 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 		txNum = min(txNum, dbg.DomainProgress(kv.ReceiptDomain))
 	}
 	if produce.RCacheDomain {
-		progress, err := tx.Unmarked(forkables.RcacheForkable).Debug().Progress()
+		progress, err := tx.Unmarked(kv.RCacheForkable).Debug().Progress()
 		if err != nil {
 			panic(err)
 		}
@@ -503,7 +502,7 @@ func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
 	}
 	if produce.RCacheDomain {
-		rcacheDbg := tx.Unmarked(forkables.RcacheForkable).Debug()
+		rcacheDbg := tx.Unmarked(kv.RCacheForkable).Debug()
 		stepSize := rcacheDbg.StepSize()
 		firstNumNotInFiles := rcacheDbg.VisibleFilesMaxNum()
 		firstStepNotInFiles := firstNumNotInFiles.Uint64() / stepSize
@@ -536,7 +535,7 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
 	}
 	if produce.RCacheDomain {
-		tables = append(tables, db.Debug().ForkableTables(forkables.RcacheForkable)...)
+		tables = append(tables, db.Debug().ForkableTables(kv.RCacheForkable)...)
 	}
 	if produce.LogAddr {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)

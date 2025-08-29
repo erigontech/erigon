@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1227,7 +1226,7 @@ type RCacheV2Query struct {
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
-	v, err := tx.Unmarked(forkables.RcacheForkable).Get(kv.Num(query.TxNum))
+	v, err := tx.Unmarked(kv.RCacheForkable).Get(kv.Num(query.TxNum))
 	if err != nil {
 		return nil, false, err
 	}
@@ -1258,7 +1257,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
-	um := tx.Unmarked(forkables.RcacheForkable)
+	um := tx.Unmarked(kv.RCacheForkable)
 
 	for txnID := _min; txnID < _max+1; txnID++ {
 		v, err := um.Get(kv.Num(txnID))

@@ -452,7 +452,8 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 
 func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
-	headerId := registerEntity(dirs, "headers")
+	headerId := ForkableId(1)
+	registerEntity(dirs, "headers", headerId)
 
 	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), headerId, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
@@ -475,7 +476,8 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 
 func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
-	bodyId := registerEntity(dirs, "bodies")
+	bodyId := ForkableId(2)
+	registerEntity(dirs, "bodies", bodyId)
 
 	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), bodyId, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
@@ -495,9 +497,9 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	return bodyId, ma
 }
 
-func registerEntity(dirs datadir.Dirs, name string) ForkableId {
+func registerEntity(dirs datadir.Dirs, name string, id ForkableId) {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, NewSnapshotConfig(&SnapshotCreationConfig{
+	registerEntityWithSnapshotConfig(dirs, id, name, NewSnapshotConfig(&SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{80, 160},
 		MinimumSize:    10,
@@ -505,8 +507,8 @@ func registerEntity(dirs datadir.Dirs, name string) ForkableId {
 	}, NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *SnapshotConfig) ForkableId {
-	return RegisterForkable(name, dirs, nil, WithSnapshotConfig(cfg))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, id ForkableId, name string, cfg *SnapshotConfig) {
+	RegisterForkable(name, id, dirs, nil, WithSnapshotConfig(cfg))
 }
 
 func calculateNumberOfFiles(amount uint64, snapConfig *SnapshotConfig) (nfiles uint64) {

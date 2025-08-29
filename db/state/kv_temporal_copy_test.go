@@ -554,6 +554,9 @@ func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainT
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.agg.InvertedIdxTables(domain...)
 }
+func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
+	panic("not implemented")
+}
 func (db *DB) ReloadFiles() error { return db.agg.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
 	return db.agg.BuildMissedAccessors(ctx, workers)

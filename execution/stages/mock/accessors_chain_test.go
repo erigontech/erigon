@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/forkables"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
@@ -534,7 +534,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		sd.SetTxNum(base)
-		putter := sd.AsUnmarkedPutter(forkables.RcacheForkable)
+		putter := sd.AsUnmarkedPutter(kv.RCacheForkable)
 		require.NoError(rawdb.WriteReceiptCacheV2(putter, nil, base))
 		for i, r := range receipts {
 			sd.SetTxNum(base + 1 + uint64(i))
