@@ -105,7 +105,7 @@ func TestCheckCompatible(t *testing.T) {
 }
 
 func TestMainnetBlobSchedule(t *testing.T) {
-	c := MainnetChainConfig
+	c := Mainnet.Config
 	// Original EIP-4844 values
 	time := c.CancunTime.Uint64()
 	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
@@ -120,7 +120,7 @@ func TestMainnetBlobSchedule(t *testing.T) {
 }
 
 func TestGnosisBlobSchedule(t *testing.T) {
-	c := GnosisChainConfig
+	c := Gnosis.Config
 
 	// Cancun values
 	time := c.CancunTime.Uint64()
