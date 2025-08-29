@@ -38,6 +38,9 @@ type Reader struct {
 
 var fuseMem = dbg.EnvBool("FUSE_MEM", false)
 
+var fuseMadvWillNeed = dbg.EnvBool("FUSE_MADV_WILLNEED", true)
+var fuseMadvNormal = dbg.EnvBool("FUSE_MADV_NORMAL", false)
+
 func NewReader(filePath string) (*Reader, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -76,6 +79,12 @@ func NewReader(filePath string) (*Reader, error) {
 	r.keepInMem = fuseMem
 	r.fileName = fileName
 
+	if fuseMadvWillNeed {
+		r.MadvWillNeed()
+	}
+	if fuseMadvNormal {
+		r.MadvNormal()
+	}
 	return r, nil
 }
 

@@ -200,12 +200,6 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 			return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 		}
 		validationPassed = true
-		if fuseMadvWillNeed {
-			idx.fuseReader.MadvWillNeed()
-		}
-		if fuseMadvNormal {
-			idx.fuseReader.MadvWillNeed()
-		}
 		return idx, nil
 	}
 	filter := new(bloomfilter.Filter)
@@ -224,6 +218,3 @@ func (b *Filter) Close() {
 	}
 	b.fuseReader.Close()
 }
-
-var fuseMadvWillNeed = dbg.EnvBool("FUSE_MADV_WILLNEED", true)
-var fuseMadvNormal = dbg.EnvBool("FUSE_MADV_NORMAL", false)
