@@ -100,6 +100,13 @@ func (e Event) AsNewBlock() EventNewBlock {
 	return e.newBlock
 }
 
+func (e Event) AsNewBlockBatch() EventNewBlockBatch {
+	if e.Type != EventTypeNewBlockBatch {
+		panic("Event type mismatch")
+	}
+	return e.newBlockBatch
+}
+
 func (e Event) AsNewBlockHashes() EventNewBlockHashes {
 	if e.Type != EventTypeNewBlockHashes {
 		panic("Event type mismatch")

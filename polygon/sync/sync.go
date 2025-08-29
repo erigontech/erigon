@@ -44,7 +44,10 @@ import (
 // The current constant value is chosen based on observed metrics in production as twice the doubled value of the maximum observed waypoint length.
 const maxFinalizationHeight = 512
 
-var futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
+var (
+	futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
+	p2pResponseTimeout   = 5 * time.Second // timeout waiting for P2P response packets
+)
 
 type heimdallSynchronizer interface {
 	IsCatchingUp(ctx context.Context) (bool, error)
@@ -298,52 +301,25 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	if ccb.ContainsHash(newBlockHeader.ParentHash) {
 		blockChain = []*types.Block{event.NewBlock}
 	} else {
-		amount := newBlockHeaderNum - rootNum + 1
-		s.logger.Debug(
-			syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
-			"rootNum", rootNum,
-			"blockNum", newBlockHeaderNum,
-			"blockHash", newBlockHeaderHash,
-			"amount", amount,
-		)
-
-		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(5 * time.Second)}
-
-		// This used to be limited to 1024 blocks (eth.MaxHeadersServe) however for the heimdall v1-v2 migration
-		// this limit on backward downloading does not holde so it has been adjusted to recieve several pages
-		// of 1024 blocks until the gap is filled.  For this one off case the gap was ~15,000 blocks.  If this
-		// ever grows substantially this will need to be revisited:
-		// 1. If we need to page we should requests from may peers
-		// 2. We need to do something about memory at the moment this is unconstrained
-
-		fetchHeaderHash := newBlockHeaderHash
-		for amount > 0 {
-			fetchAmount := amount
-
-			if fetchAmount > eth.MaxHeadersServe {
-				fetchAmount = eth.MaxHeadersServe
+		// we need to do a backward download. so schedule the download in a goroutine and have it  push an `EventNewBlockBatch` which can be processed later,
+		// so that we don't block the event processing loop
+		s.logger.Debug(syncLogPrefix("scheduling backward download"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
+			"source", event.Source,
+			"parentBlockHash", newBlockHeader.ParentHash)
+		go func() {
+			downloadedBlocks, err := s.backwardDownloadBlocksFromHash(ctx, event, ccb)
+			if err != nil {
+				s.logger.Error(syncLogPrefix("failed to backward download blocks"), newBlockHeaderNum, "blockHash", newBlockHeaderHash,
+					"source", event.Source,
+					"parentBlockHash", newBlockHeader.ParentHash)
+			} else { // push block batch event if there is no errore
+				s.tipEvents.events.PushEvent(
+					Event{Type: EventTypeNewBlockBatch,
+						newBlockBatch: EventNewBlockBatch{NewBlocks: downloadedBlocks, PeerId: event.PeerId, Source: event.Source},
+					})
 			}
-
-			blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, fetchHeaderHash, fetchAmount, event.PeerId, opts...)
-			if err != nil || len(blocks.Data) == 0 {
-				if s.ignoreFetchBlocksErrOnTipEvent(err) {
-					s.logger.Debug(
-						syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
-						"err", err,
-						"peerId", event.PeerId,
-						"lastBlockNum", newBlockHeaderNum,
-					)
-
-					return nil
-				}
-
-				return err
-			}
-
-			blockChain = append(blocks.Data, blockChain...)
-			fetchHeaderHash = blocks.Data[0].ParentHash()
-			amount -= uint64(len(blocks.Data))
-		}
+		}()
+		return nil
 	}
 
 	if err := s.blocksVerifier(blockChain); err != nil {
@@ -471,11 +447,22 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	return nil
 }
 
+func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockBatch, ccb *CanonicalChainBuilder) error {
+	for _, block := range event.NewBlocks {
+		blockEvent := EventNewBlock{NewBlock: block, PeerId: event.PeerId, Source: event.Source}
+		err := s.applyNewBlockOnTip(ctx, blockEvent, ccb)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
 	go func() { // asynchronously download blocks and in the end place the blocks batch in the event queue
 		blockchain, err := s.backwardDownloadBlocksFromHashes(ctx, event, ccb)
 		if err != nil {
-			s.logger.Error("couldn't fetch blocks from block hashes ", "err", err)
+			s.logger.Error(syncLogPrefix("couldn't fetch blocks from block hashes"), "err", err)
 		}
 		newBlockBatchEvent := EventNewBlockBatch{
 			NewBlocks: blockchain,
@@ -485,6 +472,61 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlock
 		s.tipEvents.events.PushEvent(Event{Type: EventTypeNewBlockBatch, newBlockBatch: newBlockBatchEvent})
 	}()
 	return nil
+}
+
+func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNewBlock, ccb *CanonicalChainBuilder) ([]*types.Block, error) {
+	newBlockHeader := event.NewBlock.HeaderNoCopy()
+	newBlockHeaderNum := newBlockHeader.Number.Uint64()
+	newBlockHeaderHash := newBlockHeader.Hash()
+	rootNum := ccb.Root().Number.Uint64()
+	amount := newBlockHeaderNum - rootNum + 1
+	var blockChain = make([]*types.Block, amount) // the return value
+	s.logger.Debug(
+		syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
+		"rootNum", rootNum,
+		"blockNum", newBlockHeaderNum,
+		"blockHash", newBlockHeaderHash,
+		"amount", amount,
+	)
+
+	opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(p2pResponseTimeout)}
+
+	// This used to be limited to 1024 blocks (eth.MaxHeadersServe) however for the heimdall v1-v2 migration
+	// this limit on backward downloading does not holde so it has been adjusted to recieve several pages
+	// of 1024 blocks until the gap is filled.  For this one off case the gap was ~15,000 blocks.  If this
+	// ever grows substantially this will need to be revisited:
+	// 1. If we need to page we should requests from may peers
+	// 2. We need to do something about memory at the moment this is unconstrained
+
+	fetchHeaderHash := newBlockHeaderHash
+	for amount > 0 {
+		fetchAmount := amount
+
+		if fetchAmount > eth.MaxHeadersServe {
+			fetchAmount = eth.MaxHeadersServe
+		}
+
+		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, fetchHeaderHash, fetchAmount, event.PeerId, opts...)
+		if err != nil || len(blocks.Data) == 0 {
+			if s.ignoreFetchBlocksErrOnTipEvent(err) {
+				s.logger.Debug(
+					syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
+					"err", err,
+					"peerId", event.PeerId,
+					"lastBlockNum", newBlockHeaderNum,
+				)
+
+				return nil, nil
+			}
+
+			return nil, err
+		}
+
+		blockChain = append(blocks.Data, blockChain...)
+		fetchHeaderHash = blocks.Data[0].ParentHash()
+		amount -= uint64(len(blocks.Data))
+	}
+	return blockChain, nil
 }
 
 func (s *Sync) backwardDownloadBlocksFromHashes(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) ([]*types.Block, error) {
@@ -787,7 +829,9 @@ func (s *Sync) Run(ctx context.Context) error {
 					return err
 				}
 			case EventTypeNewBlockBatch:
-
+				if err = s.applyNewBlockBatchOnTip(ctx, event.AsNewBlockBatch(), ccBuilder); err != nil {
+					return err
+				}
 			case EventTypeNewBlockHashes:
 				if err = s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
