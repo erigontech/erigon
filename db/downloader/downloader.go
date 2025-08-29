@@ -306,6 +306,7 @@ func configureHttp2(t *http.Transport) {
 	if os.Getenv("DOWNLOADER_DISABLE_HTTP2") != "" {
 		// Disable h2 being added automatically.
 		g.MakeMap(&t.TLSNextProto)
+		return
 	}
 	// Don't set the http2.Transport as the RoundTripper. It's hooked into the http.Transport by
 	// this call. Need to use external http2 library to get access to some config fields that
@@ -621,7 +622,6 @@ func (d *Downloader) ReCalcStats() {
 	}
 }
 
-// Interval is how long between recalcs.
 func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	torrentClient := d.torrentClient
 	peers := make(map[torrent.PeerID]struct{}, 16)
@@ -1329,11 +1329,16 @@ func (d *Downloader) state() DownloaderState {
 
 // Currently only called if not all torrents are complete.
 func (d *Downloader) logStats() {
-	bytesDone := d.stats.BytesCompleted
-	percentDone := float32(100) * (float32(bytesDone) / float32(d.stats.BytesTotal))
-	remainingBytes := d.stats.BytesTotal - bytesDone
+	d.lock.RLock()
+	// This is set externally. Everything else here is only modified by the caller.
+	startTime := d.startTime
+	d.lock.RUnlock()
+	stats := d.stats
+	bytesDone := stats.BytesCompleted
+	percentDone := float32(100) * (float32(bytesDone) / float32(stats.BytesTotal))
+	remainingBytes := stats.BytesTotal - bytesDone
 
-	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
+	haveAllMetadata := stats.MetadataReady == stats.NumTorrents
 
 	var logCtx []any
 
@@ -1341,7 +1346,6 @@ func (d *Downloader) logStats() {
 		logCtx = append(logCtx, ctx...)
 	}
 
-	stats := &d.stats
 	if stats.PeersUnique == 0 {
 		ips := d.TorrentClient().BadPeerIPs()
 		if len(ips) > 0 {
@@ -1353,12 +1357,12 @@ func (d *Downloader) logStats() {
 	case Syncing:
 		// TODO: Include what we're syncing.
 		addCtx(
-			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
+			"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
 			"files", fmt.Sprintf(
 				"%d/%d",
 				// For now it's 1:1 files:torrents.
-				d.stats.TorrentsCompleted,
-				d.stats.NumTorrents,
+				stats.TorrentsCompleted,
+				stats.NumTorrents,
 			),
 			"data", func() string {
 				if haveAllMetadata {
@@ -1366,18 +1370,18 @@ func (d *Downloader) logStats() {
 						"%.2f%% - %s/%s",
 						percentDone,
 						common.ByteCount(bytesDone),
-						common.ByteCount(d.stats.BytesTotal),
+						common.ByteCount(stats.BytesTotal),
 					)
 				} else {
 					return common.ByteCount(bytesDone)
 				}
 			}(),
 			// TODO: Reset on each stage.
-			"time-left", calculateTime(remainingBytes, d.stats.CompletionRate),
-			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
-			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.ClientWebseedBytesDownloadRate)),
-			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)),
-			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
+			"time-left", calculateTime(remainingBytes, stats.CompletionRate),
+			"total-time", time.Since(startTime).Truncate(time.Second).String(),
+			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(stats.ClientWebseedBytesDownloadRate)),
+			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(stats.PeerConnBytesDownloadRate)),
+			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
 		)
 	}
 
@@ -1385,9 +1389,9 @@ func (d *Downloader) logStats() {
 	dbg.ReadMemStats(&m)
 
 	addCtx(
-		"peers", d.stats.PeersUnique,
-		"conns", d.stats.ConnectionsTotal,
-		"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)),
+		"peers", stats.PeersUnique,
+		"conns", stats.ConnectionsTotal,
+		"upload", fmt.Sprintf("%s/s", common.ByteCount(stats.UploadRate)),
 		"alloc", common.ByteCount(m.Alloc),
 		"sys", common.ByteCount(m.Sys),
 	)
@@ -1396,17 +1400,17 @@ func (d *Downloader) logStats() {
 
 	diaglib.Send(diaglib.SnapshotDownloadStatistics{
 		Downloaded:           bytesDone,
-		Total:                d.stats.BytesTotal,
-		TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
-		DownloadRate:         d.stats.DownloadRate,
-		UploadRate:           d.stats.UploadRate,
-		Peers:                d.stats.PeersUnique,
-		Files:                int32(d.stats.FilesTotal),
-		Connections:          d.stats.ConnectionsTotal,
+		Total:                stats.BytesTotal,
+		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
+		DownloadRate:         stats.DownloadRate,
+		UploadRate:           stats.UploadRate,
+		Peers:                stats.PeersUnique,
+		Files:                int32(stats.FilesTotal),
+		Connections:          stats.ConnectionsTotal,
 		Alloc:                m.Alloc,
 		Sys:                  m.Sys,
-		DownloadFinished:     d.stats.AllTorrentsComplete(),
-		TorrentMetadataReady: int32(d.stats.MetadataReady),
+		DownloadFinished:     stats.AllTorrentsComplete(),
+		TorrentMetadataReady: int32(stats.MetadataReady),
 	})
 }
 

@@ -77,13 +77,13 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
-	cfg := Schema.AccountsDomain
+	cfg := statecfg.Schema.AccountsDomain
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, dirs, logger)
 	d.salt.Store(&salt)
@@ -130,7 +130,9 @@ func TestDomain_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = d.openFolder()
+	scanDirsRes, err := scanDirs(d.dirs)
+	require.NoError(t, err)
+	err = d.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	d.Close()
 }
@@ -202,7 +204,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		require.Equal(t, 2, c.valuesCount)
 		require.True(t, strings.HasSuffix(c.historyPath, "v1.1"+
 			"-accounts.0-1.v"))
-		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
+		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.HistoryValuesOnCompressedPage), c.historyComp.Count())
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -602,7 +604,9 @@ func TestDomain_ScanFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	d.closeWhatNotInList([]string{})
-	require.NoError(t, d.openFolder())
+	scanDirsRes, err := scanDirs(d.dirs)
+	require.NoError(t, err)
+	require.NoError(t, d.openFolder(scanDirsRes))
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -994,7 +998,9 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	}
 	dom.Close()
 
-	err = dom.openFolder()
+	scanDirsRes, err := scanDirs(dom.dirs)
+	require.NoError(t, err)
+	err = dom.openFolder(scanDirsRes)
 	dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
 
 	require.NoError(t, err)
@@ -1046,13 +1052,13 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 }
 
 func emptyTestDomain(aggStep uint64) *Domain {
-	cfg := Schema.AccountsDomain
+	cfg := statecfg.Schema.AccountsDomain
 
 	salt := uint32(1)
 	dirs := datadir2.New(os.TempDir())
-	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
-	cfg.hist.iiCfg.Accessors = statecfg.AccessorHashMap
+	cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
+	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
+	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
 
 	d, err := NewDomain(cfg, aggStep, dirs, log.New())
 	if err != nil {
@@ -1136,7 +1142,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1.1-accounts.0-1.v"))
-	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
+	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.Hist.HistoryValuesOnCompressedPage), c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1503,10 +1509,10 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	d.historyLargeValues = false
+	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
-	d.filenameBase = kv.CommitmentDomain.String()
+	d.FilenameBase = kv.CommitmentDomain.String()
 
 	dc := d.BeginFilesRo()
 	defer d.Close()
@@ -1578,10 +1584,10 @@ func TestDomainRange(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	d.historyLargeValues = false
+	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
-	d.filenameBase = kv.AccountsDomain.String()
+	d.FilenameBase = kv.AccountsDomain.String()
 
 	dc := d.BeginFilesRo()
 	defer d.Close()
@@ -1692,10 +1698,10 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.historyLargeValues = false
+	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
-	d.filenameBase = kv.CommitmentDomain.String()
+	d.FilenameBase = kv.CommitmentDomain.String()
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1790,7 +1796,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.historyLargeValues = false
+	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
@@ -1806,7 +1812,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	keyLimit := uint64(200)
 
 	// Key's lengths are variable so lookup should be in commitment mode.
-	d.filenameBase = kv.CommitmentDomain.String()
+	d.FilenameBase = kv.CommitmentDomain.String()
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
@@ -1937,7 +1943,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	d.historyLargeValues = false
+	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
 
@@ -1996,11 +2002,11 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
-	key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
+	key, err := GetExecV3PruneProgress(rwTx, dc.d.ValuesTable)
 	require.NoError(t, err)
 	require.NotNil(t, key)
 
-	keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
+	keysCursor, err := rwTx.RwCursorDupSort(dc.d.ValuesTable)
 	require.NoError(t, err)
 
 	k, istep, err := keysCursor.Seek(key)
@@ -2022,13 +2028,13 @@ func TestDomain_PruneProgress(t *testing.T) {
 		}
 		cancel()
 
-		key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
+		key, err := GetExecV3PruneProgress(rwTx, dc.d.ValuesTable)
 		require.NoError(t, err)
 		if step == 0 && key == nil {
 
 			fmt.Printf("pruned in %d iterations\n", i)
 
-			keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
+			keysCursor, err := rwTx.RwCursorDupSort(dc.d.ValuesTable)
 			require.NoError(t, err)
 
 			// check there are no keys with 0 step left
@@ -2462,7 +2468,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.historyLargeValues = true
+	d.HistoryLargeValues = true
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
@@ -2544,7 +2550,7 @@ func TestCanBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.historyLargeValues = true
+	d.HistoryLargeValues = true
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 

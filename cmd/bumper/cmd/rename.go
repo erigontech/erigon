@@ -2,16 +2,18 @@ package cmd
 
 import (
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
-	datadir2 "github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/version"
-	"github.com/spf13/cobra"
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/spf13/cobra"
+
+	datadir2 "github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var (
@@ -23,8 +25,9 @@ var (
 )
 
 var renameCmd = &cobra.Command{
-	Use:   "rename",
-	Short: "Rename versioned files to match schema versions",
+	Use:     "rename",
+	Short:   "Rename versioned files to match schema versions",
+	Example: `To start rename TUI in the datadir: go run ./cmd/bumper rename --datadir /path/to/your/datadir`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if datadir == "" {
 			return fmt.Errorf("--datadir flag is required")
@@ -80,37 +83,37 @@ func renameFiles(domains []string, exts []string, dirs datadir2.Dirs) ([]string,
 			renameVerMap[fileSmallMapping{
 				name: uint16(d),
 				ext:  ".kv",
-			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.DataKV.Current
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().Domain.DataKV.Current
 			renameVerMap[fileSmallMapping{
 				name: uint16(d),
 				ext:  ".bt",
-			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorBT.Current
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorBT.Current
 			renameVerMap[fileSmallMapping{
 				name: uint16(d),
 				ext:  ".kvi",
-			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVI.Current
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVI.Current
 			renameVerMap[fileSmallMapping{
 				name: uint16(d),
 				ext:  ".kvei",
-			}] = state.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVEI.Current
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().Domain.AccessorKVEI.Current
 			renameVerMap[fileSmallMapping{
 				name: uint16(d),
 				ext:  ".v",
-			}] = state.Schema.GetDomainCfg(d).GetVersions().Hist.DataV.Current
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().Hist.DataV.Current
 			renameVerMap[fileSmallMapping{
 				name: uint16(d),
 				ext:  ".vi",
-			}] = state.Schema.GetDomainCfg(d).GetVersions().Hist.AccessorVI.Current
+			}] = statecfg.Schema.GetDomainCfg(d).GetVersions().Hist.AccessorVI.Current
 		} else {
 			ii, _ := kv.String2InvertedIdx(dString)
 			renameVerMap[fileSmallMapping{
 				name: uint16(ii),
 				ext:  ".ef",
-			}] = state.Schema.GetIICfg(ii).GetVersions().II.DataEF.Current
+			}] = statecfg.Schema.GetIICfg(ii).GetVersions().II.DataEF.Current
 			renameVerMap[fileSmallMapping{
 				name: uint16(ii),
 				ext:  ".efi",
-			}] = state.Schema.GetIICfg(ii).GetVersions().II.AccessorEFI.Current
+			}] = statecfg.Schema.GetIICfg(ii).GetVersions().II.AccessorEFI.Current
 		}
 	}
 	changedFiles := make([]string, 0)

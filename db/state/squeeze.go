@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/statecfg"
+
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -107,7 +109,8 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 // SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
 // Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
 func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
-	if !at.a.commitmentValuesTransform {
+	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	if !commitmentUseReferencedBranches {
 		return nil
 	}
 
@@ -321,7 +324,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 		return "", err
 	}
 	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, commitmentValuesTransform enabled %t\n", a.StepSize(), a.commitmentValuesTransform)
+	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", a.StepSize(), a.d[kv.CommitmentDomain].ReplaceKeysInValues)
 	return s, nil
 }
 
@@ -368,9 +371,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
 	start := time.Now()
-
-	originalCommitmentValuesTransform := a.commitmentValuesTransform
-	a.commitmentValuesTransform = false
 
 	var totalKeysCommitted uint64
 
@@ -531,7 +531,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				break
 			}
 		}
-		a.commitmentValuesTransform = originalCommitmentValuesTransform // disable only while merging, to squeeze later. If enabled in Scheme, must be enabled while computing commitment to correctly dereference keys
 
 	}
 
@@ -539,11 +538,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	dbg.ReadMemStats(&m)
 	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
-	a.commitmentValuesTransform = originalCommitmentValuesTransform
-
 	acRo.Close()
 
-	if !squeeze {
+	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
