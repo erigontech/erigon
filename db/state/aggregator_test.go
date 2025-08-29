@@ -575,11 +575,12 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 func TestNewBtIndex(t *testing.T) {
 	t.Parallel()
 	keyCount := 10000
-	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
+	compCfg := seg.Cfg{}
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), compCfg)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compCfg, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -1152,47 +1153,40 @@ func Test_EncodeCommitmentState(t *testing.T) {
 }
 
 // takes first 100k keys from file
-func pivotKeysFromKV(dataPath string) ([][]byte, error) {
-	decomp, err := seg.NewDecompressor(dataPath)
-	if err != nil {
-		return nil, err
-	}
-
-	getter := decomp.MakeGetter()
-	getter.Reset(0)
+func pivotKeysFromKV(r *seg.PagedReader) ([][]byte, error) {
+	r.Reset(0)
+	defer r.Reset(0)
 
 	key := make([]byte, 0, 64)
-
 	listing := make([][]byte, 0, 1000)
-
-	for getter.HasNext() {
+	for r.HasNext() {
 		if len(listing) > 100000 {
 			break
 		}
-		key, _ := getter.Next(key[:0])
+		key, _, _ := r.NextKey(key[:0])
 		listing = append(listing, common.Copy(key))
-		getter.Skip()
 	}
-	decomp.Close()
 
 	return listing, nil
 }
 
-func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressCfg seg.Cfg) string {
 	tb.Helper()
 
 	rnd := newRnd(0)
 	values := make([]byte, valueSize)
 
 	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, compressCfg.WordLvlCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
+	defer comp.Close()
 
 	bufSize := 8 * datasize.KB
 	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
 		bufSize = 1 * datasize.MB
 	}
 	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
+	defer collector.Close()
 
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)
@@ -1208,22 +1202,19 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		require.NoError(tb, err)
 	}
 
-	writer := seg.NewWriter(comp, compressFlags)
+	writer := seg.NewPagedWriter(seg.NewWriter(comp, compressCfg.WordLvl), compressCfg.PageLvl)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		_, err = writer.Write(k)
-		require.NoError(tb, err)
-		_, err = writer.Write(v)
+		err = writer.Add(k, v)
 		require.NoError(tb, err)
 		return nil
 	}
 
 	err = collector.Load(nil, "", loader, etl.TransformArgs{})
 	require.NoError(tb, err)
-
 	collector.Close()
 
-	err = comp.Compress()
+	err = writer.Compress()
 	require.NoError(tb, err)
 	comp.Close()
 
@@ -1234,7 +1225,8 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	ps := background.NewProgressSet()
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
-	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
+
+	r := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
@@ -1457,7 +1449,7 @@ func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
 	return v
 }
 
-func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+func TestRebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}

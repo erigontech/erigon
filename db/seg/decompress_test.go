@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -28,6 +27,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/stretchr/testify/require"
 
@@ -40,7 +41,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	cfg := DefaultCfg
+	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
@@ -60,6 +61,34 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
+	return d
+}
+
+func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *Decompressor {
+	t.Helper()
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	logger, require := log.New(), require.New(t)
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	t.Name()
+	cfg := DefaultWordLvlCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(err)
+	defer c.Close()
+
+	pageLvlCfg := PageLvlCfg{PageSize: pageSize, Compress: pageCompression}
+	p := NewPagedWriter(NewWriter(c, CompressNone), pageLvlCfg)
+	for k, w := range loremStrings {
+		key := fmt.Sprintf("key %d", k)
+		val := fmt.Sprintf("%s %d", w, k)
+		require.NoError(p.AddForHistory([]byte(key), []byte(val)))
+	}
+	require.NoError(p.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(err)
 	return d
 }
 
@@ -145,7 +174,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed2")
-	cfg := DefaultCfg
+	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
@@ -266,7 +295,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	cfg := DefaultCfg
+	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
@@ -358,7 +387,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("uncompressed", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc")
-		cfg := DefaultCfg
+		cfg := DefaultWordLvlCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
@@ -380,7 +409,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("uncompressed_empty", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc_empty")
-		cfg := DefaultCfg
+		cfg := DefaultWordLvlCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
@@ -398,7 +427,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("compressed", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "comp")
-		cfg := DefaultCfg
+		cfg := DefaultWordLvlCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
@@ -420,7 +449,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("compressed_empty", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "comp_empty")
-		cfg := DefaultCfg
+		cfg := DefaultWordLvlCfg
 		cfg.MinPatternScore = 1
 		cfg.Workers = 2
 		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
@@ -583,7 +612,7 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "complex")
-	cfg := DefaultCfg
+	cfg := DefaultWordLvlCfg
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)

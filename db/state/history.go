@@ -30,13 +30,10 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -46,6 +43,8 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 type History struct {
@@ -489,10 +488,10 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	}
 
 	var (
-		_histComp *seg.Compressor
-		_efComp   *seg.Compressor
-		txKey     [8]byte
-		err       error
+		historyWriter *seg.PagedWriter
+		invIdxWriter  *seg.Writer
+		txKey         [8]byte
+		err           error
 
 		historyPath   = h.vNewFilePath(step, step+1)
 		efHistoryPath = h.efNewFilePath(step, step+1)
@@ -502,32 +501,31 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	defer func() {
 		mxCollateTookHistory.ObserveDuration(startAt)
 		if closeComp {
-			if _histComp != nil {
-				_histComp.Close()
+			if historyWriter != nil {
+				historyWriter.Close()
 			}
-			if _efComp != nil {
-				_efComp.Close()
+			if invIdxWriter != nil {
+				invIdxWriter.Close()
 			}
 		}
 	}()
 
-	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	_comp, err := seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.FilenameBase, err)
 	}
 	if h.noFsync {
-		_histComp.DisableFsync()
+		_comp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp)
-
-	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.FilenameBase, err)
 	}
 	if h.noFsync {
-		_efComp.DisableFsync()
+		efComp.DisableFsync()
 	}
-	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // coll+build must be fast - no Compression
+	invIdxWriter = h.InvertedIndex.dataWriter(efComp, true) // coll+build must be fast - no Compression
+	historyWriter = h.dataWriter(_comp)
 
 	keysCursor, err := roTx.CursorDupSort(h.KeysTable)
 	if err != nil {
@@ -590,7 +588,6 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
-
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -625,7 +622,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				}
 
 				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-				if err := historyWriter.Add(histKeyBuf, val); err != nil {
+				if err := historyWriter.AddForHistory(histKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 				}
 				continue
@@ -640,7 +637,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			}
 
 			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-			if err := historyWriter.Add(histKeyBuf, val); err != nil {
+			if err := historyWriter.AddForHistory(histKeyBuf, val); err != nil {
 				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, key, err)
 			}
 		}
@@ -649,10 +646,10 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 		prevEf = seqBuilder.AppendBytes(prevEf[:0])
 
-		if _, err = invIndexWriter.Write(prevKey); err != nil {
+		if _, err = invIdxWriter.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.FilenameBase, prevKey, err)
 		}
-		if _, err = invIndexWriter.Write(prevEf); err != nil {
+		if _, err = invIdxWriter.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.FilenameBase, err)
 		}
 
@@ -679,7 +676,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	mxCollationSizeHist.SetUint64(uint64(historyWriter.Count()))
 
 	return HistoryCollation{
-		efHistoryComp: invIndexWriter,
+		efHistoryComp: invIdxWriter,
 		efHistoryPath: efHistoryPath,
 		efBaseTxNum:   uint64(step) * h.stepSize,
 		historyPath:   historyPath,
@@ -838,20 +835,21 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	h.dirtyFiles.Set(fi)
 }
 
-func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
+func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.PagedReader { return ht.h.dataReader(f) }
+func (h *History) dataReader(f *seg.Decompressor) *seg.PagedReader {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewReader(f.MakeGetter(), h.Compression)
+	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.historyValuesOnCompressedPage, NoKeysMode: true}
+	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), h.Compression), cfg)
 }
 func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), h.HistoryValuesOnCompressedPage, true)
+	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.historyValuesOnCompressedPage, NoKeysMode: true}
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), cfg)
 }
-func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader     { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter { return ht.h.dataWriter(f) }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	k, err := kv.FirstKey(tx, h.ValuesTable)
@@ -875,7 +873,7 @@ type HistoryRoTx struct {
 	iit *InvertedIndexRoTx
 
 	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters  []*seg.Reader
+	getters  []*seg.PagedReader
 	readers  []*recsplit.IndexReader
 	stepSize uint64
 
@@ -884,8 +882,7 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs           []byte
-	snappyReadBuffer []byte
+	_bufTs []byte
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -905,15 +902,16 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 	}
 }
 
-func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {
+func (ht *HistoryRoTx) statelessGetter(i int) *seg.PagedReader {
 	if ht.getters == nil {
-		ht.getters = make([]*seg.Reader, len(ht.files))
+		ht.getters = make([]*seg.PagedReader, len(ht.files))
 	}
 	if ht.getters[i] == nil {
-		ht.getters[i] = ht.dataReader(ht.files[i].src.decompressor)
+		ht.getters[i] = ht.h.dataReader(ht.files[i].src.decompressor)
 	}
 	return ht.getters[i]
 }
+
 func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	if ht.readers == nil {
 		ht.readers = make([]*recsplit.IndexReader, len(ht.files))
@@ -1120,15 +1118,9 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, nil
 	}
 	g := ht.statelessGetter(historyItem.i)
-	g.Reset(offset)
-	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
-	v, _ := g.Next(nil)
+	v := g.FindOnPageForHistory(key, offset)
 	if traceGetAsOf == ht.h.FilenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
-	}
-
-	if ht.h.HistoryValuesOnCompressedPage > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 	}
 	return v, true, nil
 }
@@ -1286,7 +1278,8 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		if toTxNum >= 0 && item.startTxNum >= uint64(toTxNum) {
 			break
 		}
-		g := ht.iit.dataReader(item.src.decompressor)
+		//g := ht.iit.dataReader(item.src.decompressor)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.iit.ii.Compression)
 		g.Reset(0)
 		wrapper := NewSegReaderWrapper(g)
 		if wrapper.HasNext() {
