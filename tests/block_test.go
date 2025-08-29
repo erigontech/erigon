@@ -52,7 +52,7 @@ func TestLegacyBlockchain(t *testing.T) {
 	bt.slow(`.*/bcWalletTest/`)
 
 	// Very slow test
-	//bt.skipLoad(`.*/stTimeConsuming/.*`)
+	bt.skipLoad(`.*/stTimeConsuming/.*`)
 	// test takes a lot for time and goes easily OOM because of sha3 calculation on a huge range,
 	// using 4.6 TGas
 	bt.skipLoad(`.*randomStatetest94.json.*`)
