@@ -10,6 +10,7 @@ import (
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
+
 	mm "github.com/erigontech/erigon-lib/mmap"
 )
 
@@ -45,6 +46,11 @@ func NewReader(filePath string) (*Reader, error) {
 		_ = f.Close() //nolint
 		return nil, err
 	}
+
+	if err := mm.MadviseWillNeed(m); err != nil {
+		return nil, err
+	}
+
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderOnBytes(m, fileName)
 	if err != nil {
