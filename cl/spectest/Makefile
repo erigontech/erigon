@@ -2,7 +2,7 @@
 
 
 tests:
-	wget https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.4/mainnet.tar.gz
+	wget https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.5/mainnet.tar.gz
 	tar xf mainnet.tar.gz
 	rm mainnet.tar.gz
 	# not needed for now
@@ -11,6 +11,7 @@ tests:
 	rm -rf tests/mainnet/eip7441
 	rm -rf tests/mainnet/eip7732
 	rm -rf tests/mainnet/eip7805
+	rm -rf tests/mainnet/gloas
 
 clean:
 	rm -rf tests
