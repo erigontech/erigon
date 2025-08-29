@@ -1,10 +1,12 @@
 package schema
 
 import (
-	"github.com/erigontech/erigon/db/snaptype"
-	"gopkg.in/yaml.v3"
 	"os"
 	"sort"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 type TwoVers struct {

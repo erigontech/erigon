@@ -20,8 +20,9 @@ import (
 	"context"
 	"io"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"google.golang.org/grpc"
+
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 )
 
 type SentinelClientDirect struct {

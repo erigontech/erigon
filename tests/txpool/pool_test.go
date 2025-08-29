@@ -18,10 +18,11 @@ package txpool
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"

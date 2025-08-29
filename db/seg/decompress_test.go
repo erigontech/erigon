@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -28,6 +27,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/stretchr/testify/require"
 

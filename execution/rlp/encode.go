@@ -28,8 +28,9 @@ import (
 	"math/bits"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/

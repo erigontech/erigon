@@ -289,7 +289,7 @@ jobs:
           if jq -e '.tx_pool_throughput_analysis' "$output_json" > /dev/null 2>&1; then
             echo "| Max TPS | Missed Events % | Coordinated Omission Events % | Starting TPS | Ending TPS | Increment TPS | Duration (s) |" >> $GITHUB_STEP_SUMMARY
             echo "|---------|-----------------|-------------------------------|--------------|------------|---------------|--------------|" >> $GITHUB_STEP_SUMMARY
-            
+          
             throughput_length=$(jq '.tx_pool_throughput_analysis | length' "$output_json")
             for ((i=0; i<throughput_length; i++)); do
               max_tps=$(jq -r ".tx_pool_throughput_analysis[$i].max_tps" "$output_json")
@@ -299,20 +299,20 @@ jobs:
               ending_tps=$(jq -r ".tx_pool_throughput_analysis[$i].ending_tps" "$output_json")
               increment_tps=$(jq -r ".tx_pool_throughput_analysis[$i].increment_tps" "$output_json")
               duration_s=$(jq -r ".tx_pool_throughput_analysis[$i].duration_s" "$output_json")
-              
+          
               # Format percentages from decimal to percentage format
               if [ "$missed_p2p_event_rate" != "null" ] && [ -n "$missed_p2p_event_rate" ] && [[ "$missed_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                 missed_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
               else
                 missed_p2p_event_count_percentage="N/A"
               fi
-              
+          
               if [ "$coordinated_omission_event_rate" != "null" ] && [ -n "$coordinated_omission_event_rate" ] && [[ "$coordinated_omission_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                 coordinated_omission_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $coordinated_omission_event_rate * 100" | bc -l))
               else
                 coordinated_omission_event_count_percentage="N/A"
               fi
-              
+          
               echo "| $max_tps | $missed_p2p_event_count_percentage | $coordinated_omission_event_count_percentage | $starting_tps | $ending_tps | $increment_tps | $duration_s |" >> $GITHUB_STEP_SUMMARY
             done
           else
@@ -326,7 +326,7 @@ jobs:
           if jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
             echo "| TX Count | Min (μs) | Max (ms) | Coordinated Omission Events % | Missed Events % | Duplicated Events % |" >> $GITHUB_STEP_SUMMARY
             echo "|----------|----------|----------|-------------------------------|-----------------|---------------------|" >> $GITHUB_STEP_SUMMARY
-            
+          
             latency_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
             for ((i=0; i<latency_length; i++)); do
               tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
@@ -335,14 +335,14 @@ jobs:
               missed_p2p_event_rate=$(jq -r ".tx_pool_latency_analysis[$i].missed_p2p_event_rate" "$output_json")
               coor_omission_event_rate=$(jq -r ".tx_pool_latency_analysis[$i].coordinated_omission_event_rate" "$output_json")
               duplicated_p2p_event_rate=$(jq -r ".tx_pool_latency_analysis[$i].duplicated_p2p_event_rate" "$output_json")
-              
+          
               # Convert max from microseconds to milliseconds, handle null/invalid values
               if [ "$max_us" != "null" ] && [ -n "$max_us" ] && [[ "$max_us" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                 max_ms=$(echo "scale=2; $max_us / 1000" | bc -l)
               else
                 max_ms="N/A"
               fi
-              
+          
               # Format percentages from decimal to percentage format
               if [ "$missed_p2p_event_rate" != "null" ] && [ -n "$missed_p2p_event_rate" ] && [[ "$missed_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                 missed_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $missed_p2p_event_rate * 100" | bc -l))
@@ -355,13 +355,13 @@ jobs:
               else
                 coor_omission_event_count_percentage="N/A"
               fi
-              
+          
               if [ "$duplicated_p2p_event_rate" != "null" ] && [ -n "$duplicated_p2p_event_rate" ] && [[ "$duplicated_p2p_event_rate" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                 duplicated_p2p_event_count_percentage=$(printf "%.2f%%" $(echo "scale=6; $duplicated_p2p_event_rate * 100" | bc -l))
               else
                 duplicated_p2p_event_count_percentage="N/A"
               fi
-              
+          
               echo "| $tx_count | $min_us | $max_ms | $coor_omission_event_count_percentage | $missed_p2p_event_count_percentage | $duplicated_p2p_event_count_percentage |" >> $GITHUB_STEP_SUMMARY
             done
           else

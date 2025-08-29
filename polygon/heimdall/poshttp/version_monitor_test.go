@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 func TestVersioMonitorHeimdallV2(t *testing.T) {
