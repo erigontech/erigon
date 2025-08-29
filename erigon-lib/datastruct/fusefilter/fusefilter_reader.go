@@ -51,17 +51,6 @@ func NewReader(filePath string) (*Reader, error) {
 		return nil, err
 	}
 
-	if madvWillNeed {
-		if err := mm.MadviseWillNeed(m); err != nil {
-			return nil, err
-		}
-	}
-	if madvNormal {
-		if err := mm.MadviseNormal(m); err != nil {
-			return nil, err
-		}
-	}
-
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderOnBytes(m, fileName)
 	if err != nil {
@@ -69,6 +58,13 @@ func NewReader(filePath string) (*Reader, error) {
 	}
 	r.f = f
 	r.fileName = fileName
+	if madvWillNeed {
+		r.MadvWillNeed()
+	}
+	if madvNormal {
+		r.MadvNormal()
+	}
+
 	return r, nil
 }
 
@@ -104,6 +100,14 @@ func (r *Reader) MadvWillNeed() {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
+		panic(err)
+	}
+}
+func (r *Reader) MadvNormal() {
+	if r == nil || r.m == nil || len(r.m) == 0 {
+		return
+	}
+	if err := mm.MadviseNormal(r.m); err != nil {
 		panic(err)
 	}
 }
