@@ -342,7 +342,17 @@ func (s *MdbxStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDele
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+	deleted, err = txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+	if err != nil {
+		return 0, err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
 }
 
 func NewTxStore(tx kv.Tx) txStore {
