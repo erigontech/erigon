@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
+	chain2 "github.com/erigontech/erigon/arb/chain"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
 )
@@ -32,8 +33,11 @@ func Check(e error) {
 }
 
 func ChainConfig(tx kv.Tx) *chain.Config {
+	return chain2.Arb1ChainConfig // TODO fix non arb1
+
 	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	Check(err)
+
 	chainConfig, err := core.ReadChainConfig(tx, genesisBlockHash)
 	Check(err)
 	return chainConfig

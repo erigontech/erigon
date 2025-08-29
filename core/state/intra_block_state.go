@@ -1402,7 +1402,11 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
+		keepZombie := chainRules.IsSpuriousDragon
+		if chainRules.IsArbitrum {
+			keepZombie = chainRules.ArbOSVersion < chain.ArbosVersion_30
+		}
+		if err := updateAccount(keepZombie, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
 
@@ -1510,7 +1514,11 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
+		keepZombie := chainRules.IsSpuriousDragon
+		if chainRules.IsArbitrum {
+			keepZombie = chainRules.ArbOSVersion < chain.ArbosVersion_30
+		}
+		if err := updateAccount(keepZombie, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
 	}

@@ -1,0 +1,51 @@
+{
+    "chainName": "arb1",
+    "chainId": 42161,
+    "homesteadBlock": 0,
+    "daoForkBlock": null,
+    "daoForkSupport": true,
+    "eip150Block": 0,
+    "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "eip155Block": 0,
+    "eip158Block": 0,
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 0,
+    "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "muirGlacierBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "clique": {
+        "period": 0,
+        "epoch": 0
+    },
+    "arbitrum": {
+        "chain-name": "arb1",
+        "parent-chain-id": 1,
+        "parent-chain-is-arbitrum": false,
+        "sequencer-url": "https://arb1-sequencer.arbitrum.io/rpc",
+        "secondary-forwarding-target": "https://arb1-sequencer-fallback-1.arbitrum.io/rpc,https://arb1-sequencer-fallback-2.arbitrum.io/rpc,https://arb1-sequencer-fallback-3.arbitrum.io/rpc,https://arb1-sequencer-fallback-4.arbitrum.io/rpc,https://arb1-sequencer-fallback-5.arbitrum.io/rpc",
+        "feed-url": "wss://arb1-feed.arbitrum.io/feed",
+        "secondary-feed-url": "wss://arb1-delayed-feed.arbitrum.io/feed,wss://arb1-feed-fallback-1.arbitrum.io/feed,wss://arb1-feed-fallback-2.arbitrum.io/feed,wss://arb1-feed-fallback-3.arbitrum.io/feed,wss://arb1-feed-fallback-4.arbitrum.io/feed,wss://arb1-feed-fallback-5.arbitrum.io/feed",
+        "has-genesis-state": true,
+        "block-metadata-url": "https://arb1.arbitrum.io/rpc",
+        "track-block-metadata-from": 327000000,
+        "EnableArbOS": true,
+        "AllowDebugPrecompiles": false,
+        "DataAvailabilityCommittee": false,
+        "InitialArbOSVersion": 6,
+        "InitialChainOwner": "0xd345e41ae2cb00311956aa7109fc801ae8c81a52",
+        "GenesisBlockNum": 22207817,
+
+        "rollup": {
+            "bridge": "0x8315177ab297ba92a06054ce80a67ed4dbd7ed3a",
+            "inbox": "0x4dbd4fc535ac27206064b68ffcf827b0a60bab3f",
+            "rollup": "0x5ef0d09d1e6204141b4d37530808ed19f60fba35",
+            "sequencer-inbox": "0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6",
+            "validator-utils": "0x9e40625f52829cf04bc4839f186d621ee33b0e67",
+            "validator-wallet-creator": "0x960953f7c69cd2bc2322db9223a815c680ccc7ea",
+            "stake-token": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "deployed-at": 15411056
+        }
+    }
+}
