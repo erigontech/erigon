@@ -9,9 +9,11 @@ import (
 	"unsafe"
 
 	"github.com/FastFilter/xorfilter"
+	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 	mm "github.com/erigontech/erigon-lib/mmap"
 )
 
@@ -98,6 +100,7 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 func (r *Reader) ForceInMem() {
 	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
 	r.keepInMem = true
+	log.Warn("[dbg] fusefilter.ForceInMem", "file", r.fileName, "sz", datasize.ByteSize(len(r.inner.Fingerprints)).HR())
 }
 
 func (r *Reader) MadvWillNeed() {
