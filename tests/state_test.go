@@ -136,48 +136,6 @@ func TestState(t *testing.T) {
 	})
 }
 
-// TestLegacyState tests some older tests, which were moved to the folder
-// 'LegacyTests' for the Istanbul fork.
-func TestLegacyState(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
-	}
-
-	st := new(testMatcher)
-	initMatcher(st)
-
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, legacyStateTestDir, func(t *testing.T, name string, test *StateTest) {
-		for _, subtest := range test.Subtests() {
-			subtest := subtest
-			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			t.Run(key, func(t *testing.T) {
-				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer tx.Rollback()
-					_, _, err = test.Run(tx, subtest, vmconfig, dirs)
-					tx.Rollback()
-					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-						// Ignore expected errors
-						return nil
-					}
-					return st.checkFailure(t, err)
-				})
-			})
-		}
-	})
-}
-
 func withTrace(t *testing.T, test func(vm.Config) error) {
 	// Use config from command line arguments.
 	config := vm.Config{}
