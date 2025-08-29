@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -451,12 +450,14 @@ func (d *Domain) openDirtyFiles() (err error) {
 	return nil
 }
 
+var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", true)
+
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
 	if err != nil {
 		return nil, err
 	}
-	if fusefilter.InMemByDefault {
+	if domainExistenceForceInMem {
 		accessor.ForceExistenceFilterInRAM()
 	}
 	return accessor, nil
