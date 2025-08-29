@@ -312,7 +312,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 				s.logger.Error(syncLogPrefix("failed to backward download blocks"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
 					"source", event.Source,
 					"parentBlockHash", newBlockHeader.ParentHash, "err", err)
-			} else { // push block batch event if there is no error
+			} else if len(downloadedBlocks) > 0 { // push block batch event if there is no error
 				s.logger.Debug(syncLogPrefix("backward download completed, pushing new block batch event"))
 				s.tipEvents.events.PushEvent(
 					Event{Type: EventTypeNewBlockBatch,
@@ -451,7 +451,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockBatch, ccb *CanonicalChainBuilder) error {
 	numBlocks := len(event.NewBlocks)
 	if numBlocks == 0 {
-		s.logger.Debug(syncLogPrefix("appying new empty block batch event"))
+		s.logger.Debug(syncLogPrefix("applying new empty block batch event"))
 	} else {
 		s.logger.Debug(syncLogPrefix("applying new block batch event"), "startBlock", event.NewBlocks[0].Number().Uint64(), "endBlock", event.NewBlocks[numBlocks-1].Number().Uint64())
 	}
@@ -466,10 +466,16 @@ func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockB
 }
 
 func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
+	firstBlockHash := event.NewBlockHashes[0].Hash
+	firstBlockNum := event.NewBlockHashes[0].Number
+	s.logger.Debug(syncLogPrefix("applyNewBlockHashesOnTip: backward downloading"), "blockNum", firstBlockNum, "blockhash", firstBlockHash)
 	go func() { // asynchronously download blocks and in the end place the blocks batch in the event queue
 		blockchain, err := s.backwardDownloadBlocksFromHashes(ctx, event, ccb)
 		if err != nil {
 			s.logger.Error(syncLogPrefix("couldn't fetch blocks from block hashes"), "err", err)
+		}
+		if len(blockchain) == 0 { // no blocks downloaded, we can skip pushing an event
+			return
 		}
 		newBlockBatchEvent := EventNewBlockBatch{
 			NewBlocks: blockchain,
