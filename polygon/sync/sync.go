@@ -309,10 +309,11 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		go func() {
 			downloadedBlocks, err := s.backwardDownloadBlocksFromHash(ctx, event, ccb)
 			if err != nil {
-				s.logger.Error(syncLogPrefix("failed to backward download blocks"), newBlockHeaderNum, "blockHash", newBlockHeaderHash,
+				s.logger.Error(syncLogPrefix("failed to backward download blocks"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
 					"source", event.Source,
-					"parentBlockHash", newBlockHeader.ParentHash)
-			} else { // push block batch event if there is no errore
+					"parentBlockHash", newBlockHeader.ParentHash, "err", err)
+			} else { // push block batch event if there is no error
+				s.logger.Debug(syncLogPrefix("backward download completed, pushing new block batch event"))
 				s.tipEvents.events.PushEvent(
 					Event{Type: EventTypeNewBlockBatch,
 						newBlockBatch: EventNewBlockBatch{NewBlocks: downloadedBlocks, PeerId: event.PeerId, Source: event.Source},
@@ -448,6 +449,12 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 }
 
 func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockBatch, ccb *CanonicalChainBuilder) error {
+	numBlocks := len(event.NewBlocks)
+	if numBlocks == 0 {
+		s.logger.Debug(syncLogPrefix("appying new empty block batch event"))
+	} else {
+		s.logger.Debug(syncLogPrefix("applying new block batch event"), "startBlock", event.NewBlocks[0].Number().Uint64(), "endBlock", event.NewBlocks[numBlocks-1].Number().Uint64())
+	}
 	for _, block := range event.NewBlocks {
 		blockEvent := EventNewBlock{NewBlock: block, PeerId: event.PeerId, Source: event.Source}
 		err := s.applyNewBlockOnTip(ctx, blockEvent, ccb)
@@ -480,7 +487,7 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 	newBlockHeaderHash := newBlockHeader.Hash()
 	rootNum := ccb.Root().Number.Uint64()
 	amount := newBlockHeaderNum - rootNum + 1
-	var blockChain = make([]*types.Block, amount) // the return value
+	var blockChain = make([]*types.Block, 0, amount) // the return value
 	s.logger.Debug(
 		syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
 		"rootNum", rootNum,
@@ -510,7 +517,7 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 		if err != nil || len(blocks.Data) == 0 {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
-					syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
+					syncLogPrefix("backwardDownloadBlocksFromHash: failed to fetch complete blocks, ignoring event"),
 					"err", err,
 					"peerId", event.PeerId,
 					"lastBlockNum", newBlockHeaderNum,
@@ -559,7 +566,7 @@ func (s *Sync) backwardDownloadBlocksFromHashes(ctx context.Context, event Event
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
-					syncLogPrefix("applyNewBlockHashesOnTip: failed to fetch complete blocks, ignoring event"),
+					syncLogPrefix("backwardDownloadBlocksFromHashes: failed to fetch complete blocks, ignoring event"),
 					"err", err,
 					"peerId", event.PeerId,
 					"lastBlockNum", hashOrNum.Number,
