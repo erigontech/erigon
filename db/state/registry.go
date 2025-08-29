@@ -13,17 +13,12 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 )
 
-// ForkableId id as a uint64, returned by `RegisterForkable`. It is dependent on
-// the order of registration, and so counting on it being constant across reboots
-// might be tricky.
 type ForkableId = kv.ForkableId
 
 type holder struct {
 	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1.0-007300-007400-bodies.seg" file
 	name                string
-	snapshotDataFileTag string   // name to be used in snapshot file
-	indexFileTag        []string // one indexFileTag for each index
-	dirs                datadir.Dirs
+	snapshotDataFileTag string // name to be used in snapshot file
 	saltFile            string
 	snapshotConfig      *SnapshotConfig
 }
@@ -37,8 +32,6 @@ type registry struct {
 
 var Registry = registry{}
 
-var curr uint16
-
 var mu sync.RWMutex
 
 // RegisterForkable
@@ -49,7 +42,6 @@ var mu sync.RWMutex
 func RegisterForkable(name string, forkableId kv.ForkableId, dirs datadir.Dirs, pre snapcfg.PreverifiedItems, options ...EntityIdOption) {
 	h := &holder{
 		name: name,
-		dirs: dirs,
 	}
 	for _, opt := range options {
 		opt(h)
@@ -57,11 +49,6 @@ func RegisterForkable(name string, forkableId kv.ForkableId, dirs datadir.Dirs, 
 
 	if h.snapshotDataFileTag == "" {
 		h.snapshotDataFileTag = name
-	}
-
-	if h.indexFileTag == nil {
-		// default
-		h.indexFileTag = []string{name}
 	}
 
 	if h.saltFile == "" {
@@ -86,12 +73,6 @@ func WithSnapshotTag(tag string) EntityIdOption {
 	}
 }
 
-func WithIndexFileType(indexFileTag []string) EntityIdOption {
-	return func(a *holder) {
-		a.indexFileTag = indexFileTag
-	}
-}
-
 // TODO: at forkable boundary, we want this to be value type
 // so changes don't effect config forkables own. Once we get it in
 // as value, we can use reference in other places within forkables.
@@ -113,14 +94,6 @@ func (r *registry) Exists(a ForkableId) bool {
 
 func (r *registry) Name(a ForkableId) string {
 	return r.entityRegistry[a].name
-}
-
-func (r *registry) IndexFileTag(a ForkableId) []string {
-	return r.entityRegistry[a].indexFileTag
-}
-
-func (r *registry) Dirs(a ForkableId) datadir.Dirs {
-	return r.entityRegistry[a].dirs
 }
 
 func (r *registry) String(a ForkableId) string {

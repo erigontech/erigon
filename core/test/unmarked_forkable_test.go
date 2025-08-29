@@ -23,9 +23,10 @@ func (r *BorSpanRootRelation) RootNum2Num(from state.RootNum, tx kv.Tx) (state.N
 }
 
 func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[UnmarkedTxI]) {
+	id := kv.ForkableId(2)
 	stepSize := uint64(10)
 	name := "borspans"
-	borspanId := registerEntityWithSnapshotConfig(dirs, name, state.NewSnapshotConfig(
+	registerEntityWithSnapshotConfig(dirs, name, id, state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
 			MergeStages:    []uint64{200, 400},
@@ -34,33 +35,29 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 		},
 		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
 	))
-	require.Equal(t, state.ForkableId(0), borspanId)
 
-	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false), borspanId, log)
+	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false), id, dirs.Tmp, log)
 	indexb.SetFirstEntityNumFetcher(func(from, to RootNum, seg *seg.Decompressor) Num {
 		return Num(CustomSpanIdAt(uint64(from)))
 	})
 
-	uma, err := state.NewUnmarkedForkable(borspanId,
+	uma, err := state.NewUnmarkedForkable(id,
 		kv.BorSpans,
 		&BorSpanRootRelation{},
+		dirs,
 		log,
 		state.App_WithIndexBuilders(indexb))
 	require.NoError(t, err)
 
 	cleanup(t, uma.ProtoForkable, db, dirs)
-	return borspanId, uma
+	return id, uma
 }
 
 // TESTS BEGIN HERE
 
 func TestUnmarkedForkableRegistration(t *testing.T) {
-	t.Cleanup(func() {
-		state.Cleanup()
-	})
 	dirs := datadir.New(t.TempDir())
-	blockId := registerEntity(dirs, "borspans")
-	require.Equal(t, state.ForkableId(0), blockId)
+	require.NotPanics(t, func() { registerEntity(dirs, "borspans", kv.ForkableId(2)) })
 }
 
 func TestUnmarked_PutToDb(t *testing.T) {

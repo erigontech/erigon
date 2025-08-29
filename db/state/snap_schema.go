@@ -24,6 +24,7 @@ import (
 // each entity has one schema.
 type SnapNameSchema interface {
 	DataTag() string
+	IndexTags() []string
 	AccessorList() statecfg.Accessors
 	Parse(filename string) (f *SnapInfo, ok bool)
 
@@ -99,6 +100,10 @@ func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTag
 
 func (s *E2SnapSchema) DataTag() string {
 	return s.dataFileTag
+}
+
+func (s *E2SnapSchema) IndexTags() []string {
+	return s.indexFileTags
 }
 
 func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
@@ -383,6 +388,10 @@ func (s *E3SnapSchema) ExistenceFile(version statecfg.Version, from, to RootNum)
 
 func (s *E3SnapSchema) DataTag() string {
 	return s.dataFileTag
+}
+
+func (s *E3SnapSchema) IndexTags() []string {
+	return []string{s.dataFileTag}
 }
 
 func (s *E3SnapSchema) AccessorList() statecfg.Accessors {

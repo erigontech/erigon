@@ -455,10 +455,10 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	headerId := ForkableId(1)
 	registerEntity(dirs, "headers", headerId)
 
-	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), headerId, log,
+	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), headerId, dirs.Tmp, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, IdentityRootRelationInstance, log,
+	ma, err := NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder),
 		App_WithUpdateCanonical())
@@ -479,10 +479,10 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	bodyId := ForkableId(2)
 	registerEntity(dirs, "bodies", bodyId)
 
-	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), bodyId, log,
+	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), bodyId, dirs.Tmp, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(bodyId, kv.BlockBody, kv.HeaderCanonical, IdentityRootRelationInstance, log,
+	ma, err := NewMarkedForkable(bodyId, kv.BlockBody, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder))
 	require.NoError(t, err)

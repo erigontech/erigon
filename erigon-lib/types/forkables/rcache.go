@@ -23,7 +23,7 @@ func NewRcacheForkable(pre snapcfg.PreverifiedItems, dirs datadir.Dirs, stepSize
 	}
 	schema := statecfg.Schema.RCacheForkable
 
-	f, err := state.NewUnmarkedForkable(kv.RCacheForkable, schema.ValsTbl, state.IdentityRootRelationInstance, logger)
+	f, err := state.NewUnmarkedForkable(kv.RCacheForkable, schema.ValsTbl, state.IdentityRootRelationInstance, dirs, logger)
 	if err != nil {
 		return nil, err
 	}

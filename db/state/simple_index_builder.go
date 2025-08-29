@@ -67,18 +67,21 @@ type SimpleAccessorBuilder struct {
 	parser   SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
-	logger   log.Logger
+
+	tmpDir string
+	logger log.Logger
 }
 
 type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, tmpDir string, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
 		parser: Registry.SnapshotConfig(id).Schema,
+		tmpDir: tmpDir,
 		logger: logger,
 	}
 
@@ -98,6 +101,10 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logg
 		}
 	}
 
+	if b.indexPos >= uint64(len(b.parser.IndexTags())) {
+		panic("indexPos greater than indexFileTag length")
+	}
+
 	return b
 }
 
@@ -105,9 +112,6 @@ type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 
 func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
-		if int(s.indexPos) >= len(Registry.IndexFileTag(s.id)) {
-			panic("indexPos greater than indexFileTag length")
-		}
 		s.indexPos = indexPos
 	}
 }
@@ -144,7 +148,7 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%s: at=%d-%d, %v, %s", Registry.IndexFileTag(s.id)[s.indexPos], from, to, rec, dbg.Stack())
+			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.parser.IndexTags()[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
@@ -169,7 +173,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		IndexFile:          idxFile,
 		Salt:               &salt,
 		NoFsync:            s.args.Nofsync,
-		TmpDir:             Registry.Dirs(s.id).Tmp,
+		TmpDir:             s.tmpDir,
 		LessFalsePositives: s.args.LessFalsePositives,
 		BaseDataID:         iidq.GetBaseDataId(),
 	}, s.logger)

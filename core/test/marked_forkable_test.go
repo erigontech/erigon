@@ -28,19 +28,18 @@ type ForkableId = kv.ForkableId
 type MarkedTxI = state.MarkedTxI
 type UnmarkedTxI = state.UnmarkedTxI
 
-func registerEntity(dirs datadir.Dirs, name string) state.ForkableId {
+func registerEntity(dirs datadir.Dirs, name string, id ForkableId) {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, state.NewSnapshotConfig(&state.SnapshotCreationConfig{
+	registerEntityWithSnapshotConfig(dirs, name, id, state.NewSnapshotConfig(&state.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{20, 40},
 		MinimumSize:    10,
 		SafetyMargin:   5,
 	}, state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
-
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *state.SnapshotConfig) state.ForkableId {
-	return state.RegisterForkable(name, dirs, nil, state.WithSnapshotConfig(cfg))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, id ForkableId, cfg *state.SnapshotConfig) {
+	state.RegisterForkable(name, id, dirs, nil, state.WithSnapshotConfig(cfg))
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
@@ -52,16 +51,15 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 }
 
 func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[state.MarkedTxI]) {
-	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, state.ForkableId(0), headerId)
-
+	headerId := kv.ForkableId(0)
+	registerEntity(dirs, "headers", headerId)
 	// create marked forkable
 	freezer := snaptype2.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
-	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, log,
+	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, dirs.Tmp, log,
 		state.WithIndexKeyFactory(&snaptype2.HeaderAccessorIndexKeyFactory{}))
 
-	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, state.IdentityRootRelationInstance, log,
+	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, state.IdentityRootRelationInstance, dirs, log,
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),
@@ -78,7 +76,6 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 		p.Close()
 		p.RecalcVisibleFiles(0)
 
-		state.Cleanup()
 		db.Close()
 		dir.RemoveAll(dirs.Snap)
 		dir.RemoveAll(dirs.Chaindata)
@@ -91,14 +88,9 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 // test marked forkable
 func TestMarkedForkableRegistration(t *testing.T) {
 	// just registration goes fine
-	t.Cleanup(func() {
-		state.Cleanup()
-	})
 	dirs := datadir.New(t.TempDir())
-	blockId := registerEntity(dirs, "blocks")
-	require.Equal(t, state.ForkableId(0), blockId)
-	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, state.ForkableId(1), headerId)
+	require.NotPanics(t, func() { registerEntity(dirs, "blocks", kv.ForkableId(1)) })
+	require.NotPanics(t, func() { registerEntity(dirs, "headers", kv.ForkableId(0)) })
 }
 
 func TestMarked_PutToDb(t *testing.T) {

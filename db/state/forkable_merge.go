@@ -81,7 +81,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	cfg := seg.DefaultCfg
 	cfg.Workers = compressWorkers
 	r := Registry
-	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, r.Dirs(f.a).Tmp, cfg, log.LvlTrace, f.logger)
+	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, f.dirs.Tmp, cfg, log.LvlTrace, f.logger)
 	if err != nil {
 		return
 	}

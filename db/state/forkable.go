@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -67,8 +68,8 @@ func App_WithUpdateCanonical() AppOpts {
 }
 
 // func App
-func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
-	a, err := create[MarkedTxI](id, kv.Marked, valsTbl, canonicalTbl, relation, logger, options...)
+func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
+	a, err := create[MarkedTxI](id, kv.Marked, valsTbl, canonicalTbl, relation, dirs, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +87,8 @@ func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relat
 	return a, nil
 }
 
-func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
-	a, err := create[UnmarkedTxI](id, kv.Unmarked, valsTbl, "", relation, logger, options...)
+func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
+	a, err := create[UnmarkedTxI](id, kv.Unmarked, valsTbl, "", relation, dirs, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +101,7 @@ func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, 
 
 	if a.builders == nil {
 		// mapping num -> offset (ordinal map)
-		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), id, logger)
+		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), id, dirs.Tmp, logger)
 		a.builders = []AccessorIndexBuilder{builder}
 	}
 
@@ -117,9 +118,9 @@ func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, 
 	return a, nil
 }
 
-func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
+func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
 	a := &Forkable[T]{
-		ProtoForkable: NewProto(id, nil, nil, logger),
+		ProtoForkable: NewProto(id, nil, nil, dirs, logger),
 	}
 	a.rel = relation
 	a.valsTbl = valsTbl
@@ -379,7 +380,7 @@ func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
 
 func (m *UnmarkedTx) BufferedWriter() *UnmarkedBufferedWriter {
 	return &UnmarkedBufferedWriter{
-		values:  etl.NewCollector(Registry.Name(m.id)+".forkable.buffer.flush", Registry.Dirs(m.id).Tmp, etl.SmallSortableBuffers.Get(), m.a.logger),
+		values:  etl.NewCollector(Registry.Name(m.id)+".forkable.buffer.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers.Get(), m.a.logger),
 		valsTbl: m.ap.valsTbl,
 	}
 }

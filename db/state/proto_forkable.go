@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -32,9 +33,10 @@ type ProtoForkable struct {
 	unaligned bool
 
 	logger log.Logger
+	dirs   datadir.Dirs
 }
 
-func NewProto(a ForkableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoForkable {
+func NewProto(a ForkableId, builders []AccessorIndexBuilder, freezer Freezer, dirs datadir.Dirs, logger log.Logger) *ProtoForkable {
 	return &ProtoForkable{
 		a:        a,
 		cfg:      Registry.SnapshotConfig(a),
@@ -42,6 +44,7 @@ func NewProto(a ForkableId, builders []AccessorIndexBuilder, freezer Freezer, lo
 		builders: builders,
 		freezer:  freezer,
 		snaps:    NewSnapshotRepoForForkable(a, logger),
+		dirs:     dirs,
 		logger:   logger,
 	}
 }
@@ -84,7 +87,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
 	segCfg := seg.DefaultCfg
 	segCfg.Workers = compressionWorkers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.a), path, Registry.Dirs(a.a).Tmp, segCfg, log.LvlTrace, a.logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.a), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)
 	if err != nil {
 		return nil, false, err
 	}
