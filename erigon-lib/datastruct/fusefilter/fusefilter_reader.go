@@ -13,7 +13,6 @@ import (
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	mm "github.com/erigontech/erigon-lib/mmap"
 )
 
@@ -97,10 +96,10 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
 }
 
-func (r *Reader) ForceInMem() {
+func (r *Reader) ForceInMem() datasize.ByteSize {
 	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
 	r.keepInMem = true
-	log.Warn("[dbg] fusefilter.ForceInMem", "file", r.fileName, "sz", datasize.ByteSize(len(r.inner.Fingerprints)).HR())
+	return datasize.ByteSize(len(r.inner.Fingerprints))
 }
 
 func (r *Reader) MadvWillNeed() {

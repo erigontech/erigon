@@ -283,10 +283,13 @@ func (idx *Index) init() (err error) {
 	return nil
 }
 
-func (idx *Index) ForceExistenceFilterInRAM() {
+func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if idx.version >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		idx.existenceV1.ForceInMem()
+		sz := idx.existenceV1.ForceInMem()
+		log.Warn("[dbg] fusefilter.ForceInMem", "file", idx.fileName, "sz", sz.HR())
+		return sz
 	}
+	return 0
 }
 
 func onlyKnownFeatures(features Features) error {
