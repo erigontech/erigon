@@ -245,7 +245,7 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 
 func toBlobs(_blobs Blobs) []*gokzg4844.Blob {
 	blobs := make([]*gokzg4844.Blob, len(_blobs))
-	for i, _ := range _blobs {
+	for i := range _blobs {
 		blobs[i] = (*gokzg4844.Blob)(&_blobs[i])
 	}
 	return blobs

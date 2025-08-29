@@ -350,12 +350,12 @@ func newValidator(t *testing.T, testHeimdall *test_heimdall, blocks map[uint64]*
 
 func TestValidatorCreate(t *testing.T) {
 	t.Skip("issue #15017")
-	newValidator(t, newTestHeimdall(polychain.BorDevnetChainConfig), map[uint64]*types.Block{})
+	newValidator(t, newTestHeimdall(polychain.BorDevnet.Config), map[uint64]*types.Block{})
 }
 
 func TestVerifyHeader(t *testing.T) {
 	t.Skip("issue #15017")
-	v := newValidator(t, newTestHeimdall(polychain.BorDevnetChainConfig), map[uint64]*types.Block{})
+	v := newValidator(t, newTestHeimdall(polychain.BorDevnet.Config), map[uint64]*types.Block{})
 
 	chain, err := v.generateChain(1)
 
@@ -391,7 +391,7 @@ func TestVerifySpan(t *testing.T) {
 func testVerify(t *testing.T, noValidators int, chainLength int) {
 	log.Root().SetHandler(log.StderrHandler)
 
-	heimdall := newTestHeimdall(polychain.BorDevnetChainConfig)
+	heimdall := newTestHeimdall(polychain.BorDevnet.Config)
 	blocks := map[uint64]*types.Block{}
 
 	validators := make([]validator, noValidators)
@@ -453,7 +453,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 
 func TestSendBlock(t *testing.T) {
 	t.Skip("issue #15017")
-	heimdall := newTestHeimdall(polychain.BorDevnetChainConfig)
+	heimdall := newTestHeimdall(polychain.BorDevnet.Config)
 	blocks := map[uint64]*types.Block{}
 
 	s := newValidator(t, heimdall, blocks)

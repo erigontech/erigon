@@ -53,17 +53,19 @@ func TestGenesisBlockHashes(t *testing.T) {
 	logger := log.New()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
-		genesis := chainspec.GenesisBlockByChainName(network)
-		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback()
-		_, block, err := genesiswrite.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
+		spec, err := chainspec.ChainSpecByName(network)
 		require.NoError(t, err)
-		expect := chainspec.GenesisHashByChainName(network)
-		require.NotNil(t, expect, network)
-		require.Equal(t, block.Hash(), *expect, network)
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, datadir.New(t.TempDir()), logger)
+		require.NoError(t, err)
+
+		expect, err := chainspec.ChainSpecByName(network)
+		require.NoError(t, err)
+		require.NotEmpty(t, expect.GenesisHash, network)
+		require.Equal(t, block.Hash(), expect.GenesisHash, network)
 	}
 	for _, network := range networkname.All {
 		check(network)
@@ -76,35 +78,28 @@ func TestGenesisBlockRoots(t *testing.T) {
 
 	block, _, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
-	if block.Hash() != chainspec.MainnetGenesisHash {
-		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), chainspec.MainnetGenesisHash)
+	if block.Hash() != chainspec.Mainnet.GenesisHash {
+		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), chainspec.Mainnet.GenesisHash)
 	}
+	for _, netw := range []string{
+		networkname.Gnosis,
+		networkname.Chiado,
+		networkname.Test,
+	} {
+		spec, err := chainspec.ChainSpecByName(netw)
+		require.NoError(err)
+		require.False(spec.IsEmpty())
 
-	block, _, err = genesiswrite.GenesisToBlock(chainspec.GnosisGenesisBlock(), datadir.New(t.TempDir()), log.Root())
-	require.NoError(err)
-	if block.Root() != chainspec.GnosisGenesisStateRoot {
-		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), chainspec.GnosisGenesisStateRoot)
-	}
-	if block.Hash() != chainspec.GnosisGenesisHash {
-		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), chainspec.GnosisGenesisHash)
-	}
+		block, _, err = genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		require.NoError(err)
 
-	block, _, err = genesiswrite.GenesisToBlock(chainspec.ChiadoGenesisBlock(), datadir.New(t.TempDir()), log.Root())
-	require.NoError(err)
-	if block.Root() != chainspec.ChiadoGenesisStateRoot {
-		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), chainspec.ChiadoGenesisStateRoot)
-	}
-	if block.Hash() != chainspec.ChiadoGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), chainspec.ChiadoGenesisHash)
-	}
+		if block.Root() != spec.GenesisStateRoot {
+			t.Errorf("wrong %s Chain genesis state root, got %v, want %v", netw, block.Root(), spec.GenesisStateRoot)
+		}
 
-	block, _, err = genesiswrite.GenesisToBlock(chainspec.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
-	require.NoError(err)
-	if block.Root() != chainspec.TestGenesisStateRoot {
-		t.Errorf("wrong test genesis state root, got %v, want %v", block.Root(), chainspec.TestGenesisStateRoot)
-	}
-	if block.Hash() != chainspec.TestGenesisHash {
-		t.Errorf("wrong test genesis hash, got %v, want %v", block.Hash(), chainspec.TestGenesisHash)
+		if block.Hash() != spec.GenesisHash {
+			t.Errorf("wrong %s Chain genesis hash, got %v, want %v", netw, block.Hash(), spec.GenesisHash)
+		}
 	}
 }
 
@@ -116,14 +111,14 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	genesis := chainspec.GenesisBlockByChainName(networkname.Mainnet)
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
+	spec := chainspec.Mainnet
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
