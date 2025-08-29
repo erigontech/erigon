@@ -101,10 +101,6 @@ func (r *Reader) ForceInMem() {
 	r.keepInMem = true
 }
 
-func (r *Reader) Init() {
-
-}
-
 func (r *Reader) MadvWillNeed() {
 	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
