@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/jellydator/ttlcache/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -119,7 +120,8 @@ type MinedBlockObserverRegistrar interface {
 	RegisterMinedBlockObserver(callback func(*types.Block)) event.UnregisterFunc
 }
 
-func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar, minedBlockReg MinedBlockObserverRegistrar) *TipEvents {
+func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar, minedBlockReg MinedBlockObserverRegistrar,
+	blockDelayTracker *ttlcache.Cache[common.Hash, *types.Header]) *TipEvents {
 	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
 	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
 	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
@@ -130,6 +132,7 @@ func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg he
 		heimdallObserverRegistrar:   heimdallReg,
 		minedBlockObserverRegistrar: minedBlockReg,
 		blockEventsSpamGuard:        newBlockEventsSpamGuard(logger),
+		blockDelayTracker:           blockDelayTracker,
 	}
 }
 
@@ -140,6 +143,7 @@ type TipEvents struct {
 	heimdallObserverRegistrar   heimdallObserverRegistrar
 	minedBlockObserverRegistrar MinedBlockObserverRegistrar
 	blockEventsSpamGuard        blockEventsSpamGuard
+	blockDelayTracker           *ttlcache.Cache[common.Hash, *types.Header]
 }
 
 func (te *TipEvents) Events() <-chan Event {
@@ -155,6 +159,13 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			"hash", msg.Hash(),
 			"number", msg.NumberU64(),
 		)
+		header := msg.Header()
+		// record header in TTL
+		// do not record again if it's already in the cache, otherwise the header can be
+		// artificially kept fresh by a peer re-publishing it
+		if !te.blockDelayTracker.Has(header.Hash()) {
+			te.blockDelayTracker.Set(header.Hash(), header, ttlcache.DefaultTTL)
+		}
 
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,
@@ -179,6 +190,14 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			"hash", block.Hash(),
 			"number", block.NumberU64(),
 		)
+
+		header := block.Header()
+		// record header in TTL
+		// do not record again if it's already in the cache, otherwise the header can be
+		// artificially kept fresh by a peer re-publishing it
+		if !te.blockDelayTracker.Has(header.Hash()) {
+			te.blockDelayTracker.Set(header.Hash(), header, ttlcache.DefaultTTL)
+		}
 
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,
@@ -205,6 +224,12 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			"number", blockHashes[0].Number,
 		)
 
+		// record header hash in TTL
+		// do not record again if it's already in the cache, otherwise the header can be
+		// artificially kept fresh by a peer re-publishing it
+		if !te.blockDelayTracker.Has(blockHashes[0].Hash) {
+			te.blockDelayTracker.Set(blockHashes[0].Hash, nil, ttlcache.DefaultTTL)
+		}
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlockHashes,
 			newBlockHashes: EventNewBlockHashes{

@@ -38,7 +38,7 @@ var DefaultRecentHeadersCapacity uint64 = 4096      // capacity of recent header
 type HeaderTimeValidator struct {
 	borConfig             *borcfg.BorConfig
 	signaturesCache       *lru.ARCCache[libcommon.Hash, libcommon.Address]
-	recentVerifiedHeaders *ttlcache.Cache[libcommon.Hash, *types.Header]
+	blockDelayTracker     *ttlcache.Cache[libcommon.Hash, *types.Header]
 	blockProducersTracker blockProducersTracker
 	logger                log.Logger
 }
@@ -93,12 +93,11 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 	}
 	// Header time has been validated, therefore save this header to TTL
 	htv.logger.Debug("validated header time:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers.ValidatorAddresses())
-	htv.UpdateLatestVerifiedHeader(header)
 	return nil
 }
 
 func (htv *HeaderTimeValidator) UpdateLatestVerifiedHeader(header *types.Header) {
-	htv.recentVerifiedHeaders.Set(header.Hash(), header, ttlcache.DefaultTTL)
+	htv.blockDelayTracker.Set(header.Hash(), header, ttlcache.DefaultTTL)
 }
 
 // check if the conditions are met where we need to await for a span rotation
@@ -114,7 +113,7 @@ func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, paren
 	}
 	headerNum := header.Number.Uint64()
 	// the current producer has published a block, but it came too late (i.e. the parent has been evicted from the ttl cache)
-	if author == producer && producer == parentAuthor && !htv.recentVerifiedHeaders.Has(header.ParentHash) {
+	if author == producer && producer == parentAuthor && !htv.blockDelayTracker.Has(header.ParentHash) {
 		htv.logger.Info("[span-rotation] need to wait for span rotation due to longer than expected block time from current producer", "blockNum", headerNum, "parentHeader", header.ParentHash, "author", author)
 		return true, VeBlopLongBlockTimeout, nil
 	} else if author != parentAuthor && author != producer { // new author but not matching the producer for this block

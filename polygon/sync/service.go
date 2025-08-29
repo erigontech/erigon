@@ -23,12 +23,14 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/jellydator/ttlcache/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -66,6 +68,12 @@ func NewService(
 		panic(err)
 	}
 
+	blockDelayTracker := ttlcache.New[common.Hash, *types.Header](
+		ttlcache.WithTTL[common.Hash, *types.Header](VeBlopBlockTimeout),
+		ttlcache.WithCapacity[common.Hash, *types.Header](DefaultRecentHeadersCapacity),
+		ttlcache.WithDisableTouchOnHit[common.Hash, *types.Header](),
+	)
+
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
@@ -77,8 +85,8 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache, logger)
-	events := NewTipEvents(logger, p2pService, heimdallService, minedBlockReg)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, blockDelayTracker, signaturesCache, logger)
+	events := NewTipEvents(logger, p2pService, heimdallService, minedBlockReg, blockDelayTracker)
 	sync := NewSync(
 		config,
 		logger,

@@ -26,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/jellydator/ttlcache/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -128,6 +129,11 @@ func NewPolygonSyncStageCfg(
 	if err != nil {
 		panic(err)
 	}
+	blockDelayTracker := ttlcache.New[common.Hash, *types.Header](
+		ttlcache.WithTTL[common.Hash, *types.Header](sync.VeBlopBlockTimeout),
+		ttlcache.WithCapacity[common.Hash, *types.Header](sync.DefaultRecentHeadersCapacity),
+		ttlcache.WithDisableTouchOnHit[common.Hash, *types.Header](),
+	)
 
 	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService)
 	blockDownloader := polygonsync.NewBlockDownloader(
@@ -140,7 +146,7 @@ func NewPolygonSyncStageCfg(
 		syncStore,
 		blockLimit,
 	)
-	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService, minedBlockReg)
+	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService, minedBlockReg, blockDelayTracker)
 	sync := polygonsync.NewSync(
 		config,
 		logger,
@@ -150,7 +156,7 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache, logger),
+		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, blockDelayTracker, signaturesCache, logger),
 		heimdallService,
 		bridgeService,
 		events,
