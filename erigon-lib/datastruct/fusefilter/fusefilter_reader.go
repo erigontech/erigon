@@ -36,9 +36,9 @@ type Reader struct {
 	version uint8
 }
 
-var fuseMem = dbg.EnvBool("FUSE_MEM", false)
+var fuseMem = dbg.EnvBool("FUSE_MEM", true)
 
-var fuseMadvWillNeed = dbg.EnvBool("FUSE_MADV_WILLNEED", true)
+var fuseMadvWillNeed = dbg.EnvBool("FUSE_MADV_WILLNEED", false)
 var fuseMadvNormal = dbg.EnvBool("FUSE_MADV_NORMAL", false)
 
 func NewReader(filePath string) (*Reader, error) {
