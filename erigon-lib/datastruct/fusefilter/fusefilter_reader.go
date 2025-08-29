@@ -102,12 +102,7 @@ func (r *Reader) ForceInMem() {
 }
 
 func (r *Reader) Init() {
-	if MadvWillNeedByDefault {
-		r.MadvWillNeed()
-	}
-	if MadvNormalByDefault {
-		r.MadvNormal()
-	}
+
 }
 
 func (r *Reader) MadvWillNeed() {
