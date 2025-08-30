@@ -882,7 +882,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 		}
 
-		validity := state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
+		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 			func(readVersion, writtenVersion state.Version) state.VersionValidity {
 				vv := state.VersionValid
 
@@ -1114,7 +1114,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
-					state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
+					be.versionMap.ValidateVersion(txIndex, be.blockIO,
 						func(_, writtenVersion state.Version) state.VersionValidity {
 							if writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1] {
