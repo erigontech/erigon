@@ -31,6 +31,7 @@ func TestLegacyBlockchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	t.Parallel()
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -56,7 +57,6 @@ func TestLegacyBlockchain(t *testing.T) {
 	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
@@ -68,6 +68,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	t.Parallel()
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -78,7 +79,6 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
-		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
@@ -92,6 +92,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	t.Parallel()
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -101,7 +102,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests_devnet")
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
-		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
