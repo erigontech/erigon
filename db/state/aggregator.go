@@ -196,7 +196,8 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesDelete = onDel
 }
 
-func (a *Aggregator) StepSize() uint64 { return a.stepSize }
+func (a *Aggregator) StepSize() uint64   { return a.stepSize }
+func (a *Aggregator) Dirs() datadir.Dirs { return a.dirs }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
@@ -204,6 +205,10 @@ func (a *Aggregator) DisableFsync() {
 	for _, ii := range a.iis {
 		ii.DisableFsync()
 	}
+}
+
+func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
+	a.d[domain].ReplaceKeysInValues = v
 }
 
 func (a *Aggregator) reloadSalt() error {

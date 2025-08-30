@@ -28,9 +28,10 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -919,19 +920,6 @@ func (m Mode) String() string {
 	default:
 		return "unknown"
 	}
-}
-
-func ParseCommitmentMode(s string) Mode {
-	var mode Mode
-	switch s {
-	case "off":
-		mode = ModeDisabled
-	case "update":
-		mode = ModeUpdate
-	default:
-		mode = ModeDirect
-	}
-	return mode
 }
 
 type Updates struct {
