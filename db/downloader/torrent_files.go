@@ -27,6 +27,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
