@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/erigontech/erigon/db/version"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"

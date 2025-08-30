@@ -20,10 +20,11 @@ import (
 	"context"
 	"io"
 
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 var _ txpool_proto.TxpoolClient = (*TxPoolClient)(nil)
