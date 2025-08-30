@@ -28,9 +28,10 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -936,8 +937,10 @@ func ParseCommitmentMode(s string) Mode {
 
 type Updates struct {
 	hasher keyHasher
-	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
-	etl    *etl.Collector            // all-in-one collector
+
+	totalKeys int
+	etl       *etl.Collector // all-in-one collector
+
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	mode   Mode
 	tmpdir string
@@ -968,7 +971,6 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		mode:   m,
 	}
 	if t.mode == ModeDirect {
-		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
@@ -978,8 +980,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
-	if t.mode == ModeDirect && t.keys == nil {
-		t.keys = make(map[string]struct{})
+	if t.mode == ModeDirect && t.etl == nil {
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
@@ -995,13 +996,15 @@ func (t *Updates) initCollector() {
 				t.nibbles[i] = nil
 			}
 
-			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+			//t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+			t.nibbles[i] = etl.NewCollector("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 			t.nibbles[i].SortAndFlushInBackground(true)
 		}
 		if t.etl != nil {
 			t.etl.Close()
 			t.etl = nil
 		}
+		t.totalKeys = 0
 		return
 	}
 
@@ -1009,7 +1012,10 @@ func (t *Updates) initCollector() {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+	t.totalKeys = 0
+
+	//t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
 }
 
@@ -1018,7 +1024,7 @@ func (t *Updates) Mode() Mode { return t.mode }
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
-		return uint64(len(t.keys))
+		return uint64(t.totalKeys)
 	case ModeUpdate:
 		return uint64(t.tree.Len())
 	default:
@@ -1046,20 +1052,18 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
-		if _, ok := t.keys[key]; !ok {
-			keyBytes := toBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+		keyBytes := toBytesZeroCopy(key)
+		hashedKey := t.hasher(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
-			t.keys[key] = struct{}{}
+		var err error
+		if !t.sortPerNibble {
+			t.totalKeys++
+			err = t.etl.Collect(hashedKey, keyBytes)
+		} else {
+			err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
+		}
+		if err != nil {
+			log.Warn("failed to collect updated key", "key", key, "err", err)
 		}
 	default:
 	}
@@ -1120,15 +1124,14 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 }
 
 func (t *Updates) Close() {
-	if t.keys != nil {
-		clear(t.keys)
-	}
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
 	}
 	if t.etl != nil {
 		t.etl.Close()
+		t.etl = nil
+		t.initCollector() //TODO: rename .Close() to .Reset()?
 	}
 	if t.sortPerNibble {
 		for i := 0; i < len(t.nibbles); i++ {
@@ -1143,8 +1146,6 @@ func (t *Updates) Close() {
 func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
-		clear(t.keys)
-
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return fn(k, v, nil)
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1177,8 +1178,6 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		t.keys = nil
-		t.keys = make(map[string]struct{})
 		t.initCollector()
 	case ModeUpdate:
 		t.tree.Clear(true)
