@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -136,6 +137,7 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 	if err != nil {
 		return false, err
 	}
+	fmt.Println("isMyColumnDataAvailable", len(existingColumns), len(expectedCustodies))
 	return len(existingColumns) >= len(expectedCustodies), nil
 }
 
