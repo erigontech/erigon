@@ -576,33 +576,37 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.Unlock()
 	}
 
-	valWithPrevStep := dataWithPrevStep{data: v, prevStep: step, dir: get}
-	keyS := toStringZeroCopy(k)
-	var estSize int
-	if domain == kv.StorageDomain {
-		if old, ok := sd.storage.Set(keyS, valWithPrevStep); ok {
-			estSize = len(v) - len(old.data)
+	if false {
+		sd.muMaps.Lock()
+		defer sd.muMaps.Unlock()
+		valWithPrevStep := dataWithPrevStep{data: v, prevStep: step, dir: get}
+		keyS := toStringZeroCopy(k)
+		var estSize int
+		if domain == kv.StorageDomain {
+			if old, ok := sd.storage.Set(keyS, valWithPrevStep); ok {
+				estSize = len(v) - len(old.data)
+			} else {
+				estSize = len(k) + len(v)
+			}
 		} else {
-			estSize = len(k) + len(v)
+			if old, ok := sd.domains[domain][keyS]; ok {
+				estSize += len(v) - len(old.data)
+			} else {
+				estSize += len(k) + len(v)
+			}
+			sd.domains[domain][keyS] = valWithPrevStep
 		}
-	} else {
-		if old, ok := sd.domains[domain][keyS]; ok {
-			estSize += len(v) - len(old.data)
-		} else {
-			estSize += len(k) + len(v)
-		}
-		sd.domains[domain][keyS] = valWithPrevStep
-	}
 
-	sd.metrics.CacheGetSize += estSize
-	sd.metrics.CacheGetCount++
-	if dm, ok := sd.metrics.Domains[domain]; ok {
-		dm.CacheGetSize += estSize
-		dm.CacheGetCount++
-	} else {
-		sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
-			CacheGetCount: 1,
-			CacheGetSize:  estSize,
+		sd.metrics.CacheGetSize += estSize
+		sd.metrics.CacheGetCount++
+		if dm, ok := sd.metrics.Domains[domain]; ok {
+			dm.CacheGetSize += estSize
+			dm.CacheGetCount++
+		} else {
+			sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
+				CacheGetCount: 1,
+				CacheGetSize:  estSize,
+			}
 		}
 	}
 
@@ -622,7 +626,7 @@ func (sd *SharedDomains) LogMetrics() []any {
 	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
 			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
-			"gets", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
 			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
