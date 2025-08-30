@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -680,6 +681,11 @@ var (
 		Name:  "snap.skip-state-snapshot-download",
 		Usage: "Skip state download and start from genesis block",
 		Value: false,
+	}
+	SnapStepsInFrozenFilesFlag = cli.Uint64Flag{
+		Name:  "snap.max-frozen-steps",
+		Usage: "Number of steps per frozen state snapshot file",
+		Value: config3.DefaultStepsInFrozenFile,
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
@@ -1976,6 +1982,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.ProduceE2 = !ctx.Bool(SnapStopFlag.Name)
 	cfg.Snapshot.ProduceE3 = !ctx.Bool(SnapStateStopFlag.Name)
 	cfg.Snapshot.DisableDownloadE3 = ctx.Bool(SnapSkipStateSnapshotDownloadFlag.Name)
+	if ctx.IsSet(SnapStepsInFrozenFilesFlag.Name) {
+		config3.SetStepsInFrozenFile(ctx.Uint64(SnapStepsInFrozenFilesFlag.Name))
+	}
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
