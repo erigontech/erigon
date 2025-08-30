@@ -250,7 +250,7 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 				if r, _ := tm.findSkip(name); r != "" {
 					t.Skip(r)
 				}
-				//runTestFunc(runTest, t, name, m, key)
+				runTestFunc(runTest, t, name, m, key)
 			})
 		}
 	}
