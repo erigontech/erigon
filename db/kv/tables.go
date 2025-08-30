@@ -315,7 +315,6 @@ var ChaindataTables = []string{
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
-	IncarnationMap,
 	SyncStageProgress,
 	PlainState,
 	ChangeSets3,
@@ -953,9 +952,4 @@ const (
 	*/
 	E2AccountsHistory = "AccountHistory"
 	E2StorageHistory  = "StorageHistory"
-
-	// IncarnationMap for deleted accounts
-	//key - address
-	//value - incarnation of account when it was last deleted
-	IncarnationMap = "IncarnationMap"
 )
