@@ -409,7 +409,7 @@ func (a *ApiHandler) produceBlock(
 	// wait for both tasks to finish
 	wg.Wait()
 
-	if localErr != nil {
+	if localErr != nil && builderErr != nil {
 		// if we failed to locally produce the beacon body, we should not proceed with the block production
 		log.Error("Failed to produce beacon body", "err", localErr, "slot", targetSlot)
 		return nil, localErr
@@ -446,7 +446,7 @@ func (a *ApiHandler) produceBlock(
 	execValue := new(big.Int).SetUint64(localExecValue)
 	builderValue := builderHeader.BlockValue()
 	boostFactorBig := new(big.Int).SetUint64(boostFactor)
-	useLocalExec := new(big.Int).Mul(execValue, big.NewInt(100)).Cmp(new(big.Int).Mul(builderValue, boostFactorBig)) >= 0
+	useLocalExec := new(big.Int).Mul(execValue, big.NewInt(100)).Cmp(new(big.Int).Mul(builderValue, boostFactorBig)) >= 0 && localErr == nil
 	log.Info("Check mev bid", "useLocalExec", useLocalExec, "execValue", execValue, "builderValue", builderValue, "boostFactor", boostFactor, "targetSlot", targetSlot)
 
 	if useLocalExec {

@@ -138,7 +138,7 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 	}
 	if len(expectedCustodies) == 0 {
 		// this case is not reasonable due to empty node ID
-		return len(existingColumns) == int(d.beaconConfig.NumberOfColumns), nil
+		return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns), nil
 	}
 	nowCustodies := map[cltypes.CustodyIndex]bool{}
 	for _, column := range existingColumns {
@@ -146,7 +146,7 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 			nowCustodies[column] = true
 		}
 	}
-	return len(nowCustodies) == len(expectedCustodies), nil
+	return len(nowCustodies) >= len(expectedCustodies), nil
 }
 
 func (d *peerdas) resubscribeGossip() {
