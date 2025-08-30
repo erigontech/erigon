@@ -29,6 +29,7 @@ func TestTransaction(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	t.Parallel()
 
 	txt := new(testMatcher)
 
@@ -38,7 +39,6 @@ func TestTransaction(t *testing.T) {
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
-		t.Parallel()
 		cfg := chainspec.Mainnet.Config
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)
