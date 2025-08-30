@@ -62,7 +62,7 @@ jobs:
               export tag_name='docker_pectra';
               export keep_images=5;
               export latest_suffix='';
-              export binaries="erigon caplin diag devnet downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
+              export binaries="erigon caplin diag downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
               ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:

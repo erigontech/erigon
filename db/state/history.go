@@ -137,12 +137,8 @@ func (h *History) openList(idxFiles, histNames []string) error {
 	return nil
 }
 
-func (h *History) openFolder() error {
-	idxFiles, histFiles, _, err := h.fileNamesOnDisk()
-	if err != nil {
-		return err
-	}
-	return h.openList(idxFiles, histFiles)
+func (h *History) openFolder(scanDirsRes *ScanDirsResult) error {
+	return h.openList(scanDirsRes.iiFiles, scanDirsRes.historyFiles)
 }
 
 func (h *History) scanDirtyFiles(fileNames []string) {
@@ -152,7 +148,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	if h.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range scanDirtyFiles(fileNames, h.stepSize, h.FilenameBase, "v", h.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.FilenameBase, "v", h.logger) {
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}

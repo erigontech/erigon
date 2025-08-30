@@ -231,16 +231,12 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	d.closeFilesAfterStep(d.dirtyFilesEndTxNumMinimax() / d.stepSize)
 }
 
-func (d *Domain) openFolder() error {
+func (d *Domain) openFolder(r *ScanDirsResult) error {
 	if d.Disable {
 		return nil
 	}
 
-	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
-	if err != nil {
-		return fmt.Errorf("Domain(%s).openFolder: %w", d.FilenameBase, err)
-	}
-	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
+	if err := d.OpenList(r.iiFiles, r.historyFiles, r.domainFiles); err != nil {
 		return err
 	}
 	return nil
@@ -303,7 +299,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	l := scanDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
+	l := filterDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
 		dirtyFile.frozen = false
 
