@@ -874,22 +874,6 @@ func (sdb *IntraBlockState) SetStorage(addr common.Address, storage Storage) err
 	return nil
 }
 
-// SetIncarnation sets incarnation for account if account exists
-func (sdb *IntraBlockState) SetIncarnation(addr common.Address, incarnation uint64) error {
-	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("%d (%d.%d) SetIncarnation %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, incarnation)
-	}
-
-	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-	if stateObject != nil {
-		stateObject.setIncarnation(incarnation)
-	}
-	return nil
-}
-
 func (sdb *IntraBlockState) GetIncarnation(addr common.Address) (uint64, error) {
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
