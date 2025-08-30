@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -60,9 +61,17 @@ func (l *KvList) Swap(i, j int) {
 	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
+type iodir int
+
+const (
+	get iodir = iota
+	put
+)
+
 type dataWithPrevStep struct {
 	data     []byte
 	prevStep kv.Step
+	dir      iodir
 }
 
 type SharedDomainsMetrics struct {
@@ -74,6 +83,10 @@ type SharedDomainsMetrics struct {
 type DomainIOMetrics struct {
 	CacheReadCount    int64
 	CacheReadDuration time.Duration
+	CacheGetCount     int64
+	CachePutCount     int64
+	CacheGetSize      int
+	CachePutSize      int
 	DbReadCount       int64
 	DbReadDuration    time.Duration
 	FileReadCount     int64
@@ -89,7 +102,6 @@ type SharedDomains struct {
 
 	txNum             uint64
 	blockNum          atomic.Uint64
-	estSize           int
 	trace             bool //nolint
 	commitmentCapture bool
 	commitProgress    chan *commitment.CommitProgress
@@ -133,7 +145,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	}
 
 	tv := commitment.VariantHexPatriciaTrie
-	if ExperimentalConcurrentCommitment {
+	if statecfg.ExperimentalConcurrentCommitment {
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
@@ -239,26 +251,51 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	sd.estSize = 0
+	sd.metrics.CacheGetSize = 0
+	sd.metrics.CachePutSize = 0
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize), dir: put}
 	if domain == kv.StorageDomain {
+		var estSize int
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
-			sd.estSize += len(val) - len(old.data)
+			estSize = len(val) - len(old.data)
 		} else {
-			sd.estSize += len(key) + len(val)
+			estSize = len(key) + len(val)
+		}
+		sd.metrics.CachePutSize += estSize
+		sd.metrics.CachePutCount++
+		if dm, ok := sd.metrics.Domains[kv.StorageDomain]; ok {
+			dm.CachePutSize += estSize
+			dm.CachePutCount++
+		} else {
+			sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
+				CachePutCount: 1,
+				CachePutSize:  estSize,
+			}
 		}
 		return
 	}
 
+	var estSize int
 	if old, ok := sd.domains[domain][key]; ok {
-		sd.estSize += len(val) - len(old.data)
+		estSize += len(val) - len(old.data)
 	} else {
-		sd.estSize += len(key) + len(val)
+		estSize += len(key) + len(val)
+	}
+	sd.metrics.CachePutSize += estSize
+	sd.metrics.CachePutCount++
+	if dm, ok := sd.metrics.Domains[kv.StorageDomain]; ok {
+		dm.CachePutSize += estSize
+		dm.CachePutCount++
+	} else {
+		sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
+			CachePutCount: 1,
+			CachePutSize:  estSize,
+		}
 	}
 	sd.domains[domain][key] = valWithPrevStep
 }
@@ -286,59 +323,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.estSize) * 4
-}
-
-const CodeSizeTableFake = "CodeSize"
-
-func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
-	sd.muMaps.RLock()
-	defer sd.muMaps.RUnlock()
-
-	for table, list := range readLists {
-		switch table {
-		case kv.AccountsDomain.String():
-			m := sd.domains[kv.AccountsDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case kv.CodeDomain.String():
-			m := sd.domains[kv.CodeDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case kv.StorageDomain.String():
-			m := sd.storage
-			for i, key := range list.Keys {
-				if val, ok := m.Get(key); ok {
-					if !bytes.Equal(list.Vals[i], val.data) {
-						return false
-					}
-				}
-			}
-		case CodeSizeTableFake:
-			m := sd.domains[kv.CodeDomain]
-			for i, key := range list.Keys {
-				if val, ok := m[key]; ok {
-					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val.data)) {
-						return false
-					}
-				}
-			}
-		default:
-			panic(table)
-		}
-	}
-
-	return true
+	return uint64((sd.metrics.CachePutSize * 4) + (sd.metrics.CacheGetSize * 2))
 }
 
 func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
@@ -591,6 +576,36 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		sd.metrics.Unlock()
 	}
 
+	valWithPrevStep := dataWithPrevStep{data: v, prevStep: step, dir: get}
+	keyS := toStringZeroCopy(k)
+	var estSize int
+	if domain == kv.StorageDomain {
+		if old, ok := sd.storage.Set(keyS, valWithPrevStep); ok {
+			estSize = len(v) - len(old.data)
+		} else {
+			estSize = len(k) + len(v)
+		}
+	} else {
+		if old, ok := sd.domains[domain][keyS]; ok {
+			estSize += len(v) - len(old.data)
+		} else {
+			estSize += len(k) + len(v)
+		}
+		sd.domains[domain][keyS] = valWithPrevStep
+	}
+
+	sd.metrics.CacheGetSize += estSize
+	sd.metrics.CacheGetCount++
+	if dm, ok := sd.metrics.Domains[domain]; ok {
+		dm.CacheGetSize += estSize
+		dm.CacheGetCount++
+	} else {
+		sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
+			CacheGetCount: 1,
+			CacheGetSize:  estSize,
+		}
+	}
+
 	return v, step, nil
 }
 
@@ -605,7 +620,10 @@ func (sd *SharedDomains) LogMetrics() []any {
 	defer sd.metrics.RUnlock()
 
 	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
-		metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
+		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
+			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"gets", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
 	if readCount := sd.metrics.DbReadCount; readCount > 0 {

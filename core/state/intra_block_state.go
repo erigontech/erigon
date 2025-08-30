@@ -392,7 +392,7 @@ func (sdb *IntraBlockState) Exist(addr common.Address) (exists bool, err error) 
 		return false, err
 	}
 
-	destructed, _, _, err := versionedRead[bool](sdb, addr, SelfDestructPath, common.Hash{}, false, false, nil, nil)
+	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, common.Hash{}, false, false, nil, nil)
 	if err != nil {
 		return false, err
 	}
@@ -424,7 +424,7 @@ func (sdb *IntraBlockState) Empty(addr common.Address) (empty bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	destructed, _, _, err := versionedRead[bool](sdb, addr, SelfDestructPath, common.Hash{}, false, false, nil, nil)
+	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, common.Hash{}, false, false, nil, nil)
 	if err != nil {
 		return false, err
 	}
@@ -583,13 +583,13 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 				return 0, nil
 			}
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
-				sdb.stateReader.SetTrace(true)
+				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
 			readStart := time.Now()
 			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
 			sdb.codeReadDuration += time.Since(readStart)
 			sdb.codeReadCount++
-			sdb.stateReader.SetTrace(false)
+			sdb.stateReader.SetTrace(false, "")
 			if err != nil {
 				return l, err
 			}
@@ -759,13 +759,13 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 				prev := new(uint256.Int)
 
 				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
-					sdb.stateReader.SetTrace(true)
+					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 				}
 				readStart := time.Now()
 				account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
 				sdb.accountReadDuration += time.Since(readStart)
 				sdb.accountReadCount++
-				sdb.stateReader.SetTrace(false)
+				sdb.stateReader.SetTrace(false, "")
 				if account != nil {
 					prev.Add(&account.Balance, &bi.increase)
 				} else {
@@ -840,7 +840,7 @@ func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage
 		return nil, UnknownSource, UnknownVersion, nil
 	}
 
-	readAccount, source, version, err := versionedRead[*accounts.Account](sdb, addr, AddressPath, common.Hash{}, false, nil,
+	readAccount, source, version, err := versionedRead(sdb, addr, AddressPath, common.Hash{}, false, nil,
 		func(v *accounts.Account) *accounts.Account { return v }, nil)
 
 	if err != nil {
@@ -850,14 +850,14 @@ func (sdb *IntraBlockState) getVersionedAccount(addr common.Address, readStorage
 	if readAccount == nil {
 		if readStorage {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
-				sdb.stateReader.SetTrace(true)
+				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
 			readStart := time.Now()
 			readAccount, err = sdb.stateReader.ReadAccountData(addr)
 			sdb.accountReadDuration += time.Since(readStart)
 			sdb.accountReadCount++
 			source = StorageRead
-			sdb.stateReader.SetTrace(false)
+			sdb.stateReader.SetTrace(false, "")
 		}
 
 		if readAccount == nil || err != nil {
@@ -893,7 +893,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr common.Address, readAcc
 		}
 	}
 
-	nonce, nsource, nversion, err := versionedRead[uint64](sdb, addr, NoncePath, common.Hash{}, false, account.Nonce, nil, nil)
+	nonce, nsource, nversion, err := versionedRead(sdb, addr, NoncePath, common.Hash{}, false, account.Nonce, nil, nil)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1237,13 +1237,13 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
-		sdb.stateReader.SetTrace(true)
+		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}
 	readStart := time.Now()
 	readAccount, err := sdb.stateReader.ReadAccountData(addr)
 	sdb.accountReadDuration += time.Since(readStart)
 	sdb.accountReadCount++
-	sdb.stateReader.SetTrace(false)
+	sdb.stateReader.SetTrace(false, "")
 
 	accountSource := StorageRead
 	accountVersion := sdb.Version()
@@ -1260,7 +1260,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 				return nil, err
 			}
 
-			destructed, _, _, err := versionedRead[bool](sdb, addr, SelfDestructPath, common.Hash{}, false, false, nil, nil)
+			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, common.Hash{}, false, false, nil, nil)
 
 			if destructed || err != nil {
 				sdb.setStateObject(addr, &stateObject{
@@ -1398,7 +1398,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		if readAccount != nil {
 			account := readAccount
 
-			destructed, _, _, err := versionedRead[bool](sdb, addr, SelfDestructPath, common.Hash{}, false, false,
+			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, common.Hash{}, false, false,
 				func(v bool) bool { return v }, nil)
 
 			if err != nil {

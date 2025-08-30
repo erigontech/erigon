@@ -211,8 +211,8 @@ func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap,
 	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
 }
 
-func (vr *versionedStateReader) SetTrace(trace bool) {
-	vr.stateReader.SetTrace(trace)
+func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
+	vr.stateReader.SetTrace(trace, tracePrefix)
 }
 
 func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -457,7 +457,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 					fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
 				}
 
-				return pr.Val.(T), ReadSetRead, vr.Version, nil
+				return pr.Val.(T), vr.Source, vr.Version, nil
 			}
 
 			if vr.Version.TxIndex > s.dep {
@@ -471,9 +471,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 			if s.versionedReads == nil {
 				s.versionedReads = ReadSet{}
 			}
-			if s.blockNum == 74404031 && s.txIndex == 92 {
-				fmt.Printf("%d (%d.%d) Set 1: %#v\n", s.blockNum, s.txIndex, s.version, vr)
-			}
+
 			s.versionedReads.Set(vr)
 
 			panic(ErrDependency)
@@ -519,6 +517,26 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 					return pr.Val.(T), ReadSetRead, pr.Version, nil
 				}
+
+				if pr.Source == MapRead {
+					if path == BalancePath || path == NoncePath || path == CodeHashPath {
+						if _, source, version, _ := versionedRead(s, addr, AddressPath, common.Hash{}, false, nil,
+							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
+							return pr.Val.(T), ReadSetRead, pr.Version, nil
+						}
+					}
+
+					// a previous dependency has been removed from the map
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+						fmt.Printf("%d (%d.%d) RM DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
+					}
+
+					if pr.Version.TxIndex > s.dep {
+						s.dep = pr.Version.TxIndex
+					}
+
+					panic(ErrDependency)
+				}
 			}
 		}
 
@@ -530,7 +548,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		var err error
 
 		if path == BalancePath || path == NoncePath || path == CodeHashPath {
-			readAccount, source, version, err := versionedRead[*accounts.Account](s, addr, AddressPath, common.Hash{}, false, nil,
+			readAccount, source, version, err := versionedRead(s, addr, AddressPath, common.Hash{}, false, nil,
 				func(v *accounts.Account) *accounts.Account { return v }, nil)
 
 			if err != nil {
@@ -557,7 +575,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		}
 
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, valueString(path, v))
+			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		vr.Val = copyV(v)

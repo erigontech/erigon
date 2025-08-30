@@ -3,6 +3,7 @@ package version
 import (
 	"errors"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -33,6 +34,26 @@ var (
 
 func (v Version) Less(rhd Version) bool {
 	return v.Major < rhd.Major || v.Major == rhd.Major && v.Minor < rhd.Minor
+}
+
+func (v Version) Greater(rhd Version) bool {
+	return !v.Less(rhd) && !v.Eq(rhd)
+}
+
+func (v Version) LessOrEqual(rhd Version) bool {
+	return !v.Greater(rhd)
+}
+
+func (v Version) GreaterOrEqual(rhd Version) bool {
+	return !v.Less(rhd)
+}
+
+func (v Version) BumpMinor() Version {
+	return Version{v.Major, v.Minor + 1}
+}
+
+func (v Version) BumpMajor() Version {
+	return Version{v.Major + 1, 0}
 }
 
 func (v Version) Cmp(rhd Version) int {
@@ -156,6 +177,20 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	return matches[0], ver, true, nil
 }
 
+func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {
+	_, fileVer, ok, err := FindFilesWithVersionsByPattern(pattern)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("file with this pattern not found")
+	}
+	if fileVer.Less(minSup) {
+		return fmt.Errorf("file version %s is less than supported version %s", fileVer.String(), minSup.String())
+	}
+	return nil
+}
+
 func ReplaceVersionWithMask(path string) (string, error) {
 	_, fName := filepath.Split(path)
 
@@ -167,4 +202,17 @@ func ReplaceVersionWithMask(path string) (string, error) {
 	fName = strings.ReplaceAll(fName, ver.String(), "*")
 
 	return strings.ReplaceAll(path, fNameOld, fName), nil
+}
+
+func (v *Version) UnmarshalYAML(node *yaml.Node) error {
+	var s string
+	if err := node.Decode(&s); err != nil {
+		return err
+	}
+	ver, err := ParseVersion(s)
+	if err != nil {
+		return err
+	}
+	*v = ver
+	return nil
 }

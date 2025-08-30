@@ -29,12 +29,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -256,7 +256,7 @@ func TestDump(t *testing.T) {
 
 			logger := log.New()
 
-			tmpDir, snapDir := t.TempDir(), t.TempDir()
+			tmpDir, snapDir := m.Dirs.Tmp, m.Dirs.Snap
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 

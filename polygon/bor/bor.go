@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -52,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -182,6 +182,10 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
+	// Since there is only one producer in veblop, we don't need to add producer delay and backup multiplier
+	if c.IsVeBlop(number) {
+		return delay
+	}
 	if c.IsSprintStart(number) {
 		delay = c.CalculateProducerDelay(number)
 	}
@@ -817,11 +821,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// check and commit span
-			if err := c.checkAndCommitSpan(header, syscall); err != nil {
-				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
-				c.logger.Error("[bor] committing span", "err", err)
-				return nil, err
+			// post VeBlop spans won't be committed to smart contract
+			if !c.config.IsVeBlop(header.Number.Uint64()) {
+				// check and commit span
+				if err := c.checkAndCommitSpan(header, syscall); err != nil {
+					err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
+					c.logger.Error("[bor] committing span", "err", err)
+					return nil, err
+				}
 			}
 
 			// commit states
@@ -879,11 +886,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// check and commit span
-			if err := c.checkAndCommitSpan(header, syscall); err != nil {
-				err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
-				c.logger.Error("[bor] committing span", "err", err)
-				return nil, nil, err
+			// Post VeBlop spans won't be commited to smart contract
+			if !c.config.IsVeBlop(header.Number.Uint64()) {
+				// check and commit span
+				if err := c.checkAndCommitSpan(header, syscall); err != nil {
+					err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
+					c.logger.Error("[bor] committing span", "err", err)
+					return nil, nil, err
+				}
 			}
 			// commit states
 			if err := c.CommitStates(header, cx, syscall, true); err != nil {

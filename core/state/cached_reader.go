@@ -36,8 +36,8 @@ func NewCachedReader(r StateReader, cache *shards.StateCache) *CachedReader {
 	return &CachedReader{r: r, cache: cache}
 }
 
-func (cr *CachedReader) SetTrace(trace bool) {
-	cr.r.SetTrace(true)
+func (cr *CachedReader) SetTrace(trace bool, tracePrefix string) {
+	cr.r.SetTrace(true, tracePrefix)
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -59,13 +59,13 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
-	cfg.salt.Store(&salt)
-	cfg.Accessors = AccessorHashMap
-	ii, err := NewInvertedIndex(cfg, aggStep, logger)
+	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, Version: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg.Accessors = statecfg.AccessorHashMap
+	ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
 	require.NoError(tb, err)
-	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
+	ii.salt.Store(&salt)
+	ii.DisableFsync()
 	return db, ii
 }
 
@@ -92,7 +92,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		icc, err := tx.CursorDupSort(ii.keysTable)
+		icc, err := tx.CursorDupSort(ii.KeysTable)
 		require.NoError(t, err)
 
 		count := 0
@@ -177,7 +177,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		it.Close()
 
 		// straight from pruned - not empty
-		icc, err := tx.CursorDupSort(ii.keysTable)
+		icc, err := tx.CursorDupSort(ii.KeysTable)
 		require.NoError(t, err)
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
@@ -189,7 +189,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		icc.Close()
 
 		// check second table
-		icc, err = tx.CursorDupSort(ii.valuesTable)
+		icc, err = tx.CursorDupSort(ii.ValuesTable)
 		require.NoError(t, err)
 		key, txn, err := icc.First()
 		t.Logf("key: %x, txn: %x", key, txn)
@@ -347,7 +347,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	for _, table := range []string{ii.keysTable, ii.valuesTable} {
+	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
 		var cur kv.Cursor
 		cur, err = tx.Cursor(table)
 		require.NoError(t, err)
@@ -607,13 +607,13 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	// Recreate InvertedIndex to scan the files
 	salt := uint32(1)
-	cfg := ii.iiCfg
-	cfg.salt.Store(&salt)
+	cfg := ii.InvIdxCfg
 
 	var err error
-	ii, err = NewInvertedIndex(cfg, 16, logger)
+	ii, err = NewInvertedIndex(cfg, 16, ii.dirs, logger)
 	require.NoError(err)
 	defer ii.Close()
+	ii.salt.Store(&salt)
 	err = ii.openFolder()
 	require.NoError(err)
 

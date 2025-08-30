@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -90,8 +91,11 @@ type executor interface {
 	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
 	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
 
+	lastCommittedBlockNum() uint64
+	lastCommittedTxNum() uint64
+
 	LogExecuted()
-	LogCommitted(commitStart time.Time, stepsInDb float64)
+	LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
 	LogComplete(stepsInDb float64)
 }
 
@@ -119,6 +123,7 @@ type blockResult struct {
 
 type txResult struct {
 	blockNum     uint64
+	txCount      uint64
 	txNum        uint64
 	gasUsed      int64
 	receipts     []*types.Receipt
@@ -628,7 +633,9 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
-	te.doms.ClearRam(false)
+	if !te.inMemExec {
+		te.doms.ClearRam(false)
+	}
 
 	return tx, t2, nil
 }
@@ -994,6 +1001,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask := be.tasks[tx].Task
 			txResult := be.results[tx]
 
+			applyResult.txCount++
 			applyResult.txNum = txTask.Version().TxNum
 			if txResult.Receipt != nil {
 				applyResult.gasUsed += int64(txResult.Receipt.GasUsed)
@@ -1009,7 +1017,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.publishTasks.markComplete(tx)
 		}
 
-		if applyResult.txNum > 0 {
+		if applyResult.txCount > 0 {
 			pe.executedGas.Add(int64(applyResult.gasUsed))
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if stateWriter != nil {
@@ -1177,8 +1185,11 @@ func (pe *parallelExecutor) LogExecuted() {
 	}
 }
 
-func (pe *parallelExecutor) LogCommitted(commitStart time.Time, stepsInDb float64) {
-	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb)
+func (pe *parallelExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	pe.committedGas += int64(committedGas)
+	pe.txExecutor.lastCommittedBlockNum += committedBlocks
+	pe.txExecutor.lastCommittedTxNum += committedTransactions
+	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -1195,6 +1206,14 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
 		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
 	}
+}
+
+func (pe *parallelExecutor) lastCommittedBlockNum() uint64 {
+	return pe.txExecutor.lastCommittedBlockNum
+}
+
+func (pe *parallelExecutor) lastCommittedTxNum() uint64 {
+	return pe.txExecutor.lastCommittedTxNum
 }
 
 func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *StageState, applyTx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, error) {

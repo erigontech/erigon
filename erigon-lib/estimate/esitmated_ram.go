@@ -20,8 +20,6 @@ import (
 	"runtime"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon-lib/mmap"
 )
 
 type EstimatedRamPerWorker datasize.ByteSize
@@ -44,7 +42,7 @@ func (r EstimatedRamPerWorker) WorkersQuarter() int {
 // WorkersByRAMOnly - return max workers amount based on total Memory and estimated RAM per worker
 func (r EstimatedRamPerWorker) WorkersByRAMOnly() int {
 	// 50% of TotalMemory. Better don't count on 100% because OOM Killer may have aggressive defaults and other software may need RAM
-	return max(1, int((mmap.TotalMemory()/2)/uint64(r)))
+	return max(1, int((TotalMemory()/2)/uint64(r)))
 }
 
 const (

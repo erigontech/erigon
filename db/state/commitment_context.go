@@ -246,19 +246,19 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	if blockNum == 0 && txNum == 0 {
 		return 0, 0, true, nil
 	}
-
-	newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	if bytes.Equal(newRh, empty.RootHash.Bytes()) {
-		sdc.sharedDomains.SetBlockNum(0)
-		sdc.sharedDomains.SetTxNum(0)
-		return 0, 0, false, err
-	}
-	if sdc.trace {
-		fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
-	}
+	//
+	//newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
+	//if err != nil {
+	//	return 0, 0, false, err
+	//}
+	//if bytes.Equal(newRh, empty.RootHash.Bytes()) {
+	//	sdc.sharedDomains.SetBlockNum(0)
+	//	sdc.sharedDomains.SetTxNum(0)
+	//	return 0, 0, false, err
+	//}
+	//if sdc.trace {
+	//	fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
+	//}
 	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
 		return 0, 0, false, err
 	}

@@ -25,9 +25,9 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/rlp"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 )
 

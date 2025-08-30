@@ -81,7 +81,7 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 	}, nil
 }
 
-func (s *Stateless) SetTrace(trace bool) {
+func (s *Stateless) SetTrace(trace bool, _ string) {
 	s.trace = trace
 }
 

@@ -93,12 +93,17 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 
 	if block.Transactions().Len() > 0 {
 		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
-			"block", block.NumberU64(),
-			"transactions", block.Transactions().Len(),
-			"gasUsed", block.GasUsed(),
+			"blockNum", block.NumberU64(),
+			"nonce", block.Nonce(),
+			"hash", block.Hash(),
 			"gasLimit", block.GasLimit(),
-			"difficulty", block.Difficulty(),
-			"header", block.Header(),
+			"gasUsed", block.GasUsed(),
+			"blobGasUsed", block.Header().BlobGasUsed,
+			"transactionsCount", block.Transactions().Len(),
+			"coinbase", block.Coinbase(),
+			"stateRoot", block.Root(),
+			"withdrawalsHash", block.WithdrawalsHash(),
+			"requestsHash", block.RequestsHash(),
 		)
 	}
 	// interrupt aborts the in-flight sealing task.

@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
@@ -2087,7 +2087,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
 				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
 		default:
 		}
 
@@ -2215,6 +2214,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
 				append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
 					hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
+			if progress != nil {
+				progress <- &CommitProgress{
+					KeyIndex:    ki,
+					UpdateCount: updatesCount,
+					Metrics:     hph.metrics.AsValues(),
+				}
+			}
 		default:
 		}
 
@@ -2250,10 +2256,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			return fmt.Errorf("followAndUpdate: %w", err)
 		}
 		ki++
-		if progress != nil {
+		if progress != nil && ki == updatesCount {
 			progress <- &CommitProgress{
 				KeyIndex:    ki,
 				UpdateCount: updatesCount,
+				Metrics:     hph.metrics.AsValues(),
 			}
 		}
 		return nil
@@ -2684,6 +2691,25 @@ func HexTrieExtractStateRoot(enc []byte) ([]byte, error) {
 		return nil, err
 	}
 	return root.hash[:], nil
+}
+
+func HexTrieStateToShortString(enc []byte) (string, error) {
+	if len(enc) < 18 {
+		return "", fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)
+	}
+	txn := binary.BigEndian.Uint64(enc)
+	bn := binary.BigEndian.Uint64(enc[8:])
+	sl := binary.BigEndian.Uint16(enc[16:18])
+
+	var s state
+	if err := s.Decode(enc[18 : 18+sl]); err != nil {
+		return "", err
+	}
+	root := new(cell)
+	if err := root.Decode(s.Root); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("block: %d txn: %d rootHash: %x", bn, txn, root.hash[:]), nil
 }
 
 func HexTrieStateToString(enc []byte) (string, error) {

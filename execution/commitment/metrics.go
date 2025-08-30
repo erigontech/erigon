@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,9 +51,45 @@ type Metrics struct {
 	spentProcessing time.Duration
 }
 
+type MetricValues struct {
+	*sync.RWMutex
+	Accounts        map[string]*AccountStats
+	Updates         uint64
+	AddressKeys     uint64
+	StorageKeys     uint64
+	LoadBranch      uint64
+	LoadAccount     uint64
+	LoadStorage     uint64
+	UpdateBranch    uint64
+	LoadDepths      [10]uint64
+	Unfolds         uint64
+	SpentUnfolding  time.Duration
+	SpentFolding    time.Duration
+	SpentProcessing time.Duration
+}
+
 func NewMetrics() *Metrics {
 	return &Metrics{
 		Accounts: NewAccounts(),
+	}
+}
+
+func (m *Metrics) AsValues() MetricValues {
+	return MetricValues{
+		RWMutex:         &m.Accounts.m,
+		Accounts:        m.Accounts.AccountStats,
+		Updates:         m.updates.Load(),
+		AddressKeys:     m.addressKeys.Load(),
+		StorageKeys:     m.storageKeys.Load(),
+		LoadBranch:      m.loadBranch.Load(),
+		LoadAccount:     m.loadAccount.Load(),
+		LoadStorage:     m.loadStorage.Load(),
+		UpdateBranch:    m.updateBranch.Load(),
+		LoadDepths:      m.loadDepths,
+		Unfolds:         m.unfolds.Load(),
+		SpentUnfolding:  m.spentUnfolding,
+		SpentFolding:    m.spentFolding,
+		SpentProcessing: m.spentProcessing,
 	}
 }
 
@@ -70,10 +107,9 @@ func (m *Metrics) logMetrics() []any {
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
 		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
+		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
+		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
 	}
-
-	//logger.Log(level, prefix+"sccount progress")
 }
 
 func (m *Metrics) Headers() []string {
@@ -252,25 +288,24 @@ type AccountStats struct {
 }
 
 type AccountMetrics struct {
-	//m sync.Mutex
+	m sync.RWMutex
 	// will be separate value for each key in parallel processing
 	AccountStats map[string]*AccountStats
 }
 
 func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
-	//am.m.Lock()
-	//defer am.m.Unlock()
-
 	var addr string
 	if len(plainKey) > 0 {
 		addr = toStringZeroCopy(plainKey[:min(length.Addr, len(plainKey))])
 	}
+	am.m.Lock()
+	defer am.m.Unlock()
 	as, ok := am.AccountStats[addr]
 	if !ok {
 		as = &AccountStats{}
+		am.AccountStats[addr] = as
 	}
 	fn(as)
-	am.AccountStats[addr] = as
 }
 
 func (am *AccountMetrics) Headers() []string {
@@ -288,9 +323,8 @@ func (am *AccountMetrics) Headers() []string {
 }
 
 func (am *AccountMetrics) Values() [][]string {
-	//am.m.Lock()
-	//defer am.m.Unlock()
-
+	am.m.Lock()
+	defer am.m.Unlock()
 	values := make([][]string, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
 	vi := 1
 	for addr, stat := range am.AccountStats {
@@ -311,8 +345,8 @@ func (am *AccountMetrics) Values() [][]string {
 }
 
 func (am *AccountMetrics) Reset() {
-	//am.m.Lock()
-	//defer am.m.Unlock()
+	am.m.Lock()
+	defer am.m.Unlock()
 	am.AccountStats = make(map[string]*AccountStats)
 }
 

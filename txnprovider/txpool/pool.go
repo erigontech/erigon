@@ -780,6 +780,12 @@ func (p *TxPool) Started() bool {
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 	p.lock.Lock()
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
+		select {
+		case <-ctx.Done():
+			return false, 0, ctx.Err()
+		default:
+			// continue
+		}
 		p.logger.Debug("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 		p.lastSeenCond.Wait()
 	}
@@ -977,10 +983,10 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	}
 }
 
-func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
-	blobs := make([]gokzg4844.BlobRef, len(_blobs))
+func toBlobs(_blobs [][]byte) []*gokzg4844.Blob {
+	blobs := make([]*gokzg4844.Blob, len(_blobs))
 	for i, _blob := range _blobs {
-		blobs[i] = _blob
+		blobs[i] = (*gokzg4844.Blob)(_blob)
 	}
 	return blobs
 }
@@ -2193,6 +2199,11 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 func (p *TxPool) Run(ctx context.Context) error {
 	defer p.logger.Info("[txpool] stopped")
 	defer p.poolDB.Close()
+	defer func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast() // to unblock .best() wait on cond
+		p.lock.Unlock()
+	}()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()
 

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -162,7 +163,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
 
 	ibs.SetTrace(txTask.Trace)
-	rw.stateReader.SetTrace(txTask.Trace)
+	rw.stateReader.SetTrace(txTask.Trace, "")
 
 	rules := txTask.Rules()
 	header := txTask.Header
@@ -179,7 +180,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNumber() == 0 {
 			// Genesis block
-			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			_, ibs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
@@ -296,7 +297,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *exec.TxTask, tracer *calltrac
 			result.Err = outerErr
 			return result
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
 
 		result.ValidationResults = validationResults
 	}

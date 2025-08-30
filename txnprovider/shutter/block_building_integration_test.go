@@ -36,12 +36,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eth"
@@ -53,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -303,9 +303,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	shutterConfig.ChainId = chainIdU256
 	shutterConfig.SecondsPerSlot = 1
 	shutterConfig.EncryptedGasLimit = 3 * 21_000 // max 3 simple encrypted transfers per block
-	shutterConfig.SequencerContractAddress = crypto.CreateAddress(contractDeployer, 0).String()
-	shutterConfig.KeyperSetManagerContractAddress = crypto.CreateAddress(contractDeployer, 1).String()
-	shutterConfig.KeyBroadcastContractAddress = crypto.CreateAddress(contractDeployer, 2).String()
+	shutterConfig.SequencerContractAddress = types.CreateAddress(contractDeployer, 0).String()
+	shutterConfig.KeyperSetManagerContractAddress = types.CreateAddress(contractDeployer, 1).String()
+	shutterConfig.KeyBroadcastContractAddress = types.CreateAddress(contractDeployer, 2).String()
 
 	ethConfig := ethconfig.Config{
 		Dirs: dirs,
@@ -361,7 +361,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	bank.RegisterGenesisAlloc(genesis)
 	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
 	require.NoError(t, err)
-	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
+	_, gensisBlock, err := genesiswrite.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
 	require.NoError(t, err)
 	chainDB.Close()
 
