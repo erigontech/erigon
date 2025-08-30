@@ -146,18 +146,19 @@ func (opts MdbxOpts) Readonly(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx
 func (opts MdbxOpts) Accede(v bool) MdbxOpts    { return opts.boolToFlag(v, mdbx.Accede) }
 
 func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
-	if tmpDir != "" {
-		if err := os.MkdirAll(tmpDir, 0755); err != nil {
-			panic(err)
-		}
-	}
-	path, err := os.MkdirTemp(tmpDir, "erigon-memdb-")
-	if err != nil {
-		panic(err)
-	}
+	//if tmpDir != "" {
+	//	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	//		panic(err)
+	//	}
+	//}
+	//path, err := os.MkdirTemp(tmpDir, "erigon-memdb-")
+	//if err != nil {
+	//	panic(err)
+	//}
+	path := tmpDir
 	opts.path = path
 	opts.inMem = true
-	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
+	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.NoReadahead | mdbx.Exclusive | mdbx.NoSubdir
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(32 * datasize.MB)

@@ -23,6 +23,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
@@ -43,6 +45,42 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+func BenchmarkName(b *testing.B) {
+	b.Run("mdbx1", func(b *testing.B) {
+		b.ReportAllocs()
+		tmpdir := b.TempDir()
+		for i := 0; i < b.N; i++ {
+			genesisTmpDB := mdbx.New(kv.TemporaryDB, log.Root()).InMem(tmpdir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+			genesisTmpDB.Close()
+		}
+	})
+	b.Run("mdbx2", func(b *testing.B) {
+		b.ReportAllocs()
+		tmpdir := b.TempDir()
+		for i := 0; i < b.N; i++ {
+			genesisTmpDB := mdbx.New(kv.TemporaryDB, log.Root()).InMem(tmpdir).MapSize(128 * datasize.MB).GrowthStep(1 * datasize.MB).MustOpen()
+			genesisTmpDB.Close()
+		}
+	})
+	b.Run("mdbx3", func(b *testing.B) {
+		b.ReportAllocs()
+		tmpdir := b.TempDir()
+		for i := 0; i < b.N; i++ {
+			genesisTmpDB := mdbx.New(kv.TemporaryDB, log.Root()).InMem(tmpdir).MapSize(128 * datasize.MB).GrowthStep(4 * datasize.KB).MustOpen()
+			genesisTmpDB.Close()
+		}
+	})
+	b.Run("mdbx4", func(b *testing.B) {
+		b.ReportAllocs()
+		tmpdir := b.TempDir()
+		opts := mdbx.New(kv.TemporaryDB, log.Root()).InMem(tmpdir).MapSize(128 * datasize.MB).GrowthStep(4 * datasize.KB)
+		for i := 0; i < b.N; i++ {
+			genesisTmpDB := opts.MustOpen()
+			genesisTmpDB.Close()
+		}
+	})
+}
 
 func TestGenesisBlockHashes(t *testing.T) {
 	if testing.Short() {
