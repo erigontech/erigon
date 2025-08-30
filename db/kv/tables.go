@@ -30,11 +30,6 @@ import (
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
 var DBSchemaVersion = types.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
-// PlainContractCode -
-// key - address+incarnation
-// value - code hash
-const PlainContractCode = "PlainCodeHash"
-
 const ChangeSets3 = "ChangeSets3"
 
 const (
@@ -323,7 +318,6 @@ var ChaindataTables = []string{
 	IncarnationMap,
 	SyncStageProgress,
 	PlainState,
-	PlainContractCode,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
