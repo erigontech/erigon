@@ -315,7 +315,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			}
 		}()
 		// some users creating > 1Gb custome genesis by `erigon init`
-		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.Tmp).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
 		salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger)
@@ -387,10 +387,6 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 				if _, err = core.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
 					return err
 				}
-			}
-
-			if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
-				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 		}
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
