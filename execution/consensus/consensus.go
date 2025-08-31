@@ -122,7 +122,7 @@ type EngineReader interface {
 	// engine is based on signatures.
 	Author(header *types.Header) (common.Address, error)
 
-	// Dependencies retrives the dependencies between transactions
+	// Dependencies retrieves the dependencies between transactions
 	// included in the block accosiated with this header a nil return
 	// implies no dependencies are known
 	TxDependencies(header *types.Header) [][]int
