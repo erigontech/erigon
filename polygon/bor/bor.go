@@ -1077,7 +1077,7 @@ func (c *Bor) IsServiceTransaction(sender common.Address, syscall consensus.Syst
 	return false
 }
 
-// Depricated: To get the API use jsonrpc.APIList
+// Deprecated: To get the API use jsonrpc.APIList
 func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{}
 }
