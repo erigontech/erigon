@@ -34,10 +34,11 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -426,7 +427,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
-	if dbg.MdbxLockInRam() && opts.label == kv.ChainDB {
+	if dbg.MdbxLockInRam && opts.label == kv.ChainDB {
 		log.Info("[dbg] locking db in mem", "label", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
