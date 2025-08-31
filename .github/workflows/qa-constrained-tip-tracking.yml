@@ -123,9 +123,9 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log-${{ env.CHAIN }}
+        name: erigon-logs-${{ env.CHAIN }}
         path: |
-          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/erigon.log
+          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
           ${{ env.ERIGON_REFERENCE_DATA_DIR }}/proc_stat.log
 
     - name: Restore Erigon Chaindata Directory
