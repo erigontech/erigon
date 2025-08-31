@@ -35,12 +35,13 @@ func init() {
 	flags := []interface{}{}
 	startupEnv.Range(func(key, value any) bool {
 		flags = append(flags, key, value)
+		startupEnv.Delete(key)
 		return true
 	})
-	startupEnv = nil
 
-	log.Info("[env] startup env variables", flags...)
-
+	if len(flags) > 0 {
+		log.Info("[env] startup env variables", flags...)
+	}
 }
 
 func lookupEnv(envVarName string) (string, bool) {
