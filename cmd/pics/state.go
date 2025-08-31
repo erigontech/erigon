@@ -96,7 +96,6 @@ var bucketLabels = map[string]string{
 	kv.PlainState:               "Plain State",
 	kv.HashedAccountsDeprecated: "Hashed Accounts",
 	kv.HashedStorageDeprecated:  "Hashed Storage",
-	kv.IncarnationMap:           "Incarnations",
 	kv.Senders:                  "Transaction Senders",
 }
 

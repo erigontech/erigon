@@ -20,7 +20,6 @@
 package t8ntool
 
 import (
-	"encoding/binary"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -98,9 +97,6 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *dbstate.Share
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			tx.Put(kv.IncarnationMap, addr[:], b[:])
 		}
 	}
 	// Commit and re-open to start with a clean state.
