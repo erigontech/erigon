@@ -153,7 +153,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		onChangeCalls++
 		if onChangeCalls == 1 {
-			mustSeeFile(newFiles, "domain", "accounts.0-2.kv") //TODO: when we build `accounts.0-1.kv` - we sending empty notifcation
+			mustSeeFile(newFiles, "domain", "accounts.0-2.kv") //TODO: when we build `accounts.0-1.kv` - we sending empty notification
 			require.False(t, filepath.IsAbs(newFiles[0]))      // expecting non-absolute paths (relative as of snapshots dir)
 		}
 	}, func(deletedFiles []string) {
