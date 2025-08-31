@@ -49,10 +49,6 @@ func TestStateCornerCases(t *testing.T) {
 
 	st := new(testMatcher)
 
-	// Very time consuming
-	//st.skipLoad(`^stTimeConsuming/`)
-	//st.skipLoad(`.*vmPerformance/loop.*`)
-
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, cornersDir, func(t *testing.T, name string, test *StateTest) {
@@ -80,6 +76,27 @@ func TestStateCornerCases(t *testing.T) {
 
 }
 
+func initMatcher(st *testMatcher) {
+	// Long tests:
+	st.slow(`^stAttackTest/ContractCreationSpam`)
+	st.slow(`^stBadOpcode/badOpcodes`)
+	st.slow(`^stPreCompiledContracts/modexp`)
+	st.slow(`^stQuadraticComplexityTest/`)
+	st.slow(`^stStaticCall/static_Call50000`)
+	st.slow(`^stStaticCall/static_Return50000`)
+	st.slow(`^stSystemOperationsTest/CallRecursiveBomb`)
+	st.slow(`^stTransactionTest/Opcodes_TransactionInit`)
+	// Very time consuming
+	st.skipLoad(`^stTimeConsuming/`)
+	st.skipLoad(`.*vmPerformance/loop.*`)
+	// Uses 1GB RAM per tested fork
+	st.skipLoad(`^stStaticCall/static_Call1MB`)
+
+	// Broken tests:
+	// EOF is not part of cancun
+	st.skipLoad(`^stEOF/`)
+}
+
 func TestState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -93,10 +110,7 @@ func TestState(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	st := new(testMatcher)
-
-	// Very time consuming
-	st.skipLoad(`^stTimeConsuming/`)
-	st.skipLoad(`.*vmPerformance/loop.*`)
+	initMatcher(st)
 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
