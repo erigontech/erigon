@@ -374,7 +374,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	defer tx.Rollback()
 	br := m.BlockReader
 
-	// Create a test canonical number and assinged hash to move around
+	// Create a test canonical number and assigned hash to move around
 	hash, number := common.Hash{0: 0xff}, uint64(314)
 	entry, _, err := br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
