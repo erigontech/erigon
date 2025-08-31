@@ -388,6 +388,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 					return err
 				}
 			}
+
+			if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+			}
 		}
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 			return err
