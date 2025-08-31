@@ -668,7 +668,7 @@ func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Info(syncLogPrefix("waiting for execution client"))
 
 	for {
-		// we have to check if the heimdall we are connected to is synchonised with the chain
+		// we have to check if the heimdall we are connected to is synchronised with the chain
 		// to prevent getting empty list of checkpoints/milestones during the sync
 
 		catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
