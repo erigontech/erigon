@@ -21,12 +21,25 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
+
+var startupEnv = sync.Map{}
+
+func init() {
+	flags := []interface{}{}
+	startupEnv.Range(func(key, value any) bool {
+		flags = append(flags, key, value)
+		return true
+	})
+
+	log.Info("[env] startup env variables", flags...)
+}
 
 func EnvString(envVarName string, defaultVal string) string {
 	v, _ := os.LookupEnv(envVarName)
