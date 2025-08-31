@@ -470,7 +470,7 @@ func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, b
 			switch {
 			case eventId < prevEventId:
 				if failFast {
-					return prevEventId, fmt.Errorf("invaid bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
+					return prevEventId, fmt.Errorf("invalid bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
 				}
 
 				log.Error("[integrity] NoGapsInBorEvents: invalid bor event", "event", eventId, "prev", prevEventId, "block", block)
