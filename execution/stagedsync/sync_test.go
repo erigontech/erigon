@@ -507,7 +507,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 
 func TestSyncInterruptLongUnwind(t *testing.T) {
 	// interrupt a stage that is too big to fit in one batch,
-	// so the db is in inconsitent state, so we have to restart with that
+	// so the db is in inconsistent state, so we have to restart with that
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	interrupted := false
