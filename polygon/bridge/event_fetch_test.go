@@ -42,7 +42,7 @@ func TestOver50EventBlockFetch(t *testing.T) {
 	}
 
 	if len(events) != 113 {
-		t.Fatal("Unexpected event count, exptected: 113, got:", len(events))
+		t.Fatal("Unexpected event count, expected: 113, got:", len(events))
 	}
 
 	// block :=  23893568
@@ -55,7 +55,7 @@ func TestOver50EventBlockFetch(t *testing.T) {
 	}
 
 	if len(events) != 9417 {
-		t.Fatal("Unexpected event count, exptected: 9417, got:", len(events))
+		t.Fatal("Unexpected event count, expected: 9417, got:", len(events))
 	}
 
 }
