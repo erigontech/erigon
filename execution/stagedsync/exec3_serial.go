@@ -62,7 +62,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 
 			if txTask.Final {
 				if !se.isMining && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
-					// note this assumes the bloach reciepts is a fixed array shared by
+					// note this assumes the bloach receipts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
 					se.cfg.notifications.RecentLogs.Add(txTask.BlockReceipts)
