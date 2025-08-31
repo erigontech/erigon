@@ -22,7 +22,7 @@ const (
 // ETH2 uses BLS12381-G2 Curve
 var eth2Curve = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
 
-// Signature wraps CGO object repressenting the signature.
+// Signature wraps CGO object representing the signature.
 type Signature struct {
 	affine *blst.P2Affine
 }
