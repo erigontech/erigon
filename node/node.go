@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
@@ -341,6 +342,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
+			if !dbg.MdbxReadAhead {
+				opts.Flags(func(u uint) uint { return u | mdbx2.NoReadahead })
+			}
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)

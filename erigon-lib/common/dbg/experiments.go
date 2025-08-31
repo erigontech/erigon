@@ -38,7 +38,8 @@ var (
 	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxReadAhead        = EnvBool("MDBX_READ_AHEAD", true)
 	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
@@ -92,8 +93,6 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 	runtime.ReadMemStats(m)
 }
-
-func MdbxLockInRam() bool { return mdbxLockInRam }
 
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
