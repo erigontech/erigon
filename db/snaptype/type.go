@@ -203,7 +203,7 @@ type snapType struct {
 	rangeExtractor RangeExtractor
 }
 
-// These are raw maps with no mutex protection becuase they are
+// These are raw maps with no mutex protection because they are
 // expected to be written to once during program initialization
 // and them be readonly
 var registeredTypes = map[Enum]Type{}
