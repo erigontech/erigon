@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -37,8 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
-
-var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
 	domains             *dbstate.SharedDomains
@@ -257,10 +254,6 @@ func (rs *StateV3) ApplyLogsAndTraces4(tx kv.Tx, txNum uint64, receipts []*types
 	}
 
 	return nil
-}
-
-func (rs *StateV3) DoneCount() uint64 {
-	return execTxsDone.GetValueUint64()
 }
 
 func (rs *StateV3) SizeEstimate() (r uint64) {
