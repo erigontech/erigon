@@ -50,7 +50,7 @@ var (
 	)
 )
 
-// field type overrides for abi upacking
+// field type overrides for abi unpacking
 type depositUnpacking struct {
 	Pubkey                []byte
 	WithdrawalCredentials []byte
