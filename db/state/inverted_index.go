@@ -849,7 +849,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			}
 		}
 
-		if err = rwTx.Delete(ii.keysTable, k); err != nil {
+		if err = rwTx.Delete(ii.KeysTable, k); err != nil {
 			return nil, err
 		}
 
@@ -858,7 +858,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 	}
 
-	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.valuesTable)
+	valsTblDelCursor, err := rwTx.RwCursorDupSort(ii.ValuesTable)
 	if err != nil {
 		return nil, err
 	}
@@ -873,7 +873,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 		for v, err := valsTblDelCursor.SeekBothRange(key, txKey[:]); v != nil; _, v, err = valsTblDelCursor.NextDup() {
 			if err != nil {
-				return fmt.Errorf("iterate over %s values cursor: %w", ii.filenameBase, err)
+				return fmt.Errorf("iterate over %s values cursor: %w", ii.FilenameBase, err)
 			}
 			txNum := binary.BigEndian.Uint64(v)
 			if txNum > stat.MaxTxNum {
@@ -887,7 +887,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 		select {
 		case <-logEvery.C:
-			ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
+			ii.logger.Info("[snapshots] prune index", "name", ii.FilenameBase, "pruned tx", stat.PruneCountTx,
 				"pruned values", stat.PruneCountValues)
 		default:
 		}
