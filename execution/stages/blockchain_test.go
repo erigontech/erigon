@@ -1105,7 +1105,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			require.NoError(t, err)
 			block.AddTx(txn)
 
-			// sending kill messsage to an already suicided account
+			// sending kill message to an already suicided account
 			txn, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
