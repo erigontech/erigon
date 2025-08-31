@@ -229,7 +229,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 			s.host.Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
 		} else {
-			// we were able to succesfully connect, so add this peer to our pool
+			// we were able to successfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
 		}
 	}()
