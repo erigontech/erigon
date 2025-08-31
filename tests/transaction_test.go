@@ -39,7 +39,7 @@ func TestTransaction(t *testing.T) {
 
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
 		t.Parallel()
-		cfg := chainspec.MainnetChainConfig
+		cfg := chainspec.Mainnet.Config
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)
 		}
