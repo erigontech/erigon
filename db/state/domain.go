@@ -231,16 +231,12 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	d.closeFilesAfterStep(d.dirtyFilesEndTxNumMinimax() / d.stepSize)
 }
 
-func (d *Domain) openFolder() error {
+func (d *Domain) openFolder(r *ScanDirsResult) error {
 	if d.Disable {
 		return nil
 	}
 
-	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
-	if err != nil {
-		return fmt.Errorf("Domain(%s).openFolder: %w", d.FilenameBase, err)
-	}
-	if err := d.OpenList(idx, histFiles, domainFiles); err != nil {
+	if err := d.OpenList(r.iiFiles, r.historyFiles, r.domainFiles); err != nil {
 		return err
 	}
 	return nil
@@ -303,7 +299,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	l := scanDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
+	l := filterDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
 		dirtyFile.frozen = false
 
@@ -1978,5 +1974,10 @@ func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
 
 func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf("Version is too low, try to run snapshot reset: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`. file=%s, min_supported=%s, current=%s", filename, version.MinSupported, version.Current))
+	panic(fmt.Sprintf(
+		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+		filename,
+		version.MinSupported,
+		version.Current,
+	))
 }

@@ -22,7 +22,6 @@ package tests
 import (
 	"context"
 	context2 "context"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -327,12 +326,6 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-
-			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
-				return nil, err
-			}
 		}
 	}
 

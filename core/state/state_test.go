@@ -26,7 +26,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	checker "gopkg.in/check.v1"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -128,108 +127,133 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 
 	domains, err := state.NewSharedDomains(tx, log.New())
-	if err != nil {
-		panic(err)
-	}
+	require.NoError(t, err)
+	defer domains.Close()
 
 	txNum := uint64(1)
-	//domains.SetTxNum(txNum)
-	//domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
-	if err != nil {
-		panic(err)
-	}
-	s.tx = tx
-	s.r = NewReaderV3(domains.AsGetter(tx))
-	s.w = NewWriter(domains.AsPutDel(tx), nil, txNum)
-	s.state = New(s.r)
-}
+	require.NoError(t, err)
 
-func (s *StateSuite) TearDownTest(c *checker.C) {
-	s.tx.Rollback()
-	s.db.Close()
-}
+	r := NewReaderV3(domains.AsGetter(tx))
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	state := New(r)
 
-func (s *StateSuite) TestNull(c *checker.C) {
 	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
-	s.state.CreateAccount(address, true)
+	state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, common.Hash{}, value)
+	state.SetState(address, common.Hash{}, value)
 
-	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
-	c.Check(err, checker.IsNil)
+	err = state.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
 
-	err = s.state.CommitBlock(&chain.Rules{}, s.w)
-	c.Check(err, checker.IsNil)
+	err = state.CommitBlock(&chain.Rules{}, w)
+	require.NoError(t, err)
 
-	s.state.GetCommittedState(address, common.Hash{}, &value)
+	state.GetCommittedState(address, common.Hash{}, &value)
 	if !value.IsZero() {
-		c.Errorf("expected empty hash. got %x", value)
+		t.Errorf("expected empty hash. got %x", value)
 	}
 }
 
-func (s *StateSuite) TestTouchDelete(c *checker.C) {
-	s.state.GetOrNewStateObject(common.Address{})
+func TestTouchDelete(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
 
-	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
-	if err != nil {
-		c.Fatal("error while finalize", err)
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txNum := uint64(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	r := NewReaderV3(domains.AsGetter(tx))
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	state := New(r)
+
+	state.GetOrNewStateObject(common.Address{})
+
+	err = state.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	err = state.CommitBlock(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	state.Reset()
+
+	snapshot := state.Snapshot()
+	state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
+
+	if len(state.journal.dirties) != 1 {
+		t.Fatal("expected one dirty state object")
 	}
-
-	err = s.state.CommitBlock(&chain.Rules{}, s.w)
-	if err != nil {
-		c.Fatal("error while commit", err)
-	}
-
-	s.state.Reset()
-
-	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
-
-	if len(s.state.journal.dirties) != 1 {
-		c.Fatal("expected one dirty state object")
-	}
-	s.state.RevertToSnapshot(snapshot, nil)
-	if len(s.state.journal.dirties) != 0 {
-		c.Fatal("expected no dirty state object")
+	state.RevertToSnapshot(snapshot, nil)
+	if len(state.journal.dirties) != 0 {
+		t.Fatal("expected no dirty state object")
 	}
 }
 
-func (s *StateSuite) TestSnapshot(c *checker.C) {
+func TestSnapshot(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	r := NewReaderV3(domains.AsGetter(tx))
+	state := New(r)
+
 	stateobjaddr := toAddr([]byte("aa"))
 	var storageaddr common.Hash
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
 	// snapshot the genesis state
-	genesis := s.state.Snapshot()
+	genesis := state.Snapshot()
 
 	// set initial state object value
-	s.state.SetState(stateobjaddr, storageaddr, *data1)
-	snapshot := s.state.Snapshot()
+	state.SetState(stateobjaddr, storageaddr, *data1)
+	snapshot := state.Snapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	s.state.SetState(stateobjaddr, storageaddr, *data2)
-	s.state.RevertToSnapshot(snapshot, nil)
+	state.SetState(stateobjaddr, storageaddr, *data2)
+	state.RevertToSnapshot(snapshot, nil)
 
 	var value uint256.Int
-	s.state.GetState(stateobjaddr, storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, data1)
-	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	state.GetState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, *data1, value)
+	state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, uint256.Int{}, value)
 
 	// revert up to the genesis state and ensure correct content
-	s.state.RevertToSnapshot(genesis, nil)
-	s.state.GetState(stateobjaddr, storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
-	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	state.RevertToSnapshot(genesis, nil)
+	state.GetState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, uint256.Int{}, value)
+	state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	require.Equal(t, uint256.Int{}, value)
 }
 
-func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
-	s.state.RevertToSnapshot(s.state.Snapshot(), nil)
+func TestSnapshotEmpty(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	r := NewReaderV3(domains.AsGetter(tx))
+	state := New(r)
+
+	state.RevertToSnapshot(state.Snapshot(), nil)
 }
 
 // use testing instead of checker because checker does not support
@@ -268,20 +292,9 @@ func TestSnapshot2(t *testing.T) {
 	}
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43, true)
-	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'}, true)
-	so0.selfdestructed = false
-	so0.deleted = false
-	state.setStateObject(stateobjaddr0, so0)
-
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal("error while finalizing transaction", err)
-	}
 
 	err = state.CommitBlock(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal("error while committing state", err)
-	}
+	require.NoError(t, err)
 
 	// and one with deleted == true
 	so1, err := state.getStateObject(stateobjaddr1)
@@ -296,9 +309,7 @@ func TestSnapshot2(t *testing.T) {
 	state.setStateObject(stateobjaddr1, so1)
 
 	so1, err = state.getStateObject(stateobjaddr1)
-	if err != nil {
-		t.Fatal("getting state", err)
-	}
+	require.NoError(t, err)
 	if so1 != nil && !so1.deleted {
 		t.Fatalf("deleted object not nil when getting")
 	}
@@ -307,9 +318,7 @@ func TestSnapshot2(t *testing.T) {
 	state.RevertToSnapshot(snapshot, nil)
 
 	so0Restored, err := state.getStateObject(stateobjaddr0)
-	if err != nil {
-		t.Fatal("getting restored state", err)
-	}
+	require.NoError(t, err)
 	// Update lazily-loaded values before comparing.
 	var tmp uint256.Int
 	so0Restored.GetState(storageaddr, &tmp)
@@ -319,9 +328,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// deleted should be nil, both before and after restore of state copy
 	so1Restored, err := state.getStateObject(stateobjaddr1)
-	if err != nil {
-		t.Fatal("getting restored state", err)
-	}
+	require.NoError(t, err)
 	if so1Restored != nil && !so1Restored.deleted {
 		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
 	}
@@ -384,23 +391,15 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 
 	dirs, logger := datadir.New(tb.TempDir()), log.New()
 	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	tb.Cleanup(agg.Close)
 
 	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
+	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 	return _db, tx, agg
 }
