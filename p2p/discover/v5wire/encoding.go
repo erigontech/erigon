@@ -534,7 +534,7 @@ func (c *Codec) decodeHandshake(fromAddr string, head *Header) (n *enode.Node, a
 	if err != nil {
 		return nil, auth, nil, errInvalidAuthKey
 	}
-	// Derive sesssion keys.
+	// Derive session keys.
 	session := deriveKeys(sha256.New, c.privkey, ephkey, auth.h.SrcID, c.localnode.ID(), cdata)
 	session = session.keysFlipped()
 	return n, auth, session, nil
