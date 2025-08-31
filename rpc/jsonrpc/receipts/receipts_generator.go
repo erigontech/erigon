@@ -35,7 +35,7 @@ type Generator struct {
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
-	// "Requesting near-chain-tip block receipts" - is very common RPC request, means we facing many similar parallel requrest
+	// "Requesting near-chain-tip block receipts" - is very common RPC request, means we facing many similar parallel request
 	blockExecMutex *loaderMutex[common.Hash] // only
 	txnExecMutex   *loaderMutex[common.Hash] // only 1 txn with current hash executed at a time - same parallel requests are waiting for results
 
