@@ -19,6 +19,8 @@ package datadir
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -200,27 +202,45 @@ func CopyFile(from, to string) error {
 	return nil
 }
 
-func (d Dirs) RenameNewVersions() error {
+func (d *Dirs) RenameNewVersions() error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
 		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
+	var renamed, removed int
 
 	for _, dirPath := range directories {
-		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		// renaming v1.0- => v1-
+		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
+				if os.IsNotExist(err) { //skip magically disappeared files
+					return nil
+				}
 				return err
 			}
+			if dirEntry.IsDir() {
+				return nil
+			}
 
-			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1.0-") {
-				newName := strings.Replace(d.Name(), "v1.0-", "v1-", 1)
+			if strings.HasPrefix(dirEntry.Name(), "v1.0-") {
+				if strings.Contains(dirEntry.Name(), "commitment") &&
+					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
+					// remove the file instead of renaming
+					if err := dir.RemoveFile(path); err != nil {
+						return fmt.Errorf("failed to remove file %s: %w", path, err)
+					}
+					removed++
+					return nil
+				}
+				newName := strings.Replace(dirEntry.Name(), "v1.0-", "v1-", 1)
 				oldPath := path
 				newPath := filepath.Join(filepath.Dir(path), newName)
 
 				if err := os.Rename(oldPath, newPath); err != nil {
 					return err
 				}
+				renamed++
 			}
 			return nil
 		})
@@ -228,7 +248,52 @@ func (d Dirs) RenameNewVersions() error {
 		if err != nil {
 			return err
 		}
+
+		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc., unsupported in 3.0)
+		err = filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) { //skip magically disappeared files
+					return nil
+				}
+				return err
+			}
+			if dirEntry.IsDir() {
+				return nil
+			}
+
+			if IsVersionedName(dirEntry.Name()) {
+				err = dir.RemoveFile(path)
+				if err != nil {
+					return fmt.Errorf("failed to remove file %s: %w", path, err)
+				}
+				removed++
+			}
+
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 	}
 
+	log.Info(fmt.Sprintf("Renamed %d directories to old format and removed %d unsupported files", renamed, removed))
+
+	//eliminate polygon-bridge && heimdall && chaindata just in case
+	if d.DataDir != "" {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, kv.PolygonBridgeDB)))
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.HeimdallDB)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, kv.HeimdallDB)))
+		if d.Chaindata != "" {
+			if err := dir.RemoveAll(d.Chaindata); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			log.Info(fmt.Sprintf("Removed chaindata directory: %s", d.Chaindata))
+		}
+	}
 	return nil
 }
