@@ -38,7 +38,7 @@ func envLookup(envVarName string) (string, bool) {
 		return v, true
 	}
 	if v, ok := os.LookupEnv("ERIGON_" + envVarName); ok {
-		log.Warn("[env]", envVarName, v)
+		log.Warn("[env]", "ERIGON_"+envVarName, v)
 		return v, true
 	}
 	return "", false
