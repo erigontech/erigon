@@ -90,6 +90,9 @@ func EnvUint(envVarName string, defaultVal uint64) uint64 {
 func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
 	v, _ := envLookup(envVarName)
 	if v != "" {
+		if strings.ToLower(v) == "all" || strings.ToLower(v) == "true" {
+			return []int64{math.MaxUint64}
+		}
 		var ints []int64
 		for _, str := range strings.Split(v, sep) {
 			ints = append(ints, MustParseInt(str))
