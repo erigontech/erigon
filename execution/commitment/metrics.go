@@ -52,7 +52,7 @@ type Metrics struct {
 }
 
 type MetricValues struct {
-	*sync.RWMutex
+	mu              *sync.RWMutex
 	Accounts        map[string]*AccountStats
 	Updates         uint64
 	AddressKeys     uint64
@@ -68,6 +68,18 @@ type MetricValues struct {
 	SpentProcessing time.Duration
 }
 
+func (m MetricValues) RLock() {
+	if m.mu != nil {
+		m.mu.RLock()
+	}
+}
+
+func (m MetricValues) RUnlock() {
+	if m.mu != nil {
+		m.mu.RUnlock()
+	}
+}
+
 func NewMetrics() *Metrics {
 	return &Metrics{
 		Accounts: NewAccounts(),
@@ -76,7 +88,7 @@ func NewMetrics() *Metrics {
 
 func (m *Metrics) AsValues() MetricValues {
 	return MetricValues{
-		RWMutex:         &m.Accounts.m,
+		mu:              &m.Accounts.m,
 		Accounts:        m.Accounts.AccountStats,
 		Updates:         m.updates.Load(),
 		AddressKeys:     m.addressKeys.Load(),
