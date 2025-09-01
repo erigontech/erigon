@@ -339,7 +339,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 					"parentBlockHash", newBlockHeader.ParentHash, "err", err)
 			} else if len(downloadedBlocks) > 0 { // push block batch event if there is no error
 				s.logger.Debug(syncLogPrefix("backward download completed, pushing new block batch event"), "from", downloadedBlocks[0].NumberU64(),
-					"to", downloadedBlocks[len(downloadedBlocks)-1].NumberU64(), "blockHash", newBlockHeaderHash)
+					"to", downloadedBlocks[len(downloadedBlocks)-1].NumberU64(), "blockHash", newBlockHeaderHash, "peerId", event.PeerId)
 				s.tipEvents.events.PushEvent(
 					Event{Type: EventTypeNewBlockBatch,
 						newBlockBatch: EventNewBlockBatch{NewBlocks: downloadedBlocks, PeerId: event.PeerId, Source: event.Source},
