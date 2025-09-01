@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 // pool for buffers

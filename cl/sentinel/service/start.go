@@ -38,9 +38,9 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 const AttestationSubnetSubscriptions = 2
