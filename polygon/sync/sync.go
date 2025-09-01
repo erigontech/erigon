@@ -325,9 +325,12 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		}
 		// we need to do a backward download. so schedule the download in a goroutine and have it  push an `EventNewBlockBatch` which can be processed later,
 		// so that we don't block the event processing loop
-		s.logger.Debug(syncLogPrefix("scheduling backward download"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
-			"source", event.Source,
-			"parentBlockHash", newBlockHeader.ParentHash)
+		s.logger.Debug(
+			syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
+			"rootNum", rootNum,
+			"blockNum", newBlockHeaderNum,
+			"blockHash", newBlockHeaderHash,
+		)
 		go func() {
 			downloadedBlocks, err := s.backwardDownloadBlocksFromHash(ctx, event, ccb)
 			if err != nil {
@@ -335,7 +338,8 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 					"source", event.Source,
 					"parentBlockHash", newBlockHeader.ParentHash, "err", err)
 			} else if len(downloadedBlocks) > 0 { // push block batch event if there is no error
-				s.logger.Debug(syncLogPrefix("backward download completed, pushing new block batch event"))
+				s.logger.Debug(syncLogPrefix("backward download completed, pushing new block batch event"), "from", downloadedBlocks[0].NumberU64(),
+					"to", downloadedBlocks[len(downloadedBlocks)-1].NumberU64(), "blockHash", newBlockHeaderHash)
 				s.tipEvents.events.PushEvent(
 					Event{Type: EventTypeNewBlockBatch,
 						newBlockBatch: EventNewBlockBatch{NewBlocks: downloadedBlocks, PeerId: event.PeerId, Source: event.Source},
@@ -517,14 +521,6 @@ func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNe
 	amount := newBlockHeaderNum - rootNum + 1
 	var blockChain = make([]*types.Block, 0, amount) // the return value
 	s.blockRequestsCache.Add(newBlockHeaderHash, struct{}{})
-
-	s.logger.Debug(
-		syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
-		"rootNum", rootNum,
-		"blockNum", newBlockHeaderNum,
-		"blockHash", newBlockHeaderHash,
-		"amount", amount,
-	)
 
 	opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(p2pResponseTimeout)}
 
