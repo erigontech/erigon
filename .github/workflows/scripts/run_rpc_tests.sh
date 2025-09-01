@@ -47,7 +47,7 @@ if [ "$TEST_TYPE" = "latest" ]; then
     NUM_OF_RETRIES=3
 fi
 
-if [ "$VERIFY_ERROR_MESSAGE" = "do-not-compare-error-message" ]; then
+if [ "$COMPARE_ERROR_MESSAGE" = "do-not-compare-error-message" ]; then
     OPTIONAL_FLAGS+=" --do-not-compare-error"
 fi
 
