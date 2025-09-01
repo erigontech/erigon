@@ -90,10 +90,10 @@ jobs:
         
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
-             echo "Tip-tracking completed successfully"
+             echo "Tip-chasing completed successfully"
              echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-             echo "Tip-tracking encountered an error test aborted"
+             echo "Tip-chasing encountered an error test aborted"
              echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
              exit 1
           fi

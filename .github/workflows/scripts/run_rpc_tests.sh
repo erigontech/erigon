@@ -11,7 +11,7 @@ if [ -z "$1" ] || [ -z "$2" ]; then
   echo "  WORKSPACE:       Workspace directory (optional, default: /tmp)"
   echo "  RESULT_DIR:      Result directory (optional, default: empty)"
   echo "  TESTS_TYPE:      Test type (optional, default: empty, possible values: latest or all)"
-  echo "  REFERENCE_HOST:  IP Address of HOST (optional, default: empty)"
+  echo "  REFERENCE_HOST:  Host address of client node used as reference system (optional, default: empty)"
   echo "  COMPARE_ERROR_MESSAGE: Verify the Error Message (optional, default empty possible values: do-not-compare-error-message)"
   echo
   exit 1
