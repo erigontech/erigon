@@ -18,6 +18,7 @@ package dbg
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -101,6 +102,9 @@ func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
 func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
 	v, _ := envLookup(envVarName)
 	if v != "" {
+		if v == strings.ToLower("all") || v == strings.ToLower("true") {
+			return []uint64{math.MaxUint64}
+		}
 		var ints []uint64
 		for _, str := range strings.Split(v, sep) {
 			ints = append(ints, MustParseUint(str))
