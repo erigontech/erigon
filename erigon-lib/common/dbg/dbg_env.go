@@ -90,14 +90,7 @@ func EnvUint(envVarName string, defaultVal uint64) uint64 {
 func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
 	v, _ := envLookup(envVarName)
 	if v != "" {
-		if strings.ToLower(v) == "all" || strings.ToLower(v) == "true" {
-			return []int64{math.MaxUint64}
-		}
-		var ints []int64
-		for _, str := range strings.Split(v, sep) {
-			ints = append(ints, MustParseInt(str))
-		}
-		return ints
+		return MustParseInts(v, sep)
 	}
 	return defaultVal
 }
@@ -105,14 +98,7 @@ func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
 func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
 	v, _ := envLookup(envVarName)
 	if v != "" {
-		if strings.ToLower(v) == "all" || strings.ToLower(v) == "true" {
-			return []uint64{math.MaxUint64}
-		}
-		var ints []uint64
-		for _, str := range strings.Split(v, sep) {
-			ints = append(ints, MustParseUint(str))
-		}
-		return ints
+		return MustParseUints(v, sep)
 	}
 	return defaultVal
 }
@@ -157,4 +143,24 @@ func MustParseUint(strNum string) uint64 {
 		panic(fmt.Errorf("%w, str: %s", err, strNum))
 	}
 	return parsed
+}
+func MustParseInts(strNum, separator string) []int64 {
+	if strings.ToLower(strNum) == "all" || strings.ToLower(strNum) == "true" {
+		return []int64{math.MaxUint64}
+	}
+	var ints []int64
+	for _, str := range strings.Split(strNum, separator) {
+		ints = append(ints, MustParseInt(str))
+	}
+	return ints
+}
+func MustParseUints(strNum, separator string) []uint64 {
+	if strings.ToLower(strNum) == "all" || strings.ToLower(strNum) == "true" {
+		return []uint64{math.MaxUint64}
+	}
+	var ints []uint64
+	for _, str := range strings.Split(strNum, separator) {
+		ints = append(ints, MustParseUint(str))
+	}
+	return ints
 }
