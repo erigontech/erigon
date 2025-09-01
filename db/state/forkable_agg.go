@@ -677,10 +677,10 @@ func (r *ForkableAggTemporalTx) Unwind(ctx context.Context, to RootNum, tx kv.Rw
 }
 
 func (r *ForkableAggTemporalTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (hasMore bool, err error) {
-	return false, nil
+	return r.Prune(ctx, r.AlignedMaxRootNum(), timeout, tx)
 }
 
-func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, timeout time.Duration, tx kv.RwTx) (err error) {
+func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, timeout time.Duration, tx kv.RwTx) (hasMore bool, err error) {
 	if dbg.NoPrune() {
 		return
 	}
@@ -703,6 +703,7 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 
 	aggStat := ForkablePruneStat{}
 
+	hasMore = true
 	err = loopOverDebugDbsExec(r, kv.AllForkableId, func(db ForkableDbCommonTxI) error {
 		stat, err := db.Prune(ctx, toRootNum, limit, aggLogEvery, tx)
 		if err != nil {
@@ -710,6 +711,9 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 		}
 
 		aggStat.Accumulate(&stat)
+		if stat.PruneCount == 0 {
+			hasMore = false
+		}
 
 		select {
 		case <-localTimeout.C:
@@ -727,10 +731,10 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 	})
 	if errors.Is(err, timeoutErr) {
 		r.f.logger.Warn("[fork_agg] prune timeout")
-		return nil
+		return
 	}
 	r.f.logger.Info("[fork_agg] prune finished", "toRootNum", toRootNum, "stat", aggStat)
-	return err
+	return
 }
 
 func (r *ForkableAggTemporalTx) Close() {

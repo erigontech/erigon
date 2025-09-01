@@ -129,6 +129,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	// TODO: add multiple index support in filesItem
 	mergedFile.index = indexes[0]
 	closeFiles = false
+	f.logger.Info("[fork_agg] merged", "from", from.Uint64()/f.snaps.stepSize, "to", to.Uint64()/f.snaps.stepSize)
 
 	return
 }
