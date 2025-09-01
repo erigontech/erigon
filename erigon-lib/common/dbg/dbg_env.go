@@ -45,16 +45,14 @@ func envLookup(envVarName string) (string, bool) {
 }
 
 func EnvString(envVarName string, defaultVal string) string {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		return v
 	}
 	return defaultVal
 }
 
 func EnvStrings(envVarName string, sep string, defaultVal []string) []string {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		return strings.Split(v, sep)
 	}
 	return defaultVal
@@ -72,40 +70,35 @@ func EnvBool(envVarName string, defaultVal bool) bool {
 }
 
 func EnvInt(envVarName string, defaultVal int) int {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		return int(MustParseInt(v))
 	}
 	return defaultVal
 }
 
 func EnvUint(envVarName string, defaultVal uint64) uint64 {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		return MustParseUint(v)
 	}
 	return defaultVal
 }
 
 func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		return MustParseInts(v, sep)
 	}
 	return defaultVal
 }
 
 func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		return MustParseUints(v, sep)
 	}
 	return defaultVal
 }
 
 func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteSize {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		val, err := datasize.ParseString(v)
 		if err != nil {
 			panic(err)
@@ -116,8 +109,7 @@ func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteS
 }
 
 func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
-	v, _ := envLookup(envVarName)
-	if v != "" {
+	if v, _ := envLookup(envVarName); v != "" {
 		val, err := time.ParseDuration(v)
 		if err != nil {
 			panic(err)
