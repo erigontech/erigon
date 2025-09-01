@@ -146,7 +146,7 @@ func MustParseUint(strNum string) uint64 {
 }
 func MustParseInts(strNum, separator string) []int64 {
 	if strings.ToLower(strNum) == "all" || strings.ToLower(strNum) == "true" {
-		return []int64{math.MaxUint64}
+		return []int64{math.MaxInt64}
 	}
 	var ints []int64
 	for _, str := range strings.Split(strNum, separator) {
