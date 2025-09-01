@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+// envLookup - auto-add ERIGON_ prefix to any declared ENV variable
 func envLookup(envVarName string) (string, bool) {
 	if v, ok := os.LookupEnv(envVarName); ok {
 		if !strings.HasPrefix(envVarName, "ERIGON_") {
