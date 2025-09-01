@@ -266,11 +266,16 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
 		return err
 	}
+	rcacheAgg := db.(dbstate.HasAgg).ForkableAgg(kv.RCacheForkable).(*dbstate.ForkableAgg)
+	if err := rcacheAgg.BuildFiles(kv.RootNum(lastTxNum)); err != nil {
+		return err
+	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if err := tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+		ttx := tx.(kv.TemporalRwTx)
+		if err := ttx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
-		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+		if _, err := ttx.PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil

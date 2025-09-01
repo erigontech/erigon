@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"sort"
 
 	"github.com/erigontech/erigon-lib/common/background"
@@ -71,10 +72,9 @@ func (a *ProtoForkable) IntegrateDirtyFiles(files []*FilesItem) {
 
 // BuildFile builds a single file for the given range, respecting the snapshot config.
 //  1. typically this would be used to built a single step or "minimum sized snapshot", but can
-//     be used to build bigger files too.
+//     be used to build bigger files too (like in `stage_custom_trace`).
 //  2. The caller is responsible for ensuring that data is available in db to freeze.
 func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, compressionWorkers int, ps *background.ProgressSet) (builtFile *FilesItem, built bool, err error) {
-	log.Debug("freezing %s from %d to %d", Registry.Name(a.a), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
 	cfg := Registry.SnapshotConfig(a.a)
@@ -83,7 +83,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		return nil, false, nil
 	}
 
-	log.Debug("freezing %s from %d to %d", Registry.Name(a.a), calcFrom, calcTo)
+	log.Debug(fmt.Sprintf("freezing %s from %d to %d", Registry.Name(a.a), calcFrom, calcTo))
 	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
 	segCfg := seg.DefaultCfg
 	segCfg.Workers = compressionWorkers
@@ -113,7 +113,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	}
 
 	{
-		p := ps.AddNew(path, 1)
+		p := ps.AddNew(filepath.Base(path), 1)
 		defer ps.Delete(p)
 
 		if err := sn.Compress(); err != nil {

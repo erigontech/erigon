@@ -95,7 +95,7 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, tmpDir string, 
 
 	if b.fetcher == nil {
 		// assume rootnum and num is same
-		logger.Debug("using default first entity num fetcher for %s", id)
+		logger.Debug("using default first entity num fetcher", "id", id)
 		b.fetcher = func(from, to RootNum, seg *seg.Decompressor) Num {
 			return Num(from)
 		}

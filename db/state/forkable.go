@@ -380,7 +380,7 @@ func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
 
 func (m *UnmarkedTx) BufferedWriter() *UnmarkedBufferedWriter {
 	return &UnmarkedBufferedWriter{
-		values:  etl.NewCollector(Registry.Name(m.id)+".forkable.buffer.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers.Get(), m.a.logger),
+		values:  etl.NewCollector(Registry.Name(m.id)+".etl.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers.Get(), m.a.logger),
 		valsTbl: m.ap.valsTbl,
 	}
 }
@@ -425,6 +425,10 @@ func progress(tbl string, tx kv.Tx, f ForkableFilesTxI) (Num, error) {
 	k, _, err := c.Last()
 	if err != nil {
 		return 0, err
+	}
+
+	if k == nil {
+		return 0, nil
 	}
 
 	num := binary.BigEndian.Uint64(k)

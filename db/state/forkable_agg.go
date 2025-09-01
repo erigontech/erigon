@@ -121,13 +121,42 @@ func (r *ForkableAgg) OpenFolder() error {
 	return nil
 }
 
-// BuildFiles builds all snapshots (asynchronously) upto a given RootNum
+func (r *ForkableAgg) BuildFiles(num RootNum) error {
+	finished := r.BuildFilesInBackground(num)
+	if !(r.buildingFiles.Load() || r.mergingFiles.Load()) {
+		return nil
+	}
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+Loop:
+	for {
+		select {
+		case <-r.ctx.Done():
+			return r.ctx.Err()
+		case <-finished:
+			break Loop
+		case <-logEvery.C:
+			if !(r.buildingFiles.Load() || r.mergingFiles.Load()) {
+				break Loop
+			}
+			if r.HasBackgroundFilesBuild() {
+				r.logger.Info("[fork_agg] Files build", "progress", r.BackgroundProgress())
+			}
+		}
+	}
+
+	return nil
+}
+
+// BuildFilesInBackground builds all snapshots (asynchronously) upto a given RootNum
 // num is exclusive
-func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
+func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 	// build in background
 	fin := make(chan struct{})
 
 	if ok := r.buildingFiles.CompareAndSwap(false, true); !ok {
+		r.logger.Debug("[fork_agg] BuildFilesInBackground disabled or already in progress. Skipping...")
 		close(fin)
 		return fin
 	}
@@ -142,7 +171,7 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 		for built {
 			built, err = r.buildFile(r.ctx, num)
 			if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped)) {
-				r.logger.Debug("buildFile cancelled/stopped", "err", err)
+				r.logger.Debug("[fork_agg] buildFile cancelled/stopped", "err", err)
 				close(fin)
 				return
 			} else if err != nil {
@@ -154,10 +183,10 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 			defer close(fin)
 			if err := r.MergeLoop(r.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-					r.logger.Debug("MergeLoop cancelled/stopped", "err", err)
+					r.logger.Debug("[fork_agg] MergeLoop cancelled/stopped", "err", err)
 					return
 				}
-				r.logger.Warn("[forkable snapshots] merge", "err", err)
+				r.logger.Warn("[fork_agg] merge", "err", err)
 			}
 		}()
 	}()
@@ -188,7 +217,7 @@ func (a *ForkableAgg) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 
 func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || r.mergeDisabled.Load() || !r.mergingFiles.CompareAndSwap(false, true) {
-		r.logger.Debug("MergeLoop disabled or already in progress. Skipping...")
+		r.logger.Debug("[fork_agg] MergeLoop disabled or already in progress. Skipping...")
 		return nil
 	}
 
@@ -196,7 +225,7 @@ func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 	// Convert panic to error.
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("[snapshots] background files merge: %s, %s", rec, dbg.Stack())
+			err = fmt.Errorf("[fork_agg] background files merge: %s, %s", rec, dbg.Stack())
 		}
 	}()
 
@@ -362,7 +391,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 			}
 
 			if skip {
-				r.logger.Debug("skipping", "id", p.a, "from", fromRootNum, "to", to)
+				r.logger.Debug("[fork_agg] skipping", "id", p.a, "from", fromRootNum, "to", to)
 				return nil
 			}
 
@@ -388,6 +417,10 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 	}
 	closeCfiles = false
 	tx.Close() // no need for tx in index building
+
+	if len(cfiles) == 0 {
+		return false, nil
+	}
 
 	for _, df := range cfiles {
 		r.loop(func(p *ProtoForkable) error {
@@ -553,6 +586,9 @@ func (r *ForkableAgg) IsForkablePresent(id ForkableId) bool {
 	return false
 }
 
+func (r *ForkableAgg) HasBackgroundFilesBuild() bool { return r.ps.Has() }
+func (r *ForkableAgg) BackgroundProgress() string    { return r.ps.String() }
+
 type ForkableAggTemporalTx struct {
 	f        *ForkableAgg
 	marked   []MarkedTxI
@@ -640,6 +676,10 @@ func (r *ForkableAggTemporalTx) Unwind(ctx context.Context, to RootNum, tx kv.Rw
 	})
 }
 
+func (r *ForkableAggTemporalTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (hasMore bool, err error) {
+	return false, nil
+}
+
 func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, timeout time.Duration, tx kv.RwTx) (err error) {
 	if dbg.NoPrune() {
 		return
@@ -675,9 +715,9 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 		case <-localTimeout.C:
 			return timeoutErr
 		case <-logEvery.C:
-			r.f.logger.Info("forkable prune progress", "toRootNum", toRootNum, "stat", aggStat)
+			r.f.logger.Info("[fork_agg] prune progress", "toRootNum", toRootNum, "stat", aggStat)
 		case <-ctx.Done():
-			r.f.logger.Info("forkable prune cancelled", "toRootNum", toRootNum, "stat", aggStat)
+			r.f.logger.Info("[fork_agg] prune cancelled", "toRootNum", toRootNum, "stat", aggStat)
 			return ctx.Err()
 		default:
 			return nil
@@ -686,10 +726,10 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 		return nil
 	})
 	if errors.Is(err, timeoutErr) {
-		r.f.logger.Warn("forkable prune timeout")
+		r.f.logger.Warn("[fork_agg] prune timeout")
 		return nil
 	}
-	r.f.logger.Info("forkable prune finished", "toRootNum", toRootNum, "stat", aggStat)
+	r.f.logger.Info("[fork_agg] prune finished", "toRootNum", toRootNum, "stat", aggStat)
 	return err
 }
 
@@ -776,7 +816,7 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 	}
 
 	for i, ut := range r.unmarked {
-		if skipUnaligned && r.f.marked[i].unaligned {
+		if skipUnaligned && r.f.unmarked[i].unaligned {
 			continue
 		}
 		if forId.MatchAll() || r.f.unmarked[i].a == forId {

@@ -79,7 +79,7 @@ func TestOpenFolder(t *testing.T) {
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):

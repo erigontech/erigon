@@ -16,7 +16,7 @@ func NewRcacheForkable(pre snapcfg.PreverifiedItems, dirs datadir.Dirs, stepSize
 		// register forkable
 		schema := RCacheSnapSchema(dirs, stepSize)
 		config := state.NewSnapshotConfig(state.E3SnapCreationConfig(stepSize), schema)
-		state.RegisterForkable("Rcache", kv.RCacheForkable, dirs, pre,
+		state.RegisterForkable("rcache", kv.RCacheForkable, dirs, pre,
 			state.WithSnapshotConfig(config),
 			state.WithSaltFile(path.Join(dirs.Snap, "salt-state.txt")),
 		)

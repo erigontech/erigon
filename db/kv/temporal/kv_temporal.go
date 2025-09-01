@@ -91,10 +91,11 @@ func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB
 	}
 	return tdb, nil
 }
-func (db *DB) EnableForkable()           { db.forkableEnabled = true }
-func (db *DB) Agg() any                  { return db.stateFiles }
-func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
+func (db *DB) EnableForkable()                  { db.forkableEnabled = true }
+func (db *DB) Agg() any                         { return db.stateFiles }
+func (db *DB) ForkableAgg(id kv.ForkableId) any { return db.forkaggs[db.searchForkableAggIdx(id)] }
+func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB        { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -403,6 +404,9 @@ func (tx *tx) autoClose() {
 		closer.Close()
 	}
 	tx.aggtx.Close()
+	for _, f := range tx.forkaggs {
+		f.Close()
+	}
 }
 
 func (tx *RwTx) Commit() error {
@@ -637,7 +641,26 @@ func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
 	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
+	if len(tx.forkaggs) > 0 {
+		timeTaken := time.Now()
+		for i := 0; i < len(tx.forkaggs); i++ {
+			hasMore, err := tx.forkaggs[i].PruneSmallBatches(ctx, timeout, tx.RwTx)
+			if err != nil {
+				return true, err
+			}
+			if time.Since(timeTaken) > timeout {
+				return true, nil
+			}
+			haveMore = haveMore || hasMore
+		}
+		timeout -= time.Since(timeTaken)
+	}
+
+	hasMore, err := tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
+	if err != nil {
+		return
+	}
+	return haveMore || hasMore, nil
 }
 func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
 	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.RwTx)

@@ -89,7 +89,7 @@ func WithSaltFile(saltFile string) EntityIdOption {
 }
 
 func (r *registry) Exists(a ForkableId) bool {
-	return a < ForkableId(len(r.entityRegistry))
+	return r.entityRegistry[a].name != ""
 }
 
 func (r *registry) Name(a ForkableId) string {
