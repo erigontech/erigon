@@ -1127,7 +1127,9 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
-	defer func(t time.Time) { log.Warn("[dbg] hist.prune", "name", ht.h.name, "took", time.Since(t)) }(time.Now())
+	defer func(t time.Time) {
+		log.Warn("[dbg] hist.prune", "name", ht.h.name, "took", time.Since(t), "limit", limit)
+	}(time.Now())
 
 	var (
 		seek     = make([]byte, 8, 256)
