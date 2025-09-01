@@ -32,7 +32,7 @@ import (
 func envLookup(envVarName string) (string, bool) {
 	if v, ok := os.LookupEnv(envVarName); ok {
 		if !strings.HasPrefix(envVarName, "ERIGON_") {
-			log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+			log.Warn("[env] please use ERIGON_ prefix for env variables", "var", envVarName)
 		}
 		log.Warn("[env]", envVarName, v)
 		return v, true
