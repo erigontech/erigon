@@ -238,19 +238,18 @@ func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequ
 		hashes[i] = gointerfaces.ConvertH256ToHash(in.BlobHashes[i])
 	}
 	blobBundles := s.txPool.GetBlobs(hashes)
-	blobs := make([][]byte, 0)
-	proofs := make([][]byte, 0)
-	for _, bb := range blobBundles {
-		blobs = append(blobs, bb.Blob)
-		if len(bb.Proofs) == 0 {
-			proofs = append(proofs, nil)
-		}
+	reply := make([]*txpool_proto.BlobAndProof, len(blobBundles))
+	for i, bb := range blobBundles {
+		var proofs [][]byte
 		for _, p := range bb.Proofs {
 			proofs = append(proofs, p[:])
 		}
+		reply[i] = &txpool_proto.BlobAndProof{
+			Blob:   bb.Blob,
+			Proofs: proofs,
+		}
 	}
-	reply := &txpool_proto.GetBlobsReply{Blobs: blobs, Proofs: proofs}
-	return reply, nil
+	return &txpool_proto.GetBlobsReply{BlobsWithProofs: reply}, nil
 }
 
 func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpool_proto.ImportResult {
