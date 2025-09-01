@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -44,87 +43,9 @@ import (
 
 var toAddr = common.BytesToAddress
 
-type StateSuite struct {
-	db    kv.TemporalRwDB
-	tx    kv.TemporalTx
-	state *IntraBlockState
-	r     StateReader
-	w     StateWriter
-}
-
-var _ = checker.Suite(&StateSuite{})
-
-func (s *StateSuite) TestDump(c *checker.C) {
-	// generate a few entries
-	obj1, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	c.Check(err, checker.IsNil)
-	s.state.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
-	obj2, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
-	c.Check(err, checker.IsNil)
-	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3}, true)
-	obj3, err := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	c.Check(err, checker.IsNil)
-	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
-
-	// write some of them to the trie
-	err = s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
-	c.Check(err, checker.IsNil)
-	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
-	c.Check(err, checker.IsNil)
-
-	err = s.state.FinalizeTx(&chain.Rules{}, s.w)
-	c.Check(err, checker.IsNil)
-
-	err = s.state.CommitBlock(&chain.Rules{}, s.w)
-	c.Check(err, checker.IsNil)
-
-	// check that dump contains the state objects that are in trie
-	tx, err1 := s.db.BeginTemporalRo(context.Background())
-	if err1 != nil {
-		c.Fatalf("create tx: %v", err1)
-	}
-	defer tx.Rollback()
-
-	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
-	want := `{
-    "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
-    "accounts": {
-        "0x0000000000000000000000000000000000000001": {
-            "balance": "22",
-            "nonce": 0,
-            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-        },
-        "0x0000000000000000000000000000000000000002": {
-            "balance": "44",
-            "nonce": 0,
-            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-        },
-        "0x0000000000000000000000000000000000000102": {
-            "balance": "0",
-            "nonce": 0,
-            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-            "codeHash": "87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
-            "code": "03030303030303"
-        }
-    }
-}`
-	if got != want {
-		c.Errorf("DumpToCollector mismatch:\ngot: %s\nwant: %s\n", got, want)
-	}
-}
-
-func (s *StateSuite) SetUpTest(c *checker.C) {
-	stepSize := uint64(16)
-
-	db := temporaltest.NewTestDBWithStepSize(nil, datadir.New(c.MkDir()), stepSize)
-	s.db = db
-
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		panic(err)
-	}
+func TestNull(t *testing.T) {
+	t.Parallel()
+	_, tx, _ := NewTestTemporalDb(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -287,20 +208,23 @@ func TestSnapshot2(t *testing.T) {
 
 	// db, trie are already non-empty values
 	so0, err := state.getStateObject(stateobjaddr0)
-	if err != nil {
-		t.Fatal("getting state", err)
-	}
+	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43, true)
+	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'}, true)
+	so0.selfdestructed = false
+	so0.deleted = false
+	state.setStateObject(stateobjaddr0, so0)
+
+	err = state.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
 
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
 	// and one with deleted == true
 	so1, err := state.getStateObject(stateobjaddr1)
-	if err != nil {
-		t.Fatal("getting state", err)
-	}
+	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53, true)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'}, true)
