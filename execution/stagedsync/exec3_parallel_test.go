@@ -498,7 +498,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	pe := &parallelExecutor{
 		txExecutor: txExecutor{
 			cfg: ExecuteBlockCfg{
-				chainConfig: chainSpec,
+				chainConfig: chainSpec.Config,
 				db:          db,
 			},
 			doms:   domains,
