@@ -23,7 +23,7 @@ import (
 	"math"
 	"testing"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
@@ -1530,7 +1530,7 @@ func TestGetBlobsV1(t *testing.T) {
 	blobBundles := pool.GetBlobs(blobHashes)
 	require.Equal(len(blobBundles), len(blobHashes))
 	blobs := make([][]byte, 0, len(blobBundles))
-	proofs := make([]gokzg4844.KZGProof, 0, len(blobBundles))
+	proofs := make([]goethkzg.KZGProof, 0, len(blobBundles))
 	for _, bb := range blobBundles {
 		blobs = append(blobs, bb.Blob)
 		for _, p := range bb.Proofs {
