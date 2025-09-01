@@ -402,16 +402,26 @@ func SyncSnapshots(
 			}
 		}
 
-		maxStateStep := uint64(math.MaxUint64)
-		if !headerchain && syncCfg.SnapshotDownloadToBlock > 0 {
-			maxTxNumPrevBlock, err := txNumsReader.Max(tx, syncCfg.SnapshotDownloadToBlock-1)
+		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
+		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		if !headerchain && toBlock > 0 {
+			toTxNum, err := txNumsReader.Min(tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
 				return err
 			}
-			maxTxNum := maxTxNumPrevBlock + 1
-			maxStateStep = maxTxNum / uint64(config3.DefaultStepSize)
-			if maxStateStep > 0 {
-				maxStateStep-- //  we don't want to download the step of maxTxNum so that we don't include data after it
+			toStep = toTxNum / uint64(config3.DefaultStepSize)
+			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
+			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
+			// so that we can correctly calculate toTxNum above (now we should delete these)
+			for _, f := range blockReader.FrozenFiles() {
+				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
+				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
+					continue
+				}
+				log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "file", fileInfo.Name(), "toBlock", toBlock)
+				if err := blockReader.Snapshots().Delete(fileInfo.Name()); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -466,7 +476,7 @@ func SyncSnapshots(
 				continue
 			}
 
-			if filterToBlock(p.Name, syncCfg.SnapshotDownloadToBlock, maxStateStep) {
+			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
 				continue
 			}
 
@@ -516,7 +526,7 @@ func SyncSnapshots(
 	return nil
 }
 
-func filterToBlock(name string, toBlock uint64, toStep uint64) bool {
+func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
@@ -532,6 +542,11 @@ func filterToBlock(name string, toBlock uint64, toStep uint64) bool {
 	}
 	if stateFile {
 		return fileInfo.To > toStep
+	}
+	if headerchain {
+		// if we are downloading the header chain, we want to download the seg file which contains our toBlock
+		// so that we can correctly calculate its maxTxNum from the body segment files (we will later on delete this file)
+		return fileInfo.From > toBlock
 	}
 	return fileInfo.To > toBlock
 }

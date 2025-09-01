@@ -683,7 +683,7 @@ var (
 	}
 	SnapDownloadToBlockFlag = cli.Uint64Flag{
 		Name:    "snap.download.to.block",
-		Usage:   "Download snapshots up to the given block number but not beyond (default downloads up to latest)",
+		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
 		Aliases: []string{"shadow.fork.block"},
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
