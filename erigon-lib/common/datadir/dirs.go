@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -296,4 +297,10 @@ func (d *Dirs) RenameNewVersions() error {
 		}
 	}
 	return nil
+}
+
+var versionPattern = regexp.MustCompile(`^v\d+\.\d+-`)
+
+func IsVersionedName(name string) bool {
+	return versionPattern.MatchString(name)
 }
