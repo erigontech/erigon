@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -39,8 +40,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/chain/params"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/tests/bor/helper"
@@ -104,6 +107,24 @@ func TestMiningBenchmark(t *testing.T) {
 
 	debug.RaiseFdLimit()
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)
+
+	cspec := chainspec.Spec{
+		Name:        "mining_benchmark",
+		GenesisHash: common.HexToHash("0x94ed840c030d808315d18814a43ad8f6923bae9d3e5f529166085197c9b78b9d"),
+		Genesis:     &genesis,
+		Config: &chain.Config{
+			ChainName: "mining_benchmark",
+			ChainID:   big.NewInt(1338),
+			Bor:       nil,
+			BorJSON:   nil,
+			AllowAA:   false,
+		},
+		Bootnodes:  nil,
+		DNSNetwork: "",
+	}
+
+	chainspec.RegisterChainSpec(cspec.Name, cspec)
+
 	var stacks []*node.Node
 	var ethbackends []*eth.Ethereum
 	var enodes []string
