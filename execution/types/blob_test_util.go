@@ -86,12 +86,12 @@ func MakeV1WrappedBlobTxnRlp() ([]byte, []goethkzg.KZGCommitment) {
 	commitment0, _ := kzgCtx.BlobToKZGCommitment(&blob0, 0)
 	commitment1, _ := kzgCtx.BlobToKZGCommitment(&blob1, 0)
 
-	_, p1, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&blob0), 4)
+	_, p1, err := kzgCtx.ComputeCellsAndKZGProofs(&blob0, 4)
 	if err != nil {
 		fmt.Println("error", err)
 		return nil, nil
 	}
-	_, p2, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&blob1), 4)
+	_, p2, err := kzgCtx.ComputeCellsAndKZGProofs(&blob1, 4)
 	if err != nil {
 		fmt.Println("error", err)
 		return nil, nil
