@@ -26,17 +26,12 @@ func VerifyCellProofBatch(blobsBytes [][]byte, commitments []goethkzg.KZGCommitm
 		commitsExt  = make([]goethkzg.KZGCommitment, 0, len(cellProofs))
 		cellIndices = make([]uint64, 0, len(cellProofs))
 		cells       = make([]*goethkzg.Cell, 0, len(cellProofs))
-		proofs      = make([]goethkzg.KZGProof, len(cellProofs))
 	)
 
-	// Cast the cell proofs
-	for i, proof := range cellProofs {
-		proofs[i] = goethkzg.KZGProof(proof)
-	}
 	// Extend Commitments to be of the same size as CellProofs
 	for _, commitment := range commitments {
 		for range goethkzg.CellsPerExtBlob {
-			commitsExt = append(commitsExt, goethkzg.KZGCommitment(commitment))
+			commitsExt = append(commitsExt, commitment)
 		}
 	}
 	// Compute cells and cellIndices
@@ -50,5 +45,5 @@ func VerifyCellProofBatch(blobsBytes [][]byte, commitments []goethkzg.KZGCommitm
 			cellIndices = append(cellIndices, uint64(idx))
 		}
 	}
-	return gokzgCtx.VerifyCellKZGProofBatch(commitsExt, cellIndices, cells, proofs)
+	return gokzgCtx.VerifyCellKZGProofBatch(commitsExt, cellIndices, cells, cellProofs)
 }
