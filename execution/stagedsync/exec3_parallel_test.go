@@ -608,10 +608,12 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	domains.SetBlockNum(1)
 	assert.NoError(t, err)
 
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+
 	pe := &parallelExecutor{
 		txExecutor: txExecutor{
 			cfg: ExecuteBlockCfg{
-				chainConfig: chainspec.MainnetChainConfig,
+				chainConfig: chainSpec.Config,
 				db:          db,
 			},
 			doms:   domains,
