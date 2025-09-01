@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
@@ -983,10 +983,10 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	}
 }
 
-func toBlobs(_blobs [][]byte) []*gokzg4844.Blob {
-	blobs := make([]*gokzg4844.Blob, len(_blobs))
+func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
+	blobs := make([]*goethkzg.Blob, len(_blobs))
 	for i, _blob := range _blobs {
-		blobs[i] = (*gokzg4844.Blob)(_blob)
+		blobs[i] = (*goethkzg.Blob)(_blob)
 	}
 	return blobs
 }
