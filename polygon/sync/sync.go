@@ -597,7 +597,7 @@ func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlock
 			"blockHash", hashOrNum.Hash,
 		)
 
-		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(p2pResponseTimeout)}
 		// newBlocks should be a singleton
 		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, event.PeerId, fetchOpts...)
 		if err != nil {
