@@ -27,12 +27,15 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -87,7 +90,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	migrationDBs := map[kv.Label]bool{
 		kv.ChainDB:         true,
 		kv.ConsensusDB:     true,
@@ -126,5 +129,20 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	if err != nil {
 		return nil, err
 	}
-	return temporal.New(rawDB, agg)
+
+	forkableAgg := state.NewForkableAgg(context.Background(), dirs, rawDB, logger)
+	preverifiedCfg, err := downloadercfg.LoadSnapshotsHashes(context.Background(), dirs, chain)
+	if err != nil {
+		return nil, err
+	}
+	rcacheForkable, err := forkables.NewRcacheForkable(preverifiedCfg.Preverified.Items, dirs, agg.StepSize(), logger)
+	if err != nil {
+		return nil, err
+	}
+	forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
+	if err := forkableAgg.OpenFolder(); err != nil {
+		return nil, err
+	}
+
+	return temporal.New(rawDB, agg, forkableAgg)
 }

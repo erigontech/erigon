@@ -65,6 +65,7 @@ func init() {
 
 	withDataDir(compactDomains)
 	withDomain(compactDomains)
+	withChain(compactDomains)
 	compactDomains.Flags().StringVar(&outDatadir, "out", "out-compacted", "")
 	compactDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the compacted domains directly in datadir (will remove .kvei and .bt too)")
 	compactDomains.Flags().BoolVar(&doIndexBuild, "build-idx", false, "build index for compacted domains")
@@ -125,7 +126,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -165,7 +166,7 @@ var compactDomains = &cobra.Command{
 			panic("can't build index when replace-in-datadir=false (consider removing --build-idx)")
 		}
 
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
