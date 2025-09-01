@@ -554,12 +554,13 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
+	doesRmCommitment := !cliCtx.IsSet("domain") || slices.Contains(cliCtx.StringSlice("domain"), "commitment")
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+		if doesRmCommitment && strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
 			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
@@ -808,7 +809,24 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedCheck := integrity.Check(cliCtx.String("check"))
+	checkStr := cliCtx.String("check")
+	var requestedChecks []integrity.Check
+	if len(checkStr) > 0 {
+		for _, split := range strings.Split(checkStr, ",") {
+			requestedChecks = append(requestedChecks, integrity.Check(split))
+		}
+
+		for _, check := range requestedChecks {
+			if slices.Contains(integrity.AllChecks, check) || slices.Contains(integrity.NonDefaultChecks, check) {
+				continue
+			}
+
+			return fmt.Errorf("requested check %s not found", check)
+		}
+	} else {
+		requestedChecks = integrity.AllChecks
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -833,22 +851,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 
-	checks := append([]integrity.Check{}, integrity.AllChecks...)
-	nonDefaultCheck := requestedCheck != "" &&
-		!slices.Contains(integrity.AllChecks, requestedCheck) &&
-		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
-	if nonDefaultCheck {
-		checks = append(checks, integrity.NonDefaultChecks...)
-	}
-
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
-	found := false
-	for _, chk := range checks {
-		if requestedCheck != "" && requestedCheck != chk {
-			continue
-		}
-		found = true
+	for _, chk := range requestedChecks {
 		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
@@ -910,10 +915,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("not a valid check: %s", requestedCheck)
 	}
 
 	return nil
@@ -1070,7 +1071,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
-		for _, snapType := range kv.StateDomains {
+		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
 			schemaVersionMinSup := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
@@ -1164,14 +1165,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
+	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
 	for _, res := range accFiles {
-		viTypes := []string{"accounts", "storage", "code"}
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := libstate.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
