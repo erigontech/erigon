@@ -68,10 +68,10 @@ func EnvStrings(envVarName string, sep string, defaultVal []string) []string {
 
 func EnvBool(envVarName string, defaultVal bool) bool {
 	v, _ := envLookup(envVarName)
-	if strings.ToLower(v) == "true" {
+	if strings.EqualFold(v, "true") {
 		return true
 	}
-	if strings.ToLower(v) == "false" {
+	if strings.EqualFold(v, "false") {
 		return false
 	}
 	return defaultVal
@@ -145,7 +145,7 @@ func MustParseUint(strNum string) uint64 {
 	return parsed
 }
 func MustParseInts(strNum, separator string) []int64 {
-	if strings.ToLower(strNum) == "all" || strings.ToLower(strNum) == "true" {
+	if strings.EqualFold(strNum, "all") || strings.EqualFold(strNum, "true") {
 		return []int64{math.MaxInt64}
 	}
 	parts := strings.Split(strNum, separator)
@@ -156,7 +156,7 @@ func MustParseInts(strNum, separator string) []int64 {
 	return ints
 }
 func MustParseUints(strNum, separator string) []uint64 {
-	if strings.ToLower(strNum) == "all" || strings.ToLower(strNum) == "true" {
+	if strings.EqualFold(strNum, "all") || strings.EqualFold(strNum, "true") {
 		return []uint64{math.MaxUint64}
 	}
 	parts := strings.Split(strNum, separator)
