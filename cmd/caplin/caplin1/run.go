@@ -25,6 +25,10 @@ import (
 	"path"
 	"time"
 
+	"github.com/spf13/afero"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc/credentials"
+
 	"github.com/erigontech/erigon-lib/common/dir"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -71,9 +75,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/spf13/afero"
-	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc/credentials"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
