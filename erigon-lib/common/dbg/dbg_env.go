@@ -148,8 +148,9 @@ func MustParseInts(strNum, separator string) []int64 {
 	if strings.ToLower(strNum) == "all" || strings.ToLower(strNum) == "true" {
 		return []int64{math.MaxInt64}
 	}
-	var ints []int64
-	for _, str := range strings.Split(strNum, separator) {
+	parts := strings.Split(strNum, separator)
+	ints := make([]int64, 0, len(parts))
+	for _, str := range parts {
 		ints = append(ints, MustParseInt(str))
 	}
 	return ints
@@ -158,7 +159,8 @@ func MustParseUints(strNum, separator string) []uint64 {
 	if strings.ToLower(strNum) == "all" || strings.ToLower(strNum) == "true" {
 		return []uint64{math.MaxUint64}
 	}
-	var ints []uint64
+	parts := strings.Split(strNum, separator)
+	ints := make([]uint64, 0, len(parts))
 	for _, str := range strings.Split(strNum, separator) {
 		ints = append(ints, MustParseUint(str))
 	}
