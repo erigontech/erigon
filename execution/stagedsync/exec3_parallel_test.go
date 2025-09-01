@@ -22,6 +22,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
@@ -492,10 +493,12 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	domains.SetBlockNum(1)
 	assert.NoError(t, err)
 
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+
 	pe := &parallelExecutor{
 		txExecutor: txExecutor{
 			cfg: ExecuteBlockCfg{
-				chainConfig: chainspec.MainnetChainConfig,
+				chainConfig: chainSpec,
 				db:          db,
 			},
 			doms:   domains,
