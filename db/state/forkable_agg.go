@@ -245,8 +245,6 @@ func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 }
 
 func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, err error) {
-	r.logger.Debug("[fork_agg] merge", "merge_workers", r.mergeWorkers, "compress_workers", r.compressWorkers)
-
 	aggTx := r.BeginTemporalTx()
 	defer aggTx.Close()
 
@@ -318,8 +316,6 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	}
 
 	closeFiles = false
-	r.logger.Debug("[fork_agg] merge", "marked", len(mf.marked), "unmarked", len(mf.unmarked))
-
 	r.IntegrateMergeFiles(mf)
 
 	atx := r.BeginTemporalTx()

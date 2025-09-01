@@ -72,9 +72,8 @@ var ( // Compile time interface checks
 
 type DB struct {
 	kv.RwDB
-	stateFiles      *state.Aggregator
-	forkaggs        []*state.ForkableAgg
-	forkableEnabled bool
+	stateFiles *state.Aggregator
+	forkaggs   []*state.ForkableAgg
 }
 
 func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
@@ -87,11 +86,9 @@ func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB
 			}
 			tdb.forkaggs[i] = forkagg
 		}
-		tdb.forkableEnabled = true
 	}
 	return tdb, nil
 }
-func (db *DB) EnableForkable()                  { db.forkableEnabled = true }
 func (db *DB) Agg() any                         { return db.stateFiles }
 func (db *DB) ForkableAgg(id kv.ForkableId) any { return db.forkaggs[db.searchForkableAggIdx(id)] }
 func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
@@ -106,7 +103,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
 
-	if db.forkableEnabled {
+	if len(db.forkaggs) > 0 {
 		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
 		for i, forkagg := range db.forkaggs {
 			tx.forkaggs[i] = forkagg.BeginTemporalTx()
@@ -144,7 +141,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
-	if db.forkableEnabled {
+	if len(db.forkaggs) > 0 {
 		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
 		for i, forkagg := range db.forkaggs {
 			tx.forkaggs[i] = forkagg.BeginTemporalTx()
