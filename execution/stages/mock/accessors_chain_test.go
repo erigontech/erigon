@@ -529,7 +529,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	var txNum uint64
 	{
-		blockNum := uint64(0)
+		blockNum := header.Number.Uint64()
 		sd, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
