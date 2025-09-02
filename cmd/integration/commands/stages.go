@@ -1234,7 +1234,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		cfg.Miner = *miningConfig
 	}
 	cfg.Dirs = dirs
-	dbReadConcurrency := 1
+	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	blockReader, blockWriter, allSn, borSn, bridgeStore, heimdallStore, agg, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
 	if err != nil {
