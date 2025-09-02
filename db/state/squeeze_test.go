@@ -33,7 +33,7 @@ type testAggConfig struct {
 	disableCommitmentBranchTransform bool
 }
 
-func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *state.Aggregator) {
+func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
 	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
@@ -42,16 +42,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *sta
 	err := agg.BuildFiles(uint64(txCount))
 	require.NoError(tb, err)
 	return db, agg
-}
-
-// wrapDbWithCtx - deprecated copy of kv_temporal.go - visible only in tests
-// need to move non-unit-tests to own package
-func wrapDbWithCtx(db kv.RwDB, ctx *state.Aggregator) kv.TemporalRwDB {
-	v, err := temporal.New(db, ctx)
-	if err != nil {
-		panic(err)
-	}
-	return v
 }
 
 type rndGen struct {
@@ -90,7 +80,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	return keys, values
 }
 
-func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *state.Aggregator) {
+func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
@@ -100,7 +90,10 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *state.Aggre
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	return db, agg
+	tdb, err := temporal.New(db, agg)
+	require.NoError(tb, err)
+	tb.Cleanup(tdb.Close)
+	return tdb, agg
 }
 
 func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *state.Aggregator {
@@ -117,17 +110,10 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
-	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	db, err := temporal.New(_db, agg)
-	require.NoError(tb, err)
-	tb.Cleanup(db.Close)
-
-	//db := wrapDbWithCtx(_db, agg)
-
+	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
 	ctx := context.Background()
-	//agg.logger = log.Root().New()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
@@ -184,8 +170,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
-	_db, agg := testDbAggregatorWithFiles(t, cfgd)
-	db := wrapDbWithCtx(_db, agg)
+	db, agg := testDbAggregatorWithFiles(t, cfgd)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -248,7 +233,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
 	})
@@ -257,8 +242,6 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	var fPaths []string
 
 	{
-		db := wrapDbWithCtx(_db, agg)
-
 		tx, err := db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -275,10 +258,13 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		}
 		tx.Rollback()
 		agg.Close()
+		//db.Close()
 	}
 
-	agg = testAgg(t, _db, agg.Dirs(), agg.StepSize(), log.New())
-	db := wrapDbWithCtx(_db, agg)
+	agg = testAgg(t, db, agg.Dirs(), agg.StepSize(), log.New())
+	db, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	defer db.Close()
 
 	// now clean all commitment files along with related db buckets
 	rwTx, err := db.BeginRw(context.Background())
@@ -361,8 +347,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	ctx := context.Background()
 	logger := log.New()
 	aggStep := rc.aggStep
-	_db, agg := testDbAndAggregatorv3(t, aggStep)
-	db := wrapDbWithCtx(_db, agg)
+	db, agg := testDbAndAggregatorv3(t, aggStep)
 
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -436,7 +421,9 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
 
-	db = wrapDbWithCtx(db, anotherAgg)
+	db, err = temporal.New(db, anotherAgg) // to set aggregator in the db
+	require.NoError(t, err)
+	defer db.Close()
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -469,8 +456,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
 	t.Parallel()
-	_db, agg := testDbAndAggregatorv3(t, 20)
-	db := wrapDbWithCtx(_db, agg)
+	db, _ := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
