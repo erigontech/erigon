@@ -41,7 +41,7 @@ jobs:
           # Choose tag based on event type
           TAG=$BRANCH_NAME-$SHORT_SHA
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            # NOTE: This uses the short SHA when pushing tags (kept as in your original logic)
+            # NOTE: This uses the short SHA when pushing tags
             TAG=$SHORT_SHA
           elif [[ "${{ github.event_name }}" == "release" ]]; then
             TAG=${{ github.event.release.tag_name }}
