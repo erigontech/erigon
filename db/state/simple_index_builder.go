@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -157,7 +158,8 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 
 	keyCount := iidq.GetCount()
 	if p != nil {
-		p.Name.Store(&idxFile)
+		baseFileName := filepath.Base(idxFile)
+		p.Name.Store(&baseFileName)
 		p.Total.Store(keyCount)
 	}
 	salt, err := Registry.Salt(s.id)
@@ -211,9 +213,10 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		}
 		stream.Close()
 		if err = rs.Build(ctx); err != nil {
-			p.Processed.CompareAndSwap(p.Processed.Load(), 0)
 			// collision handling
 			if errors.Is(err, recsplit.ErrCollision) {
+				p.Processed.Store(0)
+				s.logger.Debug("found collision, trying again", "file", filepath.Base(idxFile), "salt", rs.Salt(), "err", err)
 				rs.ResetNextSalt()
 				continue
 			}

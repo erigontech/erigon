@@ -86,26 +86,40 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 		return
 	}
 	defer comp.Close()
-	p := ps.AddNew("merge_forkable "+path.Base(segPath), 1)
+	p := ps.AddNew(path.Base(segPath), 1)
 	defer ps.Delete(p)
-	var word = make([]byte, 0, 4096)
+
+	{
+		count := 0
+		for _, item := range filesToMerge {
+			count += item.src.decompressor.Count()
+		}
+		p.Total.Store(uint64(count))
+	}
 
 	var expectedTotal int
 	for _, item := range filesToMerge {
+		var word = make([]byte, 0, 4096)
 		startRootNum, endRootNum := item.src.Range()
 		compression := f.isCompressionUsed(RootNum(startRootNum), RootNum(endRootNum))
-		g := item.src.decompressor.MakeGetter()
 
-		for g.HasNext() {
-			if compression {
-				word, _ = g.Next(word[:0])
-			} else {
-				word, _ = g.NextUncompressed()
-			}
+		if err = item.src.decompressor.WithReadAhead(func() error {
+			g := item.src.decompressor.MakeGetter()
+			for g.HasNext() {
+				if compression {
+					word, _ = g.Next(word[:0])
+				} else {
+					word, _ = g.NextUncompressed()
+				}
 
-			if err = comp.AddWord(word); err != nil {
-				return
+				if err = comp.AddWord(word); err != nil {
+					return err
+				}
+				p.Processed.Add(1)
 			}
+			return nil
+		}); err != nil {
+			return
 		}
 
 		expectedTotal += item.src.decompressor.Count()
@@ -117,6 +131,8 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	if err = comp.Compress(); err != nil {
 		return
 	}
+
+	ps.Delete(p)
 
 	mergedFile = newFilesItemWithSnapConfig(from.Uint64(), to.Uint64(), f.cfg)
 	if mergedFile.decompressor, err = seg.NewDecompressor(segPath); err != nil {

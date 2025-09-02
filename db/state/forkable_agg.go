@@ -220,7 +220,6 @@ func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 		r.logger.Debug("[fork_agg] MergeLoop disabled or already in progress. Skipping...")
 		return nil
 	}
-
 	// Merge is background operation. It must not crush application.
 	// Convert panic to error.
 	defer func() {
@@ -255,6 +254,10 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	defer func() {
 		if closeFiles {
 			mf.Close()
+		}
+
+		if err := recover(); err != nil {
+			err = fmt.Errorf("[fork_agg] merge: %s, %s", err, dbg.Stack())
 		}
 	}()
 
@@ -686,7 +689,7 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 
 	limit := uint64(1000)
 	if timeout > 5*time.Hour {
-		limit = 10_000_000
+		limit = 100_000_000
 	} else if timeout >= time.Minute {
 		limit = 100_000
 	}

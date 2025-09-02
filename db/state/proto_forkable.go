@@ -115,7 +115,6 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	{
 		p := ps.AddNew(filepath.Base(path), 1)
 		defer ps.Delete(p)
-
 		if err := sn.Compress(); err != nil {
 			return nil, false, err
 		}

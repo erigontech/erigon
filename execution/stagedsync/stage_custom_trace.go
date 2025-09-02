@@ -270,12 +270,11 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	if err := rcacheAgg.BuildFiles(kv.RootNum(lastTxNum)); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ttx := tx.(kv.TemporalRwTx)
-		if err := ttx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		if err := tx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
-		if _, err := ttx.PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+		if _, err := tx.PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil

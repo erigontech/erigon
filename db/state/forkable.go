@@ -380,7 +380,7 @@ func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
 
 func (m *UnmarkedTx) BufferedWriter() *UnmarkedBufferedWriter {
 	return &UnmarkedBufferedWriter{
-		values:  etl.NewCollector(Registry.Name(m.id)+".etl.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers.Get(), m.a.logger),
+		values:  etl.NewCollector(Registry.Name(m.id)+".etl.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers.Get(), m.a.logger).LogLvl(log.LvlTrace),
 		valsTbl: m.ap.valsTbl,
 	}
 }
