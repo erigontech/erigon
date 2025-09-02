@@ -66,7 +66,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = true
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
