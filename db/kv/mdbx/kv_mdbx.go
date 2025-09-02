@@ -142,10 +142,11 @@ func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	}
 	return opts.RemoveFlags(flag)
 }
-func (opts MdbxOpts) WriteMap(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.WriteMap) }
-func (opts MdbxOpts) Exclusive(v bool) MdbxOpts { return opts.boolToFlag(v, mdbx.Exclusive) }
-func (opts MdbxOpts) Readonly(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Readonly) }
-func (opts MdbxOpts) Accede(v bool) MdbxOpts    { return opts.boolToFlag(v, mdbx.Accede) }
+func (opts MdbxOpts) WriteMap(v bool) MdbxOpts   { return opts.boolToFlag(v, mdbx.WriteMap) }
+func (opts MdbxOpts) Exclusive(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Exclusive) }
+func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdbx.Readonly) }
+func (opts MdbxOpts) Accede(v bool) MdbxOpts     { return opts.boolToFlag(v, mdbx.Accede) }
+func (opts MdbxOpts) AutoRemove(v bool) MdbxOpts { opts.autoRemove = v; return opts }
 
 func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	if tmpDir != "" {

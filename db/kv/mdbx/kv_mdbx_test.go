@@ -1127,3 +1127,26 @@ func TestMdbxWithSyncBytes(t *testing.T) {
 	}
 	t.Cleanup(db.Close)
 }
+
+func TestAutoRemove(t *testing.T) {
+	logger := log.New()
+
+	t.Run("autoRemove enabled", func(t *testing.T) {
+		db := New(kv.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(true).MustOpen()
+		mdbxDB := db.(*MdbxKV)
+		dbPath := mdbxDB.Path()
+
+		require.DirExists(t, dbPath)
+		db.Close()
+		require.NoDirExists(t, dbPath)
+	})
+	t.Run("autoRemove disabled", func(t *testing.T) {
+		db := New(kv.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(false).MustOpen()
+		mdbxDB := db.(*MdbxKV)
+		dbPath := mdbxDB.Path()
+
+		require.DirExists(t, dbPath)
+		db.Close()
+		require.DirExists(t, dbPath)
+	})
+}
