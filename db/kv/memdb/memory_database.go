@@ -20,8 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -31,26 +29,12 @@ func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
 	return mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
 }
 
-func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
-	return mdbx.New(kv.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-}
-
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()
 	db := New(tb, tmpDir, label)
 	tb.Cleanup(db.Close)
 	return db
-}
-
-func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
-	tb.Helper()
-	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return tx
 }
 
 func NewTestPoolDB(tb testing.TB) kv.RwDB {
