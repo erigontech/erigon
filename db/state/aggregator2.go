@@ -25,10 +25,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 }
 
 func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	err := checkSnapshotsCompatibility(dirs)
-	if err != nil {
-		return nil, err
-	}
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
@@ -227,7 +223,7 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 		},
 	}
 */
-func checkSnapshotsCompatibility(d datadir.Dirs) error {
+func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
