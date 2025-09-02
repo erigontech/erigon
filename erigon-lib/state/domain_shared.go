@@ -1196,12 +1196,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
 	if updateCount == 0 {
+		rootHash, err = sdc.patriciaTrie.RootHash()
+		if err != nil {
+			return nil, err
+		}
 		if saveState {
 			if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
 				return nil, err
 			}
 		}
-		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
 
