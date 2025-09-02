@@ -33,9 +33,8 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -45,7 +44,7 @@ var toAddr = common.BytesToAddress
 
 func TestNull(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -80,7 +79,7 @@ func TestNull(t *testing.T) {
 
 func TestTouchDelete(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -118,7 +117,7 @@ func TestTouchDelete(t *testing.T) {
 
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -162,7 +161,7 @@ func TestSnapshot(t *testing.T) {
 
 func TestSnapshotEmpty(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -182,7 +181,7 @@ func TestSnapshotEmpty(t *testing.T) {
 func TestSnapshot2(t *testing.T) {
 	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -308,29 +307,22 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
-	tb.Cleanup(db.Close)
 
-	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(tb, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
-	require.NoError(tb, err)
-	tb.Cleanup(agg.Close)
+	dirs := datadir.New(tb.TempDir())
 
-	_db, err := temporal.New(db, agg)
-	require.NoError(tb, err)
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
-	return _db, tx, agg
+	return db, tx
 }
 
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx := NewTestTemporalDb(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
