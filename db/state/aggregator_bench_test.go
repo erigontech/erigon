@@ -38,24 +38,17 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *state.Aggregator) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	b.Helper()
-	logger := log.New()
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
-	b.Cleanup(db.Close)
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(b, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(b, err)
-	b.Cleanup(agg.Close)
+	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
 	return db, agg
 }
 
@@ -66,8 +59,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	vals := queueKeys(ctx, 53, length.Hash)
 
 	aggStep := uint64(100_00)
-	_db, agg := testDbAndAggregatorBench(b, aggStep)
-	db := wrapDbWithCtx(_db, agg)
+	db, _ := testDbAndAggregatorBench(b, aggStep)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)

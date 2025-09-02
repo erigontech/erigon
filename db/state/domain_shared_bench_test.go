@@ -35,8 +35,7 @@ import (
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	stepSize := uint64(100)
-	_db, agg := testDbAndAggregatorBench(t, stepSize)
-	db := wrapDbWithCtx(_db, agg)
+	db, agg := testDbAndAggregatorBench(t, stepSize)
 
 	ctx := context.Background()
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -119,8 +118,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 
 func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	stepSize := uint64(100)
-	_db, agg := testDbAndAggregatorBench(b, stepSize)
-	db := wrapDbWithCtx(_db, agg)
+	db, _ := testDbAndAggregatorBench(b, stepSize)
 
 	ctx := context.Background()
 	rwTx, err := db.BeginTemporalRw(ctx)
