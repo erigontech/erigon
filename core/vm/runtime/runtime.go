@@ -128,7 +128,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 
 	externalState := cfg.State != nil
 	if !externalState {
-		db := memdb.NewStateDB(tempdir)
+		db := memdb.NewStateDB(nil, tempdir)
 		defer db.Close()
 		dirs := datadir.New(tempdir)
 		logger := log.New()
