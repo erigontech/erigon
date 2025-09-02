@@ -37,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -96,24 +94,10 @@ var eip2200Tests = []struct {
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
-func testTemporalDB(t *testing.T) *temporal.DB {
-	db := memdb.NewStateDB(t.TempDir())
+func testTemporalTxSD(t *testing.T) (kv.RwTx, *dbstate.SharedDomains) {
+	dirs := datadir.New(t.TempDir())
 
-	t.Cleanup(db.Close)
-
-	dirs, logger := datadir.New(t.TempDir()), log.New()
-	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(t, err)
-	agg, err := dbstate.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	return _db
-}
-
-func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *dbstate.SharedDomains) {
+	db := temporaltest.NewTestDB(t, dirs)
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
@@ -133,8 +117,7 @@ func TestEIP2200(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
 
-			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
-			defer tx.Rollback()
+			tx, sd := testTemporalTxSD(t)
 
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 			s := state.New(r)
