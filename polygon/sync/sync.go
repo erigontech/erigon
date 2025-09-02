@@ -509,9 +509,6 @@ func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockB
 }
 
 func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
-	firstBlockHash := event.NewBlockHashes[0].Hash
-	firstBlockNum := event.NewBlockHashes[0].Number
-	s.logger.Debug(syncLogPrefix("applyNewBlockHashesOnTip: schedule blocks download from hashes"), "blockNum", firstBlockNum, "blockhash", firstBlockHash, "peerId", event.PeerId)
 	go func() { // asynchronously download blocks and in the end place the blocks batch in the event queue
 		blockchain, err := s.downloadBlocksFromHashes(ctx, event, ccb)
 		if err != nil {
