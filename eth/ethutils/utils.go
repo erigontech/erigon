@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -31,7 +30,6 @@ import (
 var (
 	ErrNilBlobHashes       = errors.New("nil blob hashes array")
 	ErrMaxBlobGasUsed      = errors.New("blobs/blobgas exceeds max")
-	ErrTooManyBlobs        = errors.New("blob transaction has too many blobs")
 	ErrMismatchBlobHashes  = errors.New("mismatch blob hashes")
 	ErrInvalidVersiondHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
@@ -61,17 +59,13 @@ func IsLocalBlock(engine consensus.Engine, etherbase common.Address, txPoolLocal
 	return false
 }
 
-func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []common.Hash, transactions *[]types.Transaction, checkMaxBlobsPerTxn bool) error {
+func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []common.Hash, transactions *[]types.Transaction) error {
 	if expectedBlobHashes == nil {
 		return ErrNilBlobHashes
 	}
 	actualBlobHashes := []common.Hash{}
 	for _, txn := range *transactions {
 		if txn.Type() == types.BlobTxType {
-			if checkMaxBlobsPerTxn && len(txn.GetBlobHashes()) > params.MaxBlobsPerTxn {
-				log.Debug("blob transaction has too many blobs", "blobHashes", len(txn.GetBlobHashes()))
-				return ErrTooManyBlobs
-			}
 			for _, h := range txn.GetBlobHashes() {
 				if h[0] != kzg.BlobCommitmentVersionKZG {
 					return ErrInvalidVersiondHash
