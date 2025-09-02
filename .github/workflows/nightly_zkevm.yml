@@ -1,92 +1,90 @@
-name: Nightly - Build and Push Docker
+name: Nightly - Build and Push Docker (Docker Hub + GHCR)
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Runs every night at midnight UTC
+    - cron: '0 0 * * *'  # Every night at midnight UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
 
 env:
+  # Docker Hub
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   IMAGE_NAME: hermeznetwork/cdk-erigon
+  # GHCR
+  GHCR_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/cdk-erigon
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   prepare:
-    if: github.ref == 'refs/heads/zkevm'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.prep.outputs.version }}
     steps:
-      - name: Checkout code
+      - name: Checkout zkevm branch
         uses: actions/checkout@v4
-      - name: Prepare
+        with:
+          ref: zkevm
+
+      - name: Prepare timestamped tag
         id: prep
         run: |
-          SHORT_SHA=$(echo ${{ github.sha }} | head -c 7)
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | head -c 7)
           DATE_TIME=$(date +"%Y%m%d%H%M%S")
-          TAG=$DATE_TIME-$SHORT_SHA
-          echo "version=$TAG" >> $GITHUB_OUTPUT
+          TAG="${DATE_TIME}-${SHORT_SHA}"
+          echo "version=${TAG}" >> "$GITHUB_OUTPUT"
 
-  build-amd64:
-    if: github.ref == 'refs/heads/zkevm'
+  build-and-push:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout zkevm branch
         uses: actions/checkout@v4
+        with:
+          ref: zkevm
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Login to DockerHub
+
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
-      - name: Build and push AMD64 image
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (multi-arch to Docker Hub + GHCR)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64
-          platforms: linux/amd64
-
-  build-arm64:
-    if: github.ref == 'refs/heads/zkevm'
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
-      - name: Build and push ARM64 image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
-          platforms: linux/arm64
-
-  create-and-push-manifest:
-    if: github.ref == 'refs/heads/zkevm'
-    needs: [prepare, build-amd64, build-arm64]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
-      - name: Create and push manifest
-        run: |
-          docker buildx create --use
-          docker buildx build --push --platform linux/amd64,linux/arm64 --tag ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} --file Dockerfile .
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
+            ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
+          # (Optional) add an evergreen alias like :nightly to both registries:
+          #   ${{ env.IMAGE_NAME }}:nightly
+          #   ${{ env.GHCR_IMAGE_NAME }}:nightly
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
