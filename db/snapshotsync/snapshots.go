@@ -547,6 +547,7 @@ type RoSnapshots struct {
 
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
+	segmentsMin atomic.Uint64 // all types of .seg files are available - starting from this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
@@ -598,6 +599,7 @@ func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Lo
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -1055,6 +1057,8 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
 	var segmentsMax uint64
 	var segmentsMaxSet bool
+	var segmentsMin = ^uint64(0) // Initialize to max value
+	var segmentsMinSet bool
 
 	wg := &errgroup.Group{}
 	wg.SetLimit(64)
@@ -1136,9 +1140,17 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 			segmentsMax = 0
 		}
 		segmentsMaxSet = true
+
+		if f.From < segmentsMin {
+			segmentsMin = f.From
+			segmentsMinSet = true
+		}
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
+	}
+	if segmentsMinSet {
+		s.segmentsMin.Store(segmentsMin)
 	}
 	if err := wg.Wait(); err != nil {
 		return err

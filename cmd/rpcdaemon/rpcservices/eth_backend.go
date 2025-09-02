@@ -436,8 +436,6 @@ func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum ui
 	return back.blockReader.BlockForTxNum(ctx, tx, txNum)
 }
 
-func (back *RemoteBackend) EarliestBlockNum(ctx context.Context) (uint64, error) {
-	return 0, nil
-	// TODO: fix
-	//return back.blockReader.EarliestBlockNum(ctx)
+func (back *RemoteBackend) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
+	return back.blockReader.EarliestBlockNum(ctx, tx)
 }

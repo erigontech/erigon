@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sort"
 
@@ -65,7 +66,7 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	return block, err
 }
 
-func (r *RemoteBlockReader) EarliestBlockNum(ctx context.Context) (uint64, error) {
+func (r *RemoteBlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
 	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
 	if err != nil {
 		return 0, err
@@ -428,6 +429,29 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
+	snapshotMin := r.sn.SegmentsMin()
+
+	if tx == nil {
+		return snapshotMin, nil
+	}
+
+	var dbMin uint64 = ^uint64(0)
+	if kvTx, ok := tx.(kv.Tx); ok {
+		firstKey, err := kv.FirstKey(kvTx, kv.BlockBody)
+		if err != nil {
+			return 0, err
+		}
+		if len(firstKey) >= 8 {
+			dbMin = binary.BigEndian.Uint64(firstKey[:8])
+		}
+	}
+
+	if dbMin < snapshotMin {
+		return dbMin, nil
+	}
+	return snapshotMin, nil
+}
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 	if r.borSn == nil {
 		return 0
