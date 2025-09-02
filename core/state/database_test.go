@@ -32,13 +32,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/kv"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -923,10 +921,7 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
-	_, tx := state.NewTestRwTx(t)
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
+	_, tx, sd := state.NewTestRwTx(t)
 
 	txNum := uint64(1)
 	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
@@ -1346,10 +1341,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	t.Parallel()
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	_, tx := state.NewTestRwTx(t)
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
+	_, tx, sd := state.NewTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
@@ -1395,10 +1387,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx := state.NewTestRwTx(t)
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
+	_, tx, sd := state.NewTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
@@ -1435,10 +1424,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx := state.NewTestRwTx(t)
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
+	_, tx, sd := state.NewTestRwTx(t)
 	blockNum := uint64(1)
 	txNum := uint64(3)
 

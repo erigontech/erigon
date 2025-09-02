@@ -44,14 +44,10 @@ var toAddr = common.BytesToAddress
 
 func TestNull(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestRwTx(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	txNum := uint64(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -79,14 +75,10 @@ func TestNull(t *testing.T) {
 
 func TestTouchDelete(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestRwTx(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	txNum := uint64(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -117,13 +109,9 @@ func TestTouchDelete(t *testing.T) {
 
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestRwTx(t)
+	_, tx, domains := NewTestRwTx(t)
 
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -161,13 +149,9 @@ func TestSnapshot(t *testing.T) {
 
 func TestSnapshotEmpty(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestRwTx(t)
+	_, tx, domains := NewTestRwTx(t)
 
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -181,14 +165,10 @@ func TestSnapshotEmpty(t *testing.T) {
 func TestSnapshot2(t *testing.T) {
 	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx := NewTestRwTx(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	txNum := uint64(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
@@ -307,7 +287,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
+func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.SharedDomains) {
 	tb.Helper()
 
 	dirs := datadir.New(tb.TempDir())
@@ -317,18 +297,19 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
-	return db, tx
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+
+	return db, tx, domains
 }
 
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestRwTx(t)
+	_, tx, domains := NewTestRwTx(t)
 
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
