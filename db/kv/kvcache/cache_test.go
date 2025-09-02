@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -233,8 +232,6 @@ func TestAPI(t *testing.T) {
 		return res
 	}
 
-	counter := atomic.Int64{}
-	prevVals := map[string][]byte{}
 	put := func(k, v []byte) uint64 {
 		var txID uint64
 		err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
@@ -244,11 +241,10 @@ func TestAPI(t *testing.T) {
 				return err
 			}
 			defer d.Close()
-			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, d.TxNum(), prevVals[string(k)], kv.Step(counter.Load())); err != nil {
+			txNum := uint64(0)
+			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil, 0); err != nil {
 				return err
 			}
-			prevVals[string(k)] = v
-			counter.Add(1)
 			return d.Flush(ctx, tx)
 		})
 		require.NoError(err)
