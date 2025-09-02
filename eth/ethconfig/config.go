@@ -276,7 +276,9 @@ type Config struct {
 
 	ElBlockDownloaderV2 bool
 
-	L2RPCAddr string
+	// Arbitrum extensions
+	L2RPCAddr                string // http://host:port  to fetch blocks and transactions to stay on chain tip of L2
+	L2ArbitrumImportJsonPath string // path to arbitrum json file to import L2 blocks and transactions from (as genesis)
 }
 
 type Sync struct {
