@@ -188,13 +188,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		require.NoError(t, err)
 		codeRange = extractKVErrIterator(t, it)
 
-		its, err := AggTx(tx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err := tx.HistoryRange(kv.AccountsDomain, 0, int(maxTx), order.Asc, maxInt)
 		require.NoError(t, err)
 		accountHistRange = extractKVErrIterator(t, its)
-		its, err = AggTx(tx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = tx.HistoryRange(kv.CodeDomain, 0, int(maxTx), order.Asc, maxInt)
 		require.NoError(t, err)
 		codeHistRange = extractKVErrIterator(t, its)
-		its, err = AggTx(tx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = tx.HistoryRange(kv.StorageDomain, 0, int(maxTx), order.Asc, maxInt)
 		require.NoError(t, err)
 		storageHistRange = extractKVErrIterator(t, its)
 	}
@@ -243,13 +243,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
-		its, err := AggTx(afterTx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err := afterTx.HistoryRange(kv.AccountsDomain, 0, int(maxTx), order.Asc, maxInt)
 		require.NoError(t, err)
 		accountHistRangeAfter = extractKVErrIterator(t, its)
-		its, err = AggTx(afterTx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err = afterTx.HistoryRange(kv.CodeDomain, 0, int(maxTx), order.Asc, maxInt)
 		require.NoError(t, err)
 		codeHistRangeAfter = extractKVErrIterator(t, its)
-		its, err = AggTx(afterTx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err = afterTx.HistoryRange(kv.StorageDomain, 0, int(maxTx), order.Asc, maxInt)
 		require.NoError(t, err)
 		storageHistRangeAfter = extractKVErrIterator(t, its)
 	}
