@@ -208,7 +208,7 @@ func TestForEach(t *testing.T) {
 
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
+	db := memdb.NewStateDB(tb, tb.TempDir())
 	tb.Cleanup(db.Close)
 
 	salt := uint32(1)
