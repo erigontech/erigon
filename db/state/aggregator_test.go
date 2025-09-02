@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -43,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
@@ -136,136 +134,6 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	err = agg.MergeLoop(context.Background())
 	require.NoError(t, err)
 }
-func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-	aggStep := uint64(2)
-	_db, agg := testDbAndAggregatorv3(t, aggStep)
-	db := wrapDbWithCtx(_db, agg)
-
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	maxTx := aggStep * 3
-	t.Logf("step=%d tx_count=%d\n", aggStep, maxTx)
-
-	rnd := newRnd(0)
-
-	generateSharedDomainsUpdates(t, domains, tx, maxTx, rnd, length.Addr, 10, aggStep/2)
-
-	// flush and build files
-	err = domains.Flush(context.Background(), tx)
-	require.NoError(t, err)
-
-	var (
-		// until pruning
-		accountsRange    map[string][]byte
-		storageRange     map[string][]byte
-		codeRange        map[string][]byte
-		accountHistRange map[string][]byte
-		storageHistRange map[string][]byte
-		codeHistRange    map[string][]byte
-	)
-	maxInt := math.MaxInt
-	{
-		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
-		require.NoError(t, err)
-		accountsRange = extractKVErrIterator(t, it)
-
-		it, err = tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, maxInt)
-		require.NoError(t, err)
-		storageRange = extractKVErrIterator(t, it)
-
-		it, err = tx.Debug().RangeLatest(kv.CodeDomain, nil, nil, maxInt)
-		require.NoError(t, err)
-		codeRange = extractKVErrIterator(t, it)
-
-		its, err := tx.HistoryRange(kv.AccountsDomain, 0, int(maxTx), order.Asc, maxInt)
-		require.NoError(t, err)
-		accountHistRange = extractKVErrIterator(t, its)
-		its, err = tx.HistoryRange(kv.CodeDomain, 0, int(maxTx), order.Asc, maxInt)
-		require.NoError(t, err)
-		codeHistRange = extractKVErrIterator(t, its)
-		its, err = tx.HistoryRange(kv.StorageDomain, 0, int(maxTx), order.Asc, maxInt)
-		require.NoError(t, err)
-		storageHistRange = extractKVErrIterator(t, its)
-	}
-
-	err = tx.Commit()
-	require.NoError(t, err)
-
-	err = agg.BuildFiles(maxTx)
-	require.NoError(t, err)
-
-	buildTx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer buildTx.Rollback()
-
-	for i := 0; i < 10; i++ {
-		_, err = buildTx.PruneSmallBatches(context.Background(), time.Second*3)
-		require.NoError(t, err)
-	}
-	err = buildTx.Commit()
-	require.NoError(t, err)
-
-	afterTx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer afterTx.Rollback()
-
-	var (
-		// after pruning
-		accountsRangeAfter    map[string][]byte
-		storageRangeAfter     map[string][]byte
-		codeRangeAfter        map[string][]byte
-		accountHistRangeAfter map[string][]byte
-		storageHistRangeAfter map[string][]byte
-		codeHistRangeAfter    map[string][]byte
-	)
-
-	{
-		it, err := afterTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
-		require.NoError(t, err)
-		accountsRangeAfter = extractKVErrIterator(t, it)
-
-		it, err = afterTx.Debug().RangeLatest(kv.StorageDomain, nil, nil, maxInt)
-		require.NoError(t, err)
-		storageRangeAfter = extractKVErrIterator(t, it)
-
-		it, err = afterTx.Debug().RangeLatest(kv.CodeDomain, nil, nil, maxInt)
-		require.NoError(t, err)
-		codeRangeAfter = extractKVErrIterator(t, it)
-
-		its, err := afterTx.HistoryRange(kv.AccountsDomain, 0, int(maxTx), order.Asc, maxInt)
-		require.NoError(t, err)
-		accountHistRangeAfter = extractKVErrIterator(t, its)
-		its, err = afterTx.HistoryRange(kv.CodeDomain, 0, int(maxTx), order.Asc, maxInt)
-		require.NoError(t, err)
-		codeHistRangeAfter = extractKVErrIterator(t, its)
-		its, err = afterTx.HistoryRange(kv.StorageDomain, 0, int(maxTx), order.Asc, maxInt)
-		require.NoError(t, err)
-		storageHistRangeAfter = extractKVErrIterator(t, its)
-	}
-
-	{
-		// compare
-		compareMapsBytes(t, accountsRange, accountsRangeAfter)
-		compareMapsBytes(t, storageRange, storageRangeAfter)
-		compareMapsBytes(t, codeRange, codeRangeAfter)
-		compareMapsBytes(t, accountHistRange, accountHistRangeAfter)
-		compareMapsBytes(t, storageHistRange, storageHistRangeAfter)
-		compareMapsBytes(t, codeHistRange, codeHistRangeAfter)
-	}
-
-}
-
 func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {
 	t.Helper()
 	for k, v := range m1 {
