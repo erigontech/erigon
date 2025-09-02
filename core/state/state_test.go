@@ -44,7 +44,7 @@ var toAddr = common.BytesToAddress
 
 func TestNull(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestTemporalDb(t)
+	_, tx := NewTestRwTx(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestNull(t *testing.T) {
 
 func TestTouchDelete(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestTemporalDb(t)
+	_, tx := NewTestRwTx(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestTouchDelete(t *testing.T) {
 
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestTemporalDb(t)
+	_, tx := NewTestRwTx(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestSnapshot(t *testing.T) {
 
 func TestSnapshotEmpty(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestTemporalDb(t)
+	_, tx := NewTestRwTx(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestSnapshotEmpty(t *testing.T) {
 func TestSnapshot2(t *testing.T) {
 	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx := NewTestTemporalDb(t)
+	_, tx := NewTestRwTx(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -307,7 +307,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
+func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tb.Helper()
 
 	dirs := datadir.New(tb.TempDir())
@@ -322,7 +322,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx := NewTestTemporalDb(t)
+	_, tx := NewTestRwTx(t)
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)

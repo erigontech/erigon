@@ -101,7 +101,7 @@ func TestStateLogger(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, tx := NewTestTemporalDb(t)
+			_, tx := NewTestRwTx(t)
 
 			err := rawdbv3.TxNums.Append(tx, 1, 1)
 			require.NoError(t, err)
