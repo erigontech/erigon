@@ -254,8 +254,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 	switch {
 	case txTask.TxIndex == -1:
-		if txTask.BlockNum == 0 {
-
+		genesisBlockNum := uint64(0)
+		// if rw.chainConfig.IsArbitrum() {
+		// 	genesisBlockNum = rw.chainConfig.ArbitrumChainParams.GenesisBlockNum
+		// }
+		if txTask.BlockNum == genesisBlockNum {
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs, rw.logger)
 			if err != nil {

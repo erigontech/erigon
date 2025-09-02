@@ -259,43 +259,18 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 }
 
 // Writes custom genesis block to db. Allows to write genesis with block number > 0.
-func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block, difficulty *big.Int, genesisBlockNum uint64, cfg *chain.Config) error {
-	// This part already happens in InitializeArbosInDatabase
-	//var stateWriter state.StateWriter
-	//if block.Number().Sign() != 0 {
-	//	return nil, statedb, errors.New("can't commit genesis block with number > 0")
-	//}
-	//if err := statedb.CommitBlock(rules, stateWriter); err != nil {
-	//	return nil, statedb, fmt.Errorf("cannot write state: %w", err)
-	//}
-	//newCfg := gen.ConfigOrDefault(block.Root())
-	//if err := newCfg.CheckConfigForkOrder(); err != nil {
-	//	return err
-	//}
-
-	if err := WriteGenesisIfNotExist(tx, gen); err != nil {
-		return err
-	}
-	if err := rawdb.WriteBlock(tx, block); err != nil {
-		return err
-	}
-	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), difficulty); err != nil {
-		return err
+func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block, genesisBlockNum uint64) error {
+	if gen.Number != block.NumberU64() || gen.Number != gen.Config.ArbitrumChainParams.GenesisBlockNum {
+		panic(fmt.Sprintf("genNyumber %d bn %d expected %d", gen.Number, block.NumberU64(), gen.Config.ArbitrumChainParams.GenesisBlockNum))
 	}
 	if genesisBlockNum != block.NumberU64() {
 		return fmt.Errorf("genesis block number and given block number mismatches (gen %d != block %d)", genesisBlockNum, block.NumberU64())
 	}
-	if err := rawdbv3.TxNums.Append(tx, genesisBlockNum, uint64(block.Transactions().Len()+1)); err != nil {
+
+	if err := WriteGenesisIfNotExist(tx, gen); err != nil {
 		return err
 	}
-	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
-		return err
-	}
-	rawdb.WriteHeadBlockHash(tx, block.Hash())
-	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
-		return err
-	}
-	if err := WriteChainConfig(tx, block.Hash(), cfg); err != nil {
+	if err := WriteGenesisBesideState(block, tx, gen); err != nil {
 		return err
 	}
 	return nil
@@ -318,7 +293,8 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return err
 	}
-	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
+
+	if err := rawdbv3.TxNums.Append(tx, g.Number, uint64(block.Transactions().Len()+1)); err != nil {
 		return err
 	}
 
