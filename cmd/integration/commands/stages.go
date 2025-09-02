@@ -1019,12 +1019,18 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	defer br.(*freezeblocks.BlockRetire).MadvNormal().DisableReadAhead()
 	//defer agg.MadvNormal().DisableReadAhead()
+	forkAgg := db.(dbstate.HasAgg).ForkableAgg(kv.RCacheForkable).(*dbstate.ForkableAgg)
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
 	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
+
+	forkAgg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	forkAgg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	forkAgg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
 
 	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
