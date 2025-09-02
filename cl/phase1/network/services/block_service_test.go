@@ -30,11 +30,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 )
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
-	db := memdb.NewChainDB(t)
+	db := testdb.NewChainDB(t)
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)

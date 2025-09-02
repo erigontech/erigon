@@ -33,11 +33,11 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 )
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
-	db := memdb.NewChainDB(t)
+	db := testdb.NewChainDB(t)
 	reader := tests.LoadChain(blocks, postState, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)

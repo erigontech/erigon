@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/kv/testdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -323,7 +323,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		ch := make(chan Announcements, 100)
 
 		coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-		db := memdb.NewTestPoolDB(t)
+		db := testdb.NewPoolDB(t)
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)

@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -414,7 +414,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage2(t *testing.T) {
 	t.Parallel()
-	_, db := memdb.NewTestTx(t)
+	_, db := testdb.NewTestTx(t)
 
 	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header")})
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")})

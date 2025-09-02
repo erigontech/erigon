@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 )
 
 //go:embed test_data/anchor_state.ssz_snappy
@@ -90,7 +90,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.NewChainDB(t), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(testdb.NewChainDB(t), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(
@@ -178,7 +178,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.NewChainDB(t), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(testdb.NewChainDB(t), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(

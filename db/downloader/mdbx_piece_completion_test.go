@@ -26,11 +26,11 @@ import (
 	"github.com/anacrolix/torrent/storage"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 )
 
 func TestMdbxPieceCompletion(t *testing.T) {
-	db := memdb.NewTestDownloaderDB(t)
+	db := testdb.NewDownloaderDB(t)
 	pc, err := NewMdbxPieceCompletion(db, log.New())
 	require.NoError(t, err)
 	defer pc.Close()

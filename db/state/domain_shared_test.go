@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/testdb"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -464,7 +464,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
 
-	mdbxDb := memdb.NewChainDB(t)
+	mdbxDb := testdb.NewChainDB(t)
 	dirs := datadir.New(t.TempDir())
 	_, err := GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
 	require.NoError(t, err)

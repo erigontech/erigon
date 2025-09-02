@@ -47,13 +47,13 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, reader *antiquarytests.MockBlockReader) {
 	blocks, preState, postState = antiquarytests.GetPhase0Random()
-	db = memdb.NewChainDB(t)
+	db = testdb.NewChainDB(t)
 	reader = antiquarytests.LoadChain(blocks, postState, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)

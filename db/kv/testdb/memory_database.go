@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package memdb
+package testdb
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
 	return mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
 }
 
-func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
+func newDB(tb testing.TB, label kv.Label) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()
 	db := New(tb, tmpDir, label)
@@ -37,9 +37,10 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	return db
 }
 
-func NewChainDB(tb testing.TB) kv.RwDB          { return NewTestDB(tb, kv.ChainDB) }
-func NewTestPoolDB(tb testing.TB) kv.RwDB       { return NewTestDB(tb, kv.TxPoolDB) }
-func NewTestDownloaderDB(tb testing.TB) kv.RwDB { return NewTestDB(tb, kv.DownloaderDB) }
+func NewConsensusDB(tb testing.TB) kv.RwDB  { return newDB(tb, kv.ConsensusDB) }
+func NewChainDB(tb testing.TB) kv.RwDB      { return newDB(tb, kv.ChainDB) }
+func NewPoolDB(tb testing.TB) kv.RwDB       { return newDB(tb, kv.TxPoolDB) }
+func NewDownloaderDB(tb testing.TB) kv.RwDB { return newDB(tb, kv.DownloaderDB) }
 
 func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tb.Helper()

@@ -25,9 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/testdb"
 )
 
 func TestUnion(t *testing.T) {
@@ -80,7 +80,7 @@ func TestUnion(t *testing.T) {
 	})
 }
 func TestUnionPairs(t *testing.T) {
-	db := memdb.NewChainDB(t)
+	db := testdb.NewChainDB(t)
 	ctx := context.Background()
 	t.Run("simple", func(t *testing.T) {
 		require := require.New(t)

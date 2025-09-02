@@ -23,19 +23,19 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := testdb.NewTestTx(t)
 		prune, err := Get(tx)
 		assert.NoError(t, err)
 		assert.Equal(t, DefaultMode, prune)
 	})
 
 	t.Run("setIfNotExist", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := testdb.NewTestTx(t)
 		prune, err := Get(tx)
 		assert.NoError(t, err)
 		assert.Equal(t, DefaultMode, prune)

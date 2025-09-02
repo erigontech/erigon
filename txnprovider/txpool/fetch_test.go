@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 	"github.com/erigontech/erigon/node/direct"
 )
 
@@ -226,7 +226,7 @@ func decodeHex(in string) []byte {
 
 func TestOnNewBlock(t *testing.T) {
 	ctx := t.Context()
-	_, db := memdb.NewChainDB(t), memdb.NewTestPoolDB(t)
+	_, db := testdb.NewChainDB(t), testdb.NewPoolDB(t)
 	ctrl := gomock.NewController(t)
 
 	stream := remote.NewMockKV_StateChangesClient[*remote.StateChangeBatch](ctrl)

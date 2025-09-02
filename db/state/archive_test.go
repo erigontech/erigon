@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/testdb"
 	"github.com/erigontech/erigon/db/seg"
 )
 
@@ -147,7 +147,7 @@ func TestArchiveWriter(t *testing.T) {
 }
 
 func TestPrunableProgress(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := testdb.NewTestTx(t)
 	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
 	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
 	require.NoError(t, err)

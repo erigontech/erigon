@@ -33,10 +33,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/db/kv/testdb"
 )
 
 func TestSequence(t *testing.T) {
@@ -207,7 +207,7 @@ func TestRemoteKvRange(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	logger := log.New()
-	ctx, writeDB := context.Background(), memdb.NewChainDB(t)
+	ctx, writeDB := context.Background(), testdb.NewChainDB(t)
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
