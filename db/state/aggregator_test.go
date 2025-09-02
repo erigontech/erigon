@@ -210,7 +210,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	newDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	salt, err := GetStateIndicesSalt(dirs, false, logger)
@@ -678,7 +678,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
@@ -707,7 +707,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
@@ -736,7 +736,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
@@ -765,7 +765,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 		salt, err := GetStateIndicesSalt(dirs, true, logger)
 		require.NoError(err)
