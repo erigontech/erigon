@@ -402,6 +402,29 @@ func SyncSnapshots(
 			}
 		}
 
+		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
+		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		if !headerchain && toBlock > 0 {
+			toTxNum, err := txNumsReader.Min(tx, syncCfg.SnapshotDownloadToBlock)
+			if err != nil {
+				return err
+			}
+			toStep = toTxNum / uint64(config3.DefaultStepSize)
+			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
+			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
+			// so that we can correctly calculate toTxNum above (now we should delete these)
+			for _, f := range blockReader.FrozenFiles() {
+				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
+				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
+					continue
+				}
+				log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "file", fileInfo.Name(), "toBlock", toBlock)
+				if err := blockReader.Snapshots().Delete(fileInfo.Name()); err != nil {
+					return err
+				}
+			}
+		}
+
 		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
 		if syncCfg.PersistReceiptsCacheV2 {
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
@@ -453,6 +476,10 @@ func SyncSnapshots(
 				continue
 			}
 
+			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
+				continue
+			}
+
 			downloadRequest = append(downloadRequest, DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
@@ -497,4 +524,29 @@ func SyncSnapshots(
 	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
 	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
+}
+
+func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
+	if toBlock == 0 {
+		return false // toBlock filtering is not enabled
+	}
+	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
+	if !ok {
+		return true
+	}
+	if strings.HasPrefix(name, "salt") {
+		return false // not applicable
+	}
+	if strings.HasPrefix(name, "caplin/") {
+		return false // not applicable, caplin files are slot-based
+	}
+	if stateFile {
+		return fileInfo.To > toStep
+	}
+	if headerchain {
+		// if we are downloading the header chain, we want to download the seg file which contains our toBlock
+		// so that we can correctly calculate its maxTxNum from the body segment files (we will later on delete this file)
+		return fileInfo.From > toBlock
+	}
+	return fileInfo.To > toBlock
 }

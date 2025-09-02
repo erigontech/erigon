@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
@@ -144,7 +144,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 	}
 
 	start := time.Now()
-	if err := kzgCtx.VerifyBlobKZGProof((*gokzg4844.Blob)(&msg.Blob), gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
+	if err := kzgCtx.VerifyBlobKZGProof((*goethkzg.Blob)(&msg.Blob), goethkzg.KZGCommitment(msg.KzgCommitment), goethkzg.KZGProof(msg.KzgProof)); err != nil {
 		return fmt.Errorf("blob KZG proof verification failed: %v", err)
 	}
 
