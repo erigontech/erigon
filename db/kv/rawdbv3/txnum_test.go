@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
-func TestName(t *testing.T) {
+func TestTxNum(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	db := mdbx.New(kv.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
