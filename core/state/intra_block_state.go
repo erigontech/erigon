@@ -138,7 +138,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               -1,
 		arbExtraData: &ArbitrumExtraData{
-			unexpectedBalanceDelta: common.Num0,
+			unexpectedBalanceDelta: uint256.NewInt(0),
 			userWasms:              UserWasms{},
 			openWasmPages:          0,
 			everWasmPages:          0,
