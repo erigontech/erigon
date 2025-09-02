@@ -60,7 +60,7 @@ func NewBackwardBlockDownloader(
 	peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
 	messageListener := p2p.NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
 	messageSender := p2p.NewMessageSender(sentryClient)
-	peerTracker := p2p.NewPeerTracker(logger, sentryClient, messageListener)
+	peerTracker := p2p.NewPeerTracker(logger, messageListener)
 	var fetcher p2p.Fetcher
 	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
 	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
@@ -521,17 +521,18 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				bodies := bodiesResponse.Data
 				blockBatch := make([]*types.Block, 0, len(headerBatch))
 				for i, header := range headerBatch {
-					block := types.NewBlockFromNetwork(header, bodies[i])
-					err = block.HashCheck(true)
+					body := bodies[i]
+					err = body.MatchesHeader(header)
 					if err == nil {
+						block := types.NewBlockFromNetwork(header, body)
 						blockBatch = append(blockBatch, block)
 						continue
 					}
 
 					bbd.logger.Debug(
-						"[backward-block-downloader] block hash check failed, penalizing peer",
-						"num", block.NumberU64(),
-						"hash", block.Hash(),
+						"[backward-block-downloader] body does not match header, penalizing peer",
+						"num", header.Number.Uint64(),
+						"hash", header.Hash(),
 						"peerId", peerId.String(),
 						"err", err,
 					)
