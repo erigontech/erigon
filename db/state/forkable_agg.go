@@ -318,15 +318,16 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	closeFiles = false
 	r.IntegrateMergeFiles(mf)
 
-	atx := r.BeginTemporalTx()
-	defer atx.Close()
+	aggTx.Close()
+	aggTx = r.BeginTemporalTx()
+	defer aggTx.Close()
 
 	for i, mf := range mf.marked {
-		r.marked[i].snaps.CleanAfterMerge(mf, atx.marked[i].DebugFiles().vfs())
+		r.marked[i].snaps.CleanAfterMerge(mf, aggTx.marked[i].DebugFiles().vfs())
 	}
 
 	for i, mf := range mf.unmarked {
-		r.unmarked[i].snaps.CleanAfterMerge(mf, atx.unmarked[i].DebugFiles().vfs())
+		r.unmarked[i].snaps.CleanAfterMerge(mf, aggTx.unmarked[i].DebugFiles().vfs())
 	}
 
 	return mf.MergedFilePresent(), nil
@@ -591,7 +592,8 @@ type ForkableAggTemporalTx struct {
 	unmarked []UnmarkedTxI
 	// TODO _leakId logic
 
-	mp map[ForkableId]uint32
+	mp     map[ForkableId]uint32
+	logger log.Logger
 	// map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
 }
 
@@ -615,6 +617,7 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 		marked:   marked,
 		unmarked: unmarked,
 		mp:       mp,
+		logger:   r.logger,
 	}
 }
 
@@ -683,9 +686,9 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 
 	limit := uint64(1000)
 	if timeout > 5*time.Hour {
-		limit = 1_000_000
+		limit = 10_000_000
 	} else if timeout >= time.Minute {
-		limit = 10_000
+		limit = 100_000
 	}
 
 	localTimeout := time.NewTicker(timeout)
@@ -715,9 +718,9 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 		case <-localTimeout.C:
 			return timeoutErr
 		case <-logEvery.C:
-			r.f.logger.Info("[fork_agg] prune progress", "toRootNum", toRootNum, "stat", aggStat)
+			r.logger.Info("[fork_agg] prune progress", "toRootNum", toRootNum, "stat", aggStat)
 		case <-ctx.Done():
-			r.f.logger.Info("[fork_agg] prune cancelled", "toRootNum", toRootNum, "stat", aggStat)
+			r.logger.Info("[fork_agg] prune cancelled", "toRootNum", toRootNum, "stat", aggStat)
 			return ctx.Err()
 		default:
 			return nil
@@ -726,10 +729,10 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 		return nil
 	})
 	if errors.Is(err, timeoutErr) {
-		r.f.logger.Warn("[fork_agg] prune timeout")
+		r.logger.Warn("[fork_agg] prune timeout")
 		return
 	}
-	r.f.logger.Info("[fork_agg] prune finished", "toRootNum", toRootNum, "stat", aggStat)
+	r.logger.Info("[fork_agg] prune finished", "toRootNum", toRootNum, "stat", aggStat)
 	return
 }
 
@@ -765,7 +768,7 @@ func (r ForkableAggTemporalTx) Ids() (ids []kv.ForkableId) {
 // assume AllForkableId when needed to exec for all forkables
 func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) error) error {
 	for i, mt := range r.marked {
-		if forId.MatchAll() && r.f.marked[i].a == forId {
+		if forId.MatchAll() || r.f.marked[i].a == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
 			if err := fn(dbg.DebugDb()); err != nil {
 				return err
@@ -774,7 +777,7 @@ func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(Fo
 	}
 
 	for i, ut := range r.unmarked {
-		if forId.MatchAll() && r.f.unmarked[i].a == forId {
+		if forId.MatchAll() || r.f.unmarked[i].a == forId {
 			dbg := ut.(ForkableDebugAPI[UnmarkedDbTxI])
 			if err := fn(dbg.DebugDb()); err != nil {
 				return err
