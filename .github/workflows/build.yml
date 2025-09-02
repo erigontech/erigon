@@ -27,6 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.prep.outputs.version }}
       latest_tag: ${{ env.LATEST_TAG }}
+      ghcr_image_name: ${{ steps.prep.outputs.ghcr_image_name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -56,6 +57,10 @@ jobs:
           else
             echo "LATEST_TAG=true" >> $GITHUB_ENV
           fi
+
+          # Normalize GHCR owner to lowercase and expose image name as output
+          GHCR_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "ghcr_image_name=ghcr.io/${GHCR_OWNER_LC}/cdk-erigon" >> $GITHUB_OUTPUT
 
   build-amd64:
     needs: prepare
@@ -92,7 +97,7 @@ jobs:
           platforms: linux/amd64
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64
-            ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-amd64
 
   build-arm64:
     needs: prepare
@@ -129,7 +134,7 @@ jobs:
           platforms: linux/arm64
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
-            ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-arm64
 
   create-and-push-manifest:
     needs: [prepare, build-amd64, build-arm64]
@@ -168,13 +173,13 @@ jobs:
       - name: Create and push manifest (GHCR)
         run: |
           docker buildx imagetools create \
-            --tag ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }} \
-            ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64 \
-            ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+            --tag ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }} \
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-amd64 \
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-arm64
 
           if [ "${{ needs.prepare.outputs.latest_tag }}" == "true" ]; then
             docker buildx imagetools create \
-              --tag ${{ env.GHCR_IMAGE_NAME }}:latest \
-              ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64 \
-              ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+              --tag ${{ needs.prepare.outputs.ghcr_image_name }}:latest \
+              ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-amd64 \
+              ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-arm64
           fi
