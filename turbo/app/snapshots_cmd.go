@@ -565,6 +565,9 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 				if !strings.Contains(res.Name(), domainName) {
 					continue
 				}
+				if removeLatest {
+					_maxFrom = max(_maxFrom, res.From)
+				}
 				domainFiles = append(domainFiles, res)
 			}
 		}
