@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
@@ -202,7 +201,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool()
-	blobDb := memdb.NewTestDB(t, kv.ChainDB)
+	blobDb := memdb.NewChainDB(t)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 

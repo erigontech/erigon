@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
@@ -40,13 +39,7 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 		tb.Helper()
 	}
 
-	var rawDB kv.RwDB
-	if tb != nil {
-		rawDB = memdb.NewTestDB(tb, kv.ChainDB)
-	} else {
-		rawDB = mdbx.New(kv.ChainDB, log.New()).InMem(nil, dirs.DataDir).MustOpen()
-	}
-
+	rawDB := memdb.New(nil, dirs.DataDir, kv.ChainDB)
 	salt, err := state.GetStateIndicesSalt(dirs, true, log.New())
 	if err != nil {
 		panic(err)

@@ -80,7 +80,7 @@ func TestUnion(t *testing.T) {
 	})
 }
 func TestUnionPairs(t *testing.T) {
-	db := memdb.NewTestDB(t, kv.ChainDB)
+	db := memdb.NewChainDB(t)
 	ctx := context.Background()
 	t.Run("simple", func(t *testing.T) {
 		require := require.New(t)

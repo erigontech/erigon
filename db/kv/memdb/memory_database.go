@@ -37,25 +37,9 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	return db
 }
 
-func NewChainDB(tb testing.TB) kv.RwDB {
-	return NewTestDB(tb, kv.ChainDB)
-}
-
-func NewTestPoolDB(tb testing.TB) kv.RwDB {
-	tb.Helper()
-	tmpDir := tb.TempDir()
-	db := New(tb, tmpDir, kv.TxPoolDB)
-	tb.Cleanup(db.Close)
-	return db
-}
-
-func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
-	tb.Helper()
-	tmpDir := tb.TempDir()
-	db := New(tb, tmpDir, kv.DownloaderDB)
-	tb.Cleanup(db.Close)
-	return db
-}
+func NewChainDB(tb testing.TB) kv.RwDB          { return NewTestDB(tb, kv.ChainDB) }
+func NewTestPoolDB(tb testing.TB) kv.RwDB       { return NewTestDB(tb, kv.TxPoolDB) }
+func NewTestDownloaderDB(tb testing.TB) kv.RwDB { return NewTestDB(tb, kv.DownloaderDB) }
 
 func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tb.Helper()

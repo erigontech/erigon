@@ -464,7 +464,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
 
-	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
+	mdbxDb := memdb.NewChainDB(t)
 	dirs := datadir.New(t.TempDir())
 	_, err := GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
 	require.NoError(t, err)
