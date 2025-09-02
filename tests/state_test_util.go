@@ -22,7 +22,6 @@ package tests
 import (
 	"context"
 	context2 "context"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -48,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain"
@@ -56,7 +56,6 @@ import (
 	"github.com/erigontech/erigon/execution/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // StateTest checks transaction processing without block context.
@@ -327,12 +326,6 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-
-			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
-				return nil, err
-			}
 		}
 	}
 
