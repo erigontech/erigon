@@ -304,13 +304,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		checkMaxBlobsPerTxn := version >= clparams.FuluVersion
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions, checkMaxBlobsPerTxn)
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
-		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) || errors.Is(err, ethutils.ErrTooManyBlobs) {
-			bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
+		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) {
+			bad, latestValidHash := s.blockDownloader.IsBadHeader(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
@@ -425,7 +424,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
 		s.logger.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
-		s.hd.ReportBadHeaderPoS(blockHash, parent.Hash())
+		s.blockDownloader.ReportBadHeader(blockHash, parent.Hash())
 		parentHash := parent.Hash()
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -434,17 +433,17 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}, nil
 	}
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
-	bad, lastValidHash := s.hd.IsBadHeaderPoS(blockHash)
+	bad, lastValidHash := s.blockDownloader.IsBadHeader(blockHash)
 	if bad {
 		s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
 	} else if newPayload {
-		bad, lastValidHash = s.hd.IsBadHeaderPoS(parentHash)
+		bad, lastValidHash = s.blockDownloader.IsBadHeader(parentHash)
 		if bad {
 			s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
 		}
 	}
 	if bad {
-		s.hd.ReportBadHeaderPoS(blockHash, lastValidHash)
+		s.blockDownloader.ReportBadHeader(blockHash, lastValidHash)
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString("previously known bad block")}, nil
 	}
 
@@ -858,7 +857,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if status == execution.ExecutionStatus_BadBlock {
-		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash)
 	}
 
 	resp := &engine_types.PayloadStatus{
@@ -967,40 +966,46 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 	logLine := []string{}
 
+	if len(blobHashes) != len(res.BlobsWithProofs) {
+		log.Warn("[GetBlobs] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+		return nil, nil
+	}
+
 	if version == clparams.FuluVersion {
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
-		if len(blobHashes) != len(res.Blobs) || len(blobHashes)*int(params.CellsPerExtBlob) != len(res.Proofs) {
-			log.Warn("[GetBlobsV2] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
-			return nil, nil
-		}
-		for i := range res.Blobs {
-			if res.Blobs[i] == nil {
-				// We return a "null" response
+		for i, bwp := range res.BlobsWithProofs {
+			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
+			if len(bwp.Blob) == 0 {
+				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
 				ret = nil
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil, returning nil")
+				logLine = append(logLine, logHead, "nil")
+				break
+			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
+				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
+				ret = nil
+				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
 				break
 			} else {
-				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				ret[i] = &engine_types.BlobAndProofV2{Blob: bwp.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
-					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob)+int(c)]
+					ret[i].CellProofs[c] = bwp.Proofs[c]
 				}
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(cellProofs)=%d ", blobHashes[i], len(res.Blobs[i]), len(ret[i].CellProofs)))
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bwp.Blob)))
 			}
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
 		return ret, nil
 	} else if version == clparams.CapellaVersion {
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
-		if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
-			log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
-			return ret, nil
-		}
-		for i := range res.Blobs {
-			if res.Blobs[i] != nil {
-				ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
+		for i, bwp := range res.BlobsWithProofs {
+			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
+			if len(bwp.Blob) == 0 {
+				logLine = append(logLine, logHead, "nil")
+			} else if len(bwp.Proofs) != 1 {
+				logLine = append(logLine, logHead, fmt.Sprintf("post-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
 			} else {
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+				ret[i] = &engine_types.BlobAndProofV1{Blob: bwp.Blob, Proof: bwp.Proofs[0]}
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d len(proof)=%d ", len(bwp.Blob), len(bwp.Proofs[0])))
 			}
 		}
 		e.logger.Debug("[GetBlobsV1]", "Responses", logLine)

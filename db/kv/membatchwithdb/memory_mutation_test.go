@@ -26,9 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 )
 
 func initializeDbNonDupSort(rwTx kv.RwTx) {
@@ -39,7 +37,7 @@ func initializeDbNonDupSort(rwTx kv.RwTx) {
 }
 
 func TestPutAppendHas(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -71,7 +69,7 @@ func TestPutAppendHas(t *testing.T) {
 }
 
 func TestLastMiningDB(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -95,7 +93,7 @@ func TestLastMiningDB(t *testing.T) {
 }
 
 func TestLastMiningMem(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -119,7 +117,7 @@ func TestLastMiningMem(t *testing.T) {
 }
 
 func TestDeleteMining(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "", log.Root())
@@ -145,7 +143,7 @@ func TestDeleteMining(t *testing.T) {
 }
 
 func TestFlush(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "", log.Root())
@@ -165,7 +163,7 @@ func TestFlush(t *testing.T) {
 }
 
 func TestForEach(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -206,32 +204,21 @@ func TestForEach(t *testing.T) {
 	require.Equal(t, []string{"value", "value1", "value2", "value3", "value5"}, values1)
 }
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
+func newTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
-	tb.Cleanup(db.Close)
-
-	salt := uint32(1)
-	agg, err := state.NewAggregator2(context.Background(), datadir.New(tb.TempDir()), 16, &salt, db, log.New())
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	dirs := datadir.New(tb.TempDir())
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
 	tb.Cleanup(tx.Rollback)
-	return _db, tx, agg
+	return db, tx
 }
 
 func TestPrefix(t *testing.T) {
-	_, rwTx, _ := NewTestTemporalDb(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -270,7 +257,7 @@ func TestPrefix(t *testing.T) {
 }
 
 func TestForAmount(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -303,7 +290,7 @@ func TestForAmount(t *testing.T) {
 }
 
 func TestGetOneAfterClearBucket(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -326,7 +313,7 @@ func TestGetOneAfterClearBucket(t *testing.T) {
 }
 
 func TestSeekExactAfterClearBucket(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -362,7 +349,7 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 }
 
 func TestFirstAfterClearBucket(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -390,7 +377,7 @@ func TestFirstAfterClearBucket(t *testing.T) {
 }
 
 func TestIncReadSequence(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -413,7 +400,7 @@ func initializeDbDupSort(rwTx kv.RwTx) {
 }
 
 func TestNext(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -457,7 +444,7 @@ func TestNext(t *testing.T) {
 }
 
 func TestNextNoDup(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -484,7 +471,7 @@ func TestNextNoDup(t *testing.T) {
 }
 
 func TestDeleteCurrentDuplicates(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -518,7 +505,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 }
 
 func TestSeekBothRange(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1"))
 	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3"))
@@ -553,7 +540,7 @@ func initializeDbHeaders(rwTx kv.RwTx) {
 }
 
 func TestGetOne(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+	_, rwTx := newTestTx(t)
 
 	initializeDbHeaders(rwTx)
 

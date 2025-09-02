@@ -6,10 +6,7 @@ replace github.com/erigontech/erigon-lib => ./erigon-lib
 
 require github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 
-replace (
-	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250826132655-0f8ab1696efc
-	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
-)
+replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250718024755-5b6d5407844d
@@ -39,8 +36,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.6
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/consensys/gnark-crypto v0.19.0
-	github.com/crate-crypto/go-eth-kzg v1.3.0
-	github.com/crate-crypto/go-kzg-4844 v1.1.0
+	github.com/crate-crypto/go-eth-kzg v1.4.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
 	github.com/deckarep/golang-set/v2 v2.8.0
@@ -68,6 +64,7 @@ require (
 	github.com/google/cel-go v0.26.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/gofuzz v1.2.0
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
@@ -199,7 +196,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
 	github.com/imdario/mergo v0.3.11 // indirect

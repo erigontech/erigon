@@ -149,7 +149,7 @@ func (e *EngineBlockDownloader) download(
 	}
 	if status == execution.ExecutionStatus_BadBlock {
 		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
-		e.hd.ReportBadHeaderPoS(chainTip.Hash(), latestValidHash)
+		e.ReportBadHeader(chainTip.Hash(), latestValidHash)
 		e.status.Store(Idle)
 		return
 	}
@@ -180,7 +180,7 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 		return nil
 	}
 	if status == execution.ExecutionStatus_BadBlock {
-		e.hd.ReportBadHeaderPoS(tip.Hash(), latestValidHash)
+		e.ReportBadHeader(tip.Hash(), latestValidHash)
 		return errors.New("block segments downloaded are invalid")
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
@@ -256,8 +256,8 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	}
 	switch status {
 	case execution.ExecutionStatus_BadBlock:
-		e.hd.ReportBadHeaderPoS(block.Hash(), lastValidHash)
-		e.hd.ReportBadHeaderPoS(requested, lastValidHash)
+		e.ReportBadHeader(block.Hash(), lastValidHash)
+		e.ReportBadHeader(requested, lastValidHash)
 		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
 	case execution.ExecutionStatus_TooFarAway:
 		e.logger.Debug(

@@ -62,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -86,7 +87,6 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/eth/tracers/js"
@@ -426,6 +426,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		txNumsReader := blockReader.TxnumReader(ctx)
 
+		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
 		agg, err := dbstate.NewAggregator(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)

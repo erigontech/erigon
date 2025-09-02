@@ -23,7 +23,7 @@ import (
 	"math"
 	"testing"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
@@ -934,7 +934,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			sndrBytes := accounts3.SerialiseV3(&sndr)
-			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, sd.TxNum(), nil, 0)
+			txNum := uint64(0)
+			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -1054,7 +1055,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	sndrBytes := accounts3.SerialiseV3(&sndr)
-	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, sd.TxNum(), nil, 0)
+	txNum := uint64(0)
+	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)
@@ -1530,7 +1532,7 @@ func TestGetBlobsV1(t *testing.T) {
 	blobBundles := pool.GetBlobs(blobHashes)
 	require.Equal(len(blobBundles), len(blobHashes))
 	blobs := make([][]byte, 0, len(blobBundles))
-	proofs := make([]gokzg4844.KZGProof, 0, len(blobBundles))
+	proofs := make([]goethkzg.KZGProof, 0, len(blobBundles))
 	for _, bb := range blobBundles {
 		blobs = append(blobs, bb.Blob)
 		for _, p := range bb.Proofs {

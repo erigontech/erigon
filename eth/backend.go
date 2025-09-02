@@ -81,6 +81,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -132,7 +133,6 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -1563,6 +1563,9 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	if _, err := snaptype.LoadSalt(dirs.Snap, createNewSaltFileIfNeeded, logger); err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	if err := state.CheckSnapshotsCompatibility(dirs); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	agg, err := state.NewAggregator2(ctx, dirs, config3.DefaultStepSize, salt, db, logger)

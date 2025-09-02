@@ -35,6 +35,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -737,6 +738,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		p2p:                   cfg,
 		peersStreams:          NewPeersStreams(),
 		logger:                logger,
+		goodPeers:             make(map[[64]byte]*PeerInfo),
 		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
 	}
 
@@ -756,17 +758,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			peerID := peer.Pubkey()
 			printablePeerID := hex.EncodeToString(peerID[:])
 			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
-			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
-			if err != nil {
-				return err
-			}
-			peerInfo.protocol = protocol
-			defer peerInfo.Close()
-
-			defer ss.GoodPeers.Delete(peerID)
-
 			status := ss.GetStatus()
-
 			if status == nil {
 				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
 			}
@@ -778,13 +770,22 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
-
-			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
-			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
 			if getBlockHeadersErr != nil {
 				return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 			}
+
+			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			if err != nil {
+				return err
+			}
+
+			peerInfo.protocol = protocol
+			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
+			defer peerInfo.Close()
+			// note for consistency we want to delete the peer before send the disconnect event via sendGonePeerToClients
+			defer ss.deletePeer(peerID)
 
 			cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
 
@@ -896,8 +897,8 @@ type GrpcServer struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx                  context.Context
 	Protocols            []p2p.Protocol
-	GoodPeers            sync.Map
-	TxSubscribed         uint32 // Set to non-zero if downloader is subscribed to transaction messages
+	goodPeersMu          sync.RWMutex
+	goodPeers            map[[64]byte]*PeerInfo
 	p2pServer            *p2p.Server
 	p2pServerLock        sync.RWMutex
 	statusData           *proto_sentry.StatusData
@@ -908,9 +909,6 @@ type GrpcServer struct {
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
 	logger               log.Logger
-	// Mutex to synchronize PeerInfo creation between protocols
-	peerCreationMutex sync.Mutex
-
 	// witness request tracking
 	activeWitnessRequests map[common.Hash]*WitnessRequest
 	witnessRequestMutex   sync.RWMutex
@@ -951,38 +949,42 @@ func (ss *GrpcServer) getWitnessRequest(hash common.Hash, peerID [64]byte) bool 
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
-	ss.GoodPeers.Range(func(key, value interface{}) bool {
-		peerInfo, _ := value.(*PeerInfo)
+	ss.goodPeersMu.RLock()
+	defer ss.goodPeersMu.RUnlock()
+	for _, peerInfo := range ss.goodPeers {
 		if peerInfo == nil {
-			return true
+			continue
 		}
-		return f(peerInfo)
-	})
+		cont := f(peerInfo)
+		if !cont {
+			break
+		}
+	}
 }
 
 func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
-	if value, ok := ss.GoodPeers.Load(peerID); ok {
-		peerInfo := value.(*PeerInfo)
-		if peerInfo != nil {
-			return peerInfo
-		}
-		ss.GoodPeers.Delete(peerID)
+	ss.goodPeersMu.RLock()
+	peerInfo, ok := ss.goodPeers[peerID]
+	ss.goodPeersMu.RUnlock()
+	if ok && peerInfo == nil {
+		go func() {
+			ss.deletePeer(peerID)
+		}()
 	}
-	return nil
+	return peerInfo
 }
 
 // getOrCreatePeer gets or creates PeerInfo
 func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, protocolName string) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()
 
-	ss.peerCreationMutex.Lock()
-	defer ss.peerCreationMutex.Unlock()
+	ss.goodPeersMu.Lock()
+	defer ss.goodPeersMu.Unlock()
 
-	existingPeerInfo := ss.getPeer(peerID)
-
+	existingPeerInfo := ss.goodPeers[peerID]
 	if existingPeerInfo == nil {
 		peerInfo := NewPeerInfo(peer, rw)
-		ss.GoodPeers.Store(peerID, peerInfo)
+		ss.goodPeers[peerID] = peerInfo
 		return peerInfo, nil
 	}
 
@@ -1009,12 +1011,27 @@ func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, prot
 }
 
 func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
-	if value, ok := ss.GoodPeers.LoadAndDelete(peerID); ok {
-		peerInfo := value.(*PeerInfo)
+	if peerInfo, ok := ss.loadAndDeletePeer(peerID); ok {
 		if peerInfo != nil {
 			peerInfo.Remove(reason)
 		}
 	}
+}
+
+func (ss *GrpcServer) loadAndDeletePeer(peerID [64]byte) (*PeerInfo, bool) {
+	ss.goodPeersMu.Lock()
+	defer ss.goodPeersMu.Unlock()
+	peerInfo, ok := ss.goodPeers[peerID]
+	if ok {
+		delete(ss.goodPeers, peerID)
+	}
+	return peerInfo, ok
+}
+
+func (ss *GrpcServer) deletePeer(peerID [64]byte) {
+	ss.goodPeersMu.Lock()
+	defer ss.goodPeersMu.Unlock()
+	delete(ss.goodPeers, peerID)
 }
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
@@ -1024,8 +1041,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
-			peerInfo.Remove(p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
-			ss.GoodPeers.Delete(peerInfo.ID())
+			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
 		} else {
 			if ttl > 0 {
 				peerInfo.AddDeadline(time.Now().Add(ttl))
@@ -1535,6 +1551,25 @@ func (ss *GrpcServer) sendGonePeerToClients(peerID *proto_types.H512) {
 func (ss *GrpcServer) PeerEvents(req *proto_sentry.PeerEventsRequest, server proto_sentry.Sentry_PeerEventsServer) error {
 	clean := ss.peersStreams.Add(server)
 	defer clean()
+	// replay currently connected peers
+	eg, ctx := errgroup.WithContext(server.Context())
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		eg.Go(func() error {
+			return server.Send(&proto_sentry.PeerEvent{
+				PeerId:  gointerfaces.ConvertHashToH512(peerInfo.ID()),
+				EventId: proto_sentry.PeerEvent_Connect,
+			})
+		})
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+			return true
+		}
+	})
+	if err := eg.Wait(); err != nil {
+		return err
+	}
 	select {
 	case <-ss.ctx.Done():
 		return nil
