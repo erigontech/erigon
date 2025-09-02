@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -58,7 +59,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 var (
@@ -492,7 +492,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 		}
 
 		if includeBor {
-			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(false), requestedMinBlockNum)
+			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(true), requestedMinBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err

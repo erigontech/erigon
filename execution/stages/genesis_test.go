@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func TestSetupGenesis(t *testing.T) {
@@ -79,16 +79,16 @@ func TestSetupGenesis(t *testing.T) {
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
 			},
-			wantHash:   chainspec.MainnetGenesisHash,
-			wantConfig: chainspec.MainnetChainConfig,
+			wantHash:   chainspec.Mainnet.GenesisHash,
+			wantConfig: chainspec.Mainnet.Config,
 		},
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
 			},
-			wantHash:   chainspec.MainnetGenesisHash,
-			wantConfig: chainspec.MainnetChainConfig,
+			wantHash:   chainspec.Mainnet.GenesisHash,
+			wantConfig: chainspec.Mainnet.Config,
 		},
 		{
 			name: "custom block in DB, genesis == nil",
@@ -105,9 +105,9 @@ func TestSetupGenesis(t *testing.T) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return genesiswrite.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: chainspec.SepoliaGenesisHash},
-			wantHash:   chainspec.SepoliaGenesisHash,
-			wantConfig: chainspec.SepoliaChainConfig,
+			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: chainspec.Sepolia.GenesisHash},
+			wantHash:   chainspec.Sepolia.GenesisHash,
+			wantConfig: chainspec.Sepolia.Config,
 		},
 		{
 			name: "custom block in DB, genesis == bor-mainnet",
@@ -115,9 +115,9 @@ func TestSetupGenesis(t *testing.T) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return genesiswrite.CommitGenesisBlock(db, polychain.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: polychain.BorMainnetGenesisHash},
-			wantHash:   polychain.BorMainnetGenesisHash,
-			wantConfig: polychain.BorMainnetChainConfig,
+			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: polychain.BorMainnet.GenesisHash},
+			wantHash:   polychain.BorMainnet.GenesisHash,
+			wantConfig: polychain.BorMainnet.Config,
 		},
 		{
 			name: "custom block in DB, genesis == amoy",
@@ -125,9 +125,9 @@ func TestSetupGenesis(t *testing.T) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return genesiswrite.CommitGenesisBlock(db, polychain.AmoyGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: polychain.AmoyGenesisHash},
-			wantHash:   polychain.AmoyGenesisHash,
-			wantConfig: polychain.AmoyChainConfig,
+			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: polychain.Amoy.GenesisHash},
+			wantHash:   polychain.Amoy.GenesisHash,
+			wantConfig: polychain.Amoy.Config,
 		},
 		{
 			name: "compatible config in DB",

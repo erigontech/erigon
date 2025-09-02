@@ -635,7 +635,8 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 		}
 
 		if len(timings) > 0 {
-			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
+			timings = append(timings, "initialCycle", initialCycle)
+			e.logger.Info("Timings: Post-Forkchoice", timings...)
 		}
 	}()
 }

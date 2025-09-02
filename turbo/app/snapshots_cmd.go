@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
@@ -74,7 +75,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
@@ -85,19 +85,38 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 	return res
 }
 
+// This needs to run *after* subcommand arguments are parsed, in case they alter root flags like data dir.
+func commonBeforeSnapshotCommand(cliCtx *cli.Context) error {
+	go mem.LogMemStats(cliCtx.Context, log.New())
+	go disk.UpdateDiskStats(cliCtx.Context, log.New())
+	_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func init() {
+	// Inject commonBeforeSnapshotCommand into all snapshot subcommands Before handlers.
+	for _, cmd := range snapshotCommand.Subcommands {
+		oldBefore := cmd.Before
+		cmd.Before = func(cliCtx *cli.Context) error {
+			err := commonBeforeSnapshotCommand(cliCtx)
+			if err != nil {
+				return fmt.Errorf("common before snapshot subcommand: %w", err)
+			}
+			if oldBefore == nil {
+				return nil
+			}
+			return oldBefore(cliCtx)
+		}
+	}
+}
+
 var snapshotCommand = cli.Command{
 	Name:    "snapshots",
 	Aliases: []string{"seg", "snapshot", "segments", "segment"},
 	Usage:   `Managing historical data segments (partitions)`,
-	Before: func(cliCtx *cli.Context) error {
-		go mem.LogMemStats(cliCtx.Context, log.New())
-		go disk.UpdateDiskStats(cliCtx.Context, log.New())
-		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
-		if err != nil {
-			return err
-		}
-		return nil
-	},
 	Subcommands: []*cli.Command{
 		{
 			Name: "ls",
@@ -244,14 +263,15 @@ var snapshotCommand = cli.Command{
 			Name:   "reset",
 			Usage:  "Reset state to resumable initial sync",
 			Action: resetCliAction,
-			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
-			Flags: append(
-				slices.Clone(logging.Flags),
+			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the
+			// environment variable? Followup: It would not go here, as it could modify behaviour in
+			// parent commands.
+			Flags: []cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ChainFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-			),
+			},
 		},
 		{
 			Name:    "rm-state-snapshots",

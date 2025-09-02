@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
@@ -85,7 +86,6 @@ import (
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -1492,10 +1492,10 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 }
 
 func readGenesis(chain string) *types.Genesis {
-	genesis := chainspec.GenesisBlockByChainName(chain)
-	if genesis == nil {
-		panic("genesis is nil. probably you passed wrong --chain")
+	spec, err := chainspec.ChainSpecByName(chain)
+	if err != nil || spec.Genesis == nil {
+		panic(fmt.Errorf("genesis is nil. probably you passed wrong --chain: %w", err))
 	}
-	_ = genesis.Alloc // nil check
-	return genesis
+	_ = spec.Genesis.Alloc // nil check
+	return spec.Genesis
 }

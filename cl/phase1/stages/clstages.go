@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 type Cfg struct {

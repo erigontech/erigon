@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -91,15 +91,15 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize:   1000,
-			chainConfig: polychain.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnet.Config,
 		},
 		{
 			chainSize:   2000,
-			chainConfig: polychain.BorDevnetChainConfig,
+			chainConfig: polychain.BorDevnet.Config,
 		},
 		{
 			chainSize: 1000,
-			chainConfig: withConfig(polychain.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnet.Config,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -108,7 +108,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 2000,
-			chainConfig: withConfig(polychain.BorDevnetChainConfig,
+			chainConfig: withConfig(polychain.BorDevnet.Config,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,

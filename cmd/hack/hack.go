@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -57,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -667,9 +667,9 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	chainConfig := chainspec.ChainConfigByChainName(name)
-	if chainConfig == nil {
-		return fmt.Errorf("unknown name: %s", name)
+	spec, err := chainspec.ChainSpecByName(name)
+	if err != nil {
+		return err
 	}
 	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {
@@ -678,7 +678,7 @@ func chainConfig(name string) error {
 	w := bufio.NewWriter(f)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if err = encoder.Encode(chainConfig); err != nil {
+	if err = encoder.Encode(spec.Config); err != nil {
 		return err
 	}
 	if err = w.Flush(); err != nil {
