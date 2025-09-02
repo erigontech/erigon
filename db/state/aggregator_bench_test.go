@@ -49,7 +49,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *s
 	b.Helper()
 	dirs := datadir.New(b.TempDir())
 	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
-	return db, agg
+	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
 func BenchmarkAggregator_Processing(b *testing.B) {

@@ -115,10 +115,14 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 	return agg
 }
 
-func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.RwDB, *state.Aggregator) {
+func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	db := wrapDbWithCtx(_db, agg)
+	db, err := temporal.New(_db, agg)
+	require.NoError(tb, err)
+	tb.Cleanup(db.Close)
+
+	//db := wrapDbWithCtx(_db, agg)
 
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
