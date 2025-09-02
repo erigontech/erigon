@@ -28,7 +28,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -45,6 +45,7 @@ const (
 	subdivisionSlot = 10_000
 )
 
+//go:generate mockgen -typed=true -destination=./mock_services/blob_storage_mock.go -package=mock_services . BlobStorage
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
@@ -308,17 +309,17 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		wg.Add(1)
 		go func(sds *sidecarsPayload) {
 			defer wg.Done()
-			blobs := make([]gokzg4844.BlobRef, len(sds.sidecars))
+			blobs := make([]*goethkzg.Blob, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				blobs[i] = sidecar.Blob[:]
+				blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
 			}
-			kzgCommitments := make([]gokzg4844.KZGCommitment, len(sds.sidecars))
+			kzgCommitments := make([]goethkzg.KZGCommitment, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				kzgCommitments[i] = gokzg4844.KZGCommitment(sidecar.KzgCommitment)
+				kzgCommitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
 			}
-			kzgProofs := make([]gokzg4844.KZGProof, len(sds.sidecars))
+			kzgProofs := make([]goethkzg.KZGProof, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
-				kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
+				kzgProofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
 			}
 			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
 				errAtomic.Store(errors.New("sidecar is wrong"))

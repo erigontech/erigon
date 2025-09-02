@@ -67,7 +67,7 @@ func (sf *SelectedStaticFiles) Close() {
 func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) {
 	sf := &SelectedStaticFiles{ii: make([][]*FilesItem, len(r.invertedIndex))}
 	for id := range at.d {
-		if at.d[id].d.disable {
+		if at.d[id].d.Disable {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -76,7 +76,7 @@ func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) 
 		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
-		if at.iis[id].ii.disable {
+		if at.iis[id].ii.Disable {
 			continue
 		}
 		if rng == nil || !rng.needMerge {
@@ -102,27 +102,27 @@ type MergedFilesV3 struct {
 	iis   []*FilesItem
 }
 
-func (mf MergedFilesV3) FrozenList() (frozen []string) {
+func (mf MergedFilesV3) FilePaths(relative string) (fPaths []string) {
 	for id, d := range mf.d {
 		if d == nil {
 			continue
 		}
-		frozen = append(frozen, d.decompressor.FileName())
-
-		if mf.dHist[id] != nil && mf.dHist[id].frozen {
-			frozen = append(frozen, mf.dHist[id].decompressor.FileName())
+		fPaths = append(fPaths, d.FilePaths(relative)...)
+		if mf.dHist[id] != nil {
+			fPaths = append(fPaths, mf.dHist[id].FilePaths(relative)...)
 		}
 		if mf.dIdx[id] != nil && mf.dIdx[id].frozen {
-			frozen = append(frozen, mf.dIdx[id].decompressor.FileName())
+			fPaths = append(fPaths, mf.dIdx[id].FilePaths(relative)...)
 		}
 	}
 
 	for _, ii := range mf.iis {
-		if ii != nil && ii.frozen {
-			frozen = append(frozen, ii.decompressor.FileName())
+		if ii == nil {
+			continue
 		}
+		fPaths = append(fPaths, ii.FilePaths(relative)...)
 	}
-	return frozen
+	return fPaths
 }
 func (mf *MergedFilesV3) Close() {
 	if mf == nil {

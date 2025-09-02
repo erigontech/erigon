@@ -37,26 +37,26 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -390,7 +390,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 		}
 
 		if _, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			if isPeerNotFoundErr(err) {
+			if libsentry.IsPeerNotFoundErr(err) {
 				continue
 			}
 			return fmt.Errorf("send header request: %w", err)
@@ -638,7 +638,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		if !isPeerNotFoundErr(err) {
+		if !libsentry.IsPeerNotFoundErr(err) {
 			return fmt.Errorf("send header response 66: %w", err)
 		}
 		return fmt.Errorf("send header response 66: %w", err)
@@ -675,7 +675,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		if isPeerNotFoundErr(err) {
+		if libsentry.IsPeerNotFoundErr(err) {
 			return nil
 		}
 		return fmt.Errorf("send bodies response: %w", err)
@@ -739,7 +739,7 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *proto_sentry
 	}
 	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.OnFinishCallOption{})
 	if err != nil {
-		if isPeerNotFoundErr(err) {
+		if libsentry.IsPeerNotFoundErr(err) {
 			return nil
 		}
 		return fmt.Errorf("send receipts response: %w", err)
@@ -861,7 +861,7 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *proto_sentr
 		},
 	}
 	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err != nil && !isPeerNotFoundErr(err) {
+	if err != nil && !libsentry.IsPeerNotFoundErr(err) {
 		return fmt.Errorf("sending witness response: %w", err)
 	}
 	return nil
@@ -1007,7 +1007,7 @@ func (cs *MultiClient) newWitness(ctx context.Context, inreq *proto_sentry.Inbou
 	bHash := query.Witness.Header().Hash()
 
 	var witBuf bytes.Buffer
-	if err := query.Witness.EncodeCompressed(&witBuf); err != nil {
+	if err := query.Witness.EncodeRLP(&witBuf); err != nil {
 		return fmt.Errorf("error in witness encoding: err: %w", err)
 	}
 

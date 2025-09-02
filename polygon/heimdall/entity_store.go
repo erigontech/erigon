@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -32,12 +31,14 @@ import (
 )
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints:        {},
-	kv.BorCheckpointEnds:     {},
-	kv.BorMilestones:         {},
-	kv.BorMilestoneEnds:      {},
-	kv.BorSpans:              {},
-	kv.BorProducerSelections: {},
+	kv.BorCheckpoints:             {},
+	kv.BorCheckpointEnds:          {},
+	kv.BorMilestones:              {},
+	kv.BorMilestoneEnds:           {},
+	kv.BorSpans:                   {},
+	kv.BorSpansIndex:              {},
+	kv.BorProducerSelections:      {},
+	kv.BorProducerSelectionsIndex: {},
 }
 
 //go:generate mockgen -typed=true -source=./entity_store.go -destination=./entity_store_mock.go -package=heimdall
@@ -46,7 +47,7 @@ type EntityStore[TEntity Entity] interface {
 	Close()
 
 	LastEntityId(ctx context.Context) (uint64, bool, error)
-	LastFrozenEntityId() uint64
+	LastFrozenEntityId() (uint64, bool, error)
 	LastEntity(ctx context.Context) (TEntity, bool, error)
 	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
@@ -56,51 +57,10 @@ type EntityStore[TEntity Entity] interface {
 	DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error)
 	DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error)
 
+	RangeIndex() RangeIndex
+
 	SnapType() snaptype.Type
 }
-
-type NoopEntityStore[TEntity Entity] struct {
-	Type snaptype.Type
-}
-
-func (NoopEntityStore[TEntity]) Prepare(ctx context.Context) error {
-	return nil
-}
-
-func (NoopEntityStore[TEntity]) Close() {}
-
-func (NoopEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	return 0, false, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) LastFrozenEntityId() uint64 { return 0 }
-func (NoopEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
-	var res TEntity
-	return res, false, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
-	var res TEntity
-	return res, false, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
-	return nil
-}
-
-func (NoopEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	return 0, false, errors.New("noop")
-}
-
-func (NoopEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
-	return nil, errors.New("noop")
-}
-func (NoopEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
-	return 0, nil
-}
-
-func (NoopEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPoint uint64) (int, error) {
-	return 0, nil
-}
-
-func (ns NoopEntityStore[TEntity]) SnapType() snaptype.Type { return ns.Type }
 
 type mdbxEntityStore[TEntity Entity] struct {
 	db                *polygoncommon.Database
@@ -142,6 +102,10 @@ func (s *mdbxEntityStore[TEntity]) WithTx(tx kv.Tx) EntityStore[TEntity] {
 	return txEntityStore[TEntity]{s, tx}
 }
 
+func (s *mdbxEntityStore[TEntity]) RangeIndex() RangeIndex {
+	return s.blockNumToIdIndex
+}
+
 func (s *mdbxEntityStore[TEntity]) Close() {
 }
 
@@ -159,8 +123,8 @@ func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bo
 	return txEntityStore[TEntity]{s, tx}.LastEntityId(ctx)
 }
 
-func (s *mdbxEntityStore[TEntity]) LastFrozenEntityId() uint64 {
-	return 0
+func (s *mdbxEntityStore[TEntity]) LastFrozenEntityId() (uint64, bool, error) {
+	return 0, false, nil
 }
 
 func (s *mdbxEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
@@ -222,7 +186,7 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 	defer tx.Rollback()
 
 	if err = (txEntityStore[TEntity]{s, tx}).PutEntity(ctx, id, entity); err != nil {
-		return nil
+		return err
 	}
 
 	return tx.Commit()

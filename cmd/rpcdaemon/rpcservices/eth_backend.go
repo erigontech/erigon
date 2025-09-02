@@ -32,17 +32,17 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 var _ services.FullBlockReader = &RemoteBackend{}
@@ -437,5 +437,7 @@ func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum ui
 }
 
 func (back *RemoteBackend) EarliestBlockNum(ctx context.Context) (uint64, error) {
-	return back.blockReader.EarliestBlockNum(ctx)
+	return 0, nil
+	// TODO: fix
+	//return back.blockReader.EarliestBlockNum(ctx)
 }

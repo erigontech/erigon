@@ -50,7 +50,7 @@ func TestServiceWithAmoyData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/amoy",
-		chainConfig:                    polychain.AmoyChainConfig,
+		chainConfig:                    polychain.Amoy.Config,
 		expectedLastSpan:               1280,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         150,
@@ -92,7 +92,7 @@ func TestServiceWithMainnetData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/mainnet",
-		chainConfig:                    polychain.BorMainnetChainConfig,
+		chainConfig:                    polychain.BorMainnet.Config,
 		expectedLastSpan:               2344,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         1,
@@ -193,7 +193,10 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	})
 
 	suite.eg.Go(func() error {
-		return suite.service.Run(suite.ctx)
+		defer suite.cancel()
+		err := suite.service.Run(suite.ctx)
+		require.ErrorIs(suite.T(), err, context.Canceled)
+		return err
 	})
 
 	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)

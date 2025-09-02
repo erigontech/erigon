@@ -25,12 +25,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -39,8 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"
@@ -514,6 +514,7 @@ func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remote.BlockF
 }
 
 func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *emptypb.Empty) (*remote.EarliestBlockAvailableReply, error) {
-	blockNum, err := s.blockReader.EarliestBlockNum(ctx)
-	return &remote.EarliestBlockAvailableReply{BlockNum: blockNum}, err
+	//blockNum, err := s.blockReader.EarliestBlockNum(ctx)
+	// TODO: fix
+	return &remote.EarliestBlockAvailableReply{BlockNum: 0}, nil
 }

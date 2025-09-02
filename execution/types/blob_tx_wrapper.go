@@ -24,14 +24,14 @@ import (
 	"math/big"
 	"math/bits"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const (
@@ -226,12 +226,12 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 
 	kzgCtx := libkzg.Ctx()
 	for i := 0; i < len(blobs); i++ {
-		commitment, err := kzgCtx.BlobToKZGCommitment(blobs[i][:], 1 /*numGoRoutines*/)
+		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %w", err)
 		}
 
-		proof, err := kzgCtx.ComputeBlobKZGProof(blobs[i][:], commitment, 1 /*numGoRoutnes*/)
+		proof, err := kzgCtx.ComputeBlobKZGProof((*goethkzg.Blob)(&blobs[i]), commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %w", err)
 		}
@@ -243,30 +243,30 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
-func toBlobs(_blobs Blobs) []gokzg4844.BlobRef {
-	blobs := make([]gokzg4844.BlobRef, len(_blobs))
-	for i, _blob := range _blobs {
-		blobs[i] = _blob[:]
+func toBlobs(_blobs Blobs) []*goethkzg.Blob {
+	blobs := make([]*goethkzg.Blob, len(_blobs))
+	for i := range _blobs {
+		blobs[i] = (*goethkzg.Blob)(&_blobs[i])
 	}
 	return blobs
 }
-func toComms(_comms BlobKzgs) []gokzg4844.KZGCommitment {
-	comms := make([]gokzg4844.KZGCommitment, len(_comms))
+func toComms(_comms BlobKzgs) []goethkzg.KZGCommitment {
+	comms := make([]goethkzg.KZGCommitment, len(_comms))
 	for i, _comm := range _comms {
-		comms[i] = gokzg4844.KZGCommitment(_comm)
+		comms[i] = goethkzg.KZGCommitment(_comm)
 	}
 	return comms
 }
-func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
-	proofs := make([]gokzg4844.KZGProof, len(_proofs))
+func toProofs(_proofs KZGProofs) []goethkzg.KZGProof {
+	proofs := make([]goethkzg.KZGProof, len(_proofs))
 	for i, _proof := range _proofs {
-		proofs[i] = gokzg4844.KZGProof(_proof)
+		proofs[i] = goethkzg.KZGProof(_proof)
 	}
 	return proofs
 }
 
 func (c KZGCommitment) ComputeVersionedHash() common.Hash {
-	return common.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
+	return common.Hash(libkzg.KZGToVersionedHash(goethkzg.KZGCommitment(c)))
 }
 
 /* BlobTxWrapper methods */

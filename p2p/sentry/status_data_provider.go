@@ -161,16 +161,13 @@ func ReadChainHeadWithTx(tx kv.Tx, blockReader services.BlockReader, mergeHeight
 		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
 	}
 
-	earliestAvailableHeight, err := blockReader.EarliestBlockNum(context.Background())
-	if err != nil {
-		return ChainHead{}, fmt.Errorf("ReadChainHead: earliest block number error: %w", err)
-	}
+	//earliestAvailableHeight, err := blockReader.EarliestBlockNum(context.Background())
+	//if err != nil {
+	//	return ChainHead{}, fmt.Errorf("ReadChainHead: earliest block number error: %w", err)
+	//}
 
-	// we only serve post-merge blocks over p2p
-	earliestHeight := max(earliestAvailableHeight, mergeHeight)
-
-	log.Info(fmt.Sprintf("ReadChainHead: earliest height is %d", earliestHeight))
-	return ChainHead{height, time, hash, earliestHeight, td256}, nil
+	//log.Info(fmt.Sprintf("ReadChainHead: earliest height is %d", earliestHeight))
+	return ChainHead{height, time, hash, 0, td256}, nil
 }
 
 func ReadChainHead(ctx context.Context, db kv.RoDB, blockReader services.BlockReader, mergeHeight uint64) (ChainHead, error) {

@@ -11,7 +11,7 @@ env:
   DOCKER_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
-  BINARIES: "erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+  BINARIES: "erigon downloader evm caplin diag integration rpcdaemon sentry txpool"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   DOCKERHUB_REPOSITORY_DEV: "erigontech/dev-erigon"
   DOCKERFILE_PATH: "Dockerfile"
@@ -401,11 +401,10 @@ jobs:
         for archive in *.tar; do gzip $archive; echo Artifact $archive compressed; done
         sha256sum *.tar.gz *.deb > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
         gh release create \
-          --generate-notes \
           --target ${GITHUB_RELEASE_TARGET} \
           --draft=true \
           --title "${{ inputs.release_version }}" \
-          --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
+          --notes "**Please generate notes in WEB UI and copy-paste here**<br>**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
           "${{ inputs.release_version }}" \
           *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
 

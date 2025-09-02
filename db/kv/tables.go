@@ -30,11 +30,6 @@ import (
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
 var DBSchemaVersion = types.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
-// PlainContractCode -
-// key - address+incarnation
-// value - code hash
-const PlainContractCode = "PlainCodeHash"
-
 const ChangeSets3 = "ChangeSets3"
 
 const (
@@ -132,19 +127,21 @@ const (
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
 	// BOR
-	BorTxLookup             = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorEvents               = "BorEvents"                 // event_id -> event_payload
-	BorEventNums            = "BorEventNums"              // block_num -> event_id (last event_id in that block)
-	BorEventProcessedBlocks = "BorEventProcessedBlocks"   // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
-	BorEventTimes           = "BorEventTimes"             // timestamp -> event_id
-	BorSpans                = "BorSpans"                  // span_id -> span (in JSON encoding)
-	BorMilestones           = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
-	BorMilestoneEnds        = "BorMilestoneEnds"          // start block_num -> milestone_id (first block of milestone)
-	BorCheckpoints          = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
-	BorCheckpointEnds       = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
-	BorProducerSelections   = "BorProducerSelections"     // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
-	BorWitnesses            = "BorWitnesses"              // block_num_u64 + block_hash -> witness
-	BorWitnessSizes         = "BorWitnessSizes"           // block_num_u64 + block_hash -> witness size (uint64)
+	BorTxLookup                = "BlockBorTransactionLookup"  // transaction_hash -> block_num_u64
+	BorEvents                  = "BorEvents"                  // event_id -> event_payload
+	BorEventNums               = "BorEventNums"               // block_num -> event_id (last event_id in that block)
+	BorEventProcessedBlocks    = "BorEventProcessedBlocks"    // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
+	BorEventTimes              = "BorEventTimes"              // timestamp -> event_id
+	BorSpans                   = "BorSpans"                   // span_id -> span (in JSON encoding)
+	BorSpansIndex              = "BorSpansIndex"              // span.StartBlockNumber -> span.Id
+	BorMilestones              = "BorMilestones"              // milestone_id -> milestone (in JSON encoding)
+	BorMilestoneEnds           = "BorMilestoneEnds"           // start block_num -> milestone_id (first block of milestone)
+	BorCheckpoints             = "BorCheckpoints"             // checkpoint_id -> checkpoint (in JSON encoding)
+	BorCheckpointEnds          = "BorCheckpointEnds"          // start block_num -> checkpoint_id (first block of checkpoint)
+	BorProducerSelections      = "BorProducerSelections"      // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
+	BorProducerSelectionsIndex = "BorProducerSelectionsIndex" // span.StartBlockNumber -> span.Id
+	BorWitnesses               = "BorWitnesses"               // block_num_u64 + block_hash -> witness
+	BorWitnessSizes            = "BorWitnessSizes"            // block_num_u64 + block_hash -> witness size (uint64)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -198,14 +195,6 @@ const (
 	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
-
-	//State Reconstitution
-	PlainStateR    = "PlainStateR"    // temporary table for PlainState reconstitution
-	PlainStateD    = "PlainStateD"    // temporary table for PlainStare reconstitution, deletes
-	CodeR          = "CodeR"          // temporary table for Code reconstitution
-	CodeD          = "CodeD"          // temporary table for Code reconstitution, deletes
-	PlainContractR = "PlainContractR" // temporary table for PlainContract reconstitution
-	PlainContractD = "PlainContractD" // temporary table for PlainContract reconstitution, deletes
 
 	// Erigon-CL Objects
 
@@ -326,10 +315,8 @@ var ChaindataTables = []string{
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
-	IncarnationMap,
 	SyncStageProgress,
 	PlainState,
-	PlainContractCode,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -349,11 +336,13 @@ var ChaindataTables = []string{
 	BorEventProcessedBlocks,
 	BorEventTimes,
 	BorSpans,
+	BorSpansIndex,
 	BorMilestones,
 	BorMilestoneEnds,
 	BorCheckpoints,
 	BorCheckpointEnds,
 	BorProducerSelections,
+	BorProducerSelectionsIndex,
 	BorWitnesses,
 	BorWitnessSizes,
 	TblAccountVals,
@@ -471,19 +460,11 @@ var ConsensusTables = append([]string{
 },
 	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
 )
-var HeimdallTables = []string{}
-var PolygonBridgeTables = []string{}
+var HeimdallTables = ChaindataTables
+var PolygonBridgeTables = ChaindataTables
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
-}
-var ReconTables = []string{
-	PlainStateR,
-	PlainStateD,
-	CodeR,
-	CodeD,
-	PlainContractR,
-	PlainContractD,
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
@@ -586,19 +567,21 @@ var AuRaTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorTxLookup:             {Flags: DupSort},
-	BorEvents:               {Flags: DupSort},
-	BorEventNums:            {Flags: DupSort},
-	BorEventProcessedBlocks: {Flags: DupSort},
-	BorEventTimes:           {Flags: DupSort},
-	BorSpans:                {Flags: DupSort},
-	BorCheckpoints:          {Flags: DupSort},
-	BorCheckpointEnds:       {Flags: DupSort},
-	BorMilestones:           {Flags: DupSort},
-	BorMilestoneEnds:        {Flags: DupSort},
-	BorProducerSelections:   {Flags: DupSort},
-	BorWitnesses:            {Flags: DupSort},
-	BorWitnessSizes:         {Flags: DupSort},
+	BorTxLookup:                {Flags: DupSort},
+	BorEvents:                  {Flags: DupSort},
+	BorEventNums:               {Flags: DupSort},
+	BorEventProcessedBlocks:    {Flags: DupSort},
+	BorEventTimes:              {Flags: DupSort},
+	BorSpans:                   {Flags: DupSort},
+	BorSpansIndex:              {Flags: DupSort},
+	BorProducerSelectionsIndex: {Flags: DupSort},
+	BorCheckpoints:             {Flags: DupSort},
+	BorCheckpointEnds:          {Flags: DupSort},
+	BorMilestones:              {Flags: DupSort},
+	BorMilestoneEnds:           {Flags: DupSort},
+	BorProducerSelections:      {Flags: DupSort},
+	BorWitnesses:               {Flags: DupSort},
+	BorWitnessSizes:            {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}
@@ -608,11 +591,6 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
-var ReconTablesCfg = TableCfg{
-	PlainStateD:    {Flags: DupSort},
-	CodeD:          {Flags: DupSort},
-	PlainContractD: {Flags: DupSort},
-}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
@@ -691,13 +669,6 @@ func reinit() {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
 			DownloaderTablesCfg[name] = TableCfgItem{}
-		}
-	}
-
-	for _, name := range ReconTables {
-		_, ok := ReconTablesCfg[name]
-		if !ok {
-			ReconTablesCfg[name] = TableCfgItem{}
 		}
 	}
 
@@ -793,6 +764,10 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 		return RCacheHistoryIdx, nil
 	case "logaddrs":
 		return LogAddrIdx, nil
+	case "logaddr":
+		return LogAddrIdx, nil
+	case "logtopic":
+		return LogTopicIdx, nil
 	case "logtopics":
 		return LogTopicIdx, nil
 	case "tracesfrom":
@@ -802,6 +777,18 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 	default:
 		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
 	}
+}
+
+func String2Enum(in string) (uint16, error) {
+	ii, err := String2InvertedIdx(in)
+	if err != nil {
+		d, errD := String2Domain(in)
+		if errD != nil {
+			return 0, errD
+		}
+		return uint16(d), nil
+	}
+	return uint16(ii), nil
 }
 
 const (
@@ -965,9 +952,4 @@ const (
 	*/
 	E2AccountsHistory = "AccountHistory"
 	E2StorageHistory  = "StorageHistory"
-
-	// IncarnationMap for deleted accounts
-	//key - address
-	//value - incarnation of account when it was last deleted
-	IncarnationMap = "IncarnationMap"
 )

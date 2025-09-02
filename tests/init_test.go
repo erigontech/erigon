@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -40,6 +39,7 @@ var (
 	baseDir            = filepath.Join(".", "testdata")
 	blockTestDir       = filepath.Join(baseDir, "BlockchainTests")
 	stateTestDir       = filepath.Join(baseDir, "GeneralStateTests")
+	legacyStateTestDir = filepath.Join(baseDir, "LegacyTests")
 	transactionTestDir = filepath.Join(baseDir, "TransactionTests")
 	rlpTestDir         = filepath.Join(baseDir, "RLPTests")
 	difficultyTestDir  = filepath.Join(baseDir, "DifficultyTests")
@@ -47,31 +47,18 @@ var (
 	cornersDir = filepath.Join(".", "test-corners")
 )
 
-func readJSON(reader io.Reader, value interface{}) error {
-	data, err := io.ReadAll(reader)
+func readJSONFile(fn string, value interface{}) error {
+	data, err := os.ReadFile(fn)
 	if err != nil {
 		return fmt.Errorf("error reading JSON file: %w", err)
 	}
+
 	if err = json.Unmarshal(data, &value); err != nil {
 		if syntaxerr, ok := err.(*json.SyntaxError); ok {
 			line := findLine(data, syntaxerr.Offset)
 			return fmt.Errorf("JSON syntax error at line %v: %w", line, err)
 		}
 		return err
-	}
-	return nil
-}
-
-func readJSONFile(fn string, value interface{}) error {
-	file, err := os.Open(fn)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	err = readJSON(file, value)
-	if err != nil {
-		return fmt.Errorf("%s in file %s", err.Error(), fn)
 	}
 	return nil
 }
@@ -193,6 +180,12 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 		t.Skip("missing test files")
 	}
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) { //skip magically disappeared files
+				return nil
+			}
+			return err
+		}
 		name := filepath.ToSlash(strings.TrimPrefix(path, dir+string(filepath.Separator)))
 		if info.IsDir() {
 			if _, skipload := tm.findSkip(name + "/"); skipload {
@@ -208,9 +201,14 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	//var m runtime.MemStats
+	//dbg.ReadMemStats(&m)
+	//panic(fmt.Sprintf("[dbg] mem info: alloc=%s, sys=%s", common.ByteCount(m.Alloc), common.ByteCount(m.Sys)))
 }
 
 func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest interface{}) {
+	t.Parallel()
 	if r, _ := tm.findSkip(name); r != "" {
 		t.Skip(r)
 	}

@@ -62,11 +62,11 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var CLI struct {
@@ -394,7 +394,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -573,7 +573,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
-	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -1038,7 +1038,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -1272,7 +1272,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err

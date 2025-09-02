@@ -40,29 +40,32 @@ func newSpanBlockProducersTracker(
 	}
 
 	return &spanBlockProducersTracker{
-		logger:           logger,
-		borConfig:        borConfig,
-		store:            store,
-		recentSelections: recentSelectionsLru,
-		newSpans:         make(chan *Span),
-		idleSignal:       make(chan struct{}),
+		logger:              logger,
+		borConfig:           borConfig,
+		store:               store,
+		recentSelections:    recentSelectionsLru,
+		newSpans:            make(chan *Span),
+		idleSignal:          make(chan struct{}),
+		spanProcessedSignal: make(chan struct{}),
 	}
 }
 
 type spanBlockProducersTracker struct {
-	logger           log.Logger
-	borConfig        *borcfg.BorConfig
-	store            EntityStore[*SpanBlockProducerSelection]
-	recentSelections *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
-	newSpans         chan *Span
-	queued           atomic.Int32
-	idleSignal       chan struct{}
+	logger              log.Logger
+	borConfig           *borcfg.BorConfig
+	store               EntityStore[*SpanBlockProducerSelection]
+	recentSelections    *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
+	newSpans            chan *Span
+	queued              atomic.Int32
+	idleSignal          chan struct{}
+	spanProcessedSignal chan struct{} // signal that a new span was fully processed
 }
 
 func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 	t.logger.Info(heimdallLogPrefix("running span block producers tracker component"))
 
 	defer close(t.idleSignal)
+	defer close(t.spanProcessedSignal)
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,6 +74,12 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 			err := t.ObserveSpan(ctx, newSpan)
 			if err != nil {
 				return err
+			}
+
+			// signal that the span was observed (non-blocking)
+			select {
+			case t.spanProcessedSignal <- struct{}{}:
+			default:
 			}
 
 			t.queued.Add(-1)
@@ -82,6 +91,23 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// Anticipates a new span to be observe and fully processed withing the given timeout period.
+// Returns true if a new span was processed, false if no new span was processed
+func (t *spanBlockProducersTracker) AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case _, ok := <-t.spanProcessedSignal:
+		if !ok {
+			return false, errors.New("spanProcessed channel was closed")
+		}
+		return true, nil
+
+	case <-time.After(timeout): // timeout
+	}
+	return false, nil
 }
 
 func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {
@@ -100,13 +126,18 @@ func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {
 	}
 }
 
-func (t *spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
-	t.queued.Add(1)
-	t.newSpans <- span
+func (t *spanBlockProducersTracker) ObserveSpanAsync(ctx context.Context, span *Span) {
+	select {
+	case <-ctx.Done():
+		return
+	case t.newSpans <- span:
+		t.queued.Add(1)
+		return
+	}
 }
 
 func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
-	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
+	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "newSpan", newSpan)
 
 	lastProducerSelection, ok, err := t.store.LastEntity(ctx)
 	if err != nil {
@@ -199,28 +230,16 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint64) (*ValidatorSet, int, error) {
 	currentSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
 
-	// have we previously calculated the producers for the same sprint num (chain tip optimisation)
-	if selection, ok := t.recentSelections.Get(currentSprintNum); ok {
-		return selection.Producers.Copy(), 0, nil
-	}
-
 	// have we previously calculated the producers for the previous sprint num of the same span (chain tip optimisation)
-	spanId := SpanIdAt(blockNum)
-	var prevSprintNum uint64
-	if currentSprintNum > 0 {
-		prevSprintNum = currentSprintNum - 1
+	spanId, ok, err := t.store.EntityIdFromBlockNum(ctx, blockNum)
+	if err != nil {
+		return nil, 0, err
 	}
-	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && spanId == selection.SpanId {
-		producersCopy := selection.Producers.Copy()
-		producersCopy.IncrementProposerPriority(1)
-		selectionCopy := selection
-		selectionCopy.Producers = producersCopy
-		t.recentSelections.Add(currentSprintNum, selectionCopy)
-		return producersCopy, 1, nil
+	if !ok {
+		return nil, 0, fmt.Errorf("could not get spanId from blockNum=%d", blockNum)
 	}
 
-	// no recent selection that we can easily use, re-calculate from DB
-	producerSelection, ok, err := t.store.Entity(ctx, uint64(spanId))
+	producerSelection, ok, err := t.store.Entity(ctx, spanId)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -241,7 +260,5 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
-
-	t.recentSelections.Add(currentSprintNum, *producerSelection)
 	return producers, increments, nil
 }

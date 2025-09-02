@@ -554,7 +554,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 
-	files, err := downloader.SeedableFiles(dirs, chain, all)
+	files, err := downloader.SeedableFiles(dirs, chain, true)
 	if err != nil {
 		return err
 	}
@@ -731,12 +731,13 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		chainConfig := chainspec.ChainConfigByChainName(chainName)
-		if chainConfig == nil {
+		spc, err := chainspec.ChainSpecByName(chainName)
+		if err != nil {
 			return fmt.Errorf("unknown chain: %s", chainName)
 		}
-		if chainConfig.ChainID.Uint64() != cc.ChainID.Uint64() {
-			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
+		if spc.Config.ChainID.Uint64() != cc.ChainID.Uint64() {
+			advice := fmt.Sprintf("\nTo change to '%s', remove %s %s\nAnd then start over with --chain=%s", chainName, dirs.Chaindata, filepath.Join(dirs.Snap, "preverified.toml"), chainName)
+			return fmt.Errorf("datadir already was configured with --chain=%s"+advice, cc.ChainName)
 		}
 	}
 	return nil

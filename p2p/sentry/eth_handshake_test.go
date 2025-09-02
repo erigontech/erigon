@@ -24,32 +24,32 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 func TestCheckPeerStatusCompatibility(t *testing.T) {
 	var version uint = direct.ETH67
-	networkID := chainspec.MainnetChainConfig.ChainID.Uint64()
-	heightForks, timeForks := forkid.GatherForks(chainspec.MainnetChainConfig, 0 /* genesisTime */)
+	networkID := chainspec.Mainnet.Config.ChainID.Uint64()
+	heightForks, timeForks := forkid.GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	goodReply := eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       networkID,
 		TD:              big.NewInt(0),
 		Head:            common.Hash{},
-		Genesis:         chainspec.MainnetGenesisHash,
-		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.MainnetGenesisHash, 0, 0),
+		Genesis:         chainspec.Mainnet.GenesisHash,
+		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.Mainnet.GenesisHash, 0, 0),
 	}
 	status := proto_sentry.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(new(uint256.Int)),
 		BestHash:        nil,
 		ForkData: &proto_sentry.Forks{
-			Genesis:     gointerfaces.ConvertHashToH256(chainspec.MainnetGenesisHash),
+			Genesis:     gointerfaces.ConvertHashToH256(chainspec.Mainnet.GenesisHash),
 			HeightForks: heightForks,
 			TimeForks:   timeForks,
 		},

@@ -77,7 +77,7 @@ import (
 		return nil, err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -96,7 +96,6 @@ var bucketLabels = map[string]string{
 	kv.PlainState:               "Plain State",
 	kv.HashedAccountsDeprecated: "Hashed Accounts",
 	kv.HashedStorageDeprecated:  "Hashed Storage",
-	kv.IncarnationMap:           "Incarnations",
 	kv.Senders:                  "Transaction Senders",
 }
 
@@ -120,7 +119,7 @@ func hexPalette() error {
 		return err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -242,7 +241,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 		return err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -254,7 +253,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 			return err
 		}
 		//nolint:gosec
-		cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
+		cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("error: %v, output: %s\n", err, output)
 		}

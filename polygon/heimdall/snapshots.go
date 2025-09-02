@@ -18,8 +18,8 @@ package heimdall
 
 import (
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 // Bor Events
@@ -39,8 +39,8 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to] semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), segmentsMin, false, logger)}
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
+	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), false, logger)}
 }
 
 func (s *RoSnapshots) Ranges() []snapshotsync.Range {

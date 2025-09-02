@@ -78,7 +78,12 @@ func main() {
 }
 
 func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr, amountStr, url, countStr, chain string) error {
-	chainId := chainspec.ChainConfigByChainName(chain).ChainID
+	spec, err := chainspec.ChainSpecByName(chain)
+	if err != nil {
+		return fmt.Errorf("failed to get chain spec for %s: %w", chain, err)
+	}
+	chainId := spec.Config.ChainID
+
 	rpcClient := requests.NewRequestGenerator(url, logger)
 	transactor := testhelpers.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)
@@ -102,6 +107,11 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	for i := 0; i < count; i++ {
 		txn, err := transactor.SubmitSimpleTransfer(from, to, amount)
 		if err != nil {
+			if strings.Contains(err.Error(), "failed to get transaction count: Invalid params") {
+				logger.Warn("failed to get transaction count, retrying", "err", err)
+				time.Sleep(time.Second)
+				continue
+			}
 			return err
 		}
 		logger.Info("transaction sent", "hash", txn.Hash())

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -44,7 +45,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, _, err := core.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, _, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
@@ -53,8 +54,7 @@ func TestEmptyBlock(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, kv.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, genesis, engine, false)
 
 	time := uint64(1539016985)
 	header := core.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
@@ -92,8 +92,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, kv.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, genesis, engine, false)
 
 	difficlty, _ := new(big.Int).SetString("340282366920938463463374607431768211454", 10)
 	//Populate a sample valid header for a Pre-merge block

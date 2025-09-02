@@ -34,6 +34,8 @@ func NewIdleClient(cfg buildercfg.MiningConfig) Client {
 
 func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return &Span{
+		StartBlock: 0,
+		EndBlock:   255,
 		ValidatorSet: ValidatorSet{
 			Validators: []*Validator{
 				{
@@ -55,7 +57,9 @@ func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 
 func (c *IdleClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	return &Span{
-		Id: SpanId(spanID),
+		Id:         SpanId(spanID),
+		StartBlock: 0,
+		EndBlock:   255,
 		ValidatorSet: ValidatorSet{
 			Validators: []*Validator{
 				{
