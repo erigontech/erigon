@@ -332,7 +332,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer domains.Close()
 
 	stateReader := state.NewReaderV3(domains.AsGetter(tx))
-	fmt.Printf("[dbg] txNum: %d\n", domains.TxNum())
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
 	txNum := -1
