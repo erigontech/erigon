@@ -25,19 +25,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
-func setupTestDB(t *testing.T) kv.RwDB {
-	// Create an in-memory SQLite DB for testing purposes
-	db := memdb.NewTestDB(t, kv.ChainDB)
-	return db
-}
-
 func TestWriteBlockRoot(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
+	db := memdb.NewChainDB(t)
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
@@ -69,8 +61,7 @@ func TestWriteBlockRoot(t *testing.T) {
 }
 
 func TestReadParentBlockRoot(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
+	db := memdb.NewChainDB(t)
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
@@ -93,8 +84,7 @@ func TestReadParentBlockRoot(t *testing.T) {
 }
 
 func TestTruncateCanonicalChain(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
+	db := memdb.NewChainDB(t)
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
@@ -123,8 +113,7 @@ func TestTruncateCanonicalChain(t *testing.T) {
 }
 
 func TestReadBeaconBlockHeader(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
+	db := memdb.NewChainDB(t)
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
@@ -159,8 +148,7 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 }
 
 func TestWriteExecutionBlockNumber(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
+	db := memdb.NewChainDB(t)
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
@@ -176,8 +164,7 @@ func TestWriteExecutionBlockNumber(t *testing.T) {
 }
 
 func TestWriteExecutionBlockHash(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
+	db := memdb.NewChainDB(t)
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 

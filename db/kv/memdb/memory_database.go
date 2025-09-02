@@ -37,6 +37,10 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	return db
 }
 
+func NewChainDB(tb testing.TB) kv.RwDB {
+	return NewTestDB(tb, kv.ChainDB)
+}
+
 func NewTestPoolDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()

@@ -81,7 +81,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool()
-	blobDb := memdb.NewTestDB(t, kv.ChainDB)
+	blobDb := memdb.NewChainDB(t)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 

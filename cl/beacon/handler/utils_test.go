@@ -68,8 +68,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		blocks, preState, postState = tests.GetCapellaRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
-	db = memdb.NewTestDB(t, kv.ChainDB)
-	blobDb := memdb.NewTestDB(t, kv.ChainDB)
+	db = memdb.NewChainDB(t)
+	blobDb := memdb.NewChainDB(t)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
