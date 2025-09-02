@@ -112,7 +112,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 		accountKeyLen: accountKeyLen,
-		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
+		auxBuffer:     bytes.NewBuffer(make([]byte, 1024)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
 		metrics:       NewMetrics(),
