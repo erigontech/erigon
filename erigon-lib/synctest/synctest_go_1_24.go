@@ -18,8 +18,13 @@
 
 package synctest
 
-import "testing"
+import (
+	"testing"
+	"testing/synctest"
+)
 
 var Test testFunc = func(t *testing.T, f func(*testing.T)) {
-	f(t)
+	synctest.Run(func() {
+		f(t)
+	})
 }
