@@ -172,7 +172,8 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New(os.TempDir(), kv.ChainDB)
+	dirs := datadir.New(os.TempDir())
+	db := memdb.New(nil, dirs.Chaindata, kv.ChainDB)
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
@@ -182,7 +183,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
+	agg, err := dbstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, db, log.New())
 	if err != nil {
 		return err
 	}
