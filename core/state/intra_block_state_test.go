@@ -745,6 +745,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[1].versionedWrites = nil
 
 	// Tx2 read should get Tx0's value
+	states[2].versionedReads = nil
 	states[2].GetState(addr, key, &v)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
@@ -766,6 +767,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[0].versionedWrites = nil
 
 	// Tx2 read again should get default vals
+	states[2].versionedReads = nil
 	states[2].GetState(addr, key, &v)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
@@ -861,6 +863,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[2].versionedWrites = nil
 
 	// Tx3 read
+	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, val1, v)
 	b, err = states[3].GetBalance(addr)
@@ -873,11 +876,16 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	// map deletes necessary here as they happen in scheduler not ibs
+	states[1].versionMap.Delete(addr, StatePath, key1, 1, true)
+	states[1].versionMap.Delete(addr, StatePath, key2, 1, true)
+	states[1].versionMap.Delete(addr, BalancePath, common.Hash{}, 1, true)
 
 	// Tx3 read
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
 	states[3].stateObjects = map[common.Address]*stateObject{}
+	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
 	states[3].GetState(addr, key2, &v)
@@ -894,6 +902,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].versionedWrites = nil
 
 	// Tx3 read
+	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
 	states[3].GetState(addr, key2, &v)

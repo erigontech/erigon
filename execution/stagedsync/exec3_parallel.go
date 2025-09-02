@@ -812,11 +812,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
 		} else {
 			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-
 			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
 			// Remove entries that were previously written but are no longer written
-
 			cmpMap := map[common.Address]map[state.AccountKey]struct{}{}
 
 			for _, w := range res.TxOut {
