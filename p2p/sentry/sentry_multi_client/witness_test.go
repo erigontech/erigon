@@ -17,10 +17,8 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/memdb"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/types"
@@ -88,17 +86,10 @@ func createTestWitness(t *testing.T, header *types.Header) *stateless.Witness {
 }
 
 func createTestMultiClient(t *testing.T) (*MultiClient, kv.TemporalRwDB) {
-	baseDB := memdb.NewChainDB(t, t.TempDir())
-	t.Cleanup(baseDB.Close)
-
 	dirs, logger := datadir.New(t.TempDir()), log.New()
-	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(t, err)
-	agg, err := dbstate.NewAggregator2(context.Background(), dirs, 16, salt, baseDB, logger)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-	tdb, err := temporal.New(baseDB, agg)
-	require.NoError(t, err)
+
+	stepSize := uint64(16)
+	tdb := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
 
 	witnessBuffer := stagedsync.NewWitnessBuffer()
 
