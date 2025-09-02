@@ -60,8 +60,8 @@ type HistCfg struct {
 	HistoryValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 
 	Accessors     Accessors
-	CompressorCfg seg.Cfg             // Compression settings for history files
-	Compression   seg.FileCompression // defines type of Compression for history files
+	CompressorCfg seg.Cfg                  // Compression settings for history files
+	Compression   seg.WordLevelCompression // defines type of Compression for history files
 	HistoryIdx    kv.InvertedIdx
 
 	Version HistVersionTypes
