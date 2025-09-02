@@ -42,7 +42,7 @@ import (
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -76,7 +76,7 @@ type Pool interface {
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
-	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
+	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
@@ -150,7 +150,7 @@ type TxPool struct {
 	p2pFetcher              *Fetch
 	p2pSender               *Send
 	newSlotsStreams         *NewSlotsStreams
-	ethBackend              remote.ETHBACKENDClient
+	ethBackend              remoteproto.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
@@ -180,7 +180,7 @@ func New(
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
 	newSlotsStreams *NewSlotsStreams,
-	ethBackend remote.ETHBACKENDClient,
+	ethBackend remoteproto.ETHBACKENDClient,
 	logger log.Logger,
 	opts ...Option,
 ) (*TxPool, error) {
@@ -326,7 +326,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
 	sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
@@ -1004,7 +1004,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			return txpoolcfg.TypeNotActivated
 		}
 
-		res, err := p.ethBackend.AAValidation(context.Background(), &remote.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
+		res, err := p.ethBackend.AAValidation(context.Background(), &remoteproto.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
 		if err != nil {
 			return txpoolcfg.InvalidAA
 		}
@@ -1548,7 +1548,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 }
 
 // TODO: Looks like a copy of the above
-func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
+func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
 	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
 	if assert.Enable {
 		for _, txn := range newTxns.Txns {
@@ -1583,7 +1583,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remote.Action_UPSERT, remote.Action_UPSERT_CODE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
 				if change.Incarnation > 0 {
 					continue
 				}
