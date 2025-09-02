@@ -305,8 +305,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains, err = NewSharedDomains(rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
-		domains.SetTxNum(domains.TxNum() + 1)
-		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, domains.TxNum()+1)
+		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
 		require.NoError(err)
 		require.Equal(0, iterCount(domains))
 	}
