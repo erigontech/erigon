@@ -47,12 +47,9 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/runtime"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
@@ -172,8 +169,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	dirs := datadir.New(os.TempDir())
-	db := memdb.New(nil, dirs.Chaindata, kv.ChainDB)
+	db := temporaltest.NewTestDB(nil, datadir.New(os.TempDir()))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
@@ -183,16 +179,8 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := dbstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, db, log.New())
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		return err
-	}
-	tx, err := tdb.BeginTemporalRw(context.Background())
+
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
