@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -99,6 +100,8 @@ func createTestMultiClient(t *testing.T) (*MultiClient, kv.TemporalRwDB) {
 	t.Cleanup(agg.Close)
 	tdb, err := temporal.New(baseDB, agg)
 	require.NoError(t, err)
+	stepSize := uint64(16)
+	temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
 
 	witnessBuffer := stagedsync.NewWitnessBuffer()
 
