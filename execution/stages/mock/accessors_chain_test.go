@@ -527,6 +527,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
+	var txNum uint64
 	{
 		sd, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(err)
@@ -534,16 +535,16 @@ func TestBlockReceiptStorage(t *testing.T) {
 		base, err := txNumReader.Min(tx, 1)
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
-		sd.SetTxNum(base)
+		txNum = base
 		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
 		for i, r := range receipts {
-			sd.SetTxNum(base + 1 + uint64(i))
-			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, base+1+uint64(i)))
+			txNum = base + 1 + uint64(i)
+			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, txNum))
 		}
-		sd.SetTxNum(base + uint64(len(receipts)) + 1)
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+uint64(len(receipts))+1))
+		txNum = base + uint64(len(receipts)) + 1
+		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
 
-		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
+		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), txNum, "flush-commitment")
 		require.NoError(err)
 
 		require.NoError(sd.Flush(ctx, tx))
