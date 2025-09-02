@@ -529,6 +529,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	var txNum uint64
 	{
+		blockNum := uint64(0)
 		sd, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
@@ -544,7 +545,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 		txNum = base + uint64(len(receipts)) + 1
 		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
 
-		_, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), txNum, "flush-commitment")
+		// Compute and store the commitment
+		_, err = sd.ComputeCommitment(ctx, true, blockNum, txNum, "flush-commitment")
 		require.NoError(err)
 
 		require.NoError(sd.Flush(ctx, tx))

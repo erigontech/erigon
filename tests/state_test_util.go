@@ -345,7 +345,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), domains.TxNum(), "flush-commitment")
+	_, err = domains.ComputeCommitment(context.Background(), true, blockNr, domains.TxNum(), "flush-commitment")
 	if err != nil {
 		return nil, err
 	}
