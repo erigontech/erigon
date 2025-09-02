@@ -310,7 +310,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 
 func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.Aggregator) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb, tb.TempDir())
+	db := memdb.NewChainDB(tb, tb.TempDir())
 	tb.Cleanup(db.Close)
 
 	dirs, logger := datadir.New(tb.TempDir()), log.New()

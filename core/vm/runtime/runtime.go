@@ -128,7 +128,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 
 	externalState := cfg.State != nil
 	if !externalState {
-		db := memdb.NewStateDB(nil, tempdir)
+		db := memdb.NewChainDB(nil, tempdir)
 		defer db.Close()
 		dirs := datadir.New(tempdir)
 		logger := log.New()
@@ -199,7 +199,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		tmp := filepath.Join(os.TempDir(), "create-vm")
 		defer dir.RemoveAll(tmp) //nolint
 
-		db := memdb.NewStateDB(nil, tmp)
+		db := memdb.NewChainDB(nil, tmp)
 		defer db.Close()
 		agg, err := dbstate.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
 		if err != nil {

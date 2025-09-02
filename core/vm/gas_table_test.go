@@ -97,7 +97,7 @@ var eip2200Tests = []struct {
 }
 
 func testTemporalDB(t *testing.T) *temporal.DB {
-	db := memdb.NewStateDB(t, t.TempDir())
+	db := memdb.NewChainDB(t, t.TempDir())
 
 	t.Cleanup(db.Close)
 

@@ -31,7 +31,7 @@ func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
 	return mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
 }
 
-func NewStateDB(tb testing.TB, tmpDir string) kv.RwDB {
+func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
 	return mdbx.New(kv.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 }
 
