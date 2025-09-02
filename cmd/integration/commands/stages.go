@@ -1241,6 +1241,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
+	borSn.DownloadComplete() // mark as ready
 	engine, heimdallClient := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
@@ -1285,7 +1286,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		recents = bor.Recents
 		signatures = bor.Signatures
 	}
-	borSn.DownloadComplete() // mark as ready
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 
 	stageList := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
@@ -1374,12 +1374,11 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 			EventFetcher: heimdallClient,
 		})
 
-		if err := heimdallStore.Milestones().Prepare(ctx); err != nil {
+		if err := heimdallStore.Prepare(ctx); err != nil {
 			panic(err)
 		}
 
-		_, err := heimdallStore.Milestones().DeleteFromBlockNum(ctx, 0)
-		if err != nil {
+		if err := bridgeStore.Prepare(ctx); err != nil {
 			panic(err)
 		}
 
