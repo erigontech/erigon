@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 type StageHistoryReconstructionCfg struct {
