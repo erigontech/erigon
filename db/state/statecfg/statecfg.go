@@ -84,8 +84,8 @@ type InvIdxCfg struct {
 	ValuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	Name         kv.InvertedIdx
 
-	Compression   seg.FileCompression // compression type for inverted index keys and values
-	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
+	Compression   seg.WordLevelCompression // compression type for inverted index keys and values
+	CompressorCfg seg.Cfg                  // advanced configuration for compressor encodings
 
 	Accessors Accessors
 }
