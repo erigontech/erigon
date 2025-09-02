@@ -50,6 +50,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func composite(k, k2 []byte) []byte {
+	return append(common.Copy(k), k2...)
+}
+
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
