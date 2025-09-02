@@ -18,6 +18,8 @@ env:
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   # Docker Hub image name
   IMAGE_NAME: hermeznetwork/cdk-erigon
+  # GHCR image name
+  GHCR_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/cdk-erigon
 
 jobs:
   prepare:
@@ -25,6 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.prep.outputs.version }}
       latest_tag: ${{ env.LATEST_TAG }}
+      ghcr_image_name: ${{ steps.prep.outputs.ghcr_image_name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,6 +58,10 @@ jobs:
             echo "LATEST_TAG=true" >> $GITHUB_ENV
           fi
 
+          # Normalize GHCR owner to lowercase and expose image name as output
+          GHCR_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "ghcr_image_name=ghcr.io/${GHCR_OWNER_LC}/cdk-erigon" >> $GITHUB_OUTPUT
+
   build-amd64:
     needs: prepare
     runs-on: ubuntu-latest
@@ -81,11 +88,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Normalize GHCR image name (lowercase owner)
-        run: |
-          GHCR_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "GHCR_IMAGE_NAME=ghcr.io/${GHCR_OWNER_LC}/cdk-erigon" >> $GITHUB_ENV
-
       - name: Build and push AMD64 image (Docker Hub + GHCR)
         uses: docker/build-push-action@v6
         with:
@@ -93,15 +95,9 @@ jobs:
           file: Dockerfile
           push: true
           platforms: linux/amd64
-          # Publish the same build to both registries
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64
-            ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64
-          # Optional: BuildKit cache to speed up repeated builds
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-amd64
 
   build-arm64:
     needs: prepare
@@ -129,7 +125,61 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Normalize GHCR image name (lowercase owner)
+      - name: Build and push ARM64 image (Docker Hub + GHCR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-arm64
+
+  create-and-push-manifest:
+    needs: [prepare, build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest (Docker Hub)
         run: |
-          GHCR_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "GHCR_IMAGE_NAME=ghcr.io/${GHCR_OWNER_LC}/cdk-erigon" >> $GITHUB_ENV
+          docker buildx imagetools create \
+            --tag ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} \
+            ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64 \
+            ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+
+          if [ "${{ needs.prepare.outputs.latest_tag }}" == "true" ]; then
+            docker buildx imagetools create \
+              --tag ${{ env.IMAGE_NAME }}:latest \
+              ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64 \
+              ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
+          fi
+
+      - name: Create and push manifest (GHCR)
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }} \
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-amd64 \
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-arm64
+
+          if [ "${{ needs.prepare.outputs.latest_tag }}" == "true" ]; then
+            docker buildx imagetools create \
+              --tag ${{ needs.prepare.outputs.ghcr_image_name }}:latest \
+              ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-amd64 \
+              ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}-arm64
+          fi

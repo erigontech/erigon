@@ -13,8 +13,9 @@ env:
   # Docker Hub
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-  # Docker Hub image name
   IMAGE_NAME: hermeznetwork/cdk-erigon
+  # GHCR
+  GHCR_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/cdk-erigon
 
 concurrency:
   group: ${{ github.workflow }}
@@ -25,19 +26,25 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.prep.outputs.version }}
+      ghcr_image_name: ${{ steps.prep.outputs.ghcr_image_name }}
     steps:
       - name: Checkout zkevm branch
         uses: actions/checkout@v4
         with:
           ref: zkevm
 
-      - name: Prepare timestamped tag
+      - name: Prepare timestamped tag and GHCR image (lowercase owner)
         id: prep
         run: |
+          # Compute a timestamped tag (YYYYMMDDHHMMSS-<sha7>)
           SHORT_SHA=$(echo "${GITHUB_SHA}" | head -c 7)
           DATE_TIME=$(date +"%Y%m%d%H%M%S")
           TAG="${DATE_TIME}-${SHORT_SHA}"
           echo "version=${TAG}" >> "$GITHUB_OUTPUT"
+
+          # Normalize GHCR owner to lowercase and expose as output
+          GHCR_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "ghcr_image_name=ghcr.io/${GHCR_OWNER_LC}/cdk-erigon" >> "$GITHUB_OUTPUT"
 
   build-and-push:
     needs: prepare
@@ -67,11 +74,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Normalize GHCR image name (lowercase owner)
-        run: |
-          GHCR_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "GHCR_IMAGE_NAME=ghcr.io/${GHCR_OWNER_LC}/cdk-erigon" >> $GITHUB_ENV
-
       - name: Build and push (multi-arch to Docker Hub + GHCR)
         uses: docker/build-push-action@v6
         with:
@@ -82,7 +84,10 @@ jobs:
           # Publish the same build to both registries
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
-            ${{ env.GHCR_IMAGE_NAME }}:${{ needs.prepare.outputs.version }}
+            ${{ needs.prepare.outputs.ghcr_image_name }}:${{ needs.prepare.outputs.version }}
+          # (Optional) add an evergreen alias like :nightly to both registries:
+          #   ${{ env.IMAGE_NAME }}:nightly
+          #   ${{ needs.prepare.outputs.ghcr_image_name }}:nightly
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
