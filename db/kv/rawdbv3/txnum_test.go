@@ -31,7 +31,7 @@ import (
 func TestName(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(kv.ChainDB, log.New()).InMem(dirs.Chaindata).MustOpen()
+	db := mdbx.New(kv.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	err := db.Update(context.Background(), func(tx kv.RwTx) error {
