@@ -18,7 +18,7 @@ on:
 
 
 jobs:
-  mainnet-rpc-integ-tests:
+  mainnet-rpc-integ-tests-latest:
     concurrency:
       group: >-
         ${{
@@ -32,9 +32,8 @@ jobs:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 60 # 1 minute
       TOTAL_TIME_SECONDS: 900 # 15 minutes
-      HOST_RUNNER_GETH_LATEST: 57.180.55.78:8545
+      REFERENCE_SYSTEM_HOST_ADDRESS: 157.180.55.78:8545
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
@@ -74,9 +73,14 @@ jobs:
         run: |
           set +e # Disable exit on error
         
-          # Launch the testbed Erigon instance & test its ability to maintain sync for a timeout 
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN 
+          # Launch the testbed Erigon instance & test its ability to sync 
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-sync/run_and_chase_tip.py \
+            --build-dir=${{ github.workspace }}/build/bin \
+            --data-dir=$ERIGON_REFERENCE_DATA_DIR \
+            --total-time=$TOTAL_TIME_SECONDS \
+            --chain=$CHAIN \
+            --node-type=minimal_node \
+            --stop-erigon=False
         
           # Capture monitoring script exit status
           test_exit_status=$?
@@ -86,10 +90,10 @@ jobs:
         
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
-             echo "Tip-tracking completed successfully"
+             echo "Tip-chasing completed successfully"
              echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-             echo "Tip-tracking encountered an error test aborted"
+             echo "Tip-chasing encountered an error test aborted"
              echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
              exit 1
           fi
@@ -120,15 +124,14 @@ jobs:
 
       - name: Stop Erigon 
         if: always()
-        working-directory: ${{ github.workspace }}/build/bin
         run: |
-          # the erigon pid is stored in /tmp/erigon.pid file
-          ERIGON_PID=$(cat /tmp/erigon.pid)
+          # the erigon pid is stored in erigon.pid file
+          ERIGON_PID=$(cat ./erigon.pid)
           # Clean up rpcdaemon process if it's still running
           if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
             echo "Erigon stopping..."
             kill $ERIGON_PID
-            wait $ERIGON_PID
+            sleep 5
             echo "Erigon stopped"
           else
             echo "Erigon has already terminated"
