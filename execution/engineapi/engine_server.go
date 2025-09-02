@@ -306,12 +306,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if version >= clparams.DenebVersion {
 		arbOsVersion := types.GetArbOSVersion(&header, s.config)
-		checkMaxBlobsPerTxn := version >= clparams.FuluVersion
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time, arbOsVersion), s.config.GetMaxBlobsPerBlock(header.Time, arbOsVersion), expectedBlobHashes, &transactions, checkMaxBlobsPerTxn)
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time, arbOsVersion), s.config.GetMaxBlobsPerBlock(header.Time, arbOsVersion), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
-		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) || errors.Is(err, ethutils.ErrTooManyBlobs) {
+		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) {
 			bad, latestValidHash := s.blockDownloader.IsBadHeader(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
