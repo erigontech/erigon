@@ -88,7 +88,7 @@ func createTestWitness(t *testing.T, header *types.Header) *stateless.Witness {
 }
 
 func createTestMultiClient(t *testing.T) (*MultiClient, kv.TemporalRwDB) {
-	baseDB := memdb.NewStateDB(t.TempDir())
+	baseDB := memdb.NewStateDB(t, t.TempDir())
 	t.Cleanup(baseDB.Close)
 
 	dirs, logger := datadir.New(t.TempDir()), log.New()
