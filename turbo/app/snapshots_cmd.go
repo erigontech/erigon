@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -771,7 +772,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -822,7 +823,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -1358,7 +1359,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -1556,7 +1557,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
@@ -1597,7 +1598,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
 
@@ -1879,7 +1880,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer logger.Info("Done")
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2011,7 +2012,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	decomp.Close()
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2038,7 +2039,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	from := uint64(0)
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)

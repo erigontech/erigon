@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -50,7 +51,7 @@ type MemoryMutation struct {
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation {
-	tmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
 		panic(err)
