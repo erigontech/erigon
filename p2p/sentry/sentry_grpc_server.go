@@ -1299,7 +1299,7 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.H
 	// Add side protocols if available
 	for _, protocol := range ss.Protocols {
 		if protocol.Name == wit.ProtocolName && protocol.Version == wit.ProtocolVersions[0] {
-			reply.SideProtocols = append(reply.SideProtocols, proto_sentry.Protocol_WIT0)
+			reply.SideProtocols = append(reply.SideProtocols, sentryproto.Protocol_WIT0)
 		}
 	}
 
