@@ -50,7 +50,7 @@ func (c *DummyCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, err
 	v, _, err := tx.GetLatest(kv.CodeDomain, k)
 	return v, err
 }
-func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.Tx) (*CacheValidationResult, error) {
+func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
 	return &CacheValidationResult{Enabled: false}, nil
 }
 

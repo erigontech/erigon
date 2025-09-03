@@ -791,11 +791,6 @@ func String2Enum(in string) (uint16, error) {
 	return uint16(ii), nil
 }
 
-const (
-	ReceiptsAppendable Appendable = 0
-	AppendableLen      Appendable = 0
-)
-
 func (d Domain) String() string {
 	switch d {
 	case AccountsDomain:
