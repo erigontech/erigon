@@ -141,14 +141,18 @@ Loop:
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
 				}
+				fmt.Println("Requesting blocks from slot", start, "count", count)
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
+					fmt.Println("Error requesting blocks:", err)
 					return
 				}
 				if responses == nil {
+					fmt.Println("No responses received")
 					return
 				}
 				if len(responses) == 0 {
+					fmt.Println("No valid responses received")
 					b.rpc.BanPeer(peerId)
 					return
 				}
