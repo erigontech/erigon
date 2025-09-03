@@ -326,6 +326,7 @@ func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
 
 type InvertedIndexBufferedWriter struct {
 	index, indexKeys *etl.Collector
+	lazyInit         bool
 
 	tmpdir       string
 	discard      bool
@@ -336,6 +337,7 @@ type InvertedIndexBufferedWriter struct {
 	stepSize   uint64
 	txNumBytes [8]byte
 	name       kv.InvertedIdx
+	logger     log.Logger
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -353,6 +355,11 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	if w.discard {
 		return nil
 	}
+	if !w.lazyInit {
+		w.lazyInit = true
+		w.init()
+	}
+
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
@@ -365,7 +372,7 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 }
 
 func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
-	if w.discard {
+	if w.discard || !w.lazyInit {
 		return nil
 	}
 
@@ -404,14 +411,20 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 
 		indexKeysTable: iit.ii.KeysTable,
 		indexTable:     iit.ii.ValuesTable,
-
-		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollectorWithAllocator(iit.ii.FilenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollectorWithAllocator(iit.ii.FilenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
+		logger:         iit.ii.logger,
 	}
+	if discard {
+		return w
+	}
+	return w
+}
+
+func (w *InvertedIndexBufferedWriter) init() {
+	// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
+	w.indexKeys = etl.NewCollectorWithAllocator(w.filenameBase+".ii.keys", w.tmpdir, etl.SmallSortableBuffers, w.logger).LogLvl(log.LvlTrace)
+	w.index = etl.NewCollectorWithAllocator(w.filenameBase+".ii.vals", w.tmpdir, etl.SmallSortableBuffers, w.logger).LogLvl(log.LvlTrace)
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
-	return w
 }
 
 func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {

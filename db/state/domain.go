@@ -396,15 +396,18 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
+		tmpdir:    tmpdir,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
-		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace),
 	}
-	w.values.SortAndFlushInBackground(true)
+	if discard {
+		return w
+	}
 	return w
 }
 
 type DomainBufferedWriter struct {
-	values *etl.Collector
+	lazyInit bool
+	values   *etl.Collector
 
 	discard bool
 
@@ -417,8 +420,18 @@ type DomainBufferedWriter struct {
 	diff      *kv.DomainDiff
 
 	h *historyBufferedWriter
+
+	tmpdir string
+	name   kv.Domain
+	logger log.Logger
 }
 
+func (w *DomainBufferedWriter) init() {
+	w.values = etl.NewCollectorWithAllocator(w.name.String()+"domain.flush", w.tmpdir, etl.SmallSortableBuffers, w.logger).LogLvl(log.LvlTrace)
+	w.values.SortAndFlushInBackground(true)
+	w.h.init()
+
+}
 func (w *DomainBufferedWriter) Close() {
 	if w == nil { // allow dobule-close
 		return
@@ -498,6 +511,11 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	if w.discard {
 		return nil
 	}
+	if !w.lazyInit {
+		w.lazyInit = true
+		w.init()
+	}
+
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^uint64(step))
 
 	if w.largeVals {
