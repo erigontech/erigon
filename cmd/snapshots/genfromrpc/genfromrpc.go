@@ -16,9 +16,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/arb/chain"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -342,14 +340,36 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 	return tx
 }
 
+func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.ArbitrumLegacyTxData{LegacyTx: types.LegacyTx{CommonTx: *commonTx}}
+
+	if gasPriceHex, ok := rawTx["gasPrice"].(string); ok {
+		tx.GasPrice = uint256.MustFromHex(gasPriceHex)
+	}
+	if l1BlockNum, ok := rawTx["l1BlockNumber"].(string); ok {
+		tx.L1BlockNumber = convertHexToBigInt(l1BlockNum).Uint64()
+	} else {
+		if l1BlockNum, ok := rawTx["blockNumber"].(string); ok {
+			tx.L1BlockNumber = convertHexToBigInt(l1BlockNum).Uint64()
+		}
+	}
+	if effectiveGasPrice, ok := rawTx["effectiveGasPrice"].(string); ok {
+		tx.EffectiveGasPrice = uint256.MustFromHex(effectiveGasPrice).Uint64()
+	}
+	if hashOverride, ok := rawTx["hash"].(string); ok {
+		tx.HashOverride = common.HexToHash(hashOverride)
+	}
+	sender, _ := commonTx.GetSender()
+	tx.OverrideSender = &sender
+	return tx
+}
+
 func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.ArbitrumSubmitRetryableTx{}
 
 	// Chain ID: required field (hex string)
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
 		tx.ChainId = convertHexToBigInt(chainIdHex)
-	} else {
-		// Optionally handle missing field (e.g. log or return an error)
 	}
 
 	// Request ID: expected as a hex string
@@ -645,8 +665,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 				ChainId: chainID,
 			}
 		case "0x78": // ArbitrumLegacyTxType
-			// types.NewArbitrumLegacyTx()
-			panic("imlement me")
+			tx = makeArbitrumLegacyTxFunc(commonTx, rawTx)
 		default:
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
@@ -739,12 +758,12 @@ func genFromRPc(cliCtx *cli.Context) error {
 		}
 		if curBlock == 0 {
 			// write arb genesis
-			log.Info("Writing arbitrum sepolia-rollup genesis")
+			// log.Info("Writing arbitrum sepolia-rollup genesis")
 
-			gen := chain.ArbSepoliaRollupGenesisBlock()
+			// gen := chain.ArbSepoliaRollupGenesisBlock()
 
-			b := core.MustCommitGenesis(gen, db, dirs, log.New())
-			log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
+			// b := core.MustCommitGenesis(gen, db, dirs, log.New())
+			// log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
 		} else {
 			start = curBlock
 		}
