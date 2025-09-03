@@ -225,6 +225,38 @@ func (s *Service) synchronizeSpans(ctx context.Context) error {
 	return nil
 }
 
+// wait until heimdall CatchingUp status is false
+func (s *Service) WaitUntilHeimdallIsSynced(ctx context.Context) error {
+	timeout := 200 * time.Millisecond
+	logInterval := 10 * time.Second
+	var lastLogTime time.Time
+
+	catchingUp, err := s.IsCatchingUp(ctx)
+	if err != nil {
+		return err
+	}
+	if !catchingUp {
+		return nil
+	}
+	for catchingUp {
+		if time.Since(lastLogTime) >= logInterval {
+			log.Warn("waiting for heimdall to be synced")
+			lastLogTime = time.Now()
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(timeout):
+			catchingUp, err = s.IsCatchingUp(ctx)
+			if err != nil {
+				return err
+			}
+		}
+
+	}
+	return nil
+}
+
 func (s *Service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error) {
 	return s.reader.CheckpointsFromBlock(ctx, startBlock)
 }

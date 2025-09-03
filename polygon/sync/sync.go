@@ -56,6 +56,7 @@ type heimdallSynchronizer interface {
 	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, ok bool, err error)
 	SynchronizeMilestones(ctx context.Context) (latest *heimdall.Milestone, ok bool, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
+	WaitUntilHeimdallIsSynced(ctx context.Context) error
 	Ready(ctx context.Context) <-chan error
 }
 
@@ -289,12 +290,20 @@ func (s *Sync) applyNewBlockChainOnTip(ctx context.Context, blockChain []*types.
 		headerChain[i] = block.HeaderNoCopy()
 	}
 
+	// wait until heimdall is synchronized before proceeding
+	err := s.heimdallSync.WaitUntilHeimdallIsSynced(ctx)
+	if err != nil {
+		return err
+	}
 	// make sure spans are synchronized
 	// math.MaxUint64 is used because post VeBlop/Rio hard fork
 	// spans could be overlapping, and the blocknum for the tip
 	// of the headerChain might still be in the range of the last span
 	// in the store, but we may still be processing a new span in the meantime
-	s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64)
+	err = s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64)
+	if err != nil {
+		return err
+	}
 
 	oldTip := ccb.Tip()
 	newConnectedHeaders, err := ccb.Connect(ctx, headerChain)
