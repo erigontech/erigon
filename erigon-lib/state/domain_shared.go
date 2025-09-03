@@ -1191,24 +1191,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
-	updateCount := sdc.updates.Size()
 	if sdc.sharedDomains.trace {
-		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
-	}
-	if updateCount == 0 {
-		rootHash, err = sdc.patriciaTrie.RootHash()
-		if err != nil {
-			return nil, err
-		}
-		if saveState {
-			if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
-				return nil, err
-			}
-		}
-		return rootHash, err
+		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", sdc.updates.Size(), "mode", sdc.updates.Mode())
 	}
 
-	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
 
