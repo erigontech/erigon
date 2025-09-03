@@ -637,10 +637,12 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, txnFrom, txnTo uint64, wal *DomainBufferedWriter, vt valueTransformer) error {
+func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, batch *AggMemBatch, vt valueTransformer) error {
 	if d.Disable || stepFrom == stepTo {
 		return nil
 	}
+	wal := batch.domainWriters[d.Name]
+
 	if stepFrom > stepTo {
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}

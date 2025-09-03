@@ -708,7 +708,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		valBuf = append(valBuf[:0], lastVal...)
 	}
 	if keyBuf != nil {
-		// fmt.Printf("put %x->%x\n", keyBuf, valBuf)
+		// fmt.Printf("Put %x->%x\n", keyBuf, valBuf)
 		if _, err = write.Write(keyBuf); err != nil {
 			return nil, err
 		}

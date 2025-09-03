@@ -569,21 +569,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-// discardWrites disables updates collection for further flushing into db.
-// Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
-func (sd *SharedDomains) discardWrites(d kv.Domain) {
-	if d >= kv.DomainLen {
-		return
-	}
-	sd.domainWriters[d].discard = true
-	sd.domainWriters[d].h.discard = true
-}
-
 func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
-	sd.discardWrites(kv.AccountsDomain)
-	sd.discardWrites(kv.StorageDomain)
-	sd.discardWrites(kv.CodeDomain)
+	sd.DiscardWrites(kv.AccountsDomain)
+	sd.DiscardWrites(kv.StorageDomain)
+	sd.DiscardWrites(kv.CodeDomain)
 
 	logger := sd.logger
 
@@ -610,7 +600,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.Tempor
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.mem, nil)
 	if err != nil {
 		return nil, err
 	}
