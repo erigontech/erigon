@@ -159,7 +159,7 @@ func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntit
 		}
 	}
 
-	// Due to VeBlop, span.StartBlock is no longer strictly increasing,
+	// Due to Rio/VeBlop hardfork, span.StartBlock is no longer strictly increasing,
 	// so this kind of breaks the "Entity" abstraction.
 	// So for spans we skip the sorting and just rely on span.Id for the ordering.
 	var entity TEntity

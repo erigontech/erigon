@@ -232,8 +232,8 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
-	// Since there is only one producer in veblop, we don't need to add producer delay and backup multiplier
-	if c.IsVeBlop(number) {
+	// Since there is only one producer in Rio/VeBlop, we don't need to add producer delay and backup multiplier
+	if c.IsRio(number) {
 		return delay
 	}
 	if c.IsSprintStart(number) {
@@ -1097,7 +1097,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 		if c.blockReader != nil {
 			// post VeBlop spans won't be committed to smart contract
-			if !c.config.IsVeBlop(header.Number.Uint64()) {
+			if !c.config.IsRio(header.Number.Uint64()) {
 				// check and commit span
 				if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 					err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
@@ -1166,8 +1166,8 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// Post VeBlop spans won't be commited to smart contract
-			if !c.config.IsVeBlop(header.Number.Uint64()) {
+			// Post Rio/VeBlop spans won't be commited to smart contract
+			if !c.config.IsRio(header.Number.Uint64()) {
 				// check and commit span
 				if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 					err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)

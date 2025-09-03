@@ -44,7 +44,7 @@ type BorConfig struct {
 	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
 	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
 	BhilaiBlock                *big.Int          `json:"bhilaiBlock"`                // Bhilai switch block (nil = no fork, 0 = already on Ahmedabad)
-	VeBlopBlock                *big.Int          `json:"veblopBlock"`                // VeBlop switch block (nil = no fork, 0 = already on veblop)
+	RioBlock                   *big.Int          `json:"rioBlock"`                   // Rio switch block (nil = no fork, 0 = already on Rio)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
 	sprints sprints
@@ -178,12 +178,12 @@ func (c *BorConfig) GetBhilaiBlock() *big.Int {
 	return c.BhilaiBlock
 }
 
-func (c *BorConfig) IsVeBlop(number uint64) bool {
-	return isForked(c.VeBlopBlock, number)
+func (c *BorConfig) IsRio(number uint64) bool {
+	return isForked(c.RioBlock, number)
 }
 
-func (c *BorConfig) GetVeBlopBlock() *big.Int {
-	return c.VeBlopBlock
+func (c *BorConfig) GetRioBlock() *big.Int {
+	return c.RioBlock
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
