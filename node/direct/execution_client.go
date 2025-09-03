@@ -19,88 +19,89 @@ package direct
 import (
 	"context"
 
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 type ExecutionClientDirect struct {
-	server execution.ExecutionServer
+	server executionproto.ExecutionServer
 }
 
-func NewExecutionClientDirect(server execution.ExecutionServer) execution.ExecutionClient {
+func NewExecutionClientDirect(server executionproto.ExecutionServer) executionproto.ExecutionClient {
 	return &ExecutionClientDirect{server: server}
 }
 
-func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *execution.AssembleBlockRequest, opts ...grpc.CallOption) (*execution.AssembleBlockResponse, error) {
+func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *executionproto.AssembleBlockRequest, opts ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
 	return s.server.AssembleBlock(ctx, in)
 }
 
-func (s *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, in *execution.GetBodiesByHashesRequest, opts ...grpc.CallOption) (*execution.GetBodiesBatchResponse, error) {
+func (s *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, in *executionproto.GetBodiesByHashesRequest, opts ...grpc.CallOption) (*executionproto.GetBodiesBatchResponse, error) {
 	return s.server.GetBodiesByHashes(ctx, in)
 }
 
-func (s *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, in *execution.GetBodiesByRangeRequest, opts ...grpc.CallOption) (*execution.GetBodiesBatchResponse, error) {
+func (s *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, in *executionproto.GetBodiesByRangeRequest, opts ...grpc.CallOption) (*executionproto.GetBodiesBatchResponse, error) {
 	return s.server.GetBodiesByRange(ctx, in)
 }
 
-func (s *ExecutionClientDirect) HasBlock(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.HasBlockResponse, error) {
+func (s *ExecutionClientDirect) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.HasBlockResponse, error) {
 	return s.server.HasBlock(ctx, in)
 }
 
-func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *execution.GetAssembledBlockRequest, opts ...grpc.CallOption) (*execution.GetAssembledBlockResponse, error) {
+func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *executionproto.GetAssembledBlockRequest, opts ...grpc.CallOption) (*executionproto.GetAssembledBlockResponse, error) {
 	return s.server.GetAssembledBlock(ctx, in)
 }
 
 // Chain Putters.
-func (s *ExecutionClientDirect) InsertBlocks(ctx context.Context, in *execution.InsertBlocksRequest, opts ...grpc.CallOption) (*execution.InsertionResult, error) {
+func (s *ExecutionClientDirect) InsertBlocks(ctx context.Context, in *executionproto.InsertBlocksRequest, opts ...grpc.CallOption) (*executionproto.InsertionResult, error) {
 	return s.server.InsertBlocks(ctx, in)
 }
 
 // Chain Validation and ForkChoice.
-func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *execution.ValidationRequest, opts ...grpc.CallOption) (*execution.ValidationReceipt, error) {
+func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *executionproto.ValidationRequest, opts ...grpc.CallOption) (*executionproto.ValidationReceipt, error) {
 	return s.server.ValidateChain(ctx, in)
 
 }
 
-func (s *ExecutionClientDirect) UpdateForkChoice(ctx context.Context, in *execution.ForkChoice, opts ...grpc.CallOption) (*execution.ForkChoiceReceipt, error) {
+func (s *ExecutionClientDirect) UpdateForkChoice(ctx context.Context, in *executionproto.ForkChoice, opts ...grpc.CallOption) (*executionproto.ForkChoiceReceipt, error) {
 	return s.server.UpdateForkChoice(ctx, in)
 }
 
 // Chain Getters.
-func (s *ExecutionClientDirect) GetHeader(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetHeaderResponse, error) {
+func (s *ExecutionClientDirect) GetHeader(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
 	return s.server.GetHeader(ctx, in)
 }
 
-func (s *ExecutionClientDirect) CurrentHeader(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.GetHeaderResponse, error) {
+func (s *ExecutionClientDirect) CurrentHeader(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
 	return s.server.CurrentHeader(ctx, in)
 }
 
-func (s *ExecutionClientDirect) GetTD(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetTDResponse, error) {
+func (s *ExecutionClientDirect) GetTD(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.GetTDResponse, error) {
 	return s.server.GetTD(ctx, in)
 }
 
-func (s *ExecutionClientDirect) GetBody(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetBodyResponse, error) {
+func (s *ExecutionClientDirect) GetBody(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.GetBodyResponse, error) {
 	return s.server.GetBody(ctx, in)
 }
 
-func (s *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.IsCanonicalResponse, error) {
+func (s *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, in *typesproto.H256, opts ...grpc.CallOption) (*executionproto.IsCanonicalResponse, error) {
 	return s.server.IsCanonicalHash(ctx, in)
 }
 
-func (s *ExecutionClientDirect) GetHeaderHashNumber(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.GetHeaderHashNumberResponse, error) {
+func (s *ExecutionClientDirect) GetHeaderHashNumber(ctx context.Context, in *typesproto.H256, opts ...grpc.CallOption) (*executionproto.GetHeaderHashNumberResponse, error) {
 	return s.server.GetHeaderHashNumber(ctx, in)
 }
 
-func (s *ExecutionClientDirect) GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.ForkChoice, error) {
+func (s *ExecutionClientDirect) GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*executionproto.ForkChoice, error) {
 	return s.server.GetForkChoice(ctx, in)
 }
 
-func (s *ExecutionClientDirect) Ready(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.ReadyResponse, error) {
+func (s *ExecutionClientDirect) Ready(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*executionproto.ReadyResponse, error) {
 	return s.server.Ready(ctx, in)
 }
 
-func (s *ExecutionClientDirect) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.FrozenBlocksResponse, error) {
+func (s *ExecutionClientDirect) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*executionproto.FrozenBlocksResponse, error) {
 	return s.server.FrozenBlocks(ctx, in)
 }

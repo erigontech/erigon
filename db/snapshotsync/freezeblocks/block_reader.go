@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -44,7 +44,7 @@ import (
 )
 
 type RemoteBlockReader struct {
-	client       remote.ETHBACKENDClient
+	client       remoteproto.ETHBACKENDClient
 	txBlockIndex *txBlockIndexWithBlockReader
 }
 
@@ -146,7 +146,7 @@ func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash
 }
 
 func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error) {
-	reply, err := r.client.CanonicalHash(ctx, &remote.CanonicalHashRequest{BlockNumber: blockHeight})
+	reply, err := r.client.CanonicalHash(ctx, &remoteproto.CanonicalHashRequest{BlockNumber: blockHeight})
 	if err != nil {
 		return common.Hash{}, false, err
 	}
@@ -158,7 +158,7 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 }
 
 func (r *RemoteBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum uint64) (blockNum uint64, ok bool, err error) {
-	reply, err := r.client.BlockForTxNum(ctx, &remote.BlockForTxNumRequest{Txnum: txnNum})
+	reply, err := r.client.BlockForTxNum(ctx, &remoteproto.BlockForTxNumRequest{Txnum: txnNum})
 	if err != nil {
 		return 0, false, err
 	}
@@ -170,7 +170,7 @@ func (r *RemoteBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum 
 
 var _ services.FullBlockReader = &RemoteBlockReader{}
 
-func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
+func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReader {
 	br := &RemoteBlockReader{
 		client: client,
 	}
@@ -180,7 +180,7 @@ func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 }
 
 func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
-	reply, err := r.client.TxnLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
+	reply, err := r.client.TxnLookup(ctx, &remoteproto.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -225,7 +225,7 @@ func (r *RemoteBlockReader) HasSenders(ctx context.Context, _ kv.Getter, hash co
 }
 
 func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
-	reply, err := r.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
+	reply, err := r.client.Block(ctx, &remoteproto.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -294,7 +294,7 @@ func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Gett
 	return block.Body(), nil
 }
 func (r *RemoteBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
-	resp, err := r.client.HeaderNumber(ctx, &remote.HeaderNumberRequest{Hash: gointerfaces.ConvertHashToH256(hash)})
+	resp, err := r.client.HeaderNumber(ctx, &remoteproto.HeaderNumberRequest{Hash: gointerfaces.ConvertHashToH256(hash)})
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (r *RemoteBlockReader) Ready(ctx context.Context) <-chan error {
 }
 
 func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
-	bdRaw, err := r.client.CanonicalBodyForStorage(ctx, &remote.CanonicalBodyForStorageRequest{BlockNumber: blockNum})
+	bdRaw, err := r.client.CanonicalBodyForStorage(ctx, &remoteproto.CanonicalBodyForStorageRequest{BlockNumber: blockNum})
 	if err != nil {
 		return nil, err
 	}

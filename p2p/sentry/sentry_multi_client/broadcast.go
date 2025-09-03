@@ -24,7 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -47,8 +47,8 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 		return
 	}
 
-	req66 := proto_sentry.OutboundMessageData{
-		Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+	req66 := sentryproto.OutboundMessageData{
+		Id:   sentryproto.MessageId_NEW_BLOCK_HASHES_66,
 		Data: data,
 	}
 
@@ -81,10 +81,10 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		return
 	}
 
-	req66 := proto_sentry.SendMessageToRandomPeersRequest{
+	req66 := sentryproto.SendMessageToRandomPeersRequest{
 		MaxPeers: uint64(cs.maxBlockBroadcastPeers(header)),
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_NEW_BLOCK_66,
+		Data: &sentryproto.OutboundMessageData{
+			Id:   sentryproto.MessageId_NEW_BLOCK_66,
 			Data: data,
 		},
 	}

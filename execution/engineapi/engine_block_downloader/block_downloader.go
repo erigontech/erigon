@@ -28,7 +28,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -93,7 +93,7 @@ type EngineBlockDownloader struct {
 	badHeadersV2 *lru.Cache[common.Hash, common.Hash]
 }
 
-func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
+func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient executionproto.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
 	tmpdir string, syncCfg ethconfig.Sync,

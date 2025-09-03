@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -71,8 +71,8 @@ type EngineServer struct {
 	consuming        atomic.Bool
 	test             bool
 	caplin           bool // we need to send errors for caplin.
-	executionService execution.ExecutionClient
-	txpool           txpool.TxpoolClient // needed for getBlobs
+	executionService executionproto.ExecutionClient
+	txpool           txpoolproto.TxpoolClient // needed for getBlobs
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -85,7 +85,7 @@ type EngineServer struct {
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
-func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
+func NewEngineServer(logger log.Logger, config *chain.Config, executionService executionproto.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
@@ -116,8 +116,8 @@ func (e *EngineServer) Start(
 	stateCache kvcache.Cache,
 	engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend,
-	txPool txpool.TxpoolClient,
-	mining txpool.MiningClient,
+	txPool txpoolproto.TxpoolClient,
+	mining txpoolproto.MiningClient,
 ) {
 	if !e.caplin {
 		e.engineLogSpamer.Start(ctx)
@@ -508,7 +508,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.logger.Debug("[GetPayload] lock acquired")
-	resp, err := s.executionService.GetAssembledBlock(ctx, &execution.GetAssembledBlockRequest{
+	resp, err := s.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
 		Id: payloadId,
 	})
 	if err != nil {
@@ -638,7 +638,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
-	req := &execution.AssembleBlockRequest{
+	req := &executionproto.AssembleBlockRequest{
 		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
 		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
@@ -653,7 +653,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
 	}
 
-	var resp *execution.AssembleBlockResponse
+	var resp *executionproto.AssembleBlockResponse
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
 	execBusy, err := waitForStuff(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
@@ -813,7 +813,7 @@ func (e *EngineServer) HandleNewPayload(
 				return nil, err
 			}
 
-			if status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
+			if status == executionproto.ExecutionStatus_Busy || status == executionproto.ExecutionStatus_TooFarAway {
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			} else {
@@ -856,7 +856,7 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
-	if status == execution.ExecutionStatus_BadBlock {
+	if status == executionproto.ExecutionStatus_BadBlock {
 		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash)
 	}
 
@@ -871,17 +871,17 @@ func (e *EngineServer) HandleNewPayload(
 	return resp, nil
 }
 
-func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_types.EngineStatus {
+func convertGrpcStatusToEngineStatus(status executionproto.ExecutionStatus) engine_types.EngineStatus {
 	switch status {
-	case execution.ExecutionStatus_Success:
+	case executionproto.ExecutionStatus_Success:
 		return engine_types.ValidStatus
-	case execution.ExecutionStatus_MissingSegment:
+	case executionproto.ExecutionStatus_MissingSegment:
 		return engine_types.AcceptedStatus
-	case execution.ExecutionStatus_TooFarAway:
+	case executionproto.ExecutionStatus_TooFarAway:
 		return engine_types.AcceptedStatus
-	case execution.ExecutionStatus_BadBlock:
+	case executionproto.ExecutionStatus_BadBlock:
 		return engine_types.InvalidStatus
-	case execution.ExecutionStatus_Busy:
+	case executionproto.ExecutionStatus_Busy:
 		return engine_types.SyncingStatus
 	}
 	panic("giulio u stupid.")
@@ -928,13 +928,13 @@ func (e *EngineServer) HandlesForkChoice(
 	if err != nil {
 		return nil, err
 	}
-	if status == execution.ExecutionStatus_InvalidForkchoice {
+	if status == executionproto.ExecutionStatus_InvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
 	}
-	if status == execution.ExecutionStatus_Busy {
+	if status == executionproto.ExecutionStatus_Busy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
-	if status == execution.ExecutionStatus_BadBlock {
+	if status == executionproto.ExecutionStatus_BadBlock {
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("Invalid chain after execution")}, nil
 	}
 	payloadStatus := &engine_types.PayloadStatus{
@@ -956,7 +956,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
-	req := &txpool.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
+	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
 	for i := range blobHashes {
 		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(blobHashes[i])
 	}

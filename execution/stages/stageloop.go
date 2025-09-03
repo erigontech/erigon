@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -675,7 +675,7 @@ func NewDefaultStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader proto_downloader.DownloaderClient,
+	snapDownloader downloaderproto.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
@@ -711,7 +711,7 @@ func NewPipelineStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader proto_downloader.DownloaderClient,
+	snapDownloader downloaderproto.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,

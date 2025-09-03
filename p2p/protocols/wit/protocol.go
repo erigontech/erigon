@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon-lib/common"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/core/stateless"
 	"github.com/erigontech/erigon/node/direct"
 )
@@ -121,20 +121,20 @@ func (w *NewWitnessPacket) Kind() byte   { return NewWitnessMsg }
 func (w *NewWitnessHashesPacket) Name() string { return "NewWitnessHashes" }
 func (w *NewWitnessHashesPacket) Kind() byte   { return NewWitnessHashesMsg }
 
-var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
+var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 	direct.WIT0: {
-		NewWitnessMsg:       proto_sentry.MessageId_NEW_WITNESS_W0,
-		NewWitnessHashesMsg: proto_sentry.MessageId_NEW_WITNESS_HASHES_W0,
-		GetWitnessMsg:       proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
-		WitnessMsg:          proto_sentry.MessageId_BLOCK_WITNESS_W0,
+		NewWitnessMsg:       sentryproto.MessageId_NEW_WITNESS_W0,
+		NewWitnessHashesMsg: sentryproto.MessageId_NEW_WITNESS_HASHES_W0,
+		GetWitnessMsg:       sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+		WitnessMsg:          sentryproto.MessageId_BLOCK_WITNESS_W0,
 	},
 }
 
-var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+var FromProto = map[uint]map[sentryproto.MessageId]uint64{
 	direct.WIT0: {
-		proto_sentry.MessageId_NEW_WITNESS_W0:        NewWitnessMsg,
-		proto_sentry.MessageId_NEW_WITNESS_HASHES_W0: NewWitnessHashesMsg,
-		proto_sentry.MessageId_GET_BLOCK_WITNESS_W0:  GetWitnessMsg,
-		proto_sentry.MessageId_BLOCK_WITNESS_W0:      WitnessMsg,
+		sentryproto.MessageId_NEW_WITNESS_W0:        NewWitnessMsg,
+		sentryproto.MessageId_NEW_WITNESS_HASHES_W0: NewWitnessHashesMsg,
+		sentryproto.MessageId_GET_BLOCK_WITNESS_W0:  GetWitnessMsg,
+		sentryproto.MessageId_BLOCK_WITNESS_W0:      WitnessMsg,
 	},
 }

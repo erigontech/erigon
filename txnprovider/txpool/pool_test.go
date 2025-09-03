@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -67,11 +67,11 @@ func TestNonceFromAddress(t *testing.T) {
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -84,8 +84,8 @@ func TestNonceFromAddress(t *testing.T) {
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -321,11 +321,11 @@ func TestMultipleAuthorizations(t *testing.T) {
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(50_000)
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       36_000_000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -338,13 +338,13 @@ func TestMultipleAuthorizations(t *testing.T) {
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrA),
 		Data:    v,
 	})
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrB),
 		Data:    v,
 	})
@@ -446,11 +446,11 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -463,8 +463,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -569,11 +569,11 @@ func TestReverseNonces(t *testing.T) {
 	pendingBaseFee := uint64(1_000_000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -586,8 +586,8 @@ func TestReverseNonces(t *testing.T) {
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -699,11 +699,11 @@ func TestTxnPoke(t *testing.T) {
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -716,8 +716,8 @@ func TestTxnPoke(t *testing.T) {
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -983,11 +983,11 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -1000,8 +1000,8 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1100,12 +1100,12 @@ func TestBlobTxnReplacement(t *testing.T) {
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:       stateVersionID,
 		PendingBlockBaseFee:  200_000,
 		BlockGasLimit:        math.MaxUint64,
 		PendingBlobFeePerGas: 100_000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -1121,8 +1121,8 @@ func TestBlobTxnReplacement(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1288,11 +1288,11 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	pendingBaseFee := uint64(1_000_000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -1305,8 +1305,8 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 		Incarnation: 1,
 	}
 	v := accounts3.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1394,12 +1394,12 @@ func TestBlobSlots(t *testing.T) {
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:       stateVersionID,
 		PendingBlockBaseFee:  200_000,
 		BlockGasLimit:        math.MaxUint64,
 		PendingBlobFeePerGas: 100_000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -1416,8 +1416,8 @@ func TestBlobSlots(t *testing.T) {
 
 	for i := 0; i < 11; i++ {
 		addr[0] = uint8(i + 1)
-		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-			Action:  remote.Action_UPSERT,
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+			Action:  remoteproto.Action_UPSERT,
 			Address: gointerfaces.ConvertAddressToH160(addr),
 			Data:    v,
 		})
@@ -1478,12 +1478,12 @@ func TestGetBlobsV1(t *testing.T) {
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:       stateVersionID,
 		PendingBlockBaseFee:  200_000,
 		BlockGasLimit:        math.MaxUint64,
 		PendingBlobFeePerGas: 100_000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -1500,8 +1500,8 @@ func TestGetBlobsV1(t *testing.T) {
 
 	for i := 0; i < 11; i++ {
 		addr[0] = uint8(i + 1)
-		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-			Action:  remote.Action_UPSERT,
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+			Action:  remoteproto.Action_UPSERT,
 			Address: gointerfaces.ConvertAddressToH160(addr),
 			Data:    v,
 		})
@@ -1576,16 +1576,16 @@ func TestGasLimitChanged(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       50_000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-		Action:  remote.Action_UPSERT,
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1652,11 +1652,11 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remote.StateChangeBatch{
+	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
-		ChangeBatch: []*remote.StateChange{
+		ChangeBatch: []*remoteproto.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
@@ -1672,8 +1672,8 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 			Incarnation: 1,
 		}
 		v := accounts3.SerialiseV3(&acc)
-		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-			Action:  remote.Action_UPSERT,
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+			Action:  remoteproto.Action_UPSERT,
 			Address: gointerfaces.ConvertAddressToH160(addr),
 			Data:    v,
 		})

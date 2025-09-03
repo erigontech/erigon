@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
@@ -31,18 +31,18 @@ import (
 // implementation can work with local Ethereum object or with Remote (grpc-based) one
 // this is reason why all methods are accepting context and returning error
 type ApiBackend interface {
-	Syncing(ctx context.Context) (*remote.SyncingReply, error)
+	Syncing(ctx context.Context) (*remoteproto.SyncingReply, error)
 	Etherbase(ctx context.Context) (common.Address, error)
 	NetVersion(ctx context.Context) (uint64, error)
 	NetPeerCount(ctx context.Context) (uint64, error)
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
-	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
-	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply), requestor *atomic.Value) error
+	Subscribe(ctx context.Context, cb func(*remoteproto.SubscribeReply)) error
+	SubscribeLogs(ctx context.Context, cb func(*remoteproto.SubscribeLogsReply), requestor *atomic.Value) error
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
-	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
-	RemovePeer(ctx context.Context, url *remote.RemovePeerRequest) (*remote.RemovePeerReply, error)
+	AddPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
+	RemovePeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)
 }

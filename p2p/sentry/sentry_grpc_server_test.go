@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
@@ -55,13 +55,13 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 	headTd256 := new(uint256.Int)
 	headTd256.SetFromBig(headTd)
 	heightForks, timeForks := forkid.GatherForks(genesis.Config, genesis.Timestamp)
-	s.statusData = &proto_sentry.StatusData{
+	s.statusData = &sentryproto.StatusData{
 		NetworkId:       1,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
 		BestHash:        gointerfaces.ConvertHashToH256(head.Hash()),
 		MaxBlockHeight:  head.Number.Uint64(),
 		MaxBlockTime:    head.Time,
-		ForkData: &proto_sentry.Forks{
+		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(genesisHash),
 			HeightForks: heightForks,
 			TimeForks:   timeForks,
@@ -73,7 +73,7 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 
 func startHandshake(
 	ctx context.Context,
-	status *proto_sentry.StatusData,
+	status *sentryproto.StatusData,
 	pipe *p2p.MsgPipeRW,
 	protocolVersion uint,
 	errChan chan *p2p.PeerError,
@@ -197,16 +197,16 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
 	ss := &GrpcServer{p2p: &p2p.Config{}}
 
-	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
-		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
+	_, err := ss.SetStatus(context.Background(), &sentryproto.StatusData{
+		ForkData: &sentryproto.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
 	})
 	if err == nil {
 		t.Fatalf("error expected")
 	}
 
 	// Should not panic here.
-	_, err = ss.SetStatus(context.Background(), &proto_sentry.StatusData{
-		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
+	_, err = ss.SetStatus(context.Background(), &sentryproto.StatusData{
+		ForkData: &sentryproto.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
 	})
 	if err == nil {
 		t.Fatalf("error expected")
