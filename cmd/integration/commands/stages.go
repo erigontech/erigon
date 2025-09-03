@@ -1237,7 +1237,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	cfg.Dirs = dirs
 	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	blockReader, blockWriter, allSn, borSn, bridgeStore, heimdallStore, agg, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
+	blockReader, blockWriter, allSn, borSn, bridgeStore, heimdallStore, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
 	if err != nil {
 		panic(err)
 	}
@@ -1273,13 +1273,10 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		panic(err)
 	}
 
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-
 	notifications := shards.NewNotifications(nil)
 
-	var (
-		signatures *lru.ARCCache[common.Hash, common.Address]
-	)
+	var signatures *lru.ARCCache[common.Hash, common.Address]
+
 	if bor, ok := engine.(*bor.Bor); ok {
 		signatures = bor.Signatures
 	}

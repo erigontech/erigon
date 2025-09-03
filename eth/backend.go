@@ -1553,7 +1553,6 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			minFrozenBlock = maxSeedable - frozenLimit
 		}
 	}
-
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
