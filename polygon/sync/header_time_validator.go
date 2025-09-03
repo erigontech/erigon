@@ -60,10 +60,10 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 	}
 	htv.logger.Debug("validating header time:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers.ValidatorAddresses())
 
-	// VeBlop checks for new span if block signer is different from producer
-	if htv.borConfig.IsVeBlop(header.Number.Uint64()) {
+	// Rio/VeBlop checks for new span if block signer is different from producer
+	if htv.borConfig.IsRio(header.Number.Uint64()) {
 		if len(producers.Validators) != 1 {
-			return fmt.Errorf("unexpected number of producers post VeBlop (expected 1 producer) , blockNum=%d , numProducers=%d", header.Number.Uint64(), len(producers.Validators))
+			return fmt.Errorf("unexpected number of producers post Rio (expected 1 producer) , blockNum=%d , numProducers=%d", header.Number.Uint64(), len(producers.Validators))
 		}
 		producer := producers.Validators[0]
 		shouldWaitForNewSpans, timeout, err := htv.needToWaitForNewSpan(header, parent, producer.Address)
