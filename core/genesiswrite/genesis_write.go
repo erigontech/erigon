@@ -31,10 +31,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
@@ -303,113 +301,98 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 
+	ctx := context.Background()
 	var root common.Hash
 	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
 
-	ctx := context.Background()
-	wg, ctx := errgroup.WithContext(ctx)
-	// we may run inside write tx, can't open 2nd write tx in same goroutine
-	wg.Go(func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("panic: %v, %s", rec, dbg.Stack())
-			}
-		}()
-		// some users creating > 1Gb custome genesis by `erigon init`
-		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
-		defer genesisTmpDB.Close()
+	// some users creating > 1Gb custome genesis by `erigon init`
+	genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
+	defer genesisTmpDB.Close()
 
-		salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger)
-		if err != nil {
-			return err
+	salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	agg, err := dbstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, genesisTmpDB, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer agg.Close()
+
+	tdb, err := temporal.New(genesisTmpDB, agg)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tdb.Close()
+
+	tx, err := tdb.BeginTemporalRw(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	sd, err := dbstate.NewSharedDomains(tx, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer sd.Close()
+
+	blockNum := uint64(0)
+	txNum := uint64(1) //2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
+
+	//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	statedb = state.New(r)
+	statedb.SetTrace(false)
+
+	hasConstructorAllocation := false
+	for _, account := range g.Alloc {
+		if len(account.Constructor) > 0 {
+			hasConstructorAllocation = true
+			break
 		}
-		agg, err := dbstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, genesisTmpDB, logger)
-		if err != nil {
-			return err
+	}
+	// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
+	if hasConstructorAllocation && g.Config.Aura != nil {
+		statedb.CreateAccount(common.Address{}, false)
+	}
+
+	addrs := sortedAllocAddresses(g.Alloc)
+	for _, addr := range addrs {
+		account := g.Alloc[addr]
+
+		balance, overflow := uint256.FromBig(account.Balance)
+		if overflow {
+			panic("overflow at genesis allocs")
 		}
-		defer agg.Close()
-
-		tdb, err := temporal.New(genesisTmpDB, agg)
-		if err != nil {
-			return err
-		}
-		defer tdb.Close()
-
-		tx, err := tdb.BeginTemporalRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		sd, err := dbstate.NewSharedDomains(tx, logger)
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-
-		blockNum := uint64(0)
-		txNum := uint64(1) //2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
-
-		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-		r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-		statedb = state.New(r)
-		statedb.SetTrace(false)
-
-		hasConstructorAllocation := false
-		for _, account := range g.Alloc {
-			if len(account.Constructor) > 0 {
-				hasConstructorAllocation = true
-				break
-			}
-		}
-		// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
-		if hasConstructorAllocation && g.Config.Aura != nil {
-			statedb.CreateAccount(common.Address{}, false)
+		statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
+		statedb.SetCode(addr, account.Code)
+		statedb.SetNonce(addr, account.Nonce)
+		var slotVal uint256.Int
+		for key, value := range account.Storage {
+			slotVal.SetBytes(value.Bytes())
+			statedb.SetState(addr, key, slotVal)
 		}
 
-		addrs := sortedAllocAddresses(g.Alloc)
-		for _, addr := range addrs {
-			account := g.Alloc[addr]
-
-			balance, overflow := uint256.FromBig(account.Balance)
-			if overflow {
-				panic("overflow at genesis allocs")
-			}
-			statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
-			statedb.SetCode(addr, account.Code)
-			statedb.SetNonce(addr, account.Nonce)
-			var slotVal uint256.Int
-			for key, value := range account.Storage {
-				slotVal.SetBytes(value.Bytes())
-				statedb.SetState(addr, key, slotVal)
-			}
-
-			if len(account.Constructor) > 0 {
-				if _, err = core.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
-					return err
-				}
-			}
-
-			if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
-				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+		if len(account.Constructor) > 0 {
+			if _, err = core.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
+				return nil, nil, err
 			}
 		}
-		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
-			return err
-		}
 
-		rh, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "genesis")
-		if err != nil {
-			return err
+		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 		}
-		root = common.BytesToHash(rh)
-		return nil
-	})
-
-	if err := wg.Wait(); err != nil {
+	}
+	if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 		return nil, nil, err
 	}
 
+	rh, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "genesis")
+	if err != nil {
+		return nil, nil, err
+	}
+	root = common.BytesToHash(rh)
 	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
