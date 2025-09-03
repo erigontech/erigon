@@ -27,7 +27,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
@@ -385,7 +384,6 @@ func filterIds(in []sentryproto.MessageId, protocols []sentryproto.Protocol) (fi
 				break
 			}
 		}
-		log.Debug("Dropped message", "id", id)
 	}
 	return filtered
 }

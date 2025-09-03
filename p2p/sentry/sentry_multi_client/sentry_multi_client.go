@@ -938,7 +938,6 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *sentry
 }
 
 func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
-	log.Info("got inbound message", "id", inreq.Id, "peer", gointerfaces.ConvertH512ToHash(inreq.PeerId))
 	switch inreq.Id {
 	// ========= eth 66 ==========
 
