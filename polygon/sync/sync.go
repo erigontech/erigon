@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -45,6 +46,9 @@ import (
 const maxFinalizationHeight = 512
 const downloadRequestsCacheSize = 1024
 
+const heimdallSyncRetryIntervalOnTip = 200 * time.Millisecond
+const heimdallSyncRetryIntervalOnStartup = 30 * time.Second
+
 var (
 	futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
 	p2pResponseTimeout   = 5 * time.Second // timeout waiting for P2P response packets
@@ -55,6 +59,7 @@ type heimdallSynchronizer interface {
 	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, ok bool, err error)
 	SynchronizeMilestones(ctx context.Context) (latest *heimdall.Milestone, ok bool, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
+	WaitUntilHeimdallIsSynced(ctx context.Context, retryInterval time.Duration) error
 	Ready(ctx context.Context) <-chan error
 }
 
@@ -152,9 +157,6 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	}
 
 	blockNum := newTip.Number.Uint64()
-	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
-		return err
-	}
 
 	age := common.PrettyAge(time.Unix(int64(newTip.Time), 0))
 	s.logger.Info(syncLogPrefix("update fork choice"), "block", blockNum, "hash", newTip.Hash(), "age", age)
@@ -289,6 +291,21 @@ func (s *Sync) applyNewBlockChainOnTip(ctx context.Context, blockChain []*types.
 	headerChain := make([]*types.Header, len(blockChain))
 	for i, block := range blockChain {
 		headerChain[i] = block.HeaderNoCopy()
+	}
+
+	// wait until heimdall is synchronized before proceeding
+	err := s.heimdallSync.WaitUntilHeimdallIsSynced(ctx, heimdallSyncRetryIntervalOnTip)
+	if err != nil {
+		return err
+	}
+	// make sure spans are synchronized
+	// math.MaxUint64 is used because post VeBlop/Rio hard fork
+	// spans could be overlapping, and the blocknum for the tip
+	// of the headerChain might still be in the range of the last span
+	// in the store, but we may still be processing a new span in the meantime
+	err = s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64)
+	if err != nil {
+		return err
 	}
 
 	oldTip := ccb.Tip()
@@ -821,22 +838,17 @@ func (s *Sync) Run(ctx context.Context) error {
 
 	s.logger.Info(syncLogPrefix("running sync component"))
 
-	for {
-		// we have to check if the heimdall we are connected to is synchonised with the chain
-		// to prevent getting empty list of checkpoints/milestones during the sync
+	// we have to check if the heimdall we are connected to is synchonised with the chain
+	// to prevent getting empty list of checkpoints/milestones during the sync
+	catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
+	if err != nil {
+		return err
+	}
 
-		catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
-		if err != nil {
-			return err
-		}
-
-		if !catchingUp {
-			break
-		}
-
+	if !catchingUp {
 		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
-
-		if err := common.Sleep(ctx, 30*time.Second); err != nil {
+		err = s.heimdallSync.WaitUntilHeimdallIsSynced(ctx, heimdallSyncRetryIntervalOnStartup)
+		if err != nil {
 			return err
 		}
 	}
