@@ -91,6 +91,7 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 		fmt.Println("Not banning peer, we have only", active, "active peers")
 		return &sentinelrpc.EmptyMessage{}, nil
 	}
+	fmt.Println("Banning peer", p.Pid, "we have", active, "active peers")
 
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
