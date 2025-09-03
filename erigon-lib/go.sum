@@ -43,8 +43,8 @@ github.com/anacrolix/stm v0.2.0/go.mod h1:zoVQRvSiGjGoTmbM0vSLIiaKjWtNPeTvXUSdJQ
 github.com/anacrolix/tagflag v0.0.0-20180109131632-2146c8d41bf0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.0.0/go.mod h1:1m2U/K6ZT+JZG0+bdMK6qauP49QT4wE5pmhJXOKKCHw=
 github.com/anacrolix/tagflag v1.1.0/go.mod h1:Scxs9CV10NQatSmbyjqmqmeQNwGzlNe0CMUMIxqHIG8=
-github.com/anacrolix/torrent v1.59.2-0.20250831024100-5a4e71ecb3c3 h1:BVmTbvrRJ81R5mFR1kX3TPNs8WsZQDRJ0+hsIAn7RNQ=
-github.com/anacrolix/torrent v1.59.2-0.20250831024100-5a4e71ecb3c3/go.mod h1:6hGL5nOAk4j0zrPqyZ7GKYIkRPgehXFE9N8N6rAatQI=
+github.com/anacrolix/torrent v1.59.2-0.20250903105451-d922d78d2e61 h1:86zuTAMse1rzLq6hSGHad8gdZ0I4JRhFUuvZggvByMQ=
+github.com/anacrolix/torrent v1.59.2-0.20250903105451-d922d78d2e61/go.mod h1:6hGL5nOAk4j0zrPqyZ7GKYIkRPgehXFE9N8N6rAatQI=
 github.com/apache/thrift v0.12.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
 github.com/benbjohnson/clock v1.1.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/benbjohnson/immutable v0.2.0/go.mod h1:uc6OHo6PN2++n98KHLxW8ef4W42ylHiQSENghE1ezxI=
