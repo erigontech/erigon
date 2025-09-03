@@ -111,27 +111,27 @@ rcache:
 receipt:
     domain:
         bt:
-            current: v1.2
+            current: v1.3
             min: v1.0
         kv:
-            current: v2.1
+            current: v2.2
             min: v1.0
         kvei:
-            current: v1.2
+            current: v1.3
             min: v1.0
     hist:
         v:
-            current: v2.1
+            current: v2.2
             min: v1.0
         vi:
-            current: v1.2
+            current: v1.3
             min: v1.0
     ii:
         ef:
-            current: v2.1
+            current: v2.2
             min: v1.0
         efi:
-            current: v2.1
+            current: v2.2
             min: v1.0
 storage:
     domain:
