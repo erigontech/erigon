@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -407,14 +406,14 @@ func (d *Dirs) RenameNewVersions() error {
 
 	//eliminate polygon-bridge && heimdall && chaindata just in case
 	if d.DataDir != "" {
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, polygonBridgeDB)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, kv.PolygonBridgeDB)))
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.HeimdallDB)); err != nil && !os.IsNotExist(err) {
+		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, polygonBridgeDB)))
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, heimdallDB)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, kv.HeimdallDB)))
+		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, heimdallDB)))
 		if d.Chaindata != "" {
 			if err := dir.RemoveAll(d.Chaindata); err != nil && !os.IsNotExist(err) {
 				return err
@@ -437,3 +436,8 @@ var versionPattern = regexp.MustCompile(`^v\d+\.\d+-`)
 func IsVersionedName(name string) bool {
 	return versionPattern.MatchString(name)
 }
+
+const (
+	heimdallDB      = "heimdall"
+	polygonBridgeDB = "polygon-bridge"
+)
