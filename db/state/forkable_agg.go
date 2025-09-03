@@ -200,14 +200,14 @@ func (a *ForkableAgg) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 	go func() {
 		defer close(res)
 
-		chkEvery := time.NewTicker(3 * time.Second)
+		chkEvery := time.NewTicker(30 * time.Second)
 		defer chkEvery.Stop()
 		for a.buildingFiles.Load() || a.mergingFiles.Load() {
 			select {
 			case <-ctx.Done():
 				return
 			case <-chkEvery.C:
-				a.logger.Trace("[fork_agg] waiting for files",
+				a.logger.Debug("[fork_agg] waiting for files",
 					"building files", a.buildingFiles.Load(),
 					"merging files", a.mergingFiles.Load())
 			}
@@ -362,7 +362,6 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 	}()
 
 	g.SetLimit(r.collateAndBuildWorkers)
-	defer r.buildingFiles.Store(false)
 
 	// build aligned
 	tx := r.BeginTemporalTx()

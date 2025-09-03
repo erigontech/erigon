@@ -427,11 +427,11 @@ func progress(tbl string, tx kv.Tx, f ForkableFilesTxI) (Num, error) {
 		return 0, err
 	}
 
-	if k == nil {
-		return 0, nil
+	var num uint64
+	if k != nil {
+		num = binary.BigEndian.Uint64(k)
 	}
 
-	num := binary.BigEndian.Uint64(k)
 	return max(Num(num), f.VisibleFilesMaxNum()), nil
 }
 

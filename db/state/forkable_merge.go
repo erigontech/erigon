@@ -12,18 +12,6 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-// type Merger struct {
-// 	compressWorkers int
-// 	tmpDir          string
-// 	logger          log.Logger
-// }
-
-// func (m *Merger) Merge() error {
-
-// 	return nil
-
-// }
-
 type ForkableMergeFiles struct {
 	marked   []*FilesItem
 	unmarked []*FilesItem
@@ -143,6 +131,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 		}
 
 		ps.Delete(p)
+		comp.Close()
 	}
 
 	mergedFile = newFilesItemWithSnapConfig(from.Uint64(), to.Uint64(), f.cfg)

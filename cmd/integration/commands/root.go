@@ -30,12 +30,10 @@ import (
 	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -130,17 +128,8 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		return nil, err
 	}
 
-	forkableAgg := state.NewForkableAgg(context.Background(), dirs, rawDB, logger)
-	preverifiedCfg, err := downloadercfg.LoadSnapshotsHashes(context.Background(), dirs, chain)
+	forkableAgg, err := forkables.OpenForkableAgg(context.Background(), chain, agg.StepSize(), dirs, rawDB, logger)
 	if err != nil {
-		return nil, err
-	}
-	rcacheForkable, err := forkables.NewRcacheForkable(preverifiedCfg.Preverified.Items, dirs, agg.StepSize(), logger)
-	if err != nil {
-		return nil, err
-	}
-	forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
-	if err := forkableAgg.OpenFolder(); err != nil {
 		return nil, err
 	}
 

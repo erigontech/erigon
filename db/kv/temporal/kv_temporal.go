@@ -79,13 +79,14 @@ type DB struct {
 func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
 	tdb := &DB{RwDB: db, stateFiles: agg}
 	if len(forkaggs) > 0 {
-		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
-		for i, forkagg := range forkaggs {
-			if tdb.forkaggs[i] != nil {
-				panic("forkaggs already set")
+		arr := make([]*state.ForkableAgg, 0)
+		for _, forkagg := range forkaggs {
+			if forkagg == nil {
+				continue
 			}
-			tdb.forkaggs[i] = forkagg
+			arr = append(arr, forkagg)
 		}
+		tdb.forkaggs = arr
 	}
 	return tdb, nil
 }
@@ -601,8 +602,19 @@ func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
 	return
 }
 func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
-func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
-	return db.stateFiles.BuildMissedAccessors(ctx, workers)
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
+	if err = db.stateFiles.BuildMissedAccessors(ctx, workers); err != nil {
+		return
+	}
+
+	if len(db.forkaggs) > 0 {
+		for _, forkagg := range db.forkaggs {
+			if err = forkagg.BuildMissedAccessors(ctx, workers); err != nil {
+				return
+			}
+		}
+	}
+	return
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()
