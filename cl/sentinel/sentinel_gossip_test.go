@@ -19,6 +19,7 @@ package sentinel
 import (
 	"context"
 	"math"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	gomock "go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
@@ -42,7 +44,7 @@ func getEthClock(t *testing.T) eth_clock.EthereumClock {
 }
 
 func TestSentinelGossipOnHardFork(t *testing.T) {
-	t.Skip("issue #15001")
+	//t.Skip("issue #15001")
 
 	listenAddrHost := "127.0.0.1"
 
@@ -50,20 +52,40 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	db, _, _, _, _, reader := loadChain(t)
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	bcfg := *beaconConfig
-
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
-	require.NoError(t, err)
-	ethClock := eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), &bcfg)
-
-	bcfg.AltairForkEpoch = math.MaxUint64
-	bcfg.BellatrixForkEpoch = math.MaxUint64
-	bcfg.CapellaForkEpoch = math.MaxUint64
-	bcfg.DenebForkEpoch = math.MaxUint64
-	bcfg.ElectraForkEpoch = math.MaxUint64
 	bcfg.InitializeForkSchedule()
 
-	// Create mock PeerDasStateReader
+	// mock eth clock
 	ctrl := gomock.NewController(t)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	var hardFork atomic.Bool
+	hardFork.Store(false)
+	ethClock.EXPECT().CurrentForkDigest().DoAndReturn(func() (common.Bytes4, error) {
+		if hardFork.Load() {
+			forkDigest := common.Bytes4{0x00, 0x00, 0x00, 0x01}
+			return forkDigest, nil
+		}
+		return common.Bytes4{0x00, 0x00, 0x00, 0x00}, nil
+	}).AnyTimes()
+	ethClock.EXPECT().ForkId().DoAndReturn(func() ([]byte, error) {
+		if hardFork.Load() {
+			return []byte{0x00, 0x00, 0x00, 0x01}, nil
+		}
+		return []byte{0x00, 0x00, 0x00, 0x00}, nil
+	}).AnyTimes()
+	ethClock.EXPECT().NextForkDigest().DoAndReturn(func() (common.Bytes4, error) {
+		if hardFork.Load() {
+			return common.Bytes4{0x00, 0x00, 0x00, 0x02}, nil
+		}
+		return common.Bytes4{0x00, 0x00, 0x00, 0x01}, nil
+	}).AnyTimes()
+	ethClock.EXPECT().GetCurrentEpoch().DoAndReturn(func() uint64 {
+		if hardFork.Load() {
+			return uint64(1)
+		}
+		return uint64(0)
+	}).AnyTimes()
+
+	// Create mock PeerDasStateReader
 	mockPeerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
 	mockPeerDasStateReader.EXPECT().GetEarliestAvailableSlot().Return(uint64(0)).AnyTimes()
 	mockPeerDasStateReader.EXPECT().GetRealCgc().Return(uint64(0)).AnyTimes()
@@ -122,15 +144,14 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		// delay to make sure that the connection is established
 		sub1.Publish(msg)
 	}()
-	var previousTopic string
 
 	ans := <-ch
 	require.Equal(t, ans.Data, msg)
-	previousTopic = ans.TopicName
 
-	bcfg.AltairForkEpoch = clparams.MainnetBeaconConfig.AltairForkEpoch
-	bcfg.InitializeForkSchedule()
-	time.Sleep(5 * time.Second)
+	// check if it still works after hard fork
+	previousTopic := ans.TopicName
+	hardFork.Store(true)
+	time.Sleep(1 * time.Second)
 
 	msg = []byte("hello1")
 	go func() {
@@ -142,5 +163,4 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	ans = <-ch
 	require.Equal(t, ans.Data, msg)
 	require.NotEqual(t, previousTopic, ans.TopicName)
-
 }
