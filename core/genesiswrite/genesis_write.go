@@ -302,8 +302,6 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 
 	ctx := context.Background()
-	var root common.Hash
-	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
 
 	// some users creating > 1Gb custome genesis by `erigon init`
 	genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
@@ -342,7 +340,8 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 
 	//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	statedb = state.New(r)
+
+	statedb := state.New(r)
 	statedb.SetTrace(false)
 
 	hasConstructorAllocation := false
@@ -392,8 +391,8 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	if err != nil {
 		return nil, nil, err
 	}
-	root = common.BytesToHash(rh)
-	head.Root = root
+
+	head.Root = common.BytesToHash(rh)
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
