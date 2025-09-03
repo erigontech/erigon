@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state"
@@ -26,7 +27,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
 
-	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
+	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	_, err := state.GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
 	require.NoError(t, err)
@@ -230,7 +231,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
 
-	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
+	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	_, err := state.GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
 	require.NoError(t, err)

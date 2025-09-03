@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -98,7 +99,7 @@ var cmdStageSnapshots = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -119,7 +120,7 @@ var cmdStageHeaders = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -140,7 +141,7 @@ var cmdStageBodies = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -161,7 +162,7 @@ var cmdStageSenders = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -182,7 +183,7 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -205,7 +206,7 @@ var cmdStageCustomTrace = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -228,7 +229,7 @@ var cmdPrintCommitment = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -249,7 +250,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -270,7 +271,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -292,7 +293,7 @@ var cmdPrintStages = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -328,7 +329,7 @@ var cmdPrintTableSizes = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -379,7 +380,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -399,7 +400,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -434,27 +435,27 @@ var cmdRunMigrations = &cobra.Command{
 
 		// Chaindata DB *must* be the first one because guaranteed to contain data in Config table
 		// (see openSnapshotOnce in allSnapshots below).
-		migrateDB(kv.ChainDB, chaindata)
+		migrateDB(dbcfg.ChainDB, chaindata)
 
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
 		// (see kv/tables.go).
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
-			migrateDB(kv.ConsensusDB, consensus)
+			migrateDB(dbcfg.ConsensusDB, consensus)
 		} else {
 			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
 			if exists, err := dir.Exist(consensus); err == nil && exists {
-				migrateDB(kv.ConsensusDB, consensus)
+				migrateDB(dbcfg.ConsensusDB, consensus)
 			}
 		}
 		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
 		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
 		if exists, err := dir.Exist(heimdall); err == nil && exists {
-			migrateDB(kv.HeimdallDB, heimdall)
+			migrateDB(dbcfg.HeimdallDB, heimdall)
 		}
 		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
 		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
-			migrateDB(kv.PolygonBridgeDB, polygonBridge)
+			migrateDB(dbcfg.PolygonBridgeDB, polygonBridge)
 		}
 	},
 }
