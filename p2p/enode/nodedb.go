@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -102,7 +103,7 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 
 // newMemoryDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, error) {
-	db, err := mdbx.New(kv.SentryDB, logger).
+	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		InMem(nil, tmpDir).
 		WithTableCfg(bucketsConfig).
 		MapSize(1 * datasize.GB).
@@ -120,7 +121,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
-	db, err := mdbx.New(kv.SentryDB, logger).
+	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		Path(path).
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).

@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 // DBSchemaVersion versions list
@@ -594,21 +595,21 @@ var PolygonBridgeTablesCfg = TableCfg{}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
-	case TxPoolDB:
+	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
-	case SentryDB:
+	case dbcfg.SentryDB:
 		return SentryTablesCfg
-	case DownloaderDB:
+	case dbcfg.DownloaderDB:
 		return DownloaderTablesCfg
-	case DiagnosticsDB:
+	case dbcfg.DiagnosticsDB:
 		return DiagnosticsTablesCfg
-	case HeimdallDB:
+	case dbcfg.HeimdallDB:
 		return HeimdallTablesCfg
-	case PolygonBridgeDB:
+	case dbcfg.PolygonBridgeDB:
 		return PolygonBridgeTablesCfg
-	case ConsensusDB:
+	case dbcfg.ConsensusDB:
 		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
