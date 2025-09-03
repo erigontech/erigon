@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
-const gracePeerCount = 8
+const gracePeerCount = 32
 
 var _ sentinelrpc.SentinelServer = (*SentinelServer)(nil)
 
