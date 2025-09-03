@@ -84,6 +84,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		}
 		return uint64(0)
 	}).AnyTimes()
+	ethClock.EXPECT().NextForkEpochIncludeBPO().Return(bcfg.FarFutureEpoch).AnyTimes()
 
 	// Create mock PeerDasStateReader
 	mockPeerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
