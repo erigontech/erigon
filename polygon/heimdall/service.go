@@ -226,8 +226,7 @@ func (s *Service) synchronizeSpans(ctx context.Context) error {
 }
 
 // wait until heimdall CatchingUp status is false
-func (s *Service) WaitUntilHeimdallIsSynced(ctx context.Context) error {
-	timeout := 200 * time.Millisecond
+func (s *Service) WaitUntilHeimdallIsSynced(ctx context.Context, retryInterval time.Duration) error {
 	logInterval := 10 * time.Second
 	var lastLogTime time.Time
 
@@ -240,13 +239,13 @@ func (s *Service) WaitUntilHeimdallIsSynced(ctx context.Context) error {
 	}
 	for catchingUp {
 		if time.Since(lastLogTime) >= logInterval {
-			log.Warn("waiting for heimdall to be synced")
+			s.logger.Warn("waiting for heimdall to be synced")
 			lastLogTime = time.Now()
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(timeout):
+		case <-time.After(retryInterval):
 			catchingUp, err = s.IsCatchingUp(ctx)
 			if err != nil {
 				return err
