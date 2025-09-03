@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/common"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -35,9 +35,9 @@ func NewDummy() *DummyCache { return &DummyCache{} }
 func (c *DummyCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
 	return &DummyView{cache: c, tx: tx}, nil
 }
-func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch) {}
-func (c *DummyCache) Evict() int                             { return 0 }
-func (c *DummyCache) Len() int                               { return 0 }
+func (c *DummyCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
+func (c *DummyCache) Evict() int                                  { return 0 }
+func (c *DummyCache) Len() int                                    { return 0 }
 func (c *DummyCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	if len(k) == 20 {
 		v, _, err := tx.GetLatest(kv.AccountsDomain, k)

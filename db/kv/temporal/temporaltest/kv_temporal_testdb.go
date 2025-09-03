@@ -43,7 +43,7 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 	if tb != nil {
 		rawDB = memdb.NewTestDB(tb, kv.ChainDB)
 	} else {
-		rawDB = memdb.New(dirs.DataDir, kv.ChainDB)
+		rawDB = memdb.New(nil, dirs.DataDir, kv.ChainDB)
 	}
 
 	salt, err := state.GetStateIndicesSalt(dirs, true, log.New())

@@ -139,7 +139,7 @@ func aggregateResultsFromStateTests(
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			statedb, root, err := test.Run(tx, st, cfg, dirs)
+			statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()
@@ -159,7 +159,7 @@ func aggregateResultsFromStateTests(
 			// if benchmark requested rerun test w/o verification and collect stats
 			if bench {
 				_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-					_, _, gasUsed, _ := test.RunNoVerify(tx, st, cfg, dirs)
+					_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
 					return nil, gasUsed, nil
 				})
 

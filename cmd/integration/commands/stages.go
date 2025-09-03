@@ -54,10 +54,12 @@ import (
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -78,14 +80,15 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	"github.com/erigontech/erigon/turbo/app"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -922,33 +925,34 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	if chainTipMode {
-		var sendersProgress, execProgress uint64
-		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-			var err error
-			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-				return err
-			}
-			if execProgress == 0 {
-				doms, err := dbstate.NewSharedDomains(tx, log.New())
-				if err != nil {
-					panic(err)
-				}
-				execProgress = doms.BlockNum()
-				doms.Close()
-			}
-
-			if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
+	var sendersProgress, execProgress uint64
+	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		var err error
+		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
-		if block == 0 {
-			block = sendersProgress
+		if execProgress == 0 {
+			doms, err := dbstate.NewSharedDomains(tx, log.New())
+			if err != nil {
+				panic(err)
+			}
+			execProgress = doms.BlockNum()
+			doms.Close()
 		}
 
+		if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if block == 0 {
+		block = sendersProgress
+	}
+
+	if chainTipMode {
 		if noCommit {
 			tx, err := db.BeginTemporalRw(ctx)
 			if err != nil {
@@ -977,11 +981,16 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
-		return err
+	for {
+		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
+			var errExhausted *stagedsync.ErrLoopExhausted
+			if errors.As(err, &errExhausted) {
+				continue // has more blocks to exec
+			}
+			return err // fail
+		}
+		return nil // Exec finished
 	}
-
-	return nil
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -1355,14 +1364,15 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 		cfg.Miner = *miningConfig
 	}
 	cfg.Dirs = dirs
-	allSn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
+	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+	blockReader, blockWriter, allSn, borSn, bridgeStore, heimdallStore, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
 	if err != nil {
-		panic(err) // we do already panic above on genesis error
+		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
-
-	blockReader, blockWriter := blocksIO(db, logger)
-	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
+	borSn.DownloadComplete() // mark as ready
+	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1393,22 +1403,13 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 		panic(err)
 	}
 
-	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-
 	notifications := shards.NewNotifications(nil)
 
-	var (
-		signatures    *lru.ARCCache[common.Hash, common.Address]
-		bridgeStore   bridge.Store
-		heimdallStore heimdall.Store
-	)
+	var signatures *lru.ARCCache[common.Hash, common.Address]
+
 	if bor, ok := engine.(*bor.Bor); ok {
 		signatures = bor.Signatures
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), borSn, chainConfig.Bor)
-		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 	}
-	borSn.DownloadComplete() // mark as ready
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 
 	stageList := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
@@ -1473,9 +1474,12 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 	return res
 }
 
-func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) consensus.Engine {
 	config := ethconfig.Defaults
-
+	var polygonBridge *bridge.Service
+	var heimdallService *heimdall.Service
+	var heimdallClient heimdall.Client
+	var bridgeClient bridge.Client
 	var consensusConfig interface{}
 	if cc.Clique != nil {
 		consensusConfig = chainspec.CliqueSnapshot
@@ -1484,11 +1488,42 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 	} else if cc.Bor != nil {
 		consensusConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
+		if !config.WithoutHeimdall {
+			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
+			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
+		} else {
+			heimdallClient = heimdall.NewIdleClient(config.Miner)
+			bridgeClient = bridge.NewIdleClient()
+		}
+		borConfig := consensusConfig.(*borcfg.BorConfig)
+
+		polygonBridge = bridge.NewService(bridge.ServiceConfig{
+			Store:        bridgeStore,
+			Logger:       logger,
+			BorConfig:    borConfig,
+			EventFetcher: bridgeClient,
+		})
+
+		if err := heimdallStore.Prepare(ctx); err != nil {
+			panic(err)
+		}
+
+		if err := bridgeStore.Prepare(ctx); err != nil {
+			panic(err)
+		}
+
+		heimdallService = heimdall.NewService(heimdall.ServiceConfig{
+			Store:     heimdallStore,
+			BorConfig: borConfig,
+			Client:    heimdallClient,
+			Logger:    logger,
+		})
+
 	} else {
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, nil, nil)
+		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
 }
 
 func readGenesis(chain string) *types.Genesis {

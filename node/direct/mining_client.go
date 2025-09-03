@@ -20,29 +20,30 @@ import (
 	"context"
 	"io"
 
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
-var _ txpool_proto.MiningClient = (*MiningClient)(nil)
+var _ txpoolproto.MiningClient = (*MiningClient)(nil)
 
 type MiningClient struct {
-	server txpool_proto.MiningServer
+	server txpoolproto.MiningServer
 }
 
-func NewMiningClient(server txpool_proto.MiningServer) *MiningClient {
+func NewMiningClient(server txpoolproto.MiningServer) *MiningClient {
 	return &MiningClient{server: server}
 }
 
-func (s *MiningClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+func (s *MiningClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error) {
 	return s.server.Version(ctx, in)
 }
 
 // -- start OnPendingBlock
 
-func (s *MiningClient) OnPendingBlock(ctx context.Context, in *txpool_proto.OnPendingBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingBlockClient, error) {
+func (s *MiningClient) OnPendingBlock(ctx context.Context, in *txpoolproto.OnPendingBlockRequest, opts ...grpc.CallOption) (txpoolproto.Mining_OnPendingBlockClient, error) {
 	ch := make(chan *onPendigBlockReply, 16384)
 	streamServer := &MiningOnPendingBlockS{ch: ch, ctx: ctx}
 	go func() {
@@ -53,7 +54,7 @@ func (s *MiningClient) OnPendingBlock(ctx context.Context, in *txpool_proto.OnPe
 }
 
 type onPendigBlockReply struct {
-	r   *txpool_proto.OnPendingBlockReply
+	r   *txpoolproto.OnPendingBlockReply
 	err error
 }
 
@@ -63,7 +64,7 @@ type MiningOnPendingBlockS struct {
 	grpc.ServerStream
 }
 
-func (s *MiningOnPendingBlockS) Send(m *txpool_proto.OnPendingBlockReply) error {
+func (s *MiningOnPendingBlockS) Send(m *txpoolproto.OnPendingBlockReply) error {
 	s.ch <- &onPendigBlockReply{r: m}
 	return nil
 }
@@ -81,7 +82,7 @@ type MiningOnPendingBlockC struct {
 	grpc.ClientStream
 }
 
-func (c *MiningOnPendingBlockC) Recv() (*txpool_proto.OnPendingBlockReply, error) {
+func (c *MiningOnPendingBlockC) Recv() (*txpoolproto.OnPendingBlockReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
@@ -93,7 +94,7 @@ func (c *MiningOnPendingBlockC) Context() context.Context { return c.ctx }
 // -- end OnPendingBlock
 // -- start OnMinedBlock
 
-func (s *MiningClient) OnMinedBlock(ctx context.Context, in *txpool_proto.OnMinedBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnMinedBlockClient, error) {
+func (s *MiningClient) OnMinedBlock(ctx context.Context, in *txpoolproto.OnMinedBlockRequest, opts ...grpc.CallOption) (txpoolproto.Mining_OnMinedBlockClient, error) {
 	ch := make(chan *onMinedBlockReply, 16384)
 	streamServer := &MiningOnMinedBlockS{ch: ch, ctx: ctx}
 	go func() {
@@ -104,7 +105,7 @@ func (s *MiningClient) OnMinedBlock(ctx context.Context, in *txpool_proto.OnMine
 }
 
 type onMinedBlockReply struct {
-	r   *txpool_proto.OnMinedBlockReply
+	r   *txpoolproto.OnMinedBlockReply
 	err error
 }
 
@@ -114,7 +115,7 @@ type MiningOnMinedBlockS struct {
 	grpc.ServerStream
 }
 
-func (s *MiningOnMinedBlockS) Send(m *txpool_proto.OnMinedBlockReply) error {
+func (s *MiningOnMinedBlockS) Send(m *txpoolproto.OnMinedBlockReply) error {
 	s.ch <- &onMinedBlockReply{r: m}
 	return nil
 }
@@ -132,7 +133,7 @@ type MiningOnMinedBlockC struct {
 	grpc.ClientStream
 }
 
-func (c *MiningOnMinedBlockC) Recv() (*txpool_proto.OnMinedBlockReply, error) {
+func (c *MiningOnMinedBlockC) Recv() (*txpoolproto.OnMinedBlockReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
@@ -144,7 +145,7 @@ func (c *MiningOnMinedBlockC) Context() context.Context { return c.ctx }
 // -- end OnMinedBlock
 // -- end OnPendingLogs
 
-func (s *MiningClient) OnPendingLogs(ctx context.Context, in *txpool_proto.OnPendingLogsRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingLogsClient, error) {
+func (s *MiningClient) OnPendingLogs(ctx context.Context, in *txpoolproto.OnPendingLogsRequest, opts ...grpc.CallOption) (txpoolproto.Mining_OnPendingLogsClient, error) {
 	ch := make(chan *onPendingLogsReply, 16384)
 	streamServer := &MiningOnPendingLogsS{ch: ch, ctx: ctx}
 	go func() {
@@ -155,7 +156,7 @@ func (s *MiningClient) OnPendingLogs(ctx context.Context, in *txpool_proto.OnPen
 }
 
 type onPendingLogsReply struct {
-	r   *txpool_proto.OnPendingLogsReply
+	r   *txpoolproto.OnPendingLogsReply
 	err error
 }
 type MiningOnPendingLogsS struct {
@@ -164,7 +165,7 @@ type MiningOnPendingLogsS struct {
 	grpc.ServerStream
 }
 
-func (s *MiningOnPendingLogsS) Send(m *txpool_proto.OnPendingLogsReply) error {
+func (s *MiningOnPendingLogsS) Send(m *txpoolproto.OnPendingLogsReply) error {
 	s.ch <- &onPendingLogsReply{r: m}
 	return nil
 }
@@ -182,7 +183,7 @@ type MiningOnPendingLogsC struct {
 	grpc.ClientStream
 }
 
-func (c *MiningOnPendingLogsC) Recv() (*txpool_proto.OnPendingLogsReply, error) {
+func (c *MiningOnPendingLogsC) Recv() (*txpoolproto.OnPendingLogsReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
@@ -193,22 +194,22 @@ func (c *MiningOnPendingLogsC) Context() context.Context { return c.ctx }
 
 // -- end OnPendingLogs
 
-func (s *MiningClient) GetWork(ctx context.Context, in *txpool_proto.GetWorkRequest, opts ...grpc.CallOption) (*txpool_proto.GetWorkReply, error) {
+func (s *MiningClient) GetWork(ctx context.Context, in *txpoolproto.GetWorkRequest, opts ...grpc.CallOption) (*txpoolproto.GetWorkReply, error) {
 	return s.server.GetWork(ctx, in)
 }
 
-func (s *MiningClient) SubmitWork(ctx context.Context, in *txpool_proto.SubmitWorkRequest, opts ...grpc.CallOption) (*txpool_proto.SubmitWorkReply, error) {
+func (s *MiningClient) SubmitWork(ctx context.Context, in *txpoolproto.SubmitWorkRequest, opts ...grpc.CallOption) (*txpoolproto.SubmitWorkReply, error) {
 	return s.server.SubmitWork(ctx, in)
 }
 
-func (s *MiningClient) SubmitHashRate(ctx context.Context, in *txpool_proto.SubmitHashRateRequest, opts ...grpc.CallOption) (*txpool_proto.SubmitHashRateReply, error) {
+func (s *MiningClient) SubmitHashRate(ctx context.Context, in *txpoolproto.SubmitHashRateRequest, opts ...grpc.CallOption) (*txpoolproto.SubmitHashRateReply, error) {
 	return s.server.SubmitHashRate(ctx, in)
 }
 
-func (s *MiningClient) HashRate(ctx context.Context, in *txpool_proto.HashRateRequest, opts ...grpc.CallOption) (*txpool_proto.HashRateReply, error) {
+func (s *MiningClient) HashRate(ctx context.Context, in *txpoolproto.HashRateRequest, opts ...grpc.CallOption) (*txpoolproto.HashRateReply, error) {
 	return s.server.HashRate(ctx, in)
 }
 
-func (s *MiningClient) Mining(ctx context.Context, in *txpool_proto.MiningRequest, opts ...grpc.CallOption) (*txpool_proto.MiningReply, error) {
+func (s *MiningClient) Mining(ctx context.Context, in *txpoolproto.MiningRequest, opts ...grpc.CallOption) (*txpoolproto.MiningReply, error) {
 	return s.server.Mining(ctx, in)
 }

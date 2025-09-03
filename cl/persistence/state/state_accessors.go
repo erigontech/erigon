@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync"
 )
 
 type GetValFn func(table string, key []byte) ([]byte, error)
