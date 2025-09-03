@@ -97,9 +97,12 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 				log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
 			}
 		} else {
+			fmt.Println("Downloading only custody columns for fulu blocks")
+			s := time.Now()
 			if err := cfg.peerDas.DownloadOnlyCustodyColumns(ctx, fuluBlocks); err != nil {
 				log.Warn("[chainTipSync] failed to download only custody columns", "err", err)
 			}
+			fmt.Printf("[chainTipSync] downloaded only custody columns for fulu blocks in %v\n", time.Since(s))
 		}
 	}
 

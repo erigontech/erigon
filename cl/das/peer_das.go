@@ -3,6 +3,7 @@ package das
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -136,17 +137,8 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 	if err != nil {
 		return false, err
 	}
-	if len(expectedCustodies) == 0 {
-		// this case is not reasonable due to empty node ID
-		return len(existingColumns) == int(d.beaconConfig.NumberOfColumns), nil
-	}
-	nowCustodies := map[cltypes.CustodyIndex]bool{}
-	for _, column := range existingColumns {
-		if _, ok := expectedCustodies[column]; ok {
-			nowCustodies[column] = true
-		}
-	}
-	return len(nowCustodies) == len(expectedCustodies), nil
+	fmt.Println("isMyColumnDataAvailable", len(existingColumns), len(expectedCustodies))
+	return len(existingColumns) >= len(expectedCustodies), nil
 }
 
 func (d *peerdas) resubscribeGossip() {
