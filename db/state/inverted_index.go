@@ -299,7 +299,12 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (ii *InvertedIndex) Tables() []string { return []string{ii.KeysTable, ii.ValuesTable} }
+func (ii *InvertedIndex) Tables() []string {
+	tables := []string{ii.KeysTable}
+	if ii.ValuesTable != "" {
+		tables = append(tables, ii.ValuesTable)
+	}
+}
 
 func (ii *InvertedIndex) Close() {
 	if ii == nil {
