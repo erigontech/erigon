@@ -845,7 +845,7 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	if !catchingUp {
+	if catchingUp {
 		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
 		err = s.heimdallSync.WaitUntilHeimdallIsSynced(ctx, heimdallSyncRetryIntervalOnStartup)
 		if err != nil {
