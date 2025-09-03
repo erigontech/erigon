@@ -327,7 +327,6 @@ func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
 type InvertedIndexBufferedWriter struct {
 	index, indexKeys *etl.Collector
 
-	tmpdir       string
 	discard      bool
 	filenameBase string
 
@@ -398,19 +397,19 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 	w := &InvertedIndexBufferedWriter{
 		name:         iit.name,
 		discard:      discard,
-		tmpdir:       tmpdir,
 		filenameBase: iit.ii.FilenameBase,
 		stepSize:     iit.stepSize,
 
 		indexKeysTable: iit.ii.KeysTable,
 		indexTable:     iit.ii.ValuesTable,
-
-		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollectorWithAllocator(iit.ii.FilenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollectorWithAllocator(iit.ii.FilenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
 	}
-	w.indexKeys.SortAndFlushInBackground(true)
-	w.index.SortAndFlushInBackground(true)
+	if !discard {
+		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
+		w.indexKeys = etl.NewCollectorWithAllocator(w.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		w.index = etl.NewCollectorWithAllocator(w.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+	}
 	return w
 }
 

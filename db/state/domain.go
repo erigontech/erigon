@@ -397,9 +397,11 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
-		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace),
 	}
-	w.values.SortAndFlushInBackground(true)
+	if !discard {
+		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+	}
 	return w
 }
 
