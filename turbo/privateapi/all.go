@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
@@ -44,7 +44,7 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	}
 
 	grpcServer := grpcutil.NewServer(rateLimit, creds)
-	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
+	remoteproto.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	if txPoolServer != nil {
 		txpoolproto.RegisterTxpoolServer(grpcServer, txPoolServer)
 	}
@@ -52,13 +52,13 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
 	if bridgeServer != nil {
-		remote.RegisterBridgeBackendServer(grpcServer, bridgeServer)
+		remoteproto.RegisterBridgeBackendServer(grpcServer, bridgeServer)
 	}
 	if heimdallServer != nil {
-		remote.RegisterHeimdallBackendServer(grpcServer, heimdallServer)
+		remoteproto.RegisterHeimdallBackendServer(grpcServer, heimdallServer)
 	}
 
-	remote.RegisterKVServer(grpcServer, kv)
+	remoteproto.RegisterKVServer(grpcServer, kv)
 	var healthServer *health.Server
 	if healthCheck {
 		healthServer = health.NewServer()

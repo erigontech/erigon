@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,17 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package remoteproto
+//go:build go1.25
 
-import (
-	"strings"
+package synctest
 
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-)
+import "testing/synctest"
 
-func NodeInfoReplyCmp(i, j *typesproto.NodeInfoReply) int {
-	if cmp := strings.Compare(i.Name, j.Name); cmp != 0 {
-		return cmp
-	}
-	return strings.Compare(i.Enode, j.Enode)
-}
+var Test testFunc = synctest.Test

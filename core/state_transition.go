@@ -312,6 +312,10 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 
+	if st.evm.ChainRules().IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
+		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, st.msg.From().Hex(), len(st.msg.BlobHashes()))
+	}
+
 	// Make sure the transaction feeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)

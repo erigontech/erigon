@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -388,7 +388,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	}
 
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -398,7 +398,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 
 	msg := m.SentMessage(0)
 
-	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+	require.Equal(sentryproto.MessageId_RECEIPTS_66, msg.Id)
 
 	encoded, err := rlp.EncodeToBytes(types.Receipts{})
 	require.NoError(err)

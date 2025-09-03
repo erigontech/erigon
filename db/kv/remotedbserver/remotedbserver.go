@@ -32,8 +32,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -63,10 +63,10 @@ const MaxTxTTL = 60 * time.Second
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
-var KvServiceAPIVersion = &types.VersionReply{Major: 7, Minor: 0, Patch: 0}
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
 type KvServer struct {
-	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
+	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
 	kv                 kv.RoDB
 	stateChangeStreams *StateChangePubSub
@@ -112,7 +112,7 @@ func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapshots, borSnapsh
 }
 
 // Version returns the service-side interface version number
-func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
+func (s *KvServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	dbSchemaVersion := &kv.DBSchemaVersion
 	if KvServiceAPIVersion.Major > dbSchemaVersion.Major {
 		return KvServiceAPIVersion, nil
@@ -212,7 +212,7 @@ func (s *KvServer) with(id uint64, f func(kv.Tx) error) error {
 	return f(tx.Tx)
 }
 
-func (s *KvServer) Tx(stream remote.KV_TxServer) error {
+func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 	id, errBegin := s.begin(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
@@ -226,7 +226,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	}); err != nil {
 		return fmt.Errorf("kvserver: %w", err)
 	}
-	if err := stream.Send(&remote.Pair{ViewId: viewID, TxId: id}); err != nil {
+	if err := stream.Send(&remoteproto.Pair{ViewId: viewID, TxId: id}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
 	}
 
@@ -307,7 +307,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			c = cInfo.c
 		}
 		switch in.Op {
-		case remote.Op_OPEN:
+		case remoteproto.Op_OPEN:
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
@@ -323,11 +323,11 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				bucket: in.BucketName,
 				c:      c,
 			}
-			if err := stream.Send(&remote.Pair{CursorId: CursorID}); err != nil {
+			if err := stream.Send(&remoteproto.Pair{CursorId: CursorID}); err != nil {
 				return fmt.Errorf("kvserver: %w", err)
 			}
 			continue
-		case remote.Op_OPEN_DUP_SORT:
+		case remoteproto.Op_OPEN_DUP_SORT:
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
@@ -343,18 +343,18 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				bucket: in.BucketName,
 				c:      c,
 			}
-			if err := stream.Send(&remote.Pair{CursorId: CursorID}); err != nil {
+			if err := stream.Send(&remoteproto.Pair{CursorId: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
 			}
 			continue
-		case remote.Op_CLOSE:
+		case remoteproto.Op_CLOSE:
 			cInfo, ok := cursors[in.Cursor]
 			if !ok {
 				return fmt.Errorf("server-side error: unknown Cursor=%d, Op=%s", in.Cursor, in.Op)
 			}
 			cInfo.c.Close()
 			delete(cursors, in.Cursor)
-			if err := stream.Send(&remote.Pair{}); err != nil {
+			if err := stream.Send(&remoteproto.Pair{}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
 			}
 			continue
@@ -367,45 +367,45 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	}
 }
 
-func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
+func handleOp(c kv.Cursor, stream remoteproto.KV_TxServer, in *remoteproto.Cursor) error {
 	var k, v []byte
 	var err error
 	switch in.Op {
-	case remote.Op_FIRST:
+	case remoteproto.Op_FIRST:
 		k, v, err = c.First()
-	case remote.Op_FIRST_DUP:
+	case remoteproto.Op_FIRST_DUP:
 		v, err = c.(kv.CursorDupSort).FirstDup()
-	case remote.Op_SEEK:
+	case remoteproto.Op_SEEK:
 		k, v, err = c.Seek(in.K)
-	case remote.Op_SEEK_BOTH:
+	case remoteproto.Op_SEEK_BOTH:
 		v, err = c.(kv.CursorDupSort).SeekBothRange(in.K, in.V)
-	case remote.Op_CURRENT:
+	case remoteproto.Op_CURRENT:
 		k, v, err = c.Current()
-	case remote.Op_LAST:
+	case remoteproto.Op_LAST:
 		k, v, err = c.Last()
-	case remote.Op_LAST_DUP:
+	case remoteproto.Op_LAST_DUP:
 		v, err = c.(kv.CursorDupSort).LastDup()
-	case remote.Op_NEXT:
+	case remoteproto.Op_NEXT:
 		k, v, err = c.Next()
-	case remote.Op_NEXT_DUP:
+	case remoteproto.Op_NEXT_DUP:
 		k, v, err = c.(kv.CursorDupSort).NextDup()
-	case remote.Op_NEXT_NO_DUP:
+	case remoteproto.Op_NEXT_NO_DUP:
 		k, v, err = c.(kv.CursorDupSort).NextNoDup()
-	case remote.Op_PREV:
+	case remoteproto.Op_PREV:
 		k, v, err = c.Prev()
-	//case remote.Op_PREV_DUP:
+	//case remoteproto.Op_PREV_DUP:
 	//	k, v, err = c.(ethdb.CursorDupSort).Prev()
 	//	if err != nil {
 	//		return err
 	//	}
-	//case remote.Op_PREV_NO_DUP:
+	//case remoteproto.Op_PREV_NO_DUP:
 	//	k, v, err = c.Prev()
 	//	if err != nil {
 	//		return err
 	//	}
-	case remote.Op_SEEK_EXACT:
+	case remoteproto.Op_SEEK_EXACT:
 		k, v, err = c.SeekExact(in.K)
-	case remote.Op_SEEK_BOTH_EXACT:
+	case remoteproto.Op_SEEK_BOTH_EXACT:
 		k, v, err = c.(kv.CursorDupSort).SeekBothExact(in.K, in.V)
 	default:
 		return fmt.Errorf("unknown operation: %s", in.Op)
@@ -414,14 +414,14 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 		return err
 	}
 
-	if err := stream.Send(&remote.Pair{K: k, V: v}); err != nil {
+	if err := stream.Send(&remoteproto.Pair{K: k, V: v}); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
+func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
 	for {
@@ -438,18 +438,18 @@ func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_S
 	}
 }
 
-func (s *KvServer) SendStateChanges(_ context.Context, sc *remote.StateChangeBatch) {
+func (s *KvServer) SendStateChanges(_ context.Context, sc *remoteproto.StateChangeBatch) {
 	s.stateChangeStreams.Pub(sc)
 }
 
-func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (reply *remote.SnapshotsReply, err error) {
+func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest) (reply *remoteproto.SnapshotsReply, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%v, %s", rec, dbg.Stack())
 		}
 	}()
 	if s.blockSnapshots == nil || reflect.ValueOf(s.blockSnapshots).IsNil() { // nolint
-		return &remote.SnapshotsReply{BlocksFiles: []string{}, HistoryFiles: []string{}}, nil
+		return &remoteproto.SnapshotsReply{BlocksFiles: []string{}, HistoryFiles: []string{}}, nil
 	}
 
 	blockFiles := s.blockSnapshots.Files()
@@ -457,7 +457,7 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (rep
 		blockFiles = append(blockFiles, s.borSnapshots.Files()...)
 	}
 
-	reply = &remote.SnapshotsReply{BlocksFiles: blockFiles}
+	reply = &remoteproto.SnapshotsReply{BlocksFiles: blockFiles}
 	if s.historySnapshots != nil && !reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
 		reply.HistoryFiles = s.historySnapshots.Files()
 	}
@@ -465,8 +465,8 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (rep
 	return reply, nil
 }
 
-func (s *KvServer) Sequence(_ context.Context, req *remote.SequenceReq) (reply *remote.SequenceReply, err error) {
-	reply = &remote.SequenceReply{}
+func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, err error) {
+	reply = &remoteproto.SequenceReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
@@ -481,7 +481,7 @@ func (s *KvServer) Sequence(_ context.Context, req *remote.SequenceReq) (reply *
 }
 
 type StateChangePubSub struct {
-	chans map[uint]chan *remote.StateChangeBatch
+	chans map[uint]chan *remoteproto.StateChangeBatch
 	id    uint
 	mu    sync.RWMutex
 }
@@ -490,20 +490,20 @@ func newStateChangeStreams() *StateChangePubSub {
 	return &StateChangePubSub{}
 }
 
-func (s *StateChangePubSub) Sub() (ch chan *remote.StateChangeBatch, remove func()) {
+func (s *StateChangePubSub) Sub() (ch chan *remoteproto.StateChangeBatch, remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.chans == nil {
-		s.chans = make(map[uint]chan *remote.StateChangeBatch)
+		s.chans = make(map[uint]chan *remoteproto.StateChangeBatch)
 	}
 	s.id++
 	id := s.id
-	ch = make(chan *remote.StateChangeBatch, 8)
+	ch = make(chan *remoteproto.StateChangeBatch, 8)
 	s.chans[id] = ch
 	return ch, func() { s.remove(id) }
 }
 
-func (s *StateChangePubSub) Pub(reply *remote.StateChangeBatch) {
+func (s *StateChangePubSub) Pub(reply *remoteproto.StateChangeBatch) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, ch := range s.chans {
@@ -532,12 +532,12 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) GetLatest(_ context.Context, req *remote.GetLatestReq) (reply *remote.GetLatestReply, err error) {
+func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, err error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
-	reply = &remote.GetLatestReply{}
+	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
@@ -561,13 +561,13 @@ func (s *KvServer) GetLatest(_ context.Context, req *remote.GetLatestReq) (reply
 	return reply, nil
 }
 
-func (s *KvServer) HasPrefix(_ context.Context, req *remote.HasPrefixReq) (*remote.HasPrefixReply, error) {
+func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (*remoteproto.HasPrefixReply, error) {
 	domain, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
 
-	reply := &remote.HasPrefixReply{}
+	reply := &remoteproto.HasPrefixReply{}
 	err = s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
@@ -584,8 +584,8 @@ func (s *KvServer) HasPrefix(_ context.Context, req *remote.HasPrefixReq) (*remo
 	return reply, nil
 }
 
-func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (reply *remote.HistorySeekReply, err error) {
-	reply = &remote.HistorySeekReply{}
+func (s *KvServer) HistorySeek(_ context.Context, req *remoteproto.HistorySeekReq) (reply *remoteproto.HistorySeekReply, err error) {
+	reply = &remoteproto.HistorySeekReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
@@ -608,11 +608,11 @@ func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (r
 
 const PageSizeLimit = 4 * 4096
 
-func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*remote.IndexRangeReply, error) {
-	reply := &remote.IndexRangeReply{}
+func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq) (*remoteproto.IndexRangeReply, error) {
+	reply := &remoteproto.IndexRangeReply{}
 	from, limit := int(req.FromTs), int(req.Limit)
 	if req.PageToken != "" {
-		var pagination remote.IndexPagination
+		var pagination remoteproto.IndexPagination
 		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
 			return nil, err
 		}
@@ -645,7 +645,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 			limit--
 
 			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remote.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -659,8 +659,8 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 	return reply, nil
 }
 
-func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) (*remote.Pairs, error) {
-	reply := &remote.Pairs{}
+func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRangeReq) (*remoteproto.Pairs, error) {
+	reply := &remoteproto.Pairs{}
 	fromTs, limit := int(req.FromTs), int(req.Limit)
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
@@ -693,15 +693,15 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 	return reply, nil
 }
 
-func (s *KvServer) RangeAsOf(_ context.Context, req *remote.RangeAsOfReq) (*remote.Pairs, error) {
+func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (*remoteproto.Pairs, error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
-	reply := &remote.Pairs{}
+	reply := &remoteproto.Pairs{}
 	fromKey, toKey, limit := req.FromKey, req.ToKey, int(req.Limit)
 	if req.PageToken != "" {
-		var pagination remote.PairsPagination
+		var pagination remoteproto.PairsPagination
 		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
 			return nil, err
 		}
@@ -733,7 +733,7 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remote.RangeAsOfReq) (*remo
 			limit--
 
 			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: k, Limit: int64(limit)})
+				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: k, Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -747,10 +747,10 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remote.RangeAsOfReq) (*remo
 	return reply, nil
 }
 
-func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
+func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remoteproto.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)
 	if req.PageToken != "" {
-		var pagination remote.PairsPagination
+		var pagination remoteproto.PairsPagination
 		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
 			return nil, err
 		}
@@ -760,7 +760,7 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 		req.PageSize = PageSizeLimit
 	}
 
-	reply := &remote.Pairs{}
+	reply := &remoteproto.Pairs{}
 	var err error
 	if err = s.with(req.TxId, func(tx kv.Tx) error {
 		var it stream.KV
@@ -782,7 +782,7 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 			if err != nil {
 				return err
 			}
-			reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: nextK, Limit: int64(limit)})
+			reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 			if err != nil {
 				return err
 			}
@@ -794,8 +794,8 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 	return reply, nil
 }
 
-func (s *KvServer) HistoryStartFrom(_ context.Context, req *remote.HistoryStartFromReq) (reply *remote.HistoryStartFromReply, err error) {
-	reply = &remote.HistoryStartFromReply{}
+func (s *KvServer) HistoryStartFrom(_ context.Context, req *remoteproto.HistoryStartFromReq) (reply *remoteproto.HistoryStartFromReply, err error) {
+	reply = &remoteproto.HistoryStartFromReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {

@@ -23,9 +23,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -47,7 +46,7 @@ type LogsFilter struct {
 	addrs     map[common.Address]int
 	allTopics int
 	topics    map[common.Hash]int
-	sender    remote.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
+	sender    remoteproto.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 func NewLogsFilterAggregator(events *shards.Events) *LogsFilterAggregator {
@@ -62,7 +61,7 @@ func NewLogsFilterAggregator(events *shards.Events) *LogsFilterAggregator {
 	}
 }
 
-func (a *LogsFilterAggregator) insertLogsFilter(sender remote.ETHBACKEND_SubscribeLogsServer) (uint64, *LogsFilter) {
+func (a *LogsFilterAggregator) insertLogsFilter(sender remoteproto.ETHBACKEND_SubscribeLogsServer) (uint64, *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filterId := a.nextFilterId
@@ -84,7 +83,7 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFil
 	a.checkEmpty()
 }
 
-func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
+func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remoteproto.LogsFilterRequest) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	a.subtractLogFilters(filter)
@@ -140,11 +139,11 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 
 // SubscribeLogs
 // Only one subscription is needed to serve all the users, LogsFilterRequest allows to dynamically modifying the subscription
-func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_SubscribeLogsServer) error {
 	filterId, filter := a.insertLogsFilter(server)
 	defer a.removeLogsFilter(filterId, filter)
 	// Listen to filter updates and modify the filters, until terminated
-	var filterReq *remote.LogsFilterRequest
+	var filterReq *remoteproto.LogsFilterRequest
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
@@ -155,7 +154,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 	return nil
 }
 
-func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLogs(logs []*remoteproto.SubscribeLogsReply) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 
@@ -199,7 +198,7 @@ outerLoop:
 	return nil
 }
 
-func (a *LogsFilterAggregator) chooseTopics(filterTopics map[common.Hash]int, logTopics []*types.H256) bool {
+func (a *LogsFilterAggregator) chooseTopics(filterTopics map[common.Hash]int, logTopics []*typesproto.H256) bool {
 	for _, logTopic := range logTopics {
 		if _, ok := filterTopics[gointerfaces.ConvertH256ToHash(logTopic)]; ok {
 			return true

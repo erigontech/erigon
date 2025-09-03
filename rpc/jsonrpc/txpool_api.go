@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
@@ -40,12 +40,12 @@ type TxPoolAPI interface {
 // TxPoolAPIImpl data structure to store things needed for net_ commands
 type TxPoolAPIImpl struct {
 	*BaseAPI
-	pool proto_txpool.TxpoolClient
+	pool txpoolproto.TxpoolClient
 	db   kv.TemporalRoDB
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db kv.TemporalRoDB, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, db kv.TemporalRoDB, pool txpoolproto.TxpoolClient) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
 		BaseAPI: base,
 		pool:    pool,
@@ -54,7 +54,7 @@ func NewTxPoolAPI(base *BaseAPI, db kv.TemporalRoDB, pool proto_txpool.TxpoolCli
 }
 
 func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]map[string]*ethapi.RPCTransaction, error) {
-	reply, err := api.pool.All(ctx, &proto_txpool.AllRequest{})
+	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -75,17 +75,17 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].TxnType {
-		case proto_txpool.AllReply_PENDING:
+		case txpoolproto.AllReply_PENDING:
 			if _, ok := pending[addr]; !ok {
 				pending[addr] = make([]types.Transaction, 0, 4)
 			}
 			pending[addr] = append(pending[addr], txn)
-		case proto_txpool.AllReply_BASE_FEE:
+		case txpoolproto.AllReply_BASE_FEE:
 			if _, ok := baseFee[addr]; !ok {
 				baseFee[addr] = make([]types.Transaction, 0, 4)
 			}
 			baseFee[addr] = append(baseFee[addr], txn)
-		case proto_txpool.AllReply_QUEUED:
+		case txpoolproto.AllReply_QUEUED:
 			if _, ok := queued[addr]; !ok {
 				queued[addr] = make([]types.Transaction, 0, 4)
 			}
@@ -135,7 +135,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 }
 
 func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error) {
-	reply, err := api.pool.All(ctx, &proto_txpool.AllRequest{})
+	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -160,11 +160,11 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		}
 
 		switch reply.Txs[i].TxnType {
-		case proto_txpool.AllReply_PENDING:
+		case txpoolproto.AllReply_PENDING:
 			pending = append(pending, txn)
-		case proto_txpool.AllReply_BASE_FEE:
+		case txpoolproto.AllReply_BASE_FEE:
 			baseFee = append(baseFee, txn)
-		case proto_txpool.AllReply_QUEUED:
+		case txpoolproto.AllReply_QUEUED:
 			queued = append(queued, txn)
 		}
 	}
@@ -206,7 +206,7 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 
 // Status returns the number of pending and queued transaction in the pool.
 func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, error) {
-	reply, err := api.pool.Status(ctx, &proto_txpool.StatusRequest{})
+	reply, err := api.pool.Status(ctx, &txpoolproto.StatusRequest{})
 	if err != nil {
 		return nil, err
 	}

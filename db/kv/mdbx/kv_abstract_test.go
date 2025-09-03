@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -169,7 +169,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger))
+		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
@@ -181,7 +181,7 @@ func TestRemoteKvVersion(t *testing.T) {
 
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
 	require.NoError(t, err)
-	a, err := remotedb.NewRemote(v1, logger, remote.NewKVClient(cc)).Open()
+	a, err := remotedb.NewRemote(v1, logger, remoteproto.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -189,7 +189,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Minor versions
 	v2 := v
 	v2.Minor++
-	a, err = remotedb.NewRemote(v2, logger, remote.NewKVClient(cc)).Open()
+	a, err = remotedb.NewRemote(v2, logger, remoteproto.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -197,7 +197,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Patch versions
 	v3 := v
 	v3.Patch++
-	a, err = remotedb.NewRemote(v3, logger, remote.NewKVClient(cc)).Open()
+	a, err = remotedb.NewRemote(v3, logger, remoteproto.NewKVClient(cc)).Open()
 	require.NoError(t, err)
 	require.True(t, a.EnsureVersionCompatibility())
 }
@@ -211,7 +211,7 @@ func TestRemoteKvRange(t *testing.T) {
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
-		remote.RegisterKVServer(grpcServer, kvServer)
+		remoteproto.RegisterKVServer(grpcServer, kvServer)
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
@@ -219,7 +219,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
 	require.NoError(t, err)
-	db, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remote.NewKVClient(cc)).Open()
+	db, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteproto.NewKVClient(cc)).Open()
 	require.NoError(t, err)
 	require.True(t, db.EnsureVersionCompatibility())
 
@@ -344,7 +344,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 
 	grpcServer := grpc.NewServer()
 	f2 := func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDBs[1], nil, nil, nil, logger))
+		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDBs[1], nil, nil, nil, logger))
 		if err := grpcServer.Serve(conn); err != nil {
 			logger.Error("private RPC server fail", "err", err)
 		}
@@ -353,7 +353,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
 	require.NoError(t, err)
-	rdb, err := remotedb.NewRemote(v, logger, remote.NewKVClient(cc)).Open()
+	rdb, err := remotedb.NewRemote(v, logger, remoteproto.NewKVClient(cc)).Open()
 	require.NoError(t, err)
 	readDBs = []kv.RwDB{
 		writeDBs[0],

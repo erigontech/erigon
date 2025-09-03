@@ -22,7 +22,7 @@ import (
 	"slices"
 	"sync"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -53,7 +53,7 @@ type syncCommitteeMessagesService struct {
 
 type SyncCommitteeMessageForGossip struct {
 	SyncCommitteeMessage  *cltypes.SyncCommitteeMessage
-	Receiver              *sentinel.Peer
+	Receiver              *sentinelproto.Peer
 	ImmediateVerification bool
 }
 
