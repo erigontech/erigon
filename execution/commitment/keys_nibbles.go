@@ -128,8 +128,11 @@ func updatedNibs(num uint16) string {
 
 // hashes plainKey using keccakState and writes the hashed key nibbles to dest with respect to hashedKeyOffset.
 // Note that this function does not respect plainKey length so hashing it at once without splitting to account/storage part.
-func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int, hashBuf []byte) error {
+func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int) error {
+	var hashBufBack [length.Hash]byte
+	hashBuf := hashBufBack[:]
 	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
+
 	keccak.Reset()
 	if _, err := keccak.Write(plainKey); err != nil {
 		return err

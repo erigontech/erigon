@@ -138,9 +138,6 @@ type cell struct {
 	stateHashLen    int       // stateHash length, if > 0 can reuse
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
-
-	// temporary buffers
-	hashBuf [length.Hash]byte
 }
 
 type loadFlags uint8
@@ -186,11 +183,11 @@ var (
 )
 
 func (cell *cell) hashAccKey(keccak keccakState, depth int) error {
-	return hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, cell.hashBuf[:])
+	return hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth)
 }
 
 func (cell *cell) hashStorageKey(keccak keccakState, accountKeyLen, downOffset int, hashedKeyOffset int) error {
-	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, cell.hashBuf[:])
+	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset)
 }
 
 func (cell *cell) reset() {
@@ -736,7 +733,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
-		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], cell.hashedExtension[:], hashedKeyOffset, cell.hashBuf[:]); err != nil {
+		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], cell.hashedExtension[:], hashedKeyOffset); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
 		cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
@@ -803,8 +800,9 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			}
 		}
 	}
+
 	if cell.accountAddrLen > 0 {
-		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, cell.hashBuf[:]); err != nil {
+		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
 		cell.hashedExtension[64-depth] = terminatorHexByte // Add terminator

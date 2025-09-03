@@ -175,7 +175,7 @@ func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*cell, am uin
 	require.NoError(tb, err)
 	_, _ = tm, am
 
-	tb.Logf("%s", BranchData(enc).String())
+	//tb.Logf("%s", BranchData(enc).String())
 	//require.EqualValues(tb, tm, am)
 	//for i, c := range origins {
 	//	if c == nil {
