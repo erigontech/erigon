@@ -47,7 +47,7 @@ var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 //   - track which txNums state-changes was applied
 type ParallelExecutionState struct {
 	domains      *dbstate.SharedDomains
-	tx           kv.Tx
+	tx           kv.TemporalTx
 	triggerLock  sync.Mutex
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
@@ -63,7 +63,7 @@ type ParallelExecutionState struct {
 func NewParallelExecutionState(domains *dbstate.SharedDomains, tx kv.Tx, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
 		domains:      domains,
-		tx:           tx,
+		tx:           tx.(kv.TemporalTx),
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
@@ -634,7 +634,7 @@ type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
 	sd        *dbstate.SharedDomains
-	tx        kv.Tx
+	tx        kv.TemporalTx
 	composite []byte
 
 	discardReadList bool
