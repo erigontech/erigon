@@ -104,7 +104,7 @@ runs:
         echo '  deploy_op_succinct: false' >> params.yml
         echo 'args:' >> params.yml
         echo '  cdk_erigon_node_image: cdk-erigon-type1:local' >> params.yml
-        echo '  el-1-geth-lighthouse: ethpandaops/lighthouse@sha256:4902d9e4a6b6b8d4c136ea54f0e51582a32f356f3dec7194a1adee13ed2d662e' >> params.yml
+        echo '  cl_image: ethpandaops/lighthouse@sha256:4902d9e4a6b6b8d4c136ea54f0e51582a32f356f3dec7194a1adee13ed2d662e' >> params.yml
         echo '  consensus_contract_type: pessimistic' >> params.yml
         echo '  pp_vkey_hash: 0x00d6e4bdab9cac75a50d58262bb4e60b3107a6b61131ccdff649576c624b6fb7' >> params.yml
         echo '  agglayer_prover_primary_prover: mock-prover' >> params.yml
