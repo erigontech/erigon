@@ -168,7 +168,7 @@ var Tables = map[stages.SyncStage][]string{
 	stages.Finish:      {},
 }
 var stateBuckets = []string{
-	kv.Epoch, kv.PendingEpoch, kv.Code,
+	kv.Epoch, kv.PendingEpoch,
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,

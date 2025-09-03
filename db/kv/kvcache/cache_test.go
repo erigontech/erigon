@@ -474,7 +474,8 @@ func TestCode(t *testing.T) {
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		_ = tx.Put(kv.Code, k1[:], k2[:])
+		//todo: use kv.CodeDomain
+		//_ = tx.Put(kv.Code, k1[:], k2[:])
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)
 

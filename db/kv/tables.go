@@ -308,7 +308,6 @@ var (
 var ChaindataTables = []string{
 	E2AccountsHistory,
 	E2StorageHistory,
-	Code,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
