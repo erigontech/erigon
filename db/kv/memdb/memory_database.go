@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
@@ -32,7 +33,7 @@ func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
 }
 
 func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
-	return mdbx.New(kv.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	return mdbx.New(dbcfg.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 }
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
@@ -56,7 +57,7 @@ func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
 func NewTestPoolDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()
-	db := New(tb, tmpDir, kv.TxPoolDB)
+	db := New(tb, tmpDir, dbcfg.TxPoolDB)
 	tb.Cleanup(db.Close)
 	return db
 }
@@ -64,7 +65,7 @@ func NewTestPoolDB(tb testing.TB) kv.RwDB {
 func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()
-	db := New(tb, tmpDir, kv.DownloaderDB)
+	db := New(tb, tmpDir, dbcfg.DownloaderDB)
 	tb.Cleanup(db.Close)
 	return db
 }
@@ -72,7 +73,7 @@ func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
 func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tb.Helper()
 	tmpDir := tb.TempDir()
-	db := New(tb, tmpDir, kv.ChainDB)
+	db := New(tb, tmpDir, dbcfg.ChainDB)
 	tb.Cleanup(db.Close)
 	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
 	if err != nil {

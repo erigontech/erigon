@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -796,7 +797,7 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 	}
 	defer dir2.RemoveAll(dir)
 	var db kv.RwDB
-	db, err = kv2.New(kv.ChainDB, logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+	db, err = kv2.New(dbcfg.ChainDB, logger).Path(dir).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
 	}).Open(context.Background())
 	if err != nil {

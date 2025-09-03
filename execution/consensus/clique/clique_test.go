@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain/params"
@@ -49,7 +50,7 @@ import (
 func TestReimportMirroredState(t *testing.T) {
 	// Initialize a Clique chain with a single signer
 	var (
-		cliqueDB = memdb.NewTestDB(t, kv.ConsensusDB)
+		cliqueDB = memdb.NewTestDB(t, dbcfg.ConsensusDB)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
 		engine   = clique.New(chainspec.AllCliqueProtocolChanges, chainspec.CliqueSnapshot, cliqueDB, log.New())

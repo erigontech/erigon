@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
@@ -49,8 +50,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 			return
 		}
 	}
-	resultsKV := mdbx.New(kv.ChainDB, logger).Path(tmpDataDir).MustOpen()
-	gethKV := mdbx.New(kv.ChainDB, logger).Path(gethDataDir).MustOpen()
+	resultsKV := mdbx.New(dbcfg.ChainDB, logger).Path(tmpDataDir).MustOpen()
+	gethKV := mdbx.New(dbcfg.ChainDB, logger).Path(gethDataDir).MustOpen()
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,

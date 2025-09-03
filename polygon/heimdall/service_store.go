@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
@@ -37,7 +38,7 @@ type Store interface {
 }
 
 func NewMdbxStore(logger log.Logger, dataDir string, accede bool, roTxLimit int64) *MdbxStore {
-	return newMdbxStore(polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger, accede, roTxLimit))
+	return newMdbxStore(polygoncommon.NewDatabase(dataDir, dbcfg.HeimdallDB, databaseTablesCfg, logger, accede, roTxLimit))
 }
 
 func newMdbxStore(db *polygoncommon.Database) *MdbxStore {

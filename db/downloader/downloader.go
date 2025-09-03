@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
@@ -1218,7 +1219,7 @@ func openMdbx(
 	db kv.RwDB,
 	err error,
 ) {
-	dbCfg := mdbx.New(kv.DownloaderDB, log.New()).
+	dbCfg := mdbx.New(dbcfg.DownloaderDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).

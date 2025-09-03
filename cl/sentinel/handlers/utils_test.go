@@ -28,12 +28,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 func setupStore(t *testing.T) (freezeblocks.BeaconSnapshotReader, kv.RwDB) {
-	db := memdb.NewTestDB(t, kv.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	return tests.NewMockBlockReader(), db
 }
 

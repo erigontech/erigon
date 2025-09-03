@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -65,7 +66,7 @@ type txStore struct {
 }
 
 func NewMdbxStore(dataDir string, logger log.Logger, accede bool, roTxLimit int64) *MdbxStore {
-	return &MdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
+	return &MdbxStore{db: polygoncommon.NewDatabase(dataDir, dbcfg.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
 }
 
 func NewDbStore(db kv.RoDB) *MdbxStore {

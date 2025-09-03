@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -316,7 +317,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 			}
 		}()
 		// some users creating > 1Gb custome genesis by `erigon init`
-		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
+		genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
 		salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger)

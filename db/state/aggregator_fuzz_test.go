@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -245,7 +246,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregat
 	require := require.New(f)
 	dirs := datadir.New(f.TempDir())
 	logger := log.New()
-	db := mdbx.New(kv.ChainDB, logger).InMem(f, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(f, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
 	salt, err := GetStateIndicesSalt(dirs, true, logger)

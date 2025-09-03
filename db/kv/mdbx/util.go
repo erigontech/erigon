@@ -19,8 +19,9 @@ package mdbx
 import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 func MustOpen(path string) kv.RwDB {
-	return New(kv.ChainDB, log.New()).Path(path).MustOpen()
+	return New(dbcfg.ChainDB, log.New()).Path(path).MustOpen()
 }

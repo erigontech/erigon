@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -86,7 +87,7 @@ func Assemble(
 type poolDBInitializer func(ctx context.Context, cfg txpoolcfg.Config, logger log.Logger) (kv.RwDB, error)
 
 var defaultPoolDBInitializer = func(ctx context.Context, cfg txpoolcfg.Config, logger log.Logger) (kv.RwDB, error) {
-	opts := mdbx.New(kv.TxPoolDB, logger).
+	opts := mdbx.New(dbcfg.TxPoolDB, logger).
 		Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		WriteMergeThreshold(3 * 8192).

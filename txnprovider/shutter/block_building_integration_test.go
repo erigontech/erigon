@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -359,7 +359,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
 	bank.RegisterGenesisAlloc(genesis)
-	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
+	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), dbcfg.ChainDB, "", false, logger)
 	require.NoError(t, err)
 	_, gensisBlock, err := genesiswrite.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
 	require.NoError(t, err)

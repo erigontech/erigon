@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
@@ -25,7 +26,7 @@ func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 	ctx, cancel := context.WithCancel(t.Context())
 	logger := log.New()
 
-	db, err := mdbx.New(kv.HeimdallDB, logger).
+	db, err := mdbx.New(dbcfg.HeimdallDB, logger).
 		InMem(t, tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{kv.BorSpansIndex: {}} }).
 		MapSize(1 * datasize.GB).

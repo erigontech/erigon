@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -434,7 +435,7 @@ func TestClique(t *testing.T) {
 				Epoch:  tt.epoch,
 			}
 
-			cliqueDB := memdb.NewTestDB(t, kv.ConsensusDB)
+			cliqueDB := memdb.NewTestDB(t, dbcfg.ConsensusDB)
 
 			engine := clique.New(&config, chainspec.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true

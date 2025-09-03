@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/migrations"
@@ -293,13 +294,13 @@ func (n *Node) DataDir() string {
 
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
-	case kv.ChainDB:
+	case dbcfg.ChainDB:
 		name = "chaindata"
-	case kv.TxPoolDB:
+	case dbcfg.TxPoolDB:
 		name = "txpool"
-	case kv.PolygonBridgeDB:
+	case dbcfg.PolygonBridgeDB:
 		name = "polygon-bridge"
-	case kv.ConsensusDB:
+	case dbcfg.ConsensusDB:
 		if len(name) == 0 {
 			return nil, errors.New("expected a consensus name")
 		}
@@ -331,7 +332,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			Exclusive(exclusive)
 
 		switch label {
-		case kv.ChainDB:
+		case dbcfg.ChainDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
 			}
@@ -342,7 +343,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
-		case kv.ConsensusDB:
+		case dbcfg.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
 			}
@@ -365,7 +366,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		return nil, err
 	}
 
-	if label == kv.ChainDB {
+	if label == dbcfg.ChainDB {
 		migrator := migrations.NewMigrator(label)
 		if err := migrator.VerifyVersion(db, dbPath); err != nil {
 			return nil, err

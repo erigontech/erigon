@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -100,7 +101,7 @@ func TestBucketCRUD(t *testing.T) {
 func TestReadOnlyMode(t *testing.T) {
 	path := t.TempDir()
 	logger := log.New()
-	db1 := mdbx.New(kv.ChainDB, logger).Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db1 := mdbx.New(dbcfg.ChainDB, logger).Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.Headers: kv.TableCfgItem{},
 		}
@@ -108,7 +109,7 @@ func TestReadOnlyMode(t *testing.T) {
 	db1.Close()
 	time.Sleep(10 * time.Millisecond) // win sometime need time to close file
 
-	db2 := mdbx.New(kv.ChainDB, logger).Readonly(true).Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db2 := mdbx.New(dbcfg.ChainDB, logger).Readonly(true).Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.Headers: kv.TableCfgItem{},
 		}

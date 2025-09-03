@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -369,7 +370,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
-				return mdbx.New(kv.TxPoolDB, logger).InMem(tb, tmpdir).MustOpen(), nil
+				return mdbx.New(dbcfg.TxPoolDB, logger).InMem(tb, tmpdir).MustOpen(), nil
 			}),
 		)
 		if err != nil {

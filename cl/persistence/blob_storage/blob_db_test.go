@@ -28,11 +28,12 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
 func setupTestDB(t *testing.T) kv.RwDB {
-	db := memdb.NewTestDB(t, kv.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	return db
 }
 

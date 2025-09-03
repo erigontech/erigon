@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	datadir2 "github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -79,7 +80,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	dirs := datadir2.New(t.TempDir())
 	cfg := statecfg.Schema.AccountsDomain
 
-	db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 

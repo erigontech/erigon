@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
@@ -155,7 +156,7 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	stack, _ := New(context.Background(), testNodeConfig(t), logger)
 	defer stack.Close()
 
-	db, err := OpenDatabase(context.Background(), stack.Config(), kv.SentryDB, "", false, logger)
+	db, err := OpenDatabase(context.Background(), stack.Config(), dbcfg.SentryDB, "", false, logger)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
@@ -187,7 +188,7 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	var db kv.RwDB
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(context.Background(), stack.Config(), kv.SentryDB, "", false, logger)
+			db, err = OpenDatabase(context.Background(), stack.Config(), dbcfg.SentryDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -213,7 +214,7 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 
 	stack.RegisterLifecycle(&InstrumentedService{
 		stopHook: func() {
-			db, err := OpenDatabase(context.Background(), stack.Config(), kv.ChainDB, "", false, logger)
+			db, err := OpenDatabase(context.Background(), stack.Config(), dbcfg.ChainDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}

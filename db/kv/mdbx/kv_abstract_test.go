@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -164,7 +165,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	}
 	ctx := context.Background()
 	logger := log.New()
-	writeDB := mdbx.New(kv.ChainDB, logger).InMem(t, "").MustOpen()
+	writeDB := mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen()
 	defer writeDB.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -207,7 +208,7 @@ func TestRemoteKvRange(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	logger := log.New()
-	ctx, writeDB := context.Background(), memdb.NewTestDB(t, kv.ChainDB)
+	ctx, writeDB := context.Background(), memdb.NewTestDB(t, dbcfg.ChainDB)
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
@@ -336,8 +337,8 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	t.Helper()
 	ctx := context.Background()
 	writeDBs = []kv.RwDB{
-		mdbx.New(kv.ChainDB, logger).InMem(t, "").WithTableCfg(f).MustOpen(),
-		mdbx.New(kv.ChainDB, logger).InMem(t, "").WithTableCfg(f).MustOpen(), // for remote db
+		mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").WithTableCfg(f).MustOpen(),
+		mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").WithTableCfg(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)

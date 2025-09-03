@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -88,7 +88,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 
 	dirs := datadir.New(dataDir)
 
-	chainDB := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
