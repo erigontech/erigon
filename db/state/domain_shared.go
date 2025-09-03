@@ -174,6 +174,11 @@ func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint
 	return sd.mem.PutWithPrev(kv.CodeDomain, addr, code, txNum, prevCode, prevStep)
 }
 
+func (sd *SharedDomains) updateCommitmentData(prefix string, data []byte, txNum uint64, prev []byte, prevStep kv.Step) error {
+	sd.mem.DomainPut(kv.CommitmentDomain, prefix, data, txNum)
+	return sd.mem.PutWithPrev(kv.CommitmentDomain, toBytesZeroCopy(prefix), data, txNum, prev, prevStep)
+}
+
 func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, prev []byte, prevStep kv.Step) error {
 	addr := toBytesZeroCopy(addrS)
 	if err := sd.DomainDelPrefix(kv.StorageDomain, roTx, addr, txNum); err != nil {
@@ -192,6 +197,11 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, p
 func (sd *SharedDomains) writeAccountStorage(k string, v []byte, txNum uint64, preVal []byte, prevStep kv.Step) error {
 	sd.mem.DomainPut(kv.StorageDomain, k, v, txNum)
 	return sd.mem.PutWithPrev(kv.StorageDomain, toBytesZeroCopy(k), v, txNum, preVal, prevStep)
+}
+
+func (sd *SharedDomains) delAccountStorage(k string, txNum uint64, preVal []byte, prevStep kv.Step) error {
+	sd.mem.DomainPut(kv.StorageDomain, k, nil, txNum)
+	return sd.mem.PutWithPrev(kv.StorageDomain, toBytesZeroCopy(k), nil, txNum, preVal, prevStep)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
@@ -325,16 +335,22 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, nil)
 	switch domain {
+	case kv.AccountsDomain:
+		return sd.deleteAccount(tx, ks, txNum, prevVal, prevStep)
+	case kv.StorageDomain:
+		return sd.delAccountStorage(ks, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
+		return sd.updateAccountCode(ks, nil, txNum, prevVal, prevStep)
+	case kv.CommitmentDomain:
+		return sd.updateCommitmentData(ks, nil, txNum, prevVal, prevStep)
 	default:
 		//noop
+		sd.mem.DomainPut(domain, ks, nil, txNum)
+		return sd.mem.PutWithPrev(domain, k, nil, txNum, prevVal, prevStep)
 	}
-	sd.mem.DomainPut(domain, ks, nil, txNum)
-	return sd.mem.PutWithPrev(domain, k, nil, txNum, prevVal, prevStep)
-
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte, txNum uint64) error {
