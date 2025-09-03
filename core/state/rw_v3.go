@@ -18,7 +18,6 @@ package state
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -760,9 +759,9 @@ func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address) (int, err
 		return 0, err
 	}
 	if !r.discardReadList {
-		var sizebuf [8]byte
-		binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
-		r.readLists[dbstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
+		//var sizebuf [8]byte
+		//binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
+		//r.readLists[dbstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
 	if r.trace {

@@ -292,18 +292,15 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		sd.mem.DomainPut(domain, ks, v, txNum)
-		return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
 	case kv.StorageDomain, kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
-		sd.mem.DomainPut(domain, ks, v, txNum)
-		return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
+		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		sd.mem.DomainPut(domain, ks, v, txNum)
-		return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
 	}
+	sd.mem.DomainPut(domain, ks, v, txNum)
+	return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
 }
 
 // DomainDel
