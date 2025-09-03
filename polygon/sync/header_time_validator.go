@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var VeBlopBlockTimeout = 4 * time.Second            // timeout for waiting for a new span
-var VeBlopLongBlockTimeout = 2 * VeBlopBlockTimeout // longer timeout for waiting for a new span
-var DefaultRecentHeadersCapacity uint64 = 4096      // capacity of recent headers TTL cache
+var VeBlopNewSpanTimeout = 8 * time.Second     // timeout for waiting for a new span
+var VeBlopBlockTimeout = 4 * time.Second       // time for a block to be considered late
+var DefaultRecentHeadersCapacity uint64 = 4096 // capacity of recent headers TTL cache
 
 type HeaderTimeValidator struct {
 	borConfig             *borcfg.BorConfig
@@ -116,11 +116,7 @@ func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, paren
 	// the current producer has published a block, but it came too late (i.e. the parent has been evicted from the ttl cache)
 	if author == producer && producer == parentAuthor && !htv.recentVerifiedHeaders.Has(header.ParentHash) {
 		htv.logger.Info("[span-rotation] need to wait for span rotation due to longer than expected block time from current producer", "blockNum", headerNum, "parentHeader", header.ParentHash, "author", author)
-		return true, VeBlopLongBlockTimeout, nil
-	} else if author != parentAuthor && author != producer { // new author but not matching the producer for this block
-		htv.logger.Info("[span-rotation] need to wait for span rotation because the new author does not match the producer from current producer selection",
-			"blockNum", headerNum, "author", author, "producer", producer, "parentAuthor", parentAuthor)
-		return true, VeBlopBlockTimeout, nil // this situation has a shorter delay because non-producers could inundate the node with invalid headers signed by them
+		return true, VeBlopNewSpanTimeout, nil
 	}
 	return false, 0, nil
 

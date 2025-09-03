@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -152,9 +153,6 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	}
 
 	blockNum := newTip.Number.Uint64()
-	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
-		return err
-	}
 
 	age := common.PrettyAge(time.Unix(int64(newTip.Time), 0))
 	s.logger.Info(syncLogPrefix("update fork choice"), "block", blockNum, "hash", newTip.Hash(), "age", age)
@@ -290,6 +288,13 @@ func (s *Sync) applyNewBlockChainOnTip(ctx context.Context, blockChain []*types.
 	for i, block := range blockChain {
 		headerChain[i] = block.HeaderNoCopy()
 	}
+
+	// make sure spans are synchronized
+	// math.MaxUint64 is used because post VeBlop/Rio hard fork
+	// spans could be overlapping, and the blocknum for the tip
+	// of the headerChain might still be in the range of the last span
+	// in the store, but we may still be processing a new span in the meantime
+	s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64)
 
 	oldTip := ccb.Tip()
 	newConnectedHeaders, err := ccb.Connect(ctx, headerChain)
