@@ -280,7 +280,11 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 			if b.borConfig.OverrideStateSyncRecords != nil {
 				if eventLimit, ok := b.borConfig.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
-					endID = startID + uint64(eventLimit)
+					if eventLimit == 0 {
+						continue
+					}
+
+					endID = startID + uint64(eventLimit) - 1
 				}
 			}
 			blockNumToEventId[blockNum] = endID
