@@ -1166,7 +1166,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			// Post Rio/VeBlop spans won't be commited to smart contract
+			// Post Rio/VeBlop spans won't be committed to smart contract
 			if !c.config.IsRio(header.Number.Uint64()) {
 				// check and commit span
 				if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
