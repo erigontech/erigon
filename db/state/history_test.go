@@ -51,7 +51,7 @@ import (
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
 	tb.Cleanup(db.Close)
 
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
