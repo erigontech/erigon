@@ -374,7 +374,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
 	}
 	{ // delete marker is in DB
-		_, err = domains.ComputeCommitment(ctx, true, txNum/2, txNum, "")
+		_, err = domains.ComputeCommitment(ctx, true, txNum/2, txNum, "", nil)
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)
@@ -424,7 +424,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
 	}
 	{ // flush delete/updates to DB
-		_, err = domains.ComputeCommitment(ctx, true, txNum/2, txNum, "")
+		_, err = domains.ComputeCommitment(ctx, true, txNum/2, txNum, "", nil)
 		require.NoError(err)
 		err = domains.Flush(ctx, rwTx)
 		require.NoError(err)

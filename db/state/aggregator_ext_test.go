@@ -360,7 +360,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	}
 
 	// 3. calculate commitment with all data +removed key
-	expectedHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "")
+	expectedHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 	domains.Close()
 
@@ -388,7 +388,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
 	require.NoError(t, err)
 
-	resultHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "")
+	resultHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 
 	t.Logf("result hash: %x", resultHash)
@@ -445,7 +445,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
+			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "", nil)
 			require.NoError(t, err)
 		}
 
@@ -521,7 +521,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *state.SharedDomains, tx
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "")
+			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			t.Logf("commitment %x txn=%d", rh, txNum)
 		}

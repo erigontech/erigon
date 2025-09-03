@@ -17,7 +17,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -471,7 +472,9 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	t.Helper()
 
-	rawDb := memdb.NewStateDB("")
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+
 	defer rawDb.Close()
 
 	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, logger)
@@ -586,8 +589,8 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 
 	logger := log.Root()
 
-	rawDb := memdb.NewStateDB("")
-	defer rawDb.Close()
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 
 	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, log.New())
 	assert.NoError(t, err)
