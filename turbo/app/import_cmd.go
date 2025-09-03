@@ -30,7 +30,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -289,7 +289,7 @@ func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Lo
 		rawdb.WriteHeadBlockHash(tx, lvh)
 		return nil
 	})
-	if status != execution.ExecutionStatus_Success {
+	if status != executionproto.ExecutionStatus_Success {
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 

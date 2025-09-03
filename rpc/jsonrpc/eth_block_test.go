@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -87,8 +87,8 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, m.Log)
+	txPool := txpoolproto.NewTxpoolClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log)
 
 	expected := 1
 	header := &types.Header{
@@ -99,7 +99,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed encoding the block: %s", err)
 	}
-	ff.HandlePendingBlock(&txpool.OnPendingBlockReply{
+	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{
 		RplBlock: rlpBlock,
 	})
 

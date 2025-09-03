@@ -20,62 +20,63 @@ import (
 	"context"
 	"io"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"google.golang.org/grpc"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 )
 
 type SentinelClientDirect struct {
-	server sentinel.SentinelServer
+	server sentinelproto.SentinelServer
 }
 
-func NewSentinelClientDirect(sentinel sentinel.SentinelServer) sentinel.SentinelClient {
+func NewSentinelClientDirect(sentinel sentinelproto.SentinelServer) sentinelproto.SentinelClient {
 	return &SentinelClientDirect{server: sentinel}
 }
 
-func (s *SentinelClientDirect) SendRequest(ctx context.Context, in *sentinel.RequestData, opts ...grpc.CallOption) (*sentinel.ResponseData, error) {
+func (s *SentinelClientDirect) SendRequest(ctx context.Context, in *sentinelproto.RequestData, opts ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	return s.server.SendRequest(ctx, in)
 }
 
-func (s *SentinelClientDirect) SendPeerRequest(ctx context.Context, in *sentinel.RequestDataWithPeer, opts ...grpc.CallOption) (*sentinel.ResponseData, error) {
+func (s *SentinelClientDirect) SendPeerRequest(ctx context.Context, in *sentinelproto.RequestDataWithPeer, opts ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	return s.server.SendPeerRequest(ctx, in)
 }
 
-func (s *SentinelClientDirect) SetStatus(ctx context.Context, in *sentinel.Status, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+func (s *SentinelClientDirect) SetStatus(ctx context.Context, in *sentinelproto.Status, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.SetStatus(ctx, in)
 }
 
-func (s *SentinelClientDirect) GetPeers(ctx context.Context, in *sentinel.EmptyMessage, opts ...grpc.CallOption) (*sentinel.PeerCount, error) {
+func (s *SentinelClientDirect) GetPeers(ctx context.Context, in *sentinelproto.EmptyMessage, opts ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
 	return s.server.GetPeers(ctx, in)
 }
 
-func (s *SentinelClientDirect) BanPeer(ctx context.Context, p *sentinel.Peer, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+func (s *SentinelClientDirect) BanPeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.BanPeer(ctx, p)
 }
-func (s *SentinelClientDirect) UnbanPeer(ctx context.Context, p *sentinel.Peer, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+func (s *SentinelClientDirect) UnbanPeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.UnbanPeer(ctx, p)
 }
-func (s *SentinelClientDirect) RewardPeer(ctx context.Context, p *sentinel.Peer, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+func (s *SentinelClientDirect) RewardPeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.RewardPeer(ctx, p)
 }
-func (s *SentinelClientDirect) PenalizePeer(ctx context.Context, p *sentinel.Peer, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+func (s *SentinelClientDirect) PenalizePeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.PenalizePeer(ctx, p)
 }
 
-func (s *SentinelClientDirect) PublishGossip(ctx context.Context, in *sentinel.GossipData, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+func (s *SentinelClientDirect) PublishGossip(ctx context.Context, in *sentinelproto.GossipData, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.PublishGossip(ctx, in)
 }
 
-func (s *SentinelClientDirect) Identity(ctx context.Context, in *sentinel.EmptyMessage, opts ...grpc.CallOption) (*sentinel.IdentityResponse, error) {
+func (s *SentinelClientDirect) Identity(ctx context.Context, in *sentinelproto.EmptyMessage, opts ...grpc.CallOption) (*sentinelproto.IdentityResponse, error) {
 	return s.server.Identity(ctx, in)
 }
 
-func (s *SentinelClientDirect) PeersInfo(ctx context.Context, in *sentinel.PeersInfoRequest, opts ...grpc.CallOption) (*sentinel.PeersInfoResponse, error) {
+func (s *SentinelClientDirect) PeersInfo(ctx context.Context, in *sentinelproto.PeersInfoRequest, opts ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
 	return s.server.PeersInfo(ctx, in)
 }
 
 // Subscribe gossip part. the only complex section of this bullshit
 
-func (s *SentinelClientDirect) SubscribeGossip(ctx context.Context, in *sentinel.SubscriptionData, opts ...grpc.CallOption) (sentinel.Sentinel_SubscribeGossipClient, error) {
+func (s *SentinelClientDirect) SubscribeGossip(ctx context.Context, in *sentinelproto.SubscriptionData, opts ...grpc.CallOption) (sentinelproto.Sentinel_SubscribeGossipClient, error) {
 	ch := make(chan *gossipReply, 1<<16)
 	streamServer := &SentinelSubscribeGossipS{ch: ch, ctx: ctx}
 	go func() {
@@ -85,7 +86,7 @@ func (s *SentinelClientDirect) SubscribeGossip(ctx context.Context, in *sentinel
 	return &SentinelSubscribeGossipC{ch: ch, ctx: ctx}, nil
 }
 
-func (s *SentinelClientDirect) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinel.RequestSubscribeExpiry, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+func (s *SentinelClientDirect) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.SetSubscribeExpiry(ctx, expiryReq)
 }
 
@@ -95,7 +96,7 @@ type SentinelSubscribeGossipC struct {
 	grpc.ClientStream
 }
 
-func (c *SentinelSubscribeGossipC) Recv() (*sentinel.GossipData, error) {
+func (c *SentinelSubscribeGossipC) Recv() (*sentinelproto.GossipData, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
@@ -111,11 +112,11 @@ type SentinelSubscribeGossipS struct {
 }
 
 type gossipReply struct {
-	r   *sentinel.GossipData
+	r   *sentinelproto.GossipData
 	err error
 }
 
-func (s *SentinelSubscribeGossipS) Send(m *sentinel.GossipData) error {
+func (s *SentinelSubscribeGossipS) Send(m *sentinelproto.GossipData) error {
 	s.ch <- &gossipReply{r: m}
 	return nil
 }

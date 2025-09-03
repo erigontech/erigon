@@ -24,18 +24,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/anacrolix/torrent/metainfo"
-
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
-	_ proto_downloader.DownloaderServer = &GrpcServer{}
+	_ downloaderproto.DownloaderServer = &GrpcServer{}
 )
 
 func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
@@ -47,11 +46,11 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 }
 
 type GrpcServer struct {
-	proto_downloader.UnimplementedDownloaderServer
+	downloaderproto.UnimplementedDownloaderServer
 	d *Downloader
 }
 
-func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
+func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *downloaderproto.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
 	return &emptypb.Empty{}, nil
 }
 
@@ -59,7 +58,7 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 // "download once" invariant: means after initial download finiwh - future restart/upgrade/downgrade will not download files (our "fast restart" feature)
 // After "download once": Erigon will produce and seed new files
 // Downloader will be able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
+func (s *GrpcServer) Add(ctx context.Context, request *downloaderproto.AddRequest) (*emptypb.Empty, error) {
 	if len(request.Items) == 0 {
 		// Avoid logging initializing 0 torrents.
 		return nil, nil
@@ -131,7 +130,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 }
 
 // Delete - stop seeding, remove file, remove .torrent
-func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (_ *emptypb.Empty, err error) {
+func (s *GrpcServer) Delete(ctx context.Context, request *downloaderproto.DeleteRequest) (_ *emptypb.Empty, err error) {
 	{
 		var names []string
 		for _, relPath := range request.Paths {
@@ -156,16 +155,16 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 	return
 }
 
-func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
+func Proto2InfoHash(in *typesproto.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }
 
-func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {
+func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *downloaderproto.SetLogPrefixRequest) (*emptypb.Empty, error) {
 	s.d.SetLogPrefix(request.Prefix)
 
 	return &emptypb.Empty{}, nil
 }
 
-func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.CompletedRequest) (*proto_downloader.CompletedReply, error) {
-	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
+func (s *GrpcServer) Completed(ctx context.Context, request *downloaderproto.CompletedRequest) (*downloaderproto.CompletedReply, error) {
+	return &downloaderproto.CompletedReply{Completed: s.d.Completed()}, nil
 }

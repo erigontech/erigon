@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -153,12 +153,12 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client  remote.BridgeBackendClient
+	client  remoteproto.BridgeBackendClient
 	logger  log.Logger
 	version gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
+func NewRemoteReader(client remoteproto.BridgeBackendClient) *RemoteReader {
 	return &RemoteReader{
 		client:  client,
 		logger:  log.New("remote_service", "bridge"),
@@ -167,7 +167,7 @@ func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
 }
 
 func (r *RemoteReader) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{
+	reply, err := r.client.BorEvents(ctx, &remoteproto.BorEventsRequest{
 		BlockNum:  blockNum,
 		BlockHash: gointerfaces.ConvertHashToH256(blockHash)})
 	if err != nil {
@@ -187,7 +187,7 @@ func (r *RemoteReader) Events(ctx context.Context, blockHash common.Hash, blockN
 }
 
 func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
-	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
+	reply, err := r.client.BorTxnLookup(ctx, &remoteproto.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
 	if err != nil {
 		return 0, false, err
 	}

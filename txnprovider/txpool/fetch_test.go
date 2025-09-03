@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -45,7 +45,7 @@ func TestFetch(t *testing.T) {
 	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
-	remoteKvClient := remote.NewMockKVClient(ctrl)
+	remoteKvClient := remoteproto.NewMockKVClient(ctrl)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(true)
@@ -230,18 +230,18 @@ func TestOnNewBlock(t *testing.T) {
 	_, db := memdb.NewTestDB(t, kv.ChainDB), memdb.NewTestDB(t, kv.TxPoolDB)
 	ctrl := gomock.NewController(t)
 
-	stream := remote.NewMockKV_StateChangesClient[*remote.StateChangeBatch](ctrl)
+	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
 	i := 0
 	stream.EXPECT().
 		Recv().
-		DoAndReturn(func() (*remote.StateChangeBatch, error) {
+		DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
 			if i > 0 {
 				return nil, io.EOF
 			}
 			i++
-			return &remote.StateChangeBatch{
+			return &remoteproto.StateChangeBatch{
 				StateVersionId: 1,
-				ChangeBatch: []*remote.StateChange{
+				ChangeBatch: []*remoteproto.StateChange{
 					{
 						Txs: [][]byte{
 							decodeHex(TxnParseMainnetTests[0].PayloadStr),
@@ -256,11 +256,11 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		AnyTimes()
 
-	stateChanges := remote.NewMockKVClient(ctrl)
+	stateChanges := remoteproto.NewMockKVClient(ctrl)
 	stateChanges.
 		EXPECT().
 		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remote.StateChangeRequest, _ ...grpc.CallOption) (remote.KV_StateChangesClient, error) {
+		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
 			return stream, nil
 		})
 
@@ -276,7 +276,7 @@ func TestOnNewBlock(t *testing.T) {
 	var minedTxns TxnSlots
 	pool.EXPECT().
 		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ TxnSlots, _ TxnSlots, minedTxnsArg TxnSlots) error {
+		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeBatch, _ TxnSlots, _ TxnSlots, minedTxnsArg TxnSlots) error {
 			minedTxns = minedTxnsArg
 			return nil
 		}).
