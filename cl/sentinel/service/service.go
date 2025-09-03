@@ -88,6 +88,7 @@ func extractSubnetIndexByGossipTopic(name string) int {
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
 	active, _, _ := s.sentinel.GetPeersCount()
 	if active < gracePeerCount {
+		fmt.Println("Not banning peer, we have only", active, "active peers")
 		return &sentinelrpc.EmptyMessage{}, nil
 	}
 
