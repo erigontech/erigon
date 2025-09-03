@@ -282,7 +282,13 @@ Loop:
 		}
 
 		if to > s.BlockNumber {
-			if err := u.UnwindTo(minBlockNum-1, BadBlock(minBlockHash, minBlockErr), tx); err != nil {
+			var unwindReason UnwindReason
+			if errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
+				unwindReason = BadBlock(minBlockHash, minBlockErr)
+			} else {
+				unwindReason = OperationalErr(err)
+			}
+			if err := u.UnwindTo(minBlockNum-1, unwindReason, tx); err != nil {
 				return err
 			}
 		}
