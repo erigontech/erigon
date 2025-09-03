@@ -377,8 +377,8 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 
 // DiscardWrites disables updates collection for further flushing into db.
 // Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
-// Deprecated - need convert to Constructor-Builder configuration
 func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
+	// TODO: Deprecated - need convert this method to Constructor-Builder configuration
 	if d >= kv.DomainLen {
 		return
 	}
