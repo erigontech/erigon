@@ -153,6 +153,9 @@ Loop:
 					return
 				}
 				fmt.Println("Received responses:", responses)
+				if len(responses) > 0 {
+					fmt.Println("startSlot", responses[0].Block.Slot, "endSlot", responses[len(responses)-1].Block.Slot)
+				}
 				atomicResp.Store(responses)
 			}()
 		case <-ctx.Done():
