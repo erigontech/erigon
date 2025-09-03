@@ -163,6 +163,8 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 	return sd.mem.SizeEstimate()
 }
 
+const CodeSizeTableFake = "CodeSize"
+
 func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
 	addr := toBytesZeroCopy(addrS)
 	sd.mem.DomainPut(kv.CodeDomain, addrS, code, txNum)
