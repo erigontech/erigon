@@ -37,13 +37,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/turbo/debug"
-	turboNode "github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -78,11 +77,11 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, nil, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, nil, logger)
 	if err != nil {
 		return err
 	}
-	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
@@ -231,24 +230,8 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, setHead bool) error {
-	return insertChain(ethereum, chain, setHead)
-}
-
-func insertChain(ethereum *eth.Ethereum, chain *core.ChainPack, setHead bool) error {
-	posBlockStart := 0
-	for i, b := range chain.Blocks {
-		if b.Header().Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
-			posBlockStart = i
-			break
-		}
-	}
-
-	if posBlockStart == chain.Length() {
-		return nil
-	}
-
-	for i := posBlockStart; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(true); err != nil {
+	for _, block := range chain.Blocks {
+		if err := block.HashCheck(true); err != nil {
 			return err
 		}
 	}
