@@ -298,14 +298,13 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 
 	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
-	case kv.StorageDomain:
-		return sd.writeAccountStorage(ks, v, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		return sd.updateAccountCode(ks, v, txNum, prevVal, prevStep)
-	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
+		sd.mem.DomainPut(domain, ks, v, txNum)
+		return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
+	case kv.StorageDomain, kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
 		sd.mem.DomainPut(domain, ks, v, txNum)
 		return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
 	default:
@@ -342,9 +341,11 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 		if prevVal == nil {
 			return nil
 		}
-		return sd.updateAccountCode(ks, nil, txNum, prevVal, prevStep)
+		sd.mem.DomainPut(kv.CodeDomain, ks, nil, txNum)
+		return sd.mem.PutWithPrev(kv.CodeDomain, k, nil, txNum, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(ks, nil, txNum, prevVal, prevStep)
+		sd.mem.DomainPut(kv.CommitmentDomain, ks, nil, txNum)
+		return sd.mem.PutWithPrev(kv.CommitmentDomain, k, nil, txNum, prevVal, prevStep)
 	default:
 		sd.mem.DomainPut(domain, ks, nil, txNum)
 		return sd.mem.PutWithPrev(domain, k, nil, txNum, prevVal, prevStep)
