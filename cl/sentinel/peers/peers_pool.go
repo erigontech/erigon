@@ -28,8 +28,14 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+type PeeredObject[T any] struct {
+	Peer string
+	Data T
+}
+
 var (
-	ErrNoPeers = errors.New("no peers")
+	MaxBadResponses = 50
+	ErrNoPeers      = errors.New("no peers")
 )
 
 // Item is an item in the pool
