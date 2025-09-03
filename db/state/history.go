@@ -353,10 +353,6 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	if w.discard {
 		return nil
 	}
-	if !w.lazyInit {
-		w.lazyInit = true
-		w.init()
-	}
 
 	if original == nil {
 		original = []byte{}
@@ -413,7 +409,6 @@ func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
 }
 
 type historyBufferedWriter struct {
-	lazyInit         bool
 	historyVals      *etl.Collector
 	historyKey       []byte
 	discard          bool
@@ -450,26 +445,24 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
-	if discard {
-		return w
+	if !discard {
+		w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
 
 func (w *historyBufferedWriter) init() {
-	w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", w.ii.tmpdir, etl.SmallSortableBuffers, w.ii.logger).LogLvl(log.LvlTrace)
-	w.historyVals.SortAndFlushInBackground(true)
-	w.ii.init()
+
 }
 
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
-	if w.discard || !w.lazyInit {
+	if w.discard {
 		return nil
 	}
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-
 	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}

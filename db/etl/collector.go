@@ -83,7 +83,10 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Lo
 	return &Collector{bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 }
 
-func (c *Collector) SortAndFlushInBackground(v bool) { c.sortAndFlushInBackground = v }
+func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
+	c.sortAndFlushInBackground = v
+	return c
+}
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
