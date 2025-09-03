@@ -925,33 +925,34 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	if chainTipMode {
-		var sendersProgress, execProgress uint64
-		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-			var err error
-			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-				return err
-			}
-			if execProgress == 0 {
-				doms, err := dbstate.NewSharedDomains(tx, log.New())
-				if err != nil {
-					panic(err)
-				}
-				execProgress = doms.BlockNum()
-				doms.Close()
-			}
-
-			if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
+	var sendersProgress, execProgress uint64
+	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		var err error
+		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
-		if block == 0 {
-			block = sendersProgress
+		if execProgress == 0 {
+			doms, err := dbstate.NewSharedDomains(tx, log.New())
+			if err != nil {
+				panic(err)
+			}
+			execProgress = doms.BlockNum()
+			doms.Close()
 		}
 
+		if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if block == 0 {
+		block = sendersProgress
+	}
+
+	if chainTipMode {
 		if noCommit {
 			tx, err := db.BeginTemporalRw(ctx)
 			if err != nil {
@@ -980,11 +981,16 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
-		return err
+	for {
+		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
+			var errExhausted *stagedsync.ErrLoopExhausted
+			if errors.As(err, &errExhausted) {
+				continue // has more blocks to exec
+			}
+			return err // fail
+		}
+		return nil // Exec finished
 	}
-
-	return nil
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {

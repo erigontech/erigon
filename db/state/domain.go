@@ -397,9 +397,11 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
-		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace),
 	}
-	w.values.SortAndFlushInBackground(true)
+	if !discard {
+		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+	}
 	return w
 }
 
@@ -970,7 +972,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(stepFrom, stepTo))
+		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(stepFrom, stepTo))
 		if err != nil {
 			return StaticFiles{}, err
 		}
@@ -1072,7 +1074,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(step, step+1))
+		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
 		if err != nil {
 			return StaticFiles{}, err
 		}
