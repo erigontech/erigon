@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -71,8 +71,8 @@ type EngineServer struct {
 	consuming        atomic.Bool
 	test             bool
 	caplin           bool // we need to send errors for caplin.
-	executionService execution.ExecutionClient
-	txpool           txpool.TxpoolClient // needed for getBlobs
+	executionService executionproto.ExecutionClient
+	txpool           txpoolproto.TxpoolClient // needed for getBlobs
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -85,7 +85,7 @@ type EngineServer struct {
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
-func NewEngineServer(logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
+func NewEngineServer(logger log.Logger, config *chain.Config, executionService executionproto.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
@@ -116,8 +116,8 @@ func (e *EngineServer) Start(
 	stateCache kvcache.Cache,
 	engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend,
-	txPool txpool.TxpoolClient,
-	mining txpool.MiningClient,
+	txPool txpoolproto.TxpoolClient,
+	mining txpoolproto.MiningClient,
 ) {
 	if !e.caplin {
 		e.engineLogSpamer.Start(ctx)
@@ -304,13 +304,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		checkMaxBlobsPerTxn := version >= clparams.FuluVersion
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions, checkMaxBlobsPerTxn)
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
-		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) || errors.Is(err, ethutils.ErrTooManyBlobs) {
-			bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
+		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) {
+			bad, latestValidHash := s.blockDownloader.IsBadHeader(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
@@ -425,7 +424,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
 		s.logger.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
-		s.hd.ReportBadHeaderPoS(blockHash, parent.Hash())
+		s.blockDownloader.ReportBadHeader(blockHash, parent.Hash())
 		parentHash := parent.Hash()
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -434,17 +433,17 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}, nil
 	}
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
-	bad, lastValidHash := s.hd.IsBadHeaderPoS(blockHash)
+	bad, lastValidHash := s.blockDownloader.IsBadHeader(blockHash)
 	if bad {
 		s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
 	} else if newPayload {
-		bad, lastValidHash = s.hd.IsBadHeaderPoS(parentHash)
+		bad, lastValidHash = s.blockDownloader.IsBadHeader(parentHash)
 		if bad {
 			s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
 		}
 	}
 	if bad {
-		s.hd.ReportBadHeaderPoS(blockHash, lastValidHash)
+		s.blockDownloader.ReportBadHeader(blockHash, lastValidHash)
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString("previously known bad block")}, nil
 	}
 
@@ -509,7 +508,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.logger.Debug("[GetPayload] lock acquired")
-	resp, err := s.executionService.GetAssembledBlock(ctx, &execution.GetAssembledBlockRequest{
+	resp, err := s.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
 		Id: payloadId,
 	})
 	if err != nil {
@@ -639,7 +638,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
-	req := &execution.AssembleBlockRequest{
+	req := &executionproto.AssembleBlockRequest{
 		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
 		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
@@ -654,7 +653,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
 	}
 
-	var resp *execution.AssembleBlockResponse
+	var resp *executionproto.AssembleBlockResponse
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
 	execBusy, err := waitForStuff(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
@@ -814,7 +813,7 @@ func (e *EngineServer) HandleNewPayload(
 				return nil, err
 			}
 
-			if status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
+			if status == executionproto.ExecutionStatus_Busy || status == executionproto.ExecutionStatus_TooFarAway {
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			} else {
@@ -857,8 +856,8 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
-	if status == execution.ExecutionStatus_BadBlock {
-		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+	if status == executionproto.ExecutionStatus_BadBlock {
+		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash)
 	}
 
 	resp := &engine_types.PayloadStatus{
@@ -872,17 +871,17 @@ func (e *EngineServer) HandleNewPayload(
 	return resp, nil
 }
 
-func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_types.EngineStatus {
+func convertGrpcStatusToEngineStatus(status executionproto.ExecutionStatus) engine_types.EngineStatus {
 	switch status {
-	case execution.ExecutionStatus_Success:
+	case executionproto.ExecutionStatus_Success:
 		return engine_types.ValidStatus
-	case execution.ExecutionStatus_MissingSegment:
+	case executionproto.ExecutionStatus_MissingSegment:
 		return engine_types.AcceptedStatus
-	case execution.ExecutionStatus_TooFarAway:
+	case executionproto.ExecutionStatus_TooFarAway:
 		return engine_types.AcceptedStatus
-	case execution.ExecutionStatus_BadBlock:
+	case executionproto.ExecutionStatus_BadBlock:
 		return engine_types.InvalidStatus
-	case execution.ExecutionStatus_Busy:
+	case executionproto.ExecutionStatus_Busy:
 		return engine_types.SyncingStatus
 	}
 	panic("giulio u stupid.")
@@ -929,13 +928,13 @@ func (e *EngineServer) HandlesForkChoice(
 	if err != nil {
 		return nil, err
 	}
-	if status == execution.ExecutionStatus_InvalidForkchoice {
+	if status == executionproto.ExecutionStatus_InvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
 	}
-	if status == execution.ExecutionStatus_Busy {
+	if status == executionproto.ExecutionStatus_Busy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
-	if status == execution.ExecutionStatus_BadBlock {
+	if status == executionproto.ExecutionStatus_BadBlock {
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("Invalid chain after execution")}, nil
 	}
 	payloadStatus := &engine_types.PayloadStatus{
@@ -957,7 +956,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
-	req := &txpool.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
+	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
 	for i := range blobHashes {
 		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(blobHashes[i])
 	}
@@ -967,40 +966,46 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 	logLine := []string{}
 
+	if len(blobHashes) != len(res.BlobsWithProofs) {
+		log.Warn("[GetBlobs] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+		return nil, nil
+	}
+
 	if version == clparams.FuluVersion {
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
-		if len(blobHashes) != len(res.Blobs) || len(blobHashes)*int(params.CellsPerExtBlob) != len(res.Proofs) {
-			log.Warn("[GetBlobsV2] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
-			return nil, nil
-		}
-		for i := range res.Blobs {
-			if res.Blobs[i] == nil {
-				// We return a "null" response
+		for i, bwp := range res.BlobsWithProofs {
+			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
+			if len(bwp.Blob) == 0 {
+				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
 				ret = nil
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil, returning nil")
+				logLine = append(logLine, logHead, "nil")
+				break
+			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
+				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
+				ret = nil
+				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
 				break
 			} else {
-				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				ret[i] = &engine_types.BlobAndProofV2{Blob: bwp.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
-					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob)+int(c)]
+					ret[i].CellProofs[c] = bwp.Proofs[c]
 				}
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(cellProofs)=%d ", blobHashes[i], len(res.Blobs[i]), len(ret[i].CellProofs)))
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bwp.Blob)))
 			}
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
 		return ret, nil
 	} else if version == clparams.CapellaVersion {
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
-		if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
-			log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
-			return ret, nil
-		}
-		for i := range res.Blobs {
-			if res.Blobs[i] != nil {
-				ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
+		for i, bwp := range res.BlobsWithProofs {
+			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
+			if len(bwp.Blob) == 0 {
+				logLine = append(logLine, logHead, "nil")
+			} else if len(bwp.Proofs) != 1 {
+				logLine = append(logLine, logHead, fmt.Sprintf("post-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
 			} else {
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+				ret[i] = &engine_types.BlobAndProofV1{Blob: bwp.Blob, Proof: bwp.Proofs[0]}
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d len(proof)=%d ", len(bwp.Blob), len(bwp.Proofs[0])))
 			}
 		}
 		e.logger.Debug("[GetBlobsV1]", "Responses", logLine)

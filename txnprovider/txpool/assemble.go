@@ -22,7 +22,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -41,7 +41,7 @@ func Assemble(
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
 	logger log.Logger,
-	ethBackend remote.ETHBACKENDClient,
+	ethBackend remoteproto.ETHBACKENDClient,
 	opts ...Option,
 ) (*TxPool, txpoolproto.TxpoolServer, error) {
 	options := applyOpts(opts...)

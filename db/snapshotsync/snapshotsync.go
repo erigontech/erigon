@@ -27,7 +27,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
@@ -100,19 +100,19 @@ func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
 	return DownloadRequest{Path: path, TorrentHash: torrentHash}
 }
 
-func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddRequest {
-	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
+func BuildProtoRequest(downloadRequest []DownloadRequest) *downloaderproto.AddRequest {
+	req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
 			continue
 		}
 		if r.TorrentHash != "" {
-			req.Items = append(req.Items, &proto_downloader.AddItem{
+			req.Items = append(req.Items, &downloaderproto.AddItem{
 				TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
 				Path:        r.Path,
 			})
 		} else {
-			req.Items = append(req.Items, &proto_downloader.AddItem{
+			req.Items = append(req.Items, &downloaderproto.AddItem{
 				Path: r.Path,
 			})
 		}
@@ -124,10 +124,10 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddR
 func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []DownloadRequest,
-	downloader proto_downloader.DownloaderClient,
+	downloader downloaderproto.DownloaderClient,
 	logPrefix string,
 ) error {
-	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
+	preq := &downloaderproto.SetLogPrefixRequest{Prefix: logPrefix}
 	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
@@ -354,7 +354,7 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader proto_downloader.DownloaderClient,
+	snapshotDownloader downloaderproto.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
@@ -399,6 +399,29 @@ func SyncSnapshots(
 			blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
+			}
+		}
+
+		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
+		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		if !headerchain && toBlock > 0 {
+			toTxNum, err := txNumsReader.Min(tx, syncCfg.SnapshotDownloadToBlock)
+			if err != nil {
+				return err
+			}
+			toStep = toTxNum / uint64(config3.DefaultStepSize)
+			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
+			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
+			// so that we can correctly calculate toTxNum above (now we should delete these)
+			for _, f := range blockReader.FrozenFiles() {
+				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
+				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
+					continue
+				}
+				log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "file", fileInfo.Name(), "toBlock", toBlock)
+				if err := blockReader.Snapshots().Delete(fileInfo.Name()); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -453,6 +476,10 @@ func SyncSnapshots(
 				continue
 			}
 
+			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
+				continue
+			}
+
 			downloadRequest = append(downloadRequest, DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
@@ -480,7 +507,7 @@ func SyncSnapshots(
 	// Check for completion immediately, then growing intervals.
 	interval := time.Second
 	for {
-		completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+		completedResp, err := snapshotDownloader.Completed(ctx, &downloaderproto.CompletedRequest{})
 		if err != nil {
 			return fmt.Errorf("waiting for snapshot download: %w", err)
 		}
@@ -497,4 +524,29 @@ func SyncSnapshots(
 	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
 	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
+}
+
+func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
+	if toBlock == 0 {
+		return false // toBlock filtering is not enabled
+	}
+	fileInfo, stateFile, ok := snaptype.ParseFileName("", name)
+	if !ok {
+		return true
+	}
+	if strings.HasPrefix(name, "salt") {
+		return false // not applicable
+	}
+	if strings.HasPrefix(name, "caplin/") {
+		return false // not applicable, caplin files are slot-based
+	}
+	if stateFile {
+		return fileInfo.To > toStep
+	}
+	if headerchain {
+		// if we are downloading the header chain, we want to download the seg file which contains our toBlock
+		// so that we can correctly calculate its maxTxNum from the body segment files (we will later on delete this file)
+		return fileInfo.From > toBlock
+	}
+	return fileInfo.To > toBlock
 }

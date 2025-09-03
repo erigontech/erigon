@@ -9,8 +9,10 @@ import (
 	"unsafe"
 
 	"github.com/FastFilter/xorfilter"
+	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	mm "github.com/erigontech/erigon-lib/mmap"
 )
 
@@ -21,7 +23,9 @@ const (
 )
 
 type Reader struct {
-	inner    *xorfilter.BinaryFuse[uint8]
+	inner     *xorfilter.BinaryFuse[uint8]
+	keepInMem bool // keep it in mem insted of mmap
+
 	fileName string
 	f        *os.File
 	m        mmap.MMap
@@ -29,6 +33,11 @@ type Reader struct {
 
 	version uint8
 }
+
+var (
+	MadvWillNeedByDefault = dbg.EnvBool("FUSE_MADV_WILLNEED", false)
+	MadvNormalByDefault   = dbg.EnvBool("FUSE_MADV_NORMAL", false)
+)
 
 func NewReader(filePath string) (*Reader, error) {
 	f, err := os.Open(filePath)
@@ -41,17 +50,21 @@ func NewReader(filePath string) (*Reader, error) {
 		return nil, err
 	}
 	sz := int(st.Size())
+	var content []byte
 	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 	if err != nil {
 		_ = f.Close() //nolint
 		return nil, err
 	}
+	content = m
+
 	_, fileName := filepath.Split(filePath)
-	r, _, err := NewReaderOnBytes(m, fileName)
+	r, _, err := NewReaderOnBytes(content, fileName)
 	if err != nil {
 		return nil, err
 	}
 	r.f = f
+	r.m = m
 	r.fileName = fileName
 	return r, nil
 }
@@ -83,11 +96,25 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	return &Reader{inner: filter, version: v, features: features, m: m}, headerSize + fingerprintsLen, nil
 }
 
+func (r *Reader) ForceInMem() datasize.ByteSize {
+	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
+	r.keepInMem = true
+	return datasize.ByteSize(len(r.inner.Fingerprints))
+}
+
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 {
+	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
+		panic(err)
+	}
+}
+func (r *Reader) MadvNormal() {
+	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mm.MadviseNormal(r.m); err != nil {
 		panic(err)
 	}
 }

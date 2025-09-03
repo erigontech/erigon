@@ -681,6 +681,11 @@ var (
 		Usage: "Skip state download and start from genesis block",
 		Value: false,
 	}
+	SnapDownloadToBlockFlag = cli.Uint64Flag{
+		Name:    "snap.download.to.block",
+		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
+		Aliases: []string{"shadow.fork.block"},
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,
@@ -1141,7 +1146,7 @@ var (
 	ElBlockDownloaderV2 = cli.BoolFlag{
 		Name:  "el.block.downloader.v2",
 		Usage: "Enables the EL engine v2 block downloader",
-		Value: false,
+		Value: true,
 	}
 )
 

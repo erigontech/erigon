@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
@@ -333,15 +333,15 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	// I'm kinda curious... but it was false before.
 	d.MainLoopInBackground(true)
 	if seedbox {
-		var downloadItems []*proto_downloader.AddItem
+		var downloadItems []*downloaderproto.AddItem
 		snapCfg, _ := snapcfg.KnownCfg(chain)
 		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &proto_downloader.AddItem{
+			downloadItems = append(downloadItems, &downloaderproto.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
 			})
 		}
-		if _, err := bittorrentServer.Add(ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+		if _, err := bittorrentServer.Add(ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
 			return err
 		}
 	}
@@ -693,7 +693,7 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 	grpcServer := grpc.NewServer(opts...)
 	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	if snServer != nil {
-		proto_downloader.RegisterDownloaderServer(grpcServer, snServer)
+		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
 	//if metrics.Enabled {

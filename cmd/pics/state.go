@@ -96,7 +96,6 @@ var bucketLabels = map[string]string{
 	kv.PlainState:               "Plain State",
 	kv.HashedAccountsDeprecated: "Hashed Accounts",
 	kv.HashedStorageDeprecated:  "Hashed Storage",
-	kv.IncarnationMap:           "Incarnations",
 	kv.Senders:                  "Transaction Senders",
 }
 
@@ -427,7 +426,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New("", kv.ChainDB)
+	emptyKv := memdb.New(nil, "", kv.ChainDB)
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

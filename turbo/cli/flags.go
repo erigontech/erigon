@@ -290,6 +290,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
+	if ctx.IsSet(utils.SnapDownloadToBlockFlag.Name) {
+		cfg.Sync.SnapshotDownloadToBlock = ctx.Uint64(utils.SnapDownloadToBlockFlag.Name)
+	}
+
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
 		cfg.Sync.BreakAfterStage = stage
 	}

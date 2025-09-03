@@ -20,49 +20,50 @@ import (
 	"context"
 	"io"
 
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
-var _ txpool_proto.TxpoolClient = (*TxPoolClient)(nil)
+var _ txpoolproto.TxpoolClient = (*TxPoolClient)(nil)
 
 type TxPoolClient struct {
-	server txpool_proto.TxpoolServer
+	server txpoolproto.TxpoolServer
 }
 
-func NewTxPoolClient(server txpool_proto.TxpoolServer) *TxPoolClient {
+func NewTxPoolClient(server txpoolproto.TxpoolServer) *TxPoolClient {
 	return &TxPoolClient{server}
 }
 
-func (s *TxPoolClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+func (s *TxPoolClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error) {
 	return s.server.Version(ctx, in)
 }
 
-func (s *TxPoolClient) FindUnknown(ctx context.Context, in *txpool_proto.TxHashes, opts ...grpc.CallOption) (*txpool_proto.TxHashes, error) {
+func (s *TxPoolClient) FindUnknown(ctx context.Context, in *txpoolproto.TxHashes, opts ...grpc.CallOption) (*txpoolproto.TxHashes, error) {
 	return s.server.FindUnknown(ctx, in)
 }
 
-func (s *TxPoolClient) Add(ctx context.Context, in *txpool_proto.AddRequest, opts ...grpc.CallOption) (*txpool_proto.AddReply, error) {
+func (s *TxPoolClient) Add(ctx context.Context, in *txpoolproto.AddRequest, opts ...grpc.CallOption) (*txpoolproto.AddReply, error) {
 	return s.server.Add(ctx, in)
 }
 
-func (s *TxPoolClient) Transactions(ctx context.Context, in *txpool_proto.TransactionsRequest, opts ...grpc.CallOption) (*txpool_proto.TransactionsReply, error) {
+func (s *TxPoolClient) Transactions(ctx context.Context, in *txpoolproto.TransactionsRequest, opts ...grpc.CallOption) (*txpoolproto.TransactionsReply, error) {
 	return s.server.Transactions(ctx, in)
 }
 
-func (s *TxPoolClient) All(ctx context.Context, in *txpool_proto.AllRequest, opts ...grpc.CallOption) (*txpool_proto.AllReply, error) {
+func (s *TxPoolClient) All(ctx context.Context, in *txpoolproto.AllRequest, opts ...grpc.CallOption) (*txpoolproto.AllReply, error) {
 	return s.server.All(ctx, in)
 }
 
-func (s *TxPoolClient) Pending(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*txpool_proto.PendingReply, error) {
+func (s *TxPoolClient) Pending(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*txpoolproto.PendingReply, error) {
 	return s.server.Pending(ctx, in)
 }
 
 // -- start OnAdd
 
-func (s *TxPoolClient) OnAdd(ctx context.Context, in *txpool_proto.OnAddRequest, opts ...grpc.CallOption) (txpool_proto.Txpool_OnAddClient, error) {
+func (s *TxPoolClient) OnAdd(ctx context.Context, in *txpoolproto.OnAddRequest, opts ...grpc.CallOption) (txpoolproto.Txpool_OnAddClient, error) {
 	ch := make(chan *onAddReply, 16384)
 	streamServer := &TxPoolOnAddS{ch: ch, ctx: ctx}
 	go func() {
@@ -73,7 +74,7 @@ func (s *TxPoolClient) OnAdd(ctx context.Context, in *txpool_proto.OnAddRequest,
 }
 
 type onAddReply struct {
-	r   *txpool_proto.OnAddReply
+	r   *txpoolproto.OnAddReply
 	err error
 }
 
@@ -83,7 +84,7 @@ type TxPoolOnAddS struct {
 	grpc.ServerStream
 }
 
-func (s *TxPoolOnAddS) Send(m *txpool_proto.OnAddReply) error {
+func (s *TxPoolOnAddS) Send(m *txpoolproto.OnAddReply) error {
 	s.ch <- &onAddReply{r: m}
 	return nil
 }
@@ -101,7 +102,7 @@ type TxPoolOnAddC struct {
 	grpc.ClientStream
 }
 
-func (c *TxPoolOnAddC) Recv() (*txpool_proto.OnAddReply, error) {
+func (c *TxPoolOnAddC) Recv() (*txpoolproto.OnAddReply, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
@@ -112,14 +113,14 @@ func (c *TxPoolOnAddC) Context() context.Context { return c.ctx }
 
 // -- end OnAdd
 
-func (s *TxPoolClient) Status(ctx context.Context, in *txpool_proto.StatusRequest, opts ...grpc.CallOption) (*txpool_proto.StatusReply, error) {
+func (s *TxPoolClient) Status(ctx context.Context, in *txpoolproto.StatusRequest, opts ...grpc.CallOption) (*txpoolproto.StatusReply, error) {
 	return s.server.Status(ctx, in)
 }
 
-func (s *TxPoolClient) Nonce(ctx context.Context, in *txpool_proto.NonceRequest, opts ...grpc.CallOption) (*txpool_proto.NonceReply, error) {
+func (s *TxPoolClient) Nonce(ctx context.Context, in *txpoolproto.NonceRequest, opts ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
 	return s.server.Nonce(ctx, in)
 }
 
-func (s *TxPoolClient) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequest, opts ...grpc.CallOption) (*txpool_proto.GetBlobsReply, error) {
+func (s *TxPoolClient) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsRequest, opts ...grpc.CallOption) (*txpoolproto.GetBlobsReply, error) {
 	return s.server.GetBlobs(ctx, in)
 }
