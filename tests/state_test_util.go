@@ -29,6 +29,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"testing"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -171,8 +172,8 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
-	state, root, _, err := t.RunNoVerify(tx, subtest, vmconfig, dirs)
+func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
+	state, root, _, err := t.RunNoVerify(tb, tx, subtest, vmconfig, dirs)
 	if err != nil {
 		return state, empty.RootHash, err
 	}
@@ -189,13 +190,13 @@ func (t *StateTest) Run(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Co
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb, post-state root and gas used.
-func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
+func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, 0, testutil.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(t.genesis(config), dirs, log.Root())
+	block, _, err := genesiswrite.GenesisToBlock(tb, t.genesis(config), dirs, log.Root())
 	if err != nil {
 		return nil, common.Hash{}, 0, testutil.UnsupportedForkError{Name: subtest.Fork}
 	}

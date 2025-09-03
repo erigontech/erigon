@@ -62,7 +62,7 @@ func TestStateCornerCases(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, _, err = test.Run(tx, subtest, vmconfig, dirs)
+					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
@@ -125,7 +125,7 @@ func TestState(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, _, err = test.Run(tx, subtest, vmconfig, dirs)
+					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

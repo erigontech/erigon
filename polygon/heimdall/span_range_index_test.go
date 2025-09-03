@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type spanRangeIndexTest struct {
@@ -25,7 +26,7 @@ func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 	logger := log.New()
 
 	db, err := mdbx.New(kv.HeimdallDB, logger).
-		InMem(tmpDir).
+		InMem(t, tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{kv.BorSpansIndex: {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
