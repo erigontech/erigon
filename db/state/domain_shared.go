@@ -328,12 +328,11 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 		if prevVal == nil {
 			return nil
 		}
-		sd.mem.DomainPut(kv.CodeDomain, ks, nil, txNum)
-		return sd.mem.PutWithPrev(kv.CodeDomain, k, nil, txNum, prevVal, prevStep)
 	default:
-		sd.mem.DomainPut(domain, ks, nil, txNum)
-		return sd.mem.PutWithPrev(domain, k, nil, txNum, prevVal, prevStep)
+		//noop
 	}
+	sd.mem.DomainPut(kv.CodeDomain, ks, nil, txNum)
+	return sd.mem.PutWithPrev(kv.CodeDomain, k, nil, txNum, prevVal, prevStep)
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte, txNum uint64) error {
