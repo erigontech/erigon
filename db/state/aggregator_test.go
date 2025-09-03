@@ -917,6 +917,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
+	hph := commitment.NewHexPatriciaHashed(1, nil)
+
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		domains.SetTxNum(txNum)
 
@@ -943,8 +945,20 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
-	}
 
+		if (txNum+1)%aggStep == 0 {
+			cs := commitmentState{
+				txNum:     domains.TxNum(),
+				trieState: make([]byte, 1024),
+			}
+			cs.trieState, err = hph.EncodeCurrentState(nil)
+			require.NoError(t, err)
+			encodedState, err := cs.Encode()
+			require.NoError(t, err)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, keyCommitmentState, encodedState, txNum, nil, 0)
+			require.NoError(t, err)
+		}
+	}
 	// flush and build files
 	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
