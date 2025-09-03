@@ -114,6 +114,7 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state
 		// e.g. 50075104 on bor.
 		// the receipt calculation stored 0 for logIdxAfterTx, which leads to underflow
 		// this check allows to adjust for that error (first logIndex is 0 for such cases)
+		// can be removed when receipt files fixed and all users are sure to have it (v2.2)
 		if logIdxAfterTx >= uint(len(receiptLogs)) {
 			logIndex = logIdxAfterTx - uint(len(receiptLogs))
 		}
