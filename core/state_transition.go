@@ -643,7 +643,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			// 2. authority recover
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
-				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
+				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
 				continue
 			}
 			authority := *authorityPtr
@@ -676,7 +676,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if authorityNonce != auth.Nonce {
-				log.Debug("invalid nonce, skipping", "auth index", i)
+				log.Trace("invalid nonce, skipping", "auth index", i)
 				continue
 			}
 

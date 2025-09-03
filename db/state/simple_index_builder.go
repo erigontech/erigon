@@ -183,6 +183,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		return nil, err
 	}
 	defer rs.Close()
+	rs.LogLvl(log.LvlTrace)
 
 	s.kf.Refresh()
 	defer s.kf.Close()

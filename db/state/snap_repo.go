@@ -321,6 +321,32 @@ func (f *SnapshotRepo) CleanAfterMerge(merged *FilesItem, vf visibleFiles) {
 	f.DeleteFilesAfterMerge(outs)
 }
 
+func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
+	mf := make(map[statecfg.Accessors][]*FilesItem)
+	if f.accessors.Has(statecfg.AccessorBTree) {
+		mf[statecfg.AccessorBTree] =
+			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+				return []string{f.schema.BtIdxFile(version.V1_0, RootNum(fromStep), RootNum(toStep))}
+			})
+	}
+
+	if f.accessors.Has(statecfg.AccessorHashMap) {
+		mf[statecfg.AccessorHashMap] =
+			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+				return []string{f.schema.AccessorIdxFile(version.V1_0, RootNum(fromStep), RootNum(toStep), 0)}
+			})
+	}
+
+	if f.accessors.Has(statecfg.AccessorExistence) {
+		mf[statecfg.AccessorExistence] =
+			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+				return []string{f.schema.ExistenceFile(version.V1_0, RootNum(fromStep), RootNum(toStep))}
+			})
+	}
+
+	return (*MissedFilesMap)(&mf)
+}
+
 // private methods
 
 func (f *SnapshotRepo) openDirtyFiles() error {

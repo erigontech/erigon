@@ -14,7 +14,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"golang.org/x/sync/errgroup"
 )
 
 /*
@@ -85,42 +87,50 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 
 	log.Debug(fmt.Sprintf("freezing %s from %d to %d", Registry.Name(a.a), calcFrom, calcTo))
 	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
-	segCfg := seg.DefaultCfg
-	segCfg.Workers = compressionWorkers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.a), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)
+
+	var exists bool
+	exists, err = dir.FileExist(path)
 	if err != nil {
-		return nil, false, err
-	}
-	defer sn.Close()
-	// TODO: fsync params?
-
-	{
-		compress := a.isCompressionUsed(calcFrom, calcTo)
-		var addWordFn func(values []byte) error
-		if compress {
-			// https://github.com/erigontech/erigon/pull/11222 -- decision taken here
-			// is that 1k and 10k files will be uncompressed, but 10k files also merged
-			// and not built off db, so following decision is okay:
-			// AddWord -- compressed -- slowbuilds (merge etc.)
-			// AddUncompressedWord -- uncompressed -- fast builds
-			addWordFn = sn.AddWord
-		} else {
-			addWordFn = sn.AddUncompressedWord
-		}
-		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, addWordFn, db); err != nil {
-			return nil, false, err
-		}
+		return
 	}
 
-	{
-		p := ps.AddNew(filepath.Base(path), 1)
-		defer ps.Delete(p)
-		if err := sn.Compress(); err != nil {
+	if !exists {
+		segCfg := seg.DefaultCfg
+		segCfg.Workers = compressionWorkers
+		sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.a), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)
+		if err != nil {
 			return nil, false, err
 		}
-		sn.Close()
-		ps.Delete(p)
+		defer sn.Close()
+		// TODO: fsync params?
 
+		{
+			compress := a.isCompressionUsed(calcFrom, calcTo)
+			var addWordFn func(values []byte) error
+			if compress {
+				// https://github.com/erigontech/erigon/pull/11222 -- decision taken here
+				// is that 1k and 10k files will be uncompressed, but 10k files also merged
+				// and not built off db, so following decision is okay:
+				// AddWord -- compressed -- slowbuilds (merge etc.)
+				// AddUncompressedWord -- uncompressed -- fast builds
+				addWordFn = sn.AddWord
+			} else {
+				addWordFn = sn.AddUncompressedWord
+			}
+			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, addWordFn, db); err != nil {
+				return nil, false, err
+			}
+		}
+
+		{
+			p := ps.AddNew(filepath.Base(path), 1)
+			defer ps.Delete(p)
+			if err := sn.Compress(); err != nil {
+				return nil, false, err
+			}
+			sn.Close()
+			ps.Delete(p)
+		}
 	}
 
 	valuesDecomp, err := seg.NewDecompressor(path)
@@ -179,6 +189,10 @@ func (a *ProtoForkable) Close() {
 	a.snaps.Close()
 }
 
+func (a *ProtoForkable) FilesWithMissedAccessors() *MissedFilesMap {
+	return a.snaps.FilesWithMissedAccessors()
+}
+
 // proto_forkable_rotx
 
 type ProtoForkableTx struct {
@@ -203,6 +217,39 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 		id:    a.a,
 		files: visibleFiles,
 		a:     a,
+	}
+}
+
+// take dirtyFiles lock before using this
+func (a *ProtoForkable) DebugBeginDirtyFilesRo() *forkableDirtyFilesRoTx {
+	var files []*FilesItem
+	a.snaps.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		files = append(files, items...)
+		for _, item := range items {
+			item.refcount.Add(1)
+		}
+		return true
+	})
+	return &forkableDirtyFilesRoTx{
+		p:     a,
+		files: files,
+	}
+}
+
+func (a *ProtoForkable) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, missedFilesItems *MissedFilesMap) {
+	for _, file := range missedFilesItems.Get(statecfg.AccessorHashMap) {
+		cfile := file
+		g.Go(func() error {
+			indexes, err := a.BuildIndexes(ctx, RootNum(cfile.startTxNum), RootNum(cfile.endTxNum), ps)
+			if err != nil {
+				return err
+			}
+			for _, idx := range indexes {
+				idx.Close()
+			}
+
+			return nil
+		})
 	}
 }
 

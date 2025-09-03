@@ -166,7 +166,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -225,7 +225,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -265,7 +265,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	// nothing for headers
 	bfreezer.Expect(20, 30)
 
-	ch = agg.BuildFiles(RootNum(amount))
+	ch = agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -300,7 +300,7 @@ func TestClose(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount))
+	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -400,7 +400,7 @@ func TestMergedFileGet(t *testing.T) {
 	checkBuildFilesFn := func(mergeDisabled bool) {
 		agg.SetMergeDisabled(mergeDisabled)
 		for i := range amount {
-			ch := agg.BuildFiles(RootNum(i + 1))
+			ch := agg.BuildFilesInBackground(RootNum(i + 1))
 			select {
 			case <-ch:
 			case <-time.After(time.Second * 30):

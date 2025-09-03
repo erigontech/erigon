@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -473,6 +474,52 @@ func (r *ForkableAgg) Tables() (tables []string) {
 		tables = append(tables, u.valsTbl)
 	}
 	return
+}
+
+func (r *ForkableAgg) BuildMissedAccessors(ctx context.Context, workers int) error {
+	startIndexingTime := time.Now()
+	ps := background.NewProgressSet()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+	go func() {
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
+				r.logger.Info("[fork_agg] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			}
+		}
+	}()
+
+	rotx := r.DebugBeginDirtyFilesRo()
+	defer rotx.Close()
+
+	missedFilesItems := rotx.FilesWithMissedAccessors()
+	if missedFilesItems.IsEmpty() {
+		return nil
+	}
+
+	for _, m := range r.marked {
+		m.BuildMissedAccessors(ctx, g, ps, missedFilesItems.marked[m.a])
+	}
+
+	for _, u := range r.unmarked {
+		u.BuildMissedAccessors(ctx, g, ps, missedFilesItems.unmarked[u.a])
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	rotx.Close()
+
+	return r.OpenFolder()
 }
 
 ////

@@ -6,6 +6,7 @@ import (
 	"path"
 
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
@@ -78,61 +79,71 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	from, to := RootNum(filesToMerge[0].startTxNum), RootNum(filesToMerge.EndTxNum())
 
 	segPath := f.snaps.schema.DataFile(version.V1_0, from, to)
-	cfg := seg.DefaultCfg
-	cfg.Workers = compressWorkers
-	r := Registry
-	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, f.dirs.Tmp, cfg, log.LvlTrace, f.logger)
+
+	var exists bool
+	exists, err = dir.FileExist(segPath)
 	if err != nil {
 		return
 	}
-	defer comp.Close()
-	p := ps.AddNew(path.Base(segPath), 1)
-	defer ps.Delete(p)
 
-	{
-		count := 0
-		for _, item := range filesToMerge {
-			count += item.src.decompressor.Count()
+	if !exists {
+		cfg := seg.DefaultCfg
+		cfg.Workers = compressWorkers
+		r := Registry
+		var comp *seg.Compressor
+		comp, err = seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.a), segPath, f.dirs.Tmp, cfg, log.LvlTrace, f.logger)
+		if err != nil {
+			return
 		}
-		p.Total.Store(uint64(count))
-	}
+		defer comp.Close()
+		p := ps.AddNew(path.Base(segPath), 1)
+		defer ps.Delete(p)
 
-	var expectedTotal int
-	for _, item := range filesToMerge {
-		var word = make([]byte, 0, 4096)
-		startRootNum, endRootNum := item.src.Range()
-		compression := f.isCompressionUsed(RootNum(startRootNum), RootNum(endRootNum))
-
-		if err = item.src.decompressor.WithReadAhead(func() error {
-			g := item.src.decompressor.MakeGetter()
-			for g.HasNext() {
-				if compression {
-					word, _ = g.Next(word[:0])
-				} else {
-					word, _ = g.NextUncompressed()
-				}
-
-				if err = comp.AddWord(word); err != nil {
-					return err
-				}
-				p.Processed.Add(1)
+		{
+			count := 0
+			for _, item := range filesToMerge {
+				count += item.src.decompressor.Count()
 			}
-			return nil
-		}); err != nil {
+			p.Total.Store(uint64(count))
+		}
+
+		var expectedTotal int
+		for _, item := range filesToMerge {
+			var word = make([]byte, 0, 4096)
+			startRootNum, endRootNum := item.src.Range()
+			compression := f.isCompressionUsed(RootNum(startRootNum), RootNum(endRootNum))
+
+			if err = item.src.decompressor.WithReadAhead(func() error {
+				g := item.src.decompressor.MakeGetter()
+				for g.HasNext() {
+					if compression {
+						word, _ = g.Next(word[:0])
+					} else {
+						word, _ = g.NextUncompressed()
+					}
+
+					if err = comp.AddWord(word); err != nil {
+						return err
+					}
+					p.Processed.Add(1)
+				}
+				return nil
+			}); err != nil {
+				return
+			}
+
+			expectedTotal += item.src.decompressor.Count()
+		}
+
+		if comp.Count() != expectedTotal {
+			return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", comp.Count(), expectedTotal)
+		}
+		if err = comp.Compress(); err != nil {
 			return
 		}
 
-		expectedTotal += item.src.decompressor.Count()
+		ps.Delete(p)
 	}
-
-	if comp.Count() != expectedTotal {
-		return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", comp.Count(), expectedTotal)
-	}
-	if err = comp.Compress(); err != nil {
-		return
-	}
-
-	ps.Delete(p)
 
 	mergedFile = newFilesItemWithSnapConfig(from.Uint64(), to.Uint64(), f.cfg)
 	if mergedFile.decompressor, err = seg.NewDecompressor(segPath); err != nil {
