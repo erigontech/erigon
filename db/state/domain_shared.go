@@ -165,17 +165,6 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 const CodeSizeTableFake = "CodeSize"
 
-func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
-	addr := toBytesZeroCopy(addrS)
-	sd.mem.DomainPut(kv.CodeDomain, addrS, code, txNum)
-	return sd.mem.PutWithPrev(kv.CodeDomain, addr, code, txNum, prevCode, prevStep)
-}
-
-func (sd *SharedDomains) updateCommitmentData(prefix string, data []byte, txNum uint64, prev []byte, prevStep kv.Step) error {
-	sd.mem.DomainPut(kv.CommitmentDomain, prefix, data, txNum)
-	return sd.mem.PutWithPrev(kv.CommitmentDomain, toBytesZeroCopy(prefix), data, txNum, prev, prevStep)
-}
-
 func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, prev []byte, prevStep kv.Step) error {
 	addr := toBytesZeroCopy(addrS)
 	if err := sd.DomainDelPrefix(kv.StorageDomain, roTx, addr, txNum); err != nil {
