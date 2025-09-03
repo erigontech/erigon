@@ -382,10 +382,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	salt, err := GetStateIndicesSalt(dirs, false, logger)
-	require.NoError(t, err)
-	require.NotNil(t, salt)
-	newAgg, err := NewAggregator2(context.Background(), agg.Dirs(), aggStep, salt, newDb, logger)
+	newAgg, err := NewAggregator(context.Background(), agg.Dirs(), aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 

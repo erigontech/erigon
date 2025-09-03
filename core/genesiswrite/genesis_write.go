@@ -319,11 +319,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger)
-		if err != nil {
-			return err
-		}
-		agg, err := dbstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, genesisTmpDB, logger)
+		agg, err := dbstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, genesisTmpDB, logger)
 		if err != nil {
 			return err
 		}

@@ -413,10 +413,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	agg.Close()
 
 	// Start another aggregator on same datadir
-	salt, err := state.GetStateIndicesSalt(agg.Dirs(), false, logger)
-	require.NoError(t, err)
-	require.NotNil(t, salt)
-	anotherAgg, err := state.NewAggregator2(context.Background(), agg.Dirs(), aggStep, salt, db, logger)
+	anotherAgg, err := state.NewAggregator(context.Background(), agg.Dirs(), aggStep, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
