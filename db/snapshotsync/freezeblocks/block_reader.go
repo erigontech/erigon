@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -436,14 +437,12 @@ func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint6
 		return snapshotMin, nil
 	}
 
-	var dbMin uint64 = ^uint64(0)
+	var dbMin = ^uint64(0)
 	if kvTx, ok := tx.(kv.Tx); ok {
-		firstKey, err := kv.FirstKey(kvTx, kv.BlockBody)
+		var err error
+		dbMin, err = r.findFirstCompleteBlock(kvTx)
 		if err != nil {
-			return 0, err
-		}
-		if len(firstKey) >= 8 {
-			dbMin = binary.BigEndian.Uint64(firstKey[:8])
+			return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
 		}
 	}
 
@@ -451,6 +450,28 @@ func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint6
 		return dbMin, nil
 	}
 	return snapshotMin, nil
+}
+
+// findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
+func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
+	bodyKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(bodyKey, 1)
+
+	bodyCursor, err := tx.Cursor(kv.BlockBody)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create BlockBody cursor: %w", err)
+	}
+	defer bodyCursor.Close()
+
+	bodyKey, _, err = bodyCursor.Seek(bodyKey)
+	if err != nil {
+		return 0, fmt.Errorf("failed to seek BlockBody: %w", err)
+	}
+	if len(bodyKey) < 8 {
+		return math.MaxUint64, nil // no body data found
+	}
+
+	return binary.BigEndian.Uint64(bodyKey[:8]), nil
 }
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 	if r.borSn == nil {

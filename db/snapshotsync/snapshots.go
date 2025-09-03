@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1057,8 +1058,12 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-	var segmentsMin = ^uint64(0) // Initialize to max value
-	var segmentsMinSet bool
+
+	typeMinBlocks := make(map[snaptype.Enum]uint64)
+	coreTypes := []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions}
+	for _, t := range coreTypes {
+		typeMinBlocks[t] = math.MaxUint64
+	}
 
 	wg := &errgroup.Group{}
 	wg.SetLimit(64)
@@ -1141,17 +1146,28 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		}
 		segmentsMaxSet = true
 
-		if f.From < segmentsMin {
-			segmentsMin = f.From
-			segmentsMinSet = true
+		// Track minimum block for this type (only for core types)
+		if _, isCoreType := typeMinBlocks[f.Type.Enum()]; isCoreType {
+			if f.From < typeMinBlocks[f.Type.Enum()] {
+				typeMinBlocks[f.Type.Enum()] = f.From
+			}
 		}
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
-	if segmentsMinSet {
-		s.segmentsMin.Store(segmentsMin)
+
+	if len(typeMinBlocks) > 0 {
+		minBlocks := make([]uint64, 0, len(typeMinBlocks))
+		for _, minBlock := range typeMinBlocks {
+			minBlocks = append(minBlocks, minBlock)
+		}
+		segmentsMin := slices.Max(minBlocks)
+		if segmentsMin != math.MaxUint64 { // only set if we have valid data for all types
+			s.segmentsMin.Store(segmentsMin)
+		}
 	}
+
 	if err := wg.Wait(); err != nil {
 		return err
 	}

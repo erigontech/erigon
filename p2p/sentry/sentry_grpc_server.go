@@ -42,7 +42,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -57,7 +56,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 
@@ -339,62 +337,9 @@ func handShake(
 	version uint,
 	minVersion uint,
 ) (*common.Hash, *p2p.PeerError) {
-	// Send out own handshake in a new thread
-	errChan := make(chan *p2p.PeerError, 2)
-	resultChan := make(chan *eth.StatusPacket, 1)
-
-	ourTD := gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)
-	// Convert proto status data into the one required by devp2p
-	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
-
-	go func() {
-		defer dbg.LogPanic()
-		status := &eth.StatusPacket{
-			ProtocolVersion: uint32(version),
-			NetworkID:       status.NetworkId,
-			TD:              ourTD.ToBig(),
-			Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
-			Genesis:         genesisHash,
-			ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),
-		}
-		err := p2p.Send(rw, eth.StatusMsg, status)
-
-		if err == nil {
-			errChan <- nil
-		} else {
-			errChan <- p2p.NewPeerError(p2p.PeerErrorStatusSend, p2p.DiscNetworkError, err, "sentry.handShake failed to send eth Status")
-		}
-	}()
-
-	go func() {
-		defer dbg.LogPanic()
-		status, err := readAndValidatePeerStatusMessage(rw, status, version, minVersion)
-
-		if err == nil {
-			resultChan <- status
-			errChan <- nil
-		} else {
-			errChan <- err
-		}
-	}()
-
-	timeout := time.NewTimer(handshakeTimeout)
-	defer timeout.Stop()
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errChan:
-			if err != nil {
-				return nil, err
-			}
-		case <-timeout.C:
-			return nil, p2p.NewPeerError(p2p.PeerErrorStatusHandshakeTimeout, p2p.DiscReadTimeout, nil, "sentry.handShake timeout")
-		case <-ctx.Done():
-			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.handShake ctx.Done")
-		}
-	}
-
-	peerStatus := <-resultChan
-	return &peerStatus.Head, nil
+	head := func(pkt eth.StatusPacket) common.Hash { return pkt.Head }
+	h, e := handShakeGeneric[eth.StatusPacket](ctx, status, rw, version, minVersion, encodeStatusPacket, compatStatusPacket, head, handshakeTimeout)
+	return h, e
 }
 
 func handShake69(
@@ -404,62 +349,9 @@ func handShake69(
 	version uint,
 	minVersion uint,
 ) (*common.Hash, *p2p.PeerError) {
-	// Send out own handshake in a new thread
-	errChan := make(chan *p2p.PeerError, 2)
-	resultChan := make(chan *eth.StatusPacket69, 1)
-
-	// Convert proto status data into the one required by devp2p
-	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
-
-	go func() {
-		defer dbg.LogPanic()
-		status := &eth.StatusPacket69{
-			ProtocolVersion: uint32(version),
-			NetworkID:       status.NetworkId,
-			Genesis:         genesisHash,
-			ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),
-			EarliestBlock:   status.EarliestBlockHeight,
-			LatestBlock:     status.MaxBlockHeight,
-			LatestBlockHash: gointerfaces.ConvertH256ToHash(status.BestHash),
-		}
-		err := p2p.Send(rw, eth.StatusMsg, status)
-
-		if err == nil {
-			errChan <- nil
-		} else {
-			errChan <- p2p.NewPeerError(p2p.PeerErrorStatusSend, p2p.DiscNetworkError, err, "sentry.handShake failed to send eth Status")
-		}
-	}()
-
-	go func() {
-		defer dbg.LogPanic()
-		status, err := readAndValidatePeerStatus69Message(rw, status, version, minVersion)
-
-		if err == nil {
-			resultChan <- status
-			errChan <- nil
-		} else {
-			errChan <- err
-		}
-	}()
-
-	timeout := time.NewTimer(handshakeTimeout)
-	defer timeout.Stop()
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errChan:
-			if err != nil {
-				return nil, err
-			}
-		case <-timeout.C:
-			return nil, p2p.NewPeerError(p2p.PeerErrorStatusHandshakeTimeout, p2p.DiscReadTimeout, nil, "sentry.handShake timeout")
-		case <-ctx.Done():
-			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.handShake ctx.Done")
-		}
-	}
-
-	peerStatus := <-resultChan
-	return &peerStatus.LatestBlockHash, nil
+	head := func(pkt eth.StatusPacket69) common.Hash { return pkt.LatestBlockHash }
+	h, e := handShakeGeneric[eth.StatusPacket69](ctx, status, rw, version, minVersion, encodeStatusPacket69, compatStatusPacket69, head, handshakeTimeout)
+	return h, e
 }
 
 func runPeer(
@@ -636,15 +528,13 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockRangeUpdateMsg:
-			log.Info("server - got blockrangeupdate msg")
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
-				log.Info("server - got blockrangeupdate msg but no subscribers :(")
 				continue
 			}
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				logger.Error("reading msg into bytes", "peerId", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
@@ -869,7 +759,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			}
 
 			var peerBestHash *common.Hash
-			if protocol == direct.ETH69 {
+			if protocol >= direct.ETH69 {
 				peerBestHash, err = handShake69(ctx, status, rw, protocol, protocol)
 				if err != nil {
 					return err
@@ -1191,7 +1081,6 @@ func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *proto_sentry.S
 }
 
 func (ss *GrpcServer) SetPeerBlockRange(_ context.Context, req *proto_sentry.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
-	log.Info("setting peer block range on server", "peerID", req.PeerId)
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
 		peerInfo.SetNewMinBlock(req.MinBlockHeight)
