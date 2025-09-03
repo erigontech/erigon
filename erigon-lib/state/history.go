@@ -233,7 +233,7 @@ func (h *History) openDirtyFiles() error {
 				}
 				if fileVer.Less(h.version.DataV.MinSupported) {
 					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, h.version.DataV)
+					version.VersionTooLowPanic(fName, h.version.DataV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -274,7 +274,7 @@ func (h *History) openDirtyFiles() error {
 				if ok {
 					if fileVer.Less(h.version.AccessorVI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, h.version.AccessorVI)
+						version.VersionTooLowPanic(fName, h.version.AccessorVI)
 					}
 					if item.index, err = h.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
