@@ -17,6 +17,7 @@
 package network
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -151,6 +152,7 @@ Loop:
 					b.rpc.BanPeer(peerId)
 					return
 				}
+				fmt.Println("Received responses:", responses)
 				atomicResp.Store(responses)
 			}()
 		case <-ctx.Done():
