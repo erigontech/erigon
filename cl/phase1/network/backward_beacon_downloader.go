@@ -17,7 +17,6 @@
 package network
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -141,24 +140,18 @@ Loop:
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
 				}
-				fmt.Println("Requesting blocks from slot", start, "count", count)
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
-					fmt.Println("Error requesting blocks:", err, peerId)
-					return
-				}
-				if responses == nil {
-					fmt.Println("No responses received")
-					return
-				}
-				if len(responses) == 0 {
-					fmt.Println("No valid responses received")
 					b.rpc.BanPeer(peerId)
 					return
 				}
-				fmt.Println("Received responses:", responses)
-				if len(responses) > 0 {
-					fmt.Println("startSlot", responses[0].Block.Slot, "endSlot", responses[len(responses)-1].Block.Slot, "peerId", peerId)
+				if responses == nil {
+					b.rpc.BanPeer(peerId)
+					return
+				}
+				if len(responses) == 0 {
+					b.rpc.BanPeer(peerId)
+					return
 				}
 				atomicResp.Store(responses)
 			}()
