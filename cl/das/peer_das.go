@@ -460,9 +460,10 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 		return err
 	}
 
+	batchBlcokSize := 4
 	wg := sync.WaitGroup{}
-	for i := 0; i < len(blocks); i += 4 {
-		blocks := blocks[i:min(i+4, len(blocks))]
+	for i := 0; i < len(blocks); i += batchBlcokSize {
+		blocks := blocks[i:min(i+batchBlcokSize, len(blocks))]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -516,9 +517,10 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	}()
 
 	// initialize the download request
+	batchBlcokSize := 4
 	wg := sync.WaitGroup{}
-	for i := 0; i < len(blocksToProcess); i += 4 {
-		blocks := blocksToProcess[i:min(i+4, len(blocksToProcess))]
+	for i := 0; i < len(blocksToProcess); i += batchBlcokSize {
+		blocks := blocksToProcess[i:min(i+batchBlcokSize, len(blocksToProcess))]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
