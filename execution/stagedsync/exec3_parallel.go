@@ -560,6 +560,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 					Engine:           te.cfg.engine,
 					Trace:            dbg.TraceTx(blockNum, txIndex),
 					Hooks:            te.hooks,
+					Logger:           te.logger,
 				}
 
 				txTasks = append(txTasks, txTask)
