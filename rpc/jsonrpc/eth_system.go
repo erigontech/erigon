@@ -106,13 +106,13 @@ func (api *APIImpl) ChainID(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // ProtocolVersion implements eth_protocolVersion. Returns the current ethereum protocol version.
-func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
-	ver, err := api.ethBackend.ProtocolVersion(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return hexutil.Uint(ver), nil
-}
+// func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
+// 	ver, err := api.ethBackend.ProtocolVersion(ctx)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	return hexutil.Uint(ver), nil
+// }
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {

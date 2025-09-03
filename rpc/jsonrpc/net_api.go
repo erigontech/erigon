@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -46,13 +45,13 @@ func NewNetAPIImpl(eth rpchelper.ApiBackend) *NetAPIImpl {
 
 // Listening implements net_listening. Returns true if client is actively listening for network connections.
 // If we can get peers info, it means the network interface is up and listening
-func (api *NetAPIImpl) Listening(ctx context.Context) (bool, error) {
-	_, err := api.ethBackend.Peers(ctx)
-	if err != nil {
-		return false, nil
-	}
-	return true, nil
-}
+// func (api *NetAPIImpl) Listening(ctx context.Context) (bool, error) {
+// 	_, err := api.ethBackend.Peers(ctx)
+// 	if err != nil {
+// 		return false, nil
+// 	}
+// 	return true, nil
+// }
 
 // Version implements net_version. Returns the current network id.
 func (api *NetAPIImpl) Version(ctx context.Context) (string, error) {
@@ -71,16 +70,16 @@ func (api *NetAPIImpl) Version(ctx context.Context) (string, error) {
 
 // PeerCount implements net_peerCount. Returns number of peers currently
 // connected to the first sentry server.
-func (api *NetAPIImpl) PeerCount(ctx context.Context) (hexutil.Uint, error) {
-	if api.ethBackend == nil {
-		// We're running in --datadir mode or otherwise cannot get the backend
-		return 0, fmt.Errorf(NotAvailableChainData, "net_peerCount")
-	}
+// func (api *NetAPIImpl) PeerCount(ctx context.Context) (hexutil.Uint, error) {
+// 	if api.ethBackend == nil {
+// 		// We're running in --datadir mode or otherwise cannot get the backend
+// 		return 0, fmt.Errorf(NotAvailableChainData, "net_peerCount")
+// 	}
 
-	res, err := api.ethBackend.NetPeerCount(ctx)
-	if err != nil {
-		return 0, err
-	}
+// 	res, err := api.ethBackend.NetPeerCount(ctx)
+// 	if err != nil {
+// 		return 0, err
+// 	}
 
-	return hexutil.Uint(res), nil
-}
+// 	return hexutil.Uint(res), nil
+// }

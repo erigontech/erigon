@@ -29,33 +29,33 @@ import (
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.
-func (api *APIImpl) Coinbase(ctx context.Context) (common.Address, error) {
-	return api.ethBackend.Etherbase(ctx)
-}
+// func (api *APIImpl) Coinbase(ctx context.Context) (common.Address, error) {
+// 	return api.ethBackend.Etherbase(ctx)
+// }
 
 // Hashrate implements eth_hashrate. Returns the number of hashes per second that the node is mining with.
-func (api *APIImpl) Hashrate(ctx context.Context) (uint64, error) {
-	repl, err := api.mining.HashRate(ctx, &txpool.HashRateRequest{})
-	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return 0, errors.New(s.Message())
-		}
-		return 0, err
-	}
-	return repl.HashRate, err
-}
+// func (api *APIImpl) Hashrate(ctx context.Context) (uint64, error) {
+// 	repl, err := api.mining.HashRate(ctx, &txpool.HashRateRequest{})
+// 	if err != nil {
+// 		if s, ok := status.FromError(err); ok {
+// 			return 0, errors.New(s.Message())
+// 		}
+// 		return 0, err
+// 	}
+// 	return repl.HashRate, err
+// }
 
 // Mining returns an indication if this node is currently mining.
-func (api *APIImpl) Mining(ctx context.Context) (bool, error) {
-	repl, err := api.mining.Mining(ctx, &txpool.MiningRequest{})
-	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return false, errors.New(s.Message())
-		}
-		return false, err
-	}
-	return repl.Enabled && repl.Running, err
-}
+// func (api *APIImpl) Mining(ctx context.Context) (bool, error) {
+// 	repl, err := api.mining.Mining(ctx, &txpool.MiningRequest{})
+// 	if err != nil {
+// 		if s, ok := status.FromError(err); ok {
+// 			return false, errors.New(s.Message())
+// 		}
+// 		return false, err
+// 	}
+// 	return repl.Enabled && repl.Running, err
+// }
 
 // GetWork returns a work package for external miner.
 //
