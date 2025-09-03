@@ -59,7 +59,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		ctx:         ctx,
 		rpc:         rpc,
 		db:          db,
-		reqInterval: time.NewTicker(600 * time.Millisecond),
+		reqInterval: time.NewTicker(300 * time.Millisecond),
 		neverSkip:   true,
 		engine:      engine,
 		sn:          sn,
