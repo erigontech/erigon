@@ -165,6 +165,20 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 const CodeSizeTableFake = "CodeSize"
 
+func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
+	addr := toBytesZeroCopy(addrS)
+	sd.mem.DomainPut(kv.CodeDomain, addrS, code, txNum)
+	if len(code) == 0 {
+		return sd.mem.PutWithPrev(kv.CodeDomain, addr, nil, txNum, prevCode, prevStep)
+	}
+	return sd.mem.PutWithPrev(kv.CodeDomain, addr, code, txNum, prevCode, prevStep)
+}
+
+func (sd *SharedDomains) updateCommitmentData(prefix string, data []byte, txNum uint64, prev []byte, prevStep kv.Step) error {
+	sd.mem.DomainPut(kv.CommitmentDomain, prefix, data, txNum)
+	return sd.mem.PutWithPrev(kv.CommitmentDomain, toBytesZeroCopy(prefix), data, txNum, prev, prevStep)
+}
+
 func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, prev []byte, prevStep kv.Step) error {
 	addr := toBytesZeroCopy(addrS)
 	if err := sd.DomainDelPrefix(kv.StorageDomain, roTx, addr, txNum); err != nil {
@@ -180,6 +194,15 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, p
 	return sd.mem.PutWithPrev(kv.AccountsDomain, addr, nil, txNum, prev, prevStep)
 }
 
+func (sd *SharedDomains) writeAccountStorage(k string, v []byte, txNum uint64, preVal []byte, prevStep kv.Step) error {
+	sd.mem.DomainPut(kv.StorageDomain, k, v, txNum)
+	return sd.mem.PutWithPrev(kv.StorageDomain, toBytesZeroCopy(k), v, txNum, preVal, prevStep)
+}
+
+func (sd *SharedDomains) delAccountStorage(k string, txNum uint64, preVal []byte, prevStep kv.Step) error {
+	sd.mem.DomainPut(kv.StorageDomain, k, nil, txNum)
+	return sd.mem.PutWithPrev(kv.StorageDomain, toBytesZeroCopy(k), nil, txNum, preVal, prevStep)
+}
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
 }
@@ -279,19 +302,23 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 
 	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
+	case kv.StorageDomain:
+		return sd.writeAccountStorage(ks, v, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-	case kv.StorageDomain, kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
-		//noop
+		return sd.updateAccountCode(ks, v, txNum, prevVal, prevStep)
+	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
+		sd.mem.DomainPut(domain, ks, v, txNum)
+		return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
+		sd.mem.DomainPut(domain, ks, v, txNum)
+		return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
 	}
-	sd.mem.DomainPut(domain, ks, v, txNum)
-	return sd.mem.PutWithPrev(domain, k, v, txNum, prevVal, prevStep)
 }
 
 // DomainDel
@@ -313,15 +340,20 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(tx, ks, txNum, prevVal, prevStep)
+	case kv.StorageDomain:
+		return sd.delAccountStorage(ks, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
+		return sd.updateAccountCode(ks, nil, txNum, prevVal, prevStep)
+	case kv.CommitmentDomain:
+		return sd.updateCommitmentData(ks, nil, txNum, prevVal, prevStep)
 	default:
-		//noop
+		sd.mem.DomainPut(domain, ks, nil, txNum)
+		return sd.mem.PutWithPrev(domain, k, nil, txNum, prevVal, prevStep)
 	}
-	sd.mem.DomainPut(kv.CodeDomain, ks, nil, txNum)
-	return sd.mem.PutWithPrev(kv.CodeDomain, k, nil, txNum, prevVal, prevStep)
+
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte, txNum uint64) error {
