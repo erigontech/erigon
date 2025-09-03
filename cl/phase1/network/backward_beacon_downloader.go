@@ -144,7 +144,7 @@ Loop:
 				fmt.Println("Requesting blocks from slot", start, "count", count)
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
-					fmt.Println("Error requesting blocks:", err)
+					fmt.Println("Error requesting blocks:", err, peerId)
 					return
 				}
 				if responses == nil {
