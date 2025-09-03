@@ -1,15 +1,35 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-const excludedWorkflowFiles = [
-    '.github/workflows/backups-dashboards.yml',
-    '.github/workflows/ci-cd-main-branch-docker-images.yml',
-    '.github/workflows/docker-image-remove.yml',
-    '.github/workflows/lint.yml',
-    '.github/workflows/manifest.yml',
-    '.github/workflows/qa-test-report.yml',
-    '.github/workflows/release.yml',
-    '.github/workflows/reusable-release-build-debian-pkg.yml',
+const acceptedWorkflows = [
+    'ci.yml',
+    //'lint.yml',
+    //'manifest.yml',
+    'qa-clean-exit-block-downloading.yml',
+    'qa-clean-exit-snapshot-downloading.yml',
+    'qa-constrained-tip-tracking.yml',
+    'qa-rpc-integration-tests-gnosis.yml',
+    'qa-rpc-integration-tests-latest.yml',
+    'qa-rpc-integration-tests-polygon.yml',
+    'qa-rpc-integration-tests.yml',
+    'qa-rpc-performance-tests.yml',
+    'qa-rpc-test-bisection-tool.yml',
+    'qa-snap-download.yml',
+    'qa-sync-from-scratch-minimal-node.yml',
+    'qa-sync-from-scratch.yml',
+    'qa-sync-test-bisection-tool.yml',
+    'qa-sync-with-externalcl.yml',
+    'qa-tip-tracking-gnosis.yml',
+    'qa-tip-tracking-polygon.yml',
+    'qa-tip-tracking.yml',
+    'qa-txpool-performance-test.yml',
+    'test-all-erigon-race.yml',
+    //'test-all-erigon.yml',
+    //'test-erigon-is-library.yml',
+    'test-hive-eest.yml',
+    'test-hive.yml',
+    'test-integration-caplin.yml',
+    'test-kurtosis-assertoor.yml'
 ];
 
 // Represents a row in the summary table, which can contain strings or header objects
@@ -87,21 +107,19 @@ function legend() {
         <li>${mapConclusionToIcon('failure', null)} failure</li>
         <li>${mapConclusionToIcon('cancelled', null)} cancelled due to a subsequent commit</li>
         <li>${mapConclusionToIcon('cancelled_after_start', null)} cancelled (manually or automatically) before completion</li>
-        <li>${mapConclusionToIcon('skipped', null)} skipped </li>
-        
-        <li>${mapConclusionToIcon('timed_out', null)} timed out </li>
-        <li>${mapConclusionToIcon('neutral', null)} ended with a neutral result </li>
-        <li>${mapConclusionToIcon('stale', null)} it took too long </li>
-        <li>${mapConclusionToIcon('action_required', null)} action required </li>
-        
-        <li>${mapConclusionToIcon(null, 'requested')} requested </li>
-        <li>${mapConclusionToIcon(null, 'in_progress')} in progress </li>
-        <li>${mapConclusionToIcon(null, 'queued')} waiting for a runner </li>
-        <li>${mapConclusionToIcon(null, 'waiting')} waiting for a deployment protection rule to be satisfied </li>
-        <li>${mapConclusionToIcon(null, 'pending')} pending (the run is at the front of the queue but the concurrency limit has been reached) </li>
-        <li>${mapConclusionToIcon(null, 'expected')} expected (the run is waiting for a status to be reported) </li>
-        <li>${mapConclusionToIcon(null, 'startup_failure')} startup failure (the run failed during startup, not applicable here) </li>
-        <li>${mapConclusionToIcon(null, null)} unknown status or conclusion </li>
+        <li>${mapConclusionToIcon('skipped', null)} skipped</li>
+        <li>${mapConclusionToIcon('timed_out', null)} timed out</li>
+        <li>${mapConclusionToIcon('neutral', null)} ended with a neutral result</li>
+        <li>${mapConclusionToIcon('stale', null)} it took too long</li>
+        <li>${mapConclusionToIcon('action_required', null)} action required</li>
+        <li>${mapConclusionToIcon(null, 'requested')} requested</li>
+        <li>${mapConclusionToIcon(null, 'in_progress')} in progress</li>
+        <li>${mapConclusionToIcon(null, 'queued')} waiting for a runner</li>
+        <li>${mapConclusionToIcon(null, 'waiting')} waiting for a deployment protection rule to be satisfied</li>
+        <li>${mapConclusionToIcon(null, 'pending')} pending (the run is at the front of the queue but the concurrency limit has been reached)</li>
+        <li>${mapConclusionToIcon(null, 'expected')} expected (the run is waiting for a status to be reported)</li>
+        <li>${mapConclusionToIcon(null, 'startup_failure')} startup failure (the run failed during startup, not applicable here)</li>
+        <li>${mapConclusionToIcon(null, null)} unknown status or conclusion</li>
     </ul>`;
 }
 
@@ -205,7 +223,7 @@ export async function run() {
                 if (runDate < startDate || runDate > endDate) continue;
 
                 // Include only tests
-                if (excludedWorkflowFiles.includes(run.path ?? '')) {
+                if (!acceptedWorkflows.includes(run.path ?? '')) {
                     core.info(`Skipping workflow run: ${run.name} (${run.id})`);
                     continue;
                 }
@@ -349,6 +367,9 @@ export async function run() {
             // Otherwise, sort normally
             if (a[0] < b[0]) return -1;
             if (a[0] > b[0]) return 1;
+            // If the first columns are equal (Workflow name), sort by the second column (Job name)
+            if (a[1] < b[1]) return -1;
+            if (a[1] > b[1]) return 1;
             return 0;
         });
 
