@@ -44,8 +44,6 @@ const (
 	HashedStorageDeprecated  = "HashedStorage"
 )
 
-const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
-
 const (
 	// DatabaseInfo is used to store information about data layout.
 	DatabaseInfo = "DbInfo"
