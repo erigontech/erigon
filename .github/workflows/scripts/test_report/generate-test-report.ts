@@ -164,7 +164,8 @@ export async function run() {
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
         // The branch name, defaults to the current branch or 'main' if not in GitHub Actions
-        const branch= process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
+        // const branch= process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
+        let branch = 'main' // ### only for debug ###
         // Use github.context.repo if available, otherwise use default values
         const repoArray = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/') : ['erigontech', 'erigon'];
         const { owner, repo } = github.context.action ? github.context.repo : { owner: repoArray[0], repo: repoArray[1] };
