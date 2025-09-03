@@ -305,7 +305,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithPrevStep], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), stepSize uint64, roTx kv.Tx) error {
+func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, dataWithPrevStep], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -419,7 +419,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
 					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-					endTxNum := step.ToTxNum(stepSize) // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					endTxNum := step.ToTxNum(dt.stepSize) // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					ci1.endTxNum = endTxNum
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step
