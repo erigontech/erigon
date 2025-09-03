@@ -24,24 +24,23 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	txpooproto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 type TxPoolService struct {
-	txpooproto.TxpoolClient
+	txpoolproto.TxpoolClient
 	log     log.Logger
 	version gointerfaces.Version
 }
 
-func NewTxPoolService(client txpooproto.TxpoolClient) *TxPoolService {
+func NewTxPoolService(client txpoolproto.TxpoolClient) *TxPoolService {
 	return &TxPoolService{
 		TxpoolClient: client,
-		version:      gointerfaces.VersionFromProto(txpool2.TxPoolAPIVersion),
+		version:      gointerfaces.VersionFromProto(txpool.TxPoolAPIVersion),
 		log:          log.New("remote_service", "tx_pool"),
 	}
 }
@@ -50,7 +49,7 @@ func (s *TxPoolService) EnsureVersionCompatibility() bool {
 Start:
 	versionReply, err := s.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
-		if grpcutil.ErrIs(err, txpool2.ErrPoolDisabled) {
+		if grpcutil.ErrIs(err, txpool.ErrPoolDisabled) {
 			time.Sleep(3 * time.Second)
 			goto Start
 		}

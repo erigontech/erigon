@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/crypto"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
@@ -51,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
@@ -61,6 +60,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p"
@@ -681,6 +681,11 @@ var (
 		Usage: "Skip state download and start from genesis block",
 		Value: false,
 	}
+	SnapDownloadToBlockFlag = cli.Uint64Flag{
+		Name:    "snap.download.to.block",
+		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
+		Aliases: []string{"shadow.fork.block"},
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,
@@ -1141,7 +1146,7 @@ var (
 	ElBlockDownloaderV2 = cli.BoolFlag{
 		Name:  "el.block.downloader.v2",
 		Usage: "Enables the EL engine v2 block downloader",
-		Value: false,
+		Value: true,
 	}
 )
 
@@ -1212,7 +1217,10 @@ func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	if urlsStr != "" {
 		urls = common.CliString2Array(urlsStr)
 	} else {
-		urls = chainspec.BootnodeURLsOfChain(chain)
+		spec, _ := chainspec.ChainSpecByName(chain)
+		if !spec.IsEmpty() {
+			urls = spec.Bootnodes
+		}
 	}
 	return enode.ParseNodesFromURLs(urls)
 }
@@ -1726,8 +1734,8 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 
 	heimdall.RecordWayPoints(true)
 
-	chainConfig := chainspec.ChainConfigByChainName(ctx.String(ChainFlag.Name))
-	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
+	spec, _ := chainspec.ChainSpecByName(ctx.String(ChainFlag.Name))
+	if !spec.IsEmpty() && spec.Config.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) { // IsBor?
 		// override default max devp2p peers for polygon as per
 		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
 		// which encourages high peer count
@@ -1924,7 +1932,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
-		state.EnableHistoricalCommitment()
+		statecfg.EnableHistoricalCommitment()
 	}
 
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
@@ -1960,7 +1968,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		}
 	} else {
-		cfg.NetworkID = chainspec.NetworkIDByChainName(chain)
+		spec, err := chainspec.ChainSpecByName(chain)
+		if err != nil {
+			Fatalf("chain name is not recognized: %s", chain)
+			return
+		}
+		cfg.NetworkID = spec.Config.ChainID.Uint64()
 	}
 
 	cfg.Dirs = nodeConfig.Dirs
@@ -2000,7 +2013,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
 		// cfg.ExperimentalConcurrentCommitment = true
-		state.ExperimentalConcurrentCommitment = true
+		statecfg.ExperimentalConcurrentCommitment = true
 	}
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
@@ -2028,17 +2041,16 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
-		genesis := chainspec.GenesisBlockByChainName(chain)
-		genesisHash := chainspec.GenesisHashByChainName(chain)
-		if (genesis == nil) || (genesisHash == nil) {
-			Fatalf("ChainDB name is not recognized: %s", chain)
+		spec, err := chainspec.ChainSpecByName(chain)
+		if err != nil {
+			Fatalf("ChainDB name is not recognized: %s %s", chain, err)
 			return
 		}
-		cfg.Genesis = genesis
-		SetDNSDiscoveryDefaults(cfg, *genesisHash)
+		cfg.Genesis = spec.Genesis
+		SetDNSDiscoveryDefaults(cfg, spec.GenesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
-			SetDNSDiscoveryDefaults(cfg, chainspec.MainnetGenesisHash)
+			SetDNSDiscoveryDefaults(cfg, chainspec.Mainnet.GenesisHash)
 		}
 	case networkname.Dev:
 		// Create new developer account or reuse existing one
@@ -2156,7 +2168,12 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
-	if url := chainspec.KnownDNSNetwork(genesis); url != "" {
+	s, err := chainspec.ChainSpecByGenesisHash(genesis)
+	if err != nil {
+		log.Warn("Failed to set DNS discovery defaults", "genesis", genesis, "err", err)
+		return
+	}
+	if url := s.DNSNetwork; url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
 }

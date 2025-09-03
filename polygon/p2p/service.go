@@ -27,15 +27,15 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
-func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
+func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf libsentry.StatusDataFactory) *Service {
 	peerPenalizer := NewPeerPenalizer(sc)
 	messageListener := NewMessageListener(logger, sc, sdf, peerPenalizer)
-	peerTracker := NewPeerTracker(logger, sc, messageListener)
+	peerTracker := NewPeerTracker(logger, messageListener)
 	messageSender := NewMessageSender(sc)
 	var fetcher Fetcher
 	fetcher = NewFetcher(logger, messageListener, messageSender)

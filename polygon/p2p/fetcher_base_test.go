@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,15 +31,15 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func TestFetcherFetchHeaders(t *testing.T) {
@@ -984,7 +985,7 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	statusDataFactory := sentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
+	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
 		return &sentryproto.StatusData{}, nil
 	})
 	peerPenalizer := NewPeerPenalizer(sentryClient)
@@ -1018,7 +1019,8 @@ type fetcherTest struct {
 	sentryClient         *direct.MockSentryClient
 	messageListener      *MessageListener
 	requestResponseMocks map[uint64]requestResponseMock
-	peerEvents           chan *delayedMessage[*sentryproto.PeerEvent]
+	peerEventsSubsMu     sync.Mutex
+	peerEventsSubs       []chan *delayedMessage[*sentryproto.PeerEvent]
 }
 
 func (ft *fetcherTest) run(f func(ctx context.Context, t *testing.T)) {
@@ -1186,15 +1188,59 @@ func (ft *fetcherTest) mockSendMessageByIdForBodies(req *sentryproto.SendMessage
 }
 
 func (ft *fetcherTest) mockSentryPeerEventsStream() {
-	ft.peerEvents = make(chan *delayedMessage[*sentryproto.PeerEvent])
 	ft.sentryClient.
 		EXPECT().
 		PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&mockSentryMessagesStream[*sentryproto.PeerEvent]{
-			ctx:    ft.ctx,
-			stream: ft.peerEvents,
-		}, nil).
+		DoAndReturn(
+			func(
+				ctx context.Context,
+				request *sentryproto.PeerEventsRequest,
+				option ...grpc.CallOption,
+			) (grpc.ServerStreamingClient[sentryproto.PeerEvent], error) {
+				ft.peerEventsSubsMu.Lock()
+				defer ft.peerEventsSubsMu.Unlock()
+				peerEvents := make(chan *delayedMessage[*sentryproto.PeerEvent])
+				ft.peerEventsSubs = append(ft.peerEventsSubs, peerEvents)
+				return &mockSentryMessagesStream[*sentryproto.PeerEvent]{
+					ctx:    ft.ctx,
+					stream: peerEvents,
+				}, nil
+			},
+		).
 		AnyTimes()
+}
+
+func (ft *fetcherTest) simulateDefaultPeerEvents() {
+	ft.simulatePeerEvents([]*sentryproto.PeerEvent{
+		{
+			EventId: sentryproto.PeerEvent_Connect,
+			PeerId:  PeerIdFromUint64(1).H512(),
+		},
+		{
+			EventId: sentryproto.PeerEvent_Connect,
+			PeerId:  PeerIdFromUint64(2).H512(),
+		},
+	})
+}
+
+func (ft *fetcherTest) simulatePeerEvents(peerEvents []*sentryproto.PeerEvent) {
+	ft.peerEventsSubsMu.Lock()
+	defer ft.peerEventsSubsMu.Unlock()
+	for _, peerEvent := range peerEvents {
+		for _, peerEventsSub := range ft.peerEventsSubs {
+			ft.logger.Debug("simulating peer event", "peerId", PeerIdFromH512(peerEvent.PeerId), "eventId", peerEvent.EventId)
+			peerEventsSub <- &delayedMessage[*sentryproto.PeerEvent]{
+				message: peerEvent,
+			}
+			ft.logger.Debug("simulated peer event", "peerId", PeerIdFromH512(peerEvent.PeerId), "eventId", peerEvent.EventId)
+		}
+	}
+}
+
+func (ft *fetcherTest) peerEventsSubsCount() int {
+	ft.peerEventsSubsMu.Lock()
+	defer ft.peerEventsSubsMu.Unlock()
+	return len(ft.peerEventsSubs)
 }
 
 type requestResponseMock struct {

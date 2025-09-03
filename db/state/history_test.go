@@ -25,7 +25,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,34 +45,32 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	tb.Cleanup(db.Close)
+
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := Schema.AccountsDomain
+	cfg := statecfg.Schema.AccountsDomain
 
-	cfg.hist.iiCfg.dirs = dirs
-	if cfg.hist.iiCfg.salt == nil {
-		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.hist.iiCfg.salt.Store(&salt)
-	cfg.hist.iiCfg.Accessors = AccessorHashMap
-	cfg.hist.historyLargeValues = largeValues
+	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
+	cfg.Hist.HistoryLargeValues = largeValues
 
 	//perf of tests
-	cfg.hist.iiCfg.Compression = seg.CompressNone
-	cfg.hist.Compression = seg.CompressNone
+	cfg.Hist.IiCfg.Compression = seg.CompressNone
+	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
-	h, err := NewHistory(cfg.hist, aggregationStep, logger)
+	h, err := NewHistory(cfg.Hist, aggregationStep, dirs, logger)
 	require.NoError(tb, err)
-	h.DisableFsync()
-	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
+	h.salt.Store(&salt)
+	h.DisableFsync()
 	return db, h
 }
 
@@ -114,7 +111,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			defer sf.CleanupOnError()
 
 			efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
-			hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
+			hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.HistoryValuesOnCompressedPage, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -227,13 +224,13 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(3, c.efHistoryComp.Count()/2)
-		require.Equal(seg.WordsAmount2PagesAmount(6, h.historyValuesOnCompressedPage), c.historyComp.Count())
+		require.Equal(seg.WordsAmount2PagesAmount(6, h.HistoryValuesOnCompressedPage), c.historyComp.Count())
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
+		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.HistoryValuesOnCompressedPage, true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -260,7 +257,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		for i := 0; i < len(keyWords); i++ {
 			var offset uint64
 			var ok bool
-			if h.InvertedIndex.Accessors.Has(AccessorExistence) {
+			if h.InvertedIndex.Accessors.Has(statecfg.AccessorExistence) {
 				offset, ok = r.Lookup([]byte(keyWords[i]))
 				if !ok {
 					continue
@@ -276,7 +273,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.historyValuesOnCompressedPage, true)
+		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), h.HistoryValuesOnCompressedPage, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
@@ -355,7 +352,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 
 		require.NoError(err)
 
-		for _, table := range []string{h.keysTable, h.valuesTable, h.valuesTable} {
+		for _, table := range []string{h.KeysTable, h.ValuesTable, h.ValuesTable} {
 			var cur kv.Cursor
 			cur, err = tx.Cursor(table)
 			require.NoError(err)
@@ -430,7 +427,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	if !testing.Short() {
 		t.Run("withFiles", func(t *testing.T) {
 			db, h := testDbAndHistory(t, true, logger)
-			h.snapshotsDisabled = false
+			h.SnapshotsDisabled = false
 
 			defer db.Close()
 			writeKey(t, h, db)
@@ -467,8 +464,8 @@ func TestHistoryCanPrune(t *testing.T) {
 
 	t.Run("withoutFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
-		h.snapshotsDisabled = true
-		h.keepRecentTxnInDB = stepKeepInDB * h.stepSize
+		h.SnapshotsDisabled = true
+		h.KeepRecentTxnInDB = stepKeepInDB * h.stepSize
 
 		defer db.Close()
 
@@ -508,7 +505,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	db, h := filledHistoryValues(t, true, values, log.New())
 	defer db.Close()
 	defer h.Close()
-	h.keepRecentTxnInDB = 900 // should be ignored since files are built
+	h.KeepRecentTxnInDB = 900 // should be ignored since files are built
 	t.Logf("step=%d\n", h.stepSize)
 
 	collateAndMergeHistory(t, db, h, 500, false)
@@ -530,7 +527,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	hc := h.BeginFilesRo()
 	defer hc.Close()
 
-	itable, err := rwTx.CursorDupSort(hc.iit.ii.valuesTable)
+	itable, err := rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
 	require.NoError(t, err)
 	defer itable.Close()
 	limits := 10
@@ -545,7 +542,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
 	}
 	canHist, txTo := hc.canPruneUntil(rwTx, math.MaxUint64)
-	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.keysTable, txTo)
+	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
 
 	stat, err := hc.Prune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
 	require.NoError(t, err)
@@ -565,7 +562,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("stat=%v", stat)
 
-	icc, err := rwTx.CursorDupSort(h.valuesTable)
+	icc, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
 	defer icc.Close()
 
@@ -589,7 +586,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.valuesTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -612,7 +609,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index keys table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.keysTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.KeysTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -655,7 +652,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	binary.BigEndian.PutUint64(from[:], uint64(0))
 	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
 
-	icc, err := rwTx.CursorDupSort(h.valuesTable)
+	icc, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
 
 	count := 0
@@ -691,7 +688,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		t.Logf("[%d] stats: %v", i, stat)
 	}
 
-	icc, err = rwTx.CursorDupSort(h.valuesTable)
+	icc, err = rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
 	defer icc.Close()
 
@@ -700,7 +697,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	require.NotNil(t, key)
 	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
 
-	icc, err = rwTx.CursorDupSort(h.valuesTable)
+	icc, err = rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
 	defer icc.Close()
 }
@@ -985,7 +982,9 @@ func TestHistoryScanFiles(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
-		require.NoError(h.openFolder())
+		scanDirsRes, err := scanDirs(h.dirs)
+		require.NoError(err)
+		require.NoError(h.openFolder(scanDirsRes))
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1548,7 +1547,9 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = h.openFolder()
+	scanDirsRes, err := scanDirs(h.dirs)
+	require.NoError(t, err)
+	err = h.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }

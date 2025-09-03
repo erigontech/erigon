@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
@@ -42,7 +42,7 @@ import (
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -76,7 +76,7 @@ type Pool interface {
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
-	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
+	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
@@ -150,7 +150,7 @@ type TxPool struct {
 	p2pFetcher              *Fetch
 	p2pSender               *Send
 	newSlotsStreams         *NewSlotsStreams
-	ethBackend              remote.ETHBACKENDClient
+	ethBackend              remoteproto.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
@@ -180,7 +180,7 @@ func New(
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
 	newSlotsStreams *NewSlotsStreams,
-	ethBackend remote.ETHBACKENDClient,
+	ethBackend remoteproto.ETHBACKENDClient,
 	logger log.Logger,
 	opts ...Option,
 ) (*TxPool, error) {
@@ -326,7 +326,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
 	sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
@@ -780,6 +780,12 @@ func (p *TxPool) Started() bool {
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 	p.lock.Lock()
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
+		select {
+		case <-ctx.Done():
+			return false, 0, ctx.Err()
+		default:
+			// continue
+		}
 		p.logger.Debug("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 		p.lastSeenCond.Wait()
 	}
@@ -977,10 +983,10 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	}
 }
 
-func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
-	blobs := make([]gokzg4844.BlobRef, len(_blobs))
+func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
+	blobs := make([]*goethkzg.Blob, len(_blobs))
 	for i, _blob := range _blobs {
-		blobs[i] = _blob
+		blobs[i] = (*goethkzg.Blob)(_blob)
 	}
 	return blobs
 }
@@ -998,7 +1004,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			return txpoolcfg.TypeNotActivated
 		}
 
-		res, err := p.ethBackend.AAValidation(context.Background(), &remote.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
+		res, err := p.ethBackend.AAValidation(context.Background(), &remoteproto.AAValidationRequest{Tx: txn.ToProtoAccountAbstractionTxn()}) // enforces ERC-7562 rules
 		if err != nil {
 			return txpoolcfg.InvalidAA
 		}
@@ -1542,7 +1548,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 }
 
 // TODO: Looks like a copy of the above
-func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
+func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
 	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
 	if assert.Enable {
 		for _, txn := range newTxns.Txns {
@@ -1577,7 +1583,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remote.Action_UPSERT, remote.Action_UPSERT_CODE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
 				if change.Incarnation > 0 {
 					continue
 				}
@@ -2193,6 +2199,11 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 func (p *TxPool) Run(ctx context.Context) error {
 	defer p.logger.Info("[txpool] stopped")
 	defer p.poolDB.Close()
+	defer func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast() // to unblock .best() wait on cond
+		p.lock.Unlock()
+	}()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()
 

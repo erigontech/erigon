@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -87,7 +87,7 @@ type BlobAndProofV1 struct {
 	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
-// BlobAndProofV2 holds one item for engine_getBlobsV1
+// BlobAndProofV2 holds one item for engine_getBlobsV2
 type BlobAndProofV2 struct {
 	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
 	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
@@ -162,7 +162,7 @@ func (e *StringifiedError) Error() error {
 	return e.err
 }
 
-func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPayload {
+func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *ExecutionPayload {
 	header := payload.Header
 	body := payload.Body
 
@@ -203,7 +203,7 @@ func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPaylo
 	return res
 }
 
-func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
+func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPayload {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
 	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
 
@@ -241,7 +241,7 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 	return res
 }
 
-func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
+func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundleV1) *BlobsBundleV1 {
 	if bundle == nil {
 		return nil
 	}
@@ -262,13 +262,13 @@ func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
 	return res
 }
 
-func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
+func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
 	if in == nil {
 		return nil
 	}
-	out := make([]*types2.Withdrawal, 0, len(in))
+	out := make([]*typesproto.Withdrawal, 0, len(in))
 	for _, w := range in {
-		out = append(out, &types2.Withdrawal{
+		out = append(out, &typesproto.Withdrawal{
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
@@ -278,7 +278,7 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 	return out
 }
 
-func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
+func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal {
 	if in == nil {
 		return nil
 	}

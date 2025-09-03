@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -99,7 +100,12 @@ var readDomains = &cobra.Command{
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = chainspec.GenesisBlockByChainName(chain)
+
+		spec, err := chainspec.ChainSpecByName(chain)
+		if err != nil {
+			utils.Fatalf("unknown chain %s", chain)
+		}
+		ethConfig.Genesis = spec.Genesis
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		var readFromDomain string
@@ -340,8 +346,8 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 }
 
 func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingCompacted bool, err error) {
-	compressionType := dbstate.Schema.GetDomainCfg(domain).Compression
-	compressCfg := dbstate.Schema.GetDomainCfg(domain).CompressCfg
+	compressionType := statecfg.Schema.GetDomainCfg(domain).Compression
+	compressCfg := statecfg.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
 	switch domain {

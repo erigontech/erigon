@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
@@ -43,7 +43,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, log.New()), nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }

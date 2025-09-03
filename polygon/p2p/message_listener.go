@@ -21,14 +21,15 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 type DecodedInboundMessage[TPacket any] struct {
@@ -39,10 +40,32 @@ type DecodedInboundMessage[TPacket any] struct {
 
 type UnregisterFunc = event.UnregisterFunc
 
+type RegisterOpt func(*registerOptions)
+
+func WithReplayConnected(ctx context.Context) RegisterOpt {
+	return func(opts *registerOptions) {
+		opts.replayConnected = true
+		opts.replayConnectedCtx = ctx
+	}
+}
+
+type registerOptions struct {
+	replayConnected    bool
+	replayConnectedCtx context.Context
+}
+
+func applyRegisterOptions(opts []RegisterOpt) *registerOptions {
+	defaultOptions := &registerOptions{}
+	for _, opt := range opts {
+		opt(defaultOptions)
+	}
+	return defaultOptions
+}
+
 func NewMessageListener(
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentry.StatusDataFactory,
+	statusDataFactory libsentry.StatusDataFactory,
 	peerPenalizer *PeerPenalizer,
 ) *MessageListener {
 	return &MessageListener{
@@ -61,7 +84,7 @@ func NewMessageListener(
 type MessageListener struct {
 	logger                  log.Logger
 	sentryClient            sentryproto.SentryClient
-	statusDataFactory       sentry.StatusDataFactory
+	statusDataFactory       libsentry.StatusDataFactory
 	peerPenalizer           *PeerPenalizer
 	newBlockObservers       *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashesObservers *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
@@ -76,12 +99,15 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
-		ml.listenPeerEvents,
+		ml.listenPeerEventsBackground,
 	}
 
 	ml.stopWg.Add(len(backgroundLoops))
 	for _, loop := range backgroundLoops {
-		go loop(ctx)
+		go func() {
+			defer ml.stopWg.Done()
+			loop(ctx)
+		}()
 	}
 
 	<-ctx.Done()
@@ -93,7 +119,6 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 	ml.newBlockHashesObservers.Close()
 	ml.blockHeadersObservers.Close()
 	ml.blockBodiesObservers.Close()
-	ml.peerEventObservers.Close()
 	return ctx.Err()
 }
 
@@ -113,7 +138,17 @@ func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*
 	return ml.blockBodiesObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+func (ml *MessageListener) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent], opts ...RegisterOpt) UnregisterFunc {
+	options := applyRegisterOptions(opts)
+	if options.replayConnected {
+		// we always need to open a new stream to replay connected peers
+		ctx, cancel := context.WithCancel(options.replayConnectedCtx)
+		go ml.listenPeerEvents(ctx, uuid.New().String(), func(peerEvent *sentryproto.PeerEvent) error {
+			observer(peerEvent)
+			return nil
+		})
+		return UnregisterFunc(cancel)
+	}
 	return ml.peerEventObservers.Register(observer)
 }
 
@@ -147,12 +182,16 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 	})
 }
 
-func (ml *MessageListener) listenPeerEvents(ctx context.Context) {
+func (ml *MessageListener) listenPeerEventsBackground(ctx context.Context) {
+	ml.listenPeerEvents(ctx, "Background", ml.notifyPeerEventObservers)
+}
+
+func (ml *MessageListener) listenPeerEvents(ctx context.Context, suffix string, handler func(*sentryproto.PeerEvent) error) {
 	streamFactory := func(ctx context.Context, sentryClient sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentryClient.PeerEvents(ctx, &sentryproto.PeerEventsRequest{}, grpc.WaitForReady(true))
 	}
 
-	streamMessages(ctx, ml, "PeerEvents", streamFactory, ml.notifyPeerEventObservers)
+	streamMessages(ctx, ml, fmt.Sprintf("PeerEvents-%s", suffix), streamFactory, handler)
 }
 
 func (ml *MessageListener) notifyPeerEventObservers(peerEvent *sentryproto.PeerEvent) error {
@@ -166,16 +205,14 @@ func streamMessages[TMessage any](
 	ctx context.Context,
 	ml *MessageListener,
 	name string,
-	streamFactory sentry.MessageStreamFactory,
+	streamFactory libsentry.MessageStreamFactory,
 	handler func(event *TMessage) error,
 ) {
-	defer ml.stopWg.Done()
-
 	messageHandler := func(_ context.Context, event *TMessage, client sentryproto.SentryClient) error {
 		return handler(event)
 	}
 
-	sentry.ReconnectAndPumpStreamLoop(
+	libsentry.ReconnectAndPumpStreamLoop(
 		ctx,
 		ml.sentryClient,
 		ml.statusDataFactory,

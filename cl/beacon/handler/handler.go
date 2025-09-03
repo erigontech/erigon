@@ -24,7 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -49,8 +49,8 @@ import (
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
@@ -75,7 +75,7 @@ type ApiHandler struct {
 	operationsPool       pool.OperationsPool
 	syncedData           synced_data.SyncedData
 	stateReader          *historical_states_reader.HistoricalStatesReader
-	sentinel             sentinel.SentinelClient
+	sentinel             sentinelproto.SentinelClient
 	blobStoage           blob_storage.BlobStorage
 	columnStorage        blob_storage.DataColumnStorage
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
@@ -127,7 +127,7 @@ func NewApiHandler(
 	rcsn freezeblocks.BeaconSnapshotReader,
 	syncedData synced_data.SyncedData,
 	stateReader *historical_states_reader.HistoricalStatesReader,
-	sentinel sentinel.SentinelClient,
+	sentinel sentinelproto.SentinelClient,
 	version string,
 	routerCfg *beacon_router_configuration.RouterConfiguration,
 	emitters *beaconevents.EventEmitter,
@@ -303,8 +303,8 @@ func (a *ApiHandler) init() {
 							r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
 							r.Get("/validators", a.GetEthV1BeaconStatesValidators)
 							r.Post("/validators", a.PostEthV1BeaconStatesValidators)
-							r.Get("/validator_balances", a.GetEthV1BeaconValidatorsBalances)
-							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
+							r.Get("/validator_balances", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconValidatorsBalances))
+							r.Post("/validator_balances", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconValidatorsBalances))
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
 							r.Get("/pending_consolidations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingConsolidations))

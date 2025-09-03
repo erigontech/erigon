@@ -22,15 +22,15 @@ import (
 	"strconv"
 	"testing"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/testdata"
 )
@@ -235,10 +235,10 @@ func TestBlobTxnParsing(t *testing.T) {
 	rand.Read(blob1)
 
 	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
-	var commitment0, commitment1 gokzg4844.KZGCommitment
+	var commitment0, commitment1 goethkzg.KZGCommitment
 	rand.Read(commitment0[:])
 	rand.Read(commitment1[:])
-	var proof0, proof1 gokzg4844.KZGProof
+	var proof0, proof1 goethkzg.KZGProof
 	rand.Read(proof0[:])
 	rand.Read(proof1[:])
 
@@ -352,13 +352,13 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	blob1 := make([]byte, params.BlobSize)
 	rand.Read(blob1)
 
-	var commitment0, commitment1 gokzg4844.KZGCommitment
+	var commitment0, commitment1 goethkzg.KZGCommitment
 	rand.Read(commitment0[:])
 	rand.Read(commitment1[:])
 
-	proofs := make([]gokzg4844.KZGProof, 0, 256)
+	proofs := make([]goethkzg.KZGProof, 0, 256)
 	for range 256 {
-		var p gokzg4844.KZGProof
+		var p goethkzg.KZGProof
 		rand.Read(p[:])
 		proofs = append(proofs, p)
 	}

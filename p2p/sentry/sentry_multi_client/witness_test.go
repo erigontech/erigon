@@ -10,22 +10,20 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/stateless"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/memdb"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte, blockNumber uint64) error {
@@ -88,17 +86,10 @@ func createTestWitness(t *testing.T, header *types.Header) *stateless.Witness {
 }
 
 func createTestMultiClient(t *testing.T) (*MultiClient, kv.TemporalRwDB) {
-	baseDB := memdb.NewStateDB(t.TempDir())
-	t.Cleanup(baseDB.Close)
-
 	dirs, logger := datadir.New(t.TempDir()), log.New()
-	salt, err := dbstate.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(t, err)
-	agg, err := dbstate.NewAggregator2(context.Background(), dirs, 16, salt, baseDB, logger)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-	tdb, err := temporal.New(baseDB, agg)
-	require.NoError(t, err)
+
+	stepSize := uint64(16)
+	tdb := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
 
 	witnessBuffer := stagedsync.NewWitnessBuffer()
 
@@ -117,8 +108,8 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 	multiClient, testDB := createTestMultiClient(t)
 
 	t.Run("Invalid RLP", func(t *testing.T) {
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   []byte{0xFF, 0xFF, 0xFF}, // Invalid RLP
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -148,15 +139,15 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 		reqData, err := rlp.EncodeToBytes(&req)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
 
 		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-				require.Equal(t, proto_sentry.MessageId_BLOCK_WITNESS_W0, request.Data.Id)
+			func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+				require.Equal(t, sentryproto.MessageId_BLOCK_WITNESS_W0, request.Data.Id)
 
 				var response wit.WitnessPacketRLPPacket
 				err := rlp.DecodeBytes(request.Data.Data, &response)
@@ -170,7 +161,7 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 				require.Equal(t, uint64(1), pageResp.TotalPages)
 				require.Equal(t, testWitnessData, pageResp.Data)
 
-				return &proto_sentry.SentPeers{}, nil
+				return &sentryproto.SentPeers{}, nil
 			},
 		).Times(1)
 
@@ -186,8 +177,8 @@ func TestNewWitnessFunction(t *testing.T) {
 	multiClient, _ := createTestMultiClient(t)
 
 	t.Run("Invalid RLP", func(t *testing.T) {
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_NEW_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_NEW_WITNESS_W0,
 			Data:   []byte{0xFF, 0xFF, 0xFF}, // Invalid RLP
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -213,8 +204,8 @@ func TestNewWitnessFunction(t *testing.T) {
 		packetData, err := rlp.EncodeToBytes(&newWitnessPacket)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_NEW_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_NEW_WITNESS_W0,
 			Data:   packetData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -267,13 +258,13 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 		reqData, err := rlp.EncodeToBytes(&req)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
 
-		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).Return(&proto_sentry.SentPeers{}, nil).Times(1)
+		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.SentPeers{}, nil).Times(1)
 
 		err = multiClient.handleInboundMessage(ctx, inboundMsg, mockSentryClient)
 		require.NoError(t, err) // Should succeed with proper data
@@ -295,8 +286,8 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 		packetData, err := rlp.EncodeToBytes(&newWitnessPacket)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_NEW_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_NEW_WITNESS_W0,
 			Data:   packetData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -354,14 +345,14 @@ func TestWitnessPagination(t *testing.T) {
 		reqData, err := rlp.EncodeToBytes(&req)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
 
 		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				var response wit.WitnessPacketRLPPacket
 				err := rlp.DecodeBytes(request.Data.Data, &response)
 				require.NoError(t, err)
@@ -378,7 +369,7 @@ func TestWitnessPagination(t *testing.T) {
 				expectedFirstPage := largeWitnessData[:pageSize]
 				require.Equal(t, expectedFirstPage, pageResp.Data)
 
-				return &proto_sentry.SentPeers{}, nil
+				return &sentryproto.SentPeers{}, nil
 			},
 		).Times(1)
 
@@ -400,14 +391,14 @@ func TestWitnessPagination(t *testing.T) {
 		reqData, err := rlp.EncodeToBytes(&req)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
 
 		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				var response wit.WitnessPacketRLPPacket
 				err := rlp.DecodeBytes(request.Data.Data, &response)
 				require.NoError(t, err)
@@ -421,7 +412,7 @@ func TestWitnessPagination(t *testing.T) {
 				expectedSecondPage := largeWitnessData[pageSize : pageSize*2]
 				require.Equal(t, expectedSecondPage, pageResp.Data)
 
-				return &proto_sentry.SentPeers{}, nil
+				return &sentryproto.SentPeers{}, nil
 			},
 		).Times(1)
 
@@ -443,14 +434,14 @@ func TestWitnessPagination(t *testing.T) {
 		reqData, err := rlp.EncodeToBytes(&req)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
 
 		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				var response wit.WitnessPacketRLPPacket
 				err := rlp.DecodeBytes(request.Data.Data, &response)
 				require.NoError(t, err)
@@ -464,7 +455,7 @@ func TestWitnessPagination(t *testing.T) {
 				expectedThirdPage := largeWitnessData[pageSize*2:]
 				require.Equal(t, expectedThirdPage, pageResp.Data)
 
-				return &proto_sentry.SentPeers{}, nil
+				return &sentryproto.SentPeers{}, nil
 			},
 		).Times(1)
 
@@ -490,14 +481,14 @@ func TestWitnessPagination(t *testing.T) {
 		reqData, err := rlp.EncodeToBytes(&req)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
 
 		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				var response wit.WitnessPacketRLPPacket
 				err := rlp.DecodeBytes(request.Data.Data, &response)
 				require.NoError(t, err)
@@ -519,7 +510,7 @@ func TestWitnessPagination(t *testing.T) {
 				require.Equal(t, uint64(3), page2.TotalPages)
 				require.Equal(t, 1000, len(page2.Data))
 
-				return &proto_sentry.SentPeers{}, nil
+				return &sentryproto.SentPeers{}, nil
 			},
 		).Times(1)
 
@@ -541,14 +532,14 @@ func TestWitnessPagination(t *testing.T) {
 		reqData, err := rlp.EncodeToBytes(&req)
 		require.NoError(t, err)
 
-		inboundMsg := &proto_sentry.InboundMessage{
-			Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+		inboundMsg := &sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
 
 		mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				var response wit.WitnessPacketRLPPacket
 				err := rlp.DecodeBytes(request.Data.Data, &response)
 				require.NoError(t, err)
@@ -559,7 +550,7 @@ func TestWitnessPagination(t *testing.T) {
 				require.Equal(t, uint64(3), pageResp.TotalPages)
 				require.Empty(t, pageResp.Data) // Should be empty for invalid page
 
-				return &proto_sentry.SentPeers{}, nil
+				return &sentryproto.SentPeers{}, nil
 			},
 		).Times(1)
 
@@ -600,14 +591,14 @@ func TestWitnessExactPageSize(t *testing.T) {
 	reqData, err := rlp.EncodeToBytes(&req)
 	require.NoError(t, err)
 
-	inboundMsg := &proto_sentry.InboundMessage{
-		Id:     proto_sentry.MessageId_GET_BLOCK_WITNESS_W0,
+	inboundMsg := &sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 		Data:   reqData,
 		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x99, 0x99, 0x99}),
 	}
 
 	mockSentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(ctx context.Context, request *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+		func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 			var response wit.WitnessPacketRLPPacket
 			err := rlp.DecodeBytes(request.Data.Data, &response)
 			require.NoError(t, err)
@@ -622,7 +613,7 @@ func TestWitnessExactPageSize(t *testing.T) {
 			require.Equal(t, pageSize, len(pageResp.Data))   // Full page size
 			require.Equal(t, exactPageSizeData, pageResp.Data)
 
-			return &proto_sentry.SentPeers{}, nil
+			return &sentryproto.SentPeers{}, nil
 		},
 	).Times(1)
 

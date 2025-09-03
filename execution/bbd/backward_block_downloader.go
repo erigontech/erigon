@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/polygon/p2p"
 )
 
@@ -53,14 +53,14 @@ type BackwardBlockDownloader struct {
 func NewBackwardBlockDownloader(
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentry.StatusDataFactory,
+	statusDataFactory libsentry.StatusDataFactory,
 	headerReader HeaderReader,
 	tmpDir string,
 ) *BackwardBlockDownloader {
 	peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
 	messageListener := p2p.NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
 	messageSender := p2p.NewMessageSender(sentryClient)
-	peerTracker := p2p.NewPeerTracker(logger, sentryClient, messageListener)
+	peerTracker := p2p.NewPeerTracker(logger, messageListener)
 	var fetcher p2p.Fetcher
 	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
 	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
@@ -521,17 +521,18 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				bodies := bodiesResponse.Data
 				blockBatch := make([]*types.Block, 0, len(headerBatch))
 				for i, header := range headerBatch {
-					block := types.NewBlockFromNetwork(header, bodies[i])
-					err = block.HashCheck(true)
+					body := bodies[i]
+					err = body.MatchesHeader(header)
 					if err == nil {
+						block := types.NewBlockFromNetwork(header, body)
 						blockBatch = append(blockBatch, block)
 						continue
 					}
 
 					bbd.logger.Debug(
-						"[backward-block-downloader] block hash check failed, penalizing peer",
-						"num", block.NumberU64(),
-						"hash", block.Hash(),
+						"[backward-block-downloader] body does not match header, penalizing peer",
+						"num", header.Number.Uint64(),
+						"hash", header.Hash(),
 						"peerId", peerId.String(),
 						"err", err,
 					)

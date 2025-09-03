@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
@@ -102,8 +102,7 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 	)
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	// Generate empty chain to have some orphaned blocks for tests
 	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
@@ -310,10 +309,10 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	remote.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
+	remoteproto.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
 		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
-	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpool.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
+	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
+	txpoolproto.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
@@ -504,7 +503,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	}...)
 
 	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{

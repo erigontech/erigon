@@ -42,17 +42,14 @@ import (
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/runtime"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
@@ -172,26 +169,18 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New(os.TempDir(), kv.ChainDB)
+	db := temporaltest.NewTestDB(nil, datadir.New(os.TempDir()))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
+		genesiswrite.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		return err
-	}
-	tx, err := tdb.BeginTemporalRw(context.Background())
+
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}

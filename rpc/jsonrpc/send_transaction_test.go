@@ -28,16 +28,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -61,7 +60,7 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	require.NoError(err)
 
 	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: mockSentry.PeerId}) {
+	for _, err = range mockSentry.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: mockSentry.PeerId}) {
 		require.NoError(err)
 	}
 	// Send all the headers
@@ -71,7 +70,7 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	})
 	require.NoError(err)
 	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: mockSentry.PeerId}) {
+	for _, err = range mockSentry.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: mockSentry.PeerId}) {
 		require.NoError(err)
 	}
 	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
@@ -97,8 +96,8 @@ func TestSendRawTransaction(t *testing.T) {
 	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
-	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	txPool := txpoolproto.NewTxpoolClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
 
 	buf := bytes.NewBuffer(nil)
@@ -124,7 +123,7 @@ func TestSendRawTransaction(t *testing.T) {
 	//send same txn second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.Error(err)
-	expectedErr := txpool_proto.ImportResult_name[int32(txpool_proto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
+	expectedErr := txpoolproto.ImportResult_name[int32(txpoolproto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
 	mockSentry.ReceiveWg.Wait()
 
@@ -153,8 +152,8 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
-	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
+	txPool := txpoolproto.NewTxpoolClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
 
 	// Enable unproteced txs flag

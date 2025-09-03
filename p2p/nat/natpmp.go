@@ -28,7 +28,7 @@ import (
 
 	natpmp "github.com/jackpal/go-nat-pmp"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 )
 
 // natPMPClient adapts the NAT-PMP protocol implementation so it conforms to
@@ -79,7 +79,7 @@ func discoverPMP() Interface {
 	for i := range gws {
 		gw := gws[i]
 		go func() {
-			defer debug.LogPanic()
+			defer dbg.LogPanic()
 			c := natpmp.NewClient(gw)
 			if _, err := c.GetExternalAddress(); err != nil {
 				found <- nil

@@ -18,12 +18,12 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentryClient {
@@ -75,7 +75,7 @@ func TestCreateMultiplexer(t *testing.T) {
 		clients = append(clients, newClient(ctrl, i, nil))
 	}
 
-	mux := sentry.NewSentryMultiplexer(clients)
+	mux := libsentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
 
 	hs, err := mux.HandShake(context.Background(), &emptypb.Empty{})
@@ -127,7 +127,7 @@ func TestStatus(t *testing.T) {
 		clients = append(clients, client)
 	}
 
-	mux := sentry.NewSentryMultiplexer(clients)
+	mux := libsentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
 
 	hs, err := mux.HandShake(context.Background(), &emptypb.Empty{})
@@ -183,7 +183,7 @@ func TestSend(t *testing.T) {
 		clients = append(clients, client)
 	}
 
-	mux := sentry.NewSentryMultiplexer(clients)
+	mux := libsentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
 
 	_, err := mux.HandShake(context.Background(), &emptypb.Empty{})
@@ -239,8 +239,8 @@ func TestMessages(t *testing.T) {
 		client := newClient(ctrl, i, nil)
 		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
-				ch := make(chan sentry.StreamReply[*sentryproto.InboundMessage], 16384)
-				streamServer := &sentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
+				ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], 16384)
+				streamServer := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
 
 				go func() {
 					for i := 0; i < 5; i++ {
@@ -250,13 +250,13 @@ func TestMessages(t *testing.T) {
 					streamServer.Close()
 				}()
 
-				return &sentry.SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
+				return &libsentry.SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
 			})
 
 		clients = append(clients, client)
 	}
 
-	mux := sentry.NewSentryMultiplexer(clients)
+	mux := libsentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
 
 	client, err := mux.Messages(context.Background(), &sentryproto.MessagesRequest{})
@@ -300,8 +300,8 @@ func TestPeers(t *testing.T) {
 			})
 		client.EXPECT().PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-				ch := make(chan sentry.StreamReply[*sentryproto.PeerEvent], 16384)
-				streamServer := &sentry.SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
+				ch := make(chan libsentry.StreamReply[*sentryproto.PeerEvent], 16384)
+				streamServer := &libsentry.SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
 
 				go func() {
 					for i := 0; i < 5; i++ {
@@ -311,7 +311,7 @@ func TestPeers(t *testing.T) {
 					streamServer.Close()
 				}()
 
-				return &sentry.SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
+				return &libsentry.SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
 			})
 		client.EXPECT().PeerById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.PeerByIdRequest, opts ...grpc.CallOption) (*sentryproto.PeerByIdReply, error) {
@@ -331,7 +331,7 @@ func TestPeers(t *testing.T) {
 		clients = append(clients, client)
 	}
 
-	mux := sentry.NewSentryMultiplexer(clients)
+	mux := libsentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
 
 	_, err := mux.HandShake(context.Background(), &emptypb.Empty{})

@@ -26,11 +26,11 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	erigonlibtypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
@@ -40,17 +40,17 @@ func TestMessageSenderSendGetBlockHeaders(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, request *sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentry.SentPeers, error) {
+		DoAndReturn(func(_ context.Context, request *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 			require.Equal(t, PeerIdFromUint64(123), PeerIdFromH512(request.PeerId))
-			require.Equal(t, sentry.MessageId_GET_BLOCK_HEADERS_66, request.Data.Id)
+			require.Equal(t, sentryproto.MessageId_GET_BLOCK_HEADERS_66, request.Data.Id)
 			var payload eth.GetBlockHeadersPacket66
 			err := rlp.DecodeBytes(request.Data.Data, &payload)
 			require.NoError(t, err)
 			require.Equal(t, uint64(10), payload.RequestId)
 			require.Equal(t, uint64(3), payload.Origin.Number)
 			require.Equal(t, uint64(5), payload.Amount)
-			return &sentry.SentPeers{
-				Peers: []*erigonlibtypes.H512{
+			return &sentryproto.SentPeers{
+				Peers: []*typesproto.H512{
 					PeerIdFromUint64(123).H512(),
 				},
 			}, nil
@@ -76,7 +76,7 @@ func TestMessageSenderSendGetBlockHeadersErrPeerNotFound(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&sentry.SentPeers{}, nil).
+		Return(&sentryproto.SentPeers{}, nil).
 		Times(1)
 
 	messageSender := NewMessageSender(sentryClient)
@@ -98,16 +98,16 @@ func TestMessageSenderSendGetBlockBodies(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, request *sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentry.SentPeers, error) {
+		DoAndReturn(func(_ context.Context, request *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 			require.Equal(t, PeerIdFromUint64(123), PeerIdFromH512(request.PeerId))
-			require.Equal(t, sentry.MessageId_GET_BLOCK_BODIES_66, request.Data.Id)
+			require.Equal(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, request.Data.Id)
 			var payload eth.GetBlockBodiesPacket66
 			err := rlp.DecodeBytes(request.Data.Data, &payload)
 			require.NoError(t, err)
 			require.Equal(t, uint64(10), payload.RequestId)
 			require.Len(t, payload.GetBlockBodiesPacket, 1)
-			return &sentry.SentPeers{
-				Peers: []*erigonlibtypes.H512{
+			return &sentryproto.SentPeers{
+				Peers: []*typesproto.H512{
 					PeerIdFromUint64(123).H512(),
 				},
 			}, nil
@@ -128,7 +128,7 @@ func TestMessageSenderSendGetBlockBodiesErrPeerNotFound(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&sentry.SentPeers{}, nil).
+		Return(&sentryproto.SentPeers{}, nil).
 		Times(1)
 
 	messageSender := NewMessageSender(sentryClient)
@@ -145,17 +145,17 @@ func TestMessageSenderSendNewBlockHashes(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, request *sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentry.SentPeers, error) {
+		DoAndReturn(func(_ context.Context, request *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 			require.Equal(t, PeerIdFromUint64(123), PeerIdFromH512(request.PeerId))
-			require.Equal(t, sentry.MessageId_NEW_BLOCK_HASHES_66, request.Data.Id)
+			require.Equal(t, sentryproto.MessageId_NEW_BLOCK_HASHES_66, request.Data.Id)
 			var payload eth.NewBlockHashesPacket
 			err := rlp.DecodeBytes(request.Data.Data, &payload)
 			require.NoError(t, err)
 			require.Len(t, payload, 1)
 			require.Equal(t, uint64(1), payload[0].Number)
 			require.Equal(t, common.HexToHash("0x0"), payload[0].Hash)
-			return &sentry.SentPeers{
-				Peers: []*erigonlibtypes.H512{
+			return &sentryproto.SentPeers{
+				Peers: []*typesproto.H512{
 					PeerIdFromUint64(123).H512(),
 				},
 			}, nil
@@ -178,7 +178,7 @@ func TestMessageSenderSendNewBlockHashesErrPeerNotFound(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&sentry.SentPeers{}, nil).
+		Return(&sentryproto.SentPeers{}, nil).
 		Times(1)
 
 	messageSender := NewMessageSender(sentryClient)
@@ -198,16 +198,16 @@ func TestMessageSenderSendNewBlock(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, request *sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentry.SentPeers, error) {
+		DoAndReturn(func(_ context.Context, request *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 			require.Equal(t, PeerIdFromUint64(123), PeerIdFromH512(request.PeerId))
-			require.Equal(t, sentry.MessageId_NEW_BLOCK_66, request.Data.Id)
+			require.Equal(t, sentryproto.MessageId_NEW_BLOCK_66, request.Data.Id)
 			var payload eth.NewBlockPacket
 			err := rlp.DecodeBytes(request.Data.Data, &payload)
 			require.NoError(t, err)
 			require.Equal(t, uint64(123), payload.Block.NumberU64())
 			require.Equal(t, uint64(2), payload.TD.Uint64())
-			return &sentry.SentPeers{
-				Peers: []*erigonlibtypes.H512{
+			return &sentryproto.SentPeers{
+				Peers: []*typesproto.H512{
 					PeerIdFromUint64(123).H512(),
 				},
 			}, nil
@@ -229,7 +229,7 @@ func TestMessageSenderSendNewBlockErrPeerNotFound(t *testing.T) {
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&sentry.SentPeers{}, nil).
+		Return(&sentryproto.SentPeers{}, nil).
 		Times(1)
 
 	messageSender := NewMessageSender(sentryClient)

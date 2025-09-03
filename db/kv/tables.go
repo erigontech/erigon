@@ -21,19 +21,14 @@ import (
 	"sort"
 	"strings"
 
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 // DBSchemaVersion versions list
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
-var DBSchemaVersion = types.VersionReply{Major: 7, Minor: 0, Patch: 0}
-
-// PlainContractCode -
-// key - address+incarnation
-// value - code hash
-const PlainContractCode = "PlainCodeHash"
+var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
 const ChangeSets3 = "ChangeSets3"
 
@@ -201,14 +196,6 @@ const (
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
 
-	//State Reconstitution
-	PlainStateR    = "PlainStateR"    // temporary table for PlainState reconstitution
-	PlainStateD    = "PlainStateD"    // temporary table for PlainStare reconstitution, deletes
-	CodeR          = "CodeR"          // temporary table for Code reconstitution
-	CodeD          = "CodeD"          // temporary table for Code reconstitution, deletes
-	PlainContractR = "PlainContractR" // temporary table for PlainContract reconstitution
-	PlainContractD = "PlainContractD" // temporary table for PlainContract reconstitution, deletes
-
 	// Erigon-CL Objects
 
 	// [slot + block root] => [signature + block without execution payload]
@@ -328,10 +315,8 @@ var ChaindataTables = []string{
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
-	IncarnationMap,
 	SyncStageProgress,
 	PlainState,
-	PlainContractCode,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -475,19 +460,11 @@ var ConsensusTables = append([]string{
 },
 	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
 )
-var HeimdallTables = []string{}
-var PolygonBridgeTables = []string{}
+var HeimdallTables = ChaindataTables
+var PolygonBridgeTables = ChaindataTables
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
-}
-var ReconTables = []string{
-	PlainStateR,
-	PlainStateD,
-	CodeR,
-	CodeD,
-	PlainContractR,
-	PlainContractD,
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
@@ -614,11 +591,6 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
-var ReconTablesCfg = TableCfg{
-	PlainStateD:    {Flags: DupSort},
-	CodeD:          {Flags: DupSort},
-	PlainContractD: {Flags: DupSort},
-}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
@@ -697,13 +669,6 @@ func reinit() {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
 			DownloaderTablesCfg[name] = TableCfgItem{}
-		}
-	}
-
-	for _, name := range ReconTables {
-		_, ok := ReconTablesCfg[name]
-		if !ok {
-			ReconTablesCfg[name] = TableCfgItem{}
 		}
 	}
 
@@ -799,6 +764,10 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 		return RCacheHistoryIdx, nil
 	case "logaddrs":
 		return LogAddrIdx, nil
+	case "logaddr":
+		return LogAddrIdx, nil
+	case "logtopic":
+		return LogTopicIdx, nil
 	case "logtopics":
 		return LogTopicIdx, nil
 	case "tracesfrom":
@@ -808,6 +777,18 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 	default:
 		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
 	}
+}
+
+func String2Enum(in string) (uint16, error) {
+	ii, err := String2InvertedIdx(in)
+	if err != nil {
+		d, errD := String2Domain(in)
+		if errD != nil {
+			return 0, errD
+		}
+		return uint16(d), nil
+	}
+	return uint16(ii), nil
 }
 
 const (
@@ -971,9 +952,4 @@ const (
 	*/
 	E2AccountsHistory = "AccountHistory"
 	E2StorageHistory  = "StorageHistory"
-
-	// IncarnationMap for deleted accounts
-	//key - address
-	//value - incarnation of account when it was last deleted
-	IncarnationMap = "IncarnationMap"
 )

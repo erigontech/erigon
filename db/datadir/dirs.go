@@ -318,8 +318,12 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	} else {
 		log.Debug(fmt.Sprintf("Renamed %d directories to v1.0- and removed %d .torrent files", renamed, torrentsRemoved))
 	}
+	if renamed > 0 || removed > 0 {
+		log.Warn("Your snapshots are compatible but old. We recommend you (for better experience) " +
+			"upgrade them by `./build/bin/erigon --datadir /your/datadir snapshots reset ` command, after this command: next Erigon start - will download latest files (but re-use unchanged files) - likely will take many hours")
+	}
 	if d.Downloader != "" && (renamed > 0 || removed > 0) {
-		if err := dir.RemoveAll(d.Downloader); err != nil {
+		if err := dir.RemoveAll(d.Downloader); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		log.Info(fmt.Sprintf("Removed Downloader directory: %s", d.Downloader))
@@ -403,16 +407,16 @@ func (d *Dirs) RenameNewVersions() error {
 
 	//eliminate polygon-bridge && heimdall && chaindata just in case
 	if d.DataDir != "" {
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.PolygonBridgeDB)); err != nil {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, kv.PolygonBridgeDB)))
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.HeimdallDB)); err != nil {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, kv.HeimdallDB)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, kv.HeimdallDB)))
 		if d.Chaindata != "" {
-			if err := dir.RemoveAll(d.Chaindata); err != nil {
+			if err := dir.RemoveAll(d.Chaindata); err != nil && !os.IsNotExist(err) {
 				return err
 			}
 			log.Info(fmt.Sprintf("Removed chaindata directory: %s", d.Chaindata))

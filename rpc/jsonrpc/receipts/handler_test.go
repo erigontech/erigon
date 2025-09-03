@@ -30,15 +30,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
@@ -248,7 +248,7 @@ func TestGetBlockHeaders(t *testing.T) {
 		backend.ReceiveWg.Add(1)
 		encodedMessage, err := rlp.EncodeToBytes(eth.GetBlockHeadersPacket66{RequestId: 1, GetBlockHeadersPacket: tt.query})
 		require.NoError(t, err)
-		for _, err = range backend.Send(&sentry.InboundMessage{Id: eth.ToProto[direct.ETH68][eth.GetBlockHeadersMsg], Data: encodedMessage, PeerId: backend.PeerId}) {
+		for _, err = range backend.Send(&sentryproto.InboundMessage{Id: eth.ToProto[direct.ETH68][eth.GetBlockHeadersMsg], Data: encodedMessage, PeerId: backend.PeerId}) {
 			require.NoError(t, err)
 		}
 		expect, err := rlp.EncodeToBytes(eth.BlockHeadersPacket66{RequestId: 1, BlockHeadersPacket: expectedHeaders})
@@ -330,7 +330,7 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	m.ReceiveWg.Add(1)
 	// Send the hash request and verify the response
-	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[direct.ETH67][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: eth.ToProto[direct.ETH67][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 

@@ -89,13 +89,11 @@ type SimulatedBackend struct {
 	logsFeed   event.Feed
 }
 
-// NewSimulatedBackend creates a new binding backend using a simulated blockchain
-// for testing purposes.
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, checkStateRoot)
+	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
+	m := mock.MockWithGenesisEngine(t, &genesis, engine, false)
 
 	backend := &SimulatedBackend{
 		m:            m,
@@ -108,21 +106,19 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 			return h, err
 		},
 	}
+	if t != nil {
+		t.Cleanup(backend.Close)
+	}
 	backend.emptyPendingBlock()
 	return backend
 }
 
-// A simulated backend always uses chainID 1337.
+// NewSimulatedBackend A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewTestSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
+	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
 	return b
 }
 
-func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(t, alloc, config, gasLimit)
-	t.Cleanup(b.Close)
-	return b
-}
 func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
 func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }

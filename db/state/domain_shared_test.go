@@ -83,7 +83,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Logf("expected hash: %x", expectedHash)
-	t.Logf("valueTransform enabled: %t", agg.commitmentValuesTransform)
+	t.Logf("key referencing enabled: %t", agg.d[kv.CommitmentDomain].ReplaceKeysInValues)
 	err = agg.BuildFiles(stepSize * 16)
 	require.NoError(t, err)
 
@@ -385,8 +385,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains, err = NewSharedDomains(rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
-		domains.SetTxNum(domains.TxNum() + 1)
-		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, domains.TxNum()+1)
+		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
 		require.NoError(err)
 		require.Equal(0, iterCount(domains))
 	}
