@@ -109,7 +109,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 // SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
 // Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
 func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
-	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if !commitmentUseReferencedBranches {
 		return nil
 	}
@@ -324,7 +324,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 		return "", err
 	}
 	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", a.StepSize(), a.d[kv.CommitmentDomain].ReplaceKeysInValues)
+	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", a.StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues)
 	return s, nil
 }
 

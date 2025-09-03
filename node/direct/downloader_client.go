@@ -22,27 +22,27 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 )
 
 type DownloaderClient struct {
-	server proto_downloader.DownloaderServer
+	server downloaderproto.DownloaderServer
 }
 
-func NewDownloaderClient(server proto_downloader.DownloaderServer) *DownloaderClient {
+func NewDownloaderClient(server downloaderproto.DownloaderServer) *DownloaderClient {
 	return &DownloaderClient{server: server}
 }
 
-func (c *DownloaderClient) Add(ctx context.Context, in *proto_downloader.AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *DownloaderClient) Add(ctx context.Context, in *downloaderproto.AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Add(ctx, in)
 }
 
-func (c *DownloaderClient) Delete(ctx context.Context, in *proto_downloader.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *DownloaderClient) Delete(ctx context.Context, in *downloaderproto.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
 }
-func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *proto_downloader.SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *downloaderproto.SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.SetLogPrefix(ctx, in)
 }
-func (c *DownloaderClient) Completed(ctx context.Context, in *proto_downloader.CompletedRequest, opts ...grpc.CallOption) (*proto_downloader.CompletedReply, error) {
+func (c *DownloaderClient) Completed(ctx context.Context, in *downloaderproto.CompletedRequest, opts ...grpc.CallOption) (*downloaderproto.CompletedReply, error) {
 	return c.server.Completed(ctx, in)
 }

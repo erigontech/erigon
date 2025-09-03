@@ -27,7 +27,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
@@ -321,7 +321,7 @@ func (c *SentryPeersStreamC) RecvMsg(anyMessage interface{}) error {
 
 // -- end Peers
 
-func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
+func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
 	return c.server.NodeInfo(ctx, in)
 }
 

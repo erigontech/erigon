@@ -42,7 +42,7 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 	logger := log.New()
 
 	db, err := mdbx.New(kv.ChainDB, logger).
-		InMem(tmpDir).
+		InMem(t, tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{"RangeIndex": {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)

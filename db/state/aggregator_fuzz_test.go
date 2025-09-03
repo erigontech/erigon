@@ -74,7 +74,6 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
-			domains.SetTxNum(txNum)
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(0),
@@ -158,7 +157,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	_db, agg := testFuzzDbAndAggregatorv3(f, 10)
 	db := wrapDbWithCtx(_db, agg)
-	agg.d[kv.CommitmentDomain].ReplaceKeysInValues = true
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(f, err)
@@ -190,7 +189,6 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
-			domains.SetTxNum(txNum)
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(txNum * 1e6),
@@ -247,7 +245,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregat
 	require := require.New(f)
 	dirs := datadir.New(f.TempDir())
 	logger := log.New()
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(f, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
 	salt, err := GetStateIndicesSalt(dirs, true, logger)

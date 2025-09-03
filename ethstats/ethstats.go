@@ -37,7 +37,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/erigontech/erigon-lib/common"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -79,7 +79,7 @@ type Service struct {
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
 	blockReader services.FullBlockReader
-	txPool      txpool.TxpoolClient
+	txPool      txpoolproto.TxpoolClient
 }
 
 // connWrapper is a wrapper to prevent concurrent-write or concurrent-read on the
@@ -133,7 +133,7 @@ func (w *connWrapper) Close() error {
 
 // New returns a monitoring service ready for stats reporting.
 func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader,
-	engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpool.TxpoolClient) error {
+	engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient) error {
 	// Parse the netstats connection url
 	parts := urlRegex.FindStringSubmatch(url)
 	if len(parts) != 5 {
@@ -654,7 +654,7 @@ type pendStats struct {
 // reportPending retrieves the current number of pending transactions and reports
 // it to the stats server.
 func (s *Service) reportPending(conn *connWrapper) error {
-	in := new(txpool.StatusRequest)
+	in := new(txpoolproto.StatusRequest)
 	status, err := s.txPool.Status(context.Background(), in)
 	if err != nil {
 		return err

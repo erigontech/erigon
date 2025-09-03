@@ -22,7 +22,7 @@ import (
 	"errors"
 	"net/http"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -146,7 +146,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			continue
 		}
 		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 				Data:     encodedSSZ,
 				Name:     gossip.TopicNamePrefixBeaconAttestation,
 				SubnetId: &subnet,
@@ -223,7 +223,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			continue
 		}
 		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 				Data:     encodedSSZ,
 				Name:     gossip.TopicNamePrefixBeaconAttestation,
 				SubnetId: &subnet,
@@ -269,7 +269,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 	}
 	a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	if a.sentinel != nil {
-		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 			Data: encodedSSZ,
 			Name: gossip.TopicNameVoluntaryExit,
 		}); err != nil {
@@ -299,7 +299,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 			Data: encodedSSZ,
 			Name: gossip.TopicNameAttesterSlashing,
 		}); err != nil {
@@ -327,7 +327,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 			Data: encodedSSZ,
 			Name: gossip.TopicNameProposerSlashing,
 		}); err != nil {
@@ -370,7 +370,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 			continue
 		}
 		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBlsToExecutionChange,
 			}); err != nil {
@@ -416,7 +416,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 		}
 
 		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBeaconAggregateAndProof,
 			}); err != nil {
@@ -478,7 +478,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				break
 			}
 			if a.sentinel != nil {
-				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 					Data:     encodedSSZ,
 					Name:     gossip.TopicNamePrefixSyncCommittee,
 					SubnetId: &subnetId,
@@ -528,7 +528,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			continue
 		}
 		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameSyncCommitteeContributionAndProof,
 			}); err != nil {

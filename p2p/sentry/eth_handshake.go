@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -28,7 +28,7 @@ import (
 
 func readAndValidatePeerStatusMessage(
 	rw p2p.MsgReadWriter,
-	status *proto_sentry.StatusData,
+	status *sentryproto.StatusData,
 	version uint,
 	minVersion uint,
 ) (*eth.StatusPacket, *p2p.PeerError) {
@@ -70,7 +70,7 @@ func tryDecodeStatusMessage(msg *p2p.Msg) (*eth.StatusPacket, error) {
 
 func checkPeerStatusCompatibility(
 	reply *eth.StatusPacket,
-	status *proto_sentry.StatusData,
+	status *sentryproto.StatusData,
 	version uint,
 	minVersion uint,
 ) error {

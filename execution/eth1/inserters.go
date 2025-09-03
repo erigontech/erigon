@@ -22,17 +22,17 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common/metrics"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
+func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executionproto.InsertBlocksRequest) (*executionproto.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
-		return &execution.InsertionResult{
-			Result: execution.ExecutionStatus_Busy,
+		return &executionproto.InsertionResult{
+			Result: executionproto.ExecutionStatus_Busy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
@@ -95,7 +95,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not commit: %s", err)
 	}
 
-	return &execution.InsertionResult{
-		Result: execution.ExecutionStatus_Success,
+	return &executionproto.InsertionResult{
+		Result: executionproto.ExecutionStatus_Success,
 	}, nil
 }

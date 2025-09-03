@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 	"unsafe"
 
@@ -79,7 +80,8 @@ type MdbxOpts struct {
 	mergeThreshold  uint64
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
-	inMem           bool
+
+	inMem, autoRemove bool
 
 	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
 	// most of db must set explicit `roTxsLimiter <= 9K`.
@@ -140,12 +142,13 @@ func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	}
 	return opts.RemoveFlags(flag)
 }
-func (opts MdbxOpts) WriteMap(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.WriteMap) }
-func (opts MdbxOpts) Exclusive(v bool) MdbxOpts { return opts.boolToFlag(v, mdbx.Exclusive) }
-func (opts MdbxOpts) Readonly(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Readonly) }
-func (opts MdbxOpts) Accede(v bool) MdbxOpts    { return opts.boolToFlag(v, mdbx.Accede) }
+func (opts MdbxOpts) WriteMap(v bool) MdbxOpts   { return opts.boolToFlag(v, mdbx.WriteMap) }
+func (opts MdbxOpts) Exclusive(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Exclusive) }
+func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdbx.Readonly) }
+func (opts MdbxOpts) Accede(v bool) MdbxOpts     { return opts.boolToFlag(v, mdbx.Accede) }
+func (opts MdbxOpts) AutoRemove(v bool) MdbxOpts { opts.autoRemove = v; return opts }
 
-func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
+func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	if tmpDir != "" {
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			panic(err)
@@ -157,6 +160,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	}
 	opts.path = path
 	opts.inMem = true
+	opts.autoRemove = tb == nil
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
@@ -571,7 +575,7 @@ func (db *MdbxKV) Close() {
 	db.env.Close()
 	db.env = nil
 
-	if db.opts.inMem {
+	if db.opts.autoRemove {
 		if err := dir.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
