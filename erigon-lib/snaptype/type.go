@@ -462,7 +462,7 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To))
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(fileVer, info.From, info.To))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err
