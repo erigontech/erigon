@@ -245,7 +245,7 @@ func (s *Service) WaitUntilHeimdallIsSynced(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-time.After(timeout):
 			catchingUp, err = s.IsCatchingUp(ctx)
 			if err != nil {
