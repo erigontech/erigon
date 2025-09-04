@@ -273,7 +273,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 			return nil
 		}
 	}
-	return sd.mem.Put(domain, ks, v, txNum, prevVal, prevStep)
+	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
 }
 
 // DomainDel
@@ -301,7 +301,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
 			return err
 		}
-		return sd.mem.Del(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
+		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
@@ -309,7 +309,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	default:
 		//noop
 	}
-	return sd.mem.Del(domain, ks, txNum, prevVal, prevStep)
+	return sd.mem.DomainDel(domain, ks, txNum, prevVal, prevStep)
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte, txNum uint64) error {

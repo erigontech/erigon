@@ -73,24 +73,24 @@ func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
 	return sd
 }
 
-func (sd *TemporalMemBatch) Put(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
-	sd.put(domain, k, v, txNum)
-	return sd.putWal(domain, toBytesZeroCopy(k), v, txNum, preval, prevStep)
+func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+	sd.putLatest(domain, k, v, txNum)
+	return sd.putHistory(domain, toBytesZeroCopy(k), v, txNum, preval, prevStep)
 }
 
-func (sd *TemporalMemBatch) Del(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error {
-	sd.put(domain, k, nil, txNum)
-	return sd.putWal(domain, toBytesZeroCopy(k), nil, txNum, preval, prevStep)
+func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error {
+	sd.putLatest(domain, k, nil, txNum)
+	return sd.putHistory(domain, toBytesZeroCopy(k), nil, txNum, preval, prevStep)
 }
 
-func (sd *TemporalMemBatch) putWal(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	if len(v) == 0 {
 		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval, prevStep)
 	}
 	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval, prevStep)
 }
 
-func (sd *TemporalMemBatch) put(domain kv.Domain, key string, val []byte, txNum uint64) {
+func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}

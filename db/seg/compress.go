@@ -121,7 +121,18 @@ type Compressor struct {
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
+type CompOpts struct {
+	cfg       Cfg
+	lvl       log.Lvl
+	logger    log.Logger
+	logPrefix string
+}
+
+func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*CompOpts, error) {
+	newCompressor()
+}
+
+func newCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	workers := cfg.Workers
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
