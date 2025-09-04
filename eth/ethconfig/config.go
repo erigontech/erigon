@@ -185,7 +185,6 @@ type BlocksFreezing struct {
 	NoDownloader      bool // possible to use snapshots without calling Downloader
 	Verify            bool // verify snapshots on startup
 	DisableDownloadE3 bool // disable download state snapshots
-	Testing           bool //  config used for testing purposes
 	DownloaderAddr    string
 	ChainName         string
 }

@@ -570,11 +570,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles(s.alignMin)
-
-	if cfg.Testing { // mark download as complete if we are in a testing scenario
-		s.DownloadComplete()
-	}
-
 	return s
 }
 
