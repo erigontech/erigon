@@ -364,7 +364,7 @@ func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	stepSize := uint64(10)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
 
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {0, 2}})
@@ -373,13 +373,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 
 	require.NoError(t, agg.OpenFolder())
 
-	tdb := wrapDbWithCtx(db, agg)
-	defer tdb.Close()
-	tx, err := tdb.BeginTemporalRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	aggTx := AggTx(tx)
+	aggTx := agg.BeginFilesRo()
 
 	checkFn := func(files visibleFiles, merged bool) {
 		if merged {
@@ -402,7 +396,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	checkFn(aggTx.d[kv.CodeDomain].ht.iit.files, true)
 	checkFn(aggTx.d[kv.StorageDomain].ht.iit.files, true)
 
-	tx.Rollback()
+	aggTx.Close()
 
 	// delete merged code history file
 	codeMergedFile := filepath.Join(agg.Dirs().SnapHistory, "v1.0-code.0-2.v")
@@ -414,11 +408,8 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(codeMergedFile))
 
 	require.NoError(t, agg.OpenFolder())
-	tx, err = tdb.BeginTemporalRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	aggTx = AggTx(tx)
+	aggTx = agg.BeginFilesRo()
+	defer aggTx.Close()
 
 	checkFn(aggTx.d[kv.AccountsDomain].ht.files, true)
 	checkFn(aggTx.d[kv.CodeDomain].ht.files, false)
