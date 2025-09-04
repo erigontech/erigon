@@ -155,7 +155,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 		ramIter = sd.storage.Iter()
 	}
 
-	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, sd.stepSize, roTx)
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *StateChangeSet) {
