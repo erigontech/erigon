@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -56,20 +57,7 @@ func (l *KvList) Swap(i, j int) {
 	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
-type iodir int
-
-const (
-	get iodir = iota
-	put
-)
-
-type dataWithPrevStep struct {
-	data     []byte
-	prevStep kv.Step
-	dir      iodir
-}
-
-type SharedDomainsMetrics struct {
+type DomainMetrics struct {
 	sync.RWMutex
 	DomainIOMetrics
 	Domains map[kv.Domain]*DomainIOMetrics
@@ -95,11 +83,12 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	txNum    uint64
-	blockNum atomic.Uint64
-	trace    bool //nolint
-	metrics                   SharedDomainsMetrics
-	mem *TemporalMemBatch
+	txNum             uint64
+	blockNum          atomic.Uint64
+	trace             bool //nolint
+	commitmentCapture bool
+	metrics           DomainMetrics
+	mem               *TemporalMemBatch
 }
 
 type HasAgg interface {
@@ -110,8 +99,8 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics: SharedDomainsMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}},
-		mem: newTemporalMemBatch(tx),
+		metrics: DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}},
+		mem:     newTemporalMemBatch(tx),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -174,7 +163,7 @@ func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return 0
 }
 
-func (sd *SharedDomains) AsGetter(tx kv.Tx) kv.TemporalGetter {
+func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd, tx}
 }
 
@@ -277,7 +266,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
 	start := time.Now()
-	if v, prevStep, ok := sd.get(domain, k); ok {
+	if v, prevStep, ok := sd.mem.GetLatest(domain, k); ok {
 		sd.metrics.Lock()
 		sd.metrics.CacheReadCount++
 		readDuration := time.Since(start)
@@ -292,7 +281,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 			}
 		}
 		sd.metrics.Unlock()
-	if v, prevStep, ok := sd.mem.GetLatest(domain, k); ok {
 		return v, prevStep, nil
 	}
 	v, step, err = tx.GetLatest(domain, k)
@@ -300,76 +288,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	if stepsInFiles := tx.(kv.TemporalTx).StepsInFiles(domain); step > stepsInFiles {
-		sd.metrics.Lock()
-		sd.metrics.DbReadCount++
-		readDuration := time.Since(start)
-		sd.metrics.DbReadDuration += readDuration
-		if dm, ok := sd.metrics.Domains[domain]; ok {
-			dm.DbReadCount++
-			dm.DbReadDuration += readDuration
-		} else {
-			sd.metrics.Domains[domain] = &DomainIOMetrics{
-				DbReadCount:    1,
-				DbReadDuration: readDuration,
-			}
-		}
-		sd.metrics.Unlock()
-	} else {
-		sd.metrics.Lock()
-		sd.metrics.FileReadCount++
-		readDuration := time.Since(start)
-		sd.metrics.FileReadDuration += time.Since(start)
-		if dm, ok := sd.metrics.Domains[domain]; ok {
-			dm.FileReadCount++
-			dm.FileReadDuration += readDuration
-		} else {
-			sd.metrics.Domains[domain] = &DomainIOMetrics{
-				FileReadCount:    1,
-				FileReadDuration: readDuration,
-			}
-		}
-		sd.metrics.Unlock()
-	}
-
-	if false {
-		sd.muMaps.Lock()
-		defer sd.muMaps.Unlock()
-		valWithPrevStep := dataWithPrevStep{data: v, prevStep: step, dir: get}
-		keyS := toStringZeroCopy(k)
-		var estSize int
-		if domain == kv.StorageDomain {
-			if old, ok := sd.storage.Set(keyS, valWithPrevStep); ok {
-				estSize = len(v) - len(old.data)
-			} else {
-				estSize = len(k) + len(v)
-			}
-		} else {
-			if old, ok := sd.domains[domain][keyS]; ok {
-				estSize += len(v) - len(old.data)
-			} else {
-				estSize += len(k) + len(v)
-			}
-			sd.domains[domain][keyS] = valWithPrevStep
-		}
-
-		sd.metrics.CacheGetSize += estSize
-		sd.metrics.CacheGetCount++
-		if dm, ok := sd.metrics.Domains[domain]; ok {
-			dm.CacheGetSize += estSize
-			dm.CacheGetCount++
-		} else {
-			sd.metrics.Domains[kv.StorageDomain] = &DomainIOMetrics{
-				CacheGetCount: 1,
-				CacheGetSize:  estSize,
-			}
-		}
-	}
-
 	return v, step, nil
 }
 
-func (sd *SharedDomains) Metrics() *SharedDomainsMetrics {
+func (sd *SharedDomains) Metrics() *DomainMetrics {
 	return &sd.metrics
 }
 

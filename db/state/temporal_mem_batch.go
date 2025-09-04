@@ -30,9 +30,17 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
+type iodir int
+
+const (
+	get iodir = iota
+	put
+)
+
 type dataWithPrevStep struct {
 	data     []byte
 	prevStep kv.Step
+	dir      iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`

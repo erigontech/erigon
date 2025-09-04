@@ -555,8 +555,8 @@ type DomainRoTx struct {
 
 	comBuf []byte
 
-	valsCs map[kv.Tx]kv.Cursor
-
+	valsCs           map[kv.Tx]kv.Cursor
+	metrics          *DomainMetrics
 	getFromFileCache *DomainGetFromFileCache
 }
 
@@ -1685,6 +1685,11 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 		return nil, 0, false, nil
 	}
 
+	var start time.Time
+	if dt.metrics != nil {
+		start = time.Now()
+	}
+
 	var v []byte
 	var foundStep kv.Step
 	var found bool
@@ -1702,10 +1707,41 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found {
+		if dt.metrics != nil {
+			dt.metrics.Lock()
+			dt.metrics.DbReadCount++
+			readDuration := time.Since(start)
+			dt.metrics.DbReadDuration += readDuration
+			if dm, ok := dt.metrics.Domains[dt.name]; ok {
+				dm.DbReadCount++
+				dm.DbReadDuration += readDuration
+			} else {
+				dt.metrics.Domains[dt.name] = &DomainIOMetrics{
+					DbReadCount:    1,
+					DbReadDuration: readDuration,
+				}
+			}
+			dt.metrics.Unlock()
+		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
+	dt.metrics.Lock()
+	dt.metrics.DbReadCount++
+	readDuration := time.Since(start)
+	dt.metrics.DbReadDuration += readDuration
+	if dm, ok := dt.metrics.Domains[dt.name]; ok {
+		dm.DbReadCount++
+		dm.DbReadDuration += readDuration
+	} else {
+		dt.metrics.Domains[dt.name] = &DomainIOMetrics{
+			DbReadCount:    1,
+			DbReadDuration: readDuration,
+		}
+	}
+	dt.metrics.Unlock()
+
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
 	}

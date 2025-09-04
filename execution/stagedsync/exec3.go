@@ -248,12 +248,12 @@ func resetCommitGauges(ctx context.Context) {
 	}
 }
 
-func updateExecDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbstate.SharedDomainsMetrics, interval time.Duration) *dbstate.SharedDomainsMetrics {
+func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstate.DomainMetrics, interval time.Duration) *dbstate.DomainMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
 
 	if prevMetrics == nil {
-		prevMetrics = &dbstate.SharedDomainsMetrics{
+		prevMetrics = &dbstate.DomainMetrics{
 			Domains: map[kv.Domain]*dbstate.DomainIOMetrics{},
 		}
 	}
@@ -359,12 +359,12 @@ func updateExecDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics 
 
 	return prevMetrics
 }
-func updateCommitmentDomainMetrics(metrics *dbstate.SharedDomainsMetrics, prevMetrics *dbstate.SharedDomainsMetrics, interval time.Duration) *dbstate.SharedDomainsMetrics {
+func updateCommitmentDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstate.DomainMetrics, interval time.Duration) *dbstate.DomainMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
 
 	if prevMetrics == nil {
-		prevMetrics = &dbstate.SharedDomainsMetrics{
+		prevMetrics = &dbstate.DomainMetrics{
 			Domains: map[kv.Domain]*dbstate.DomainIOMetrics{},
 		}
 	}
@@ -472,7 +472,7 @@ type Progress struct {
 	prevBranchReadCount            uint64
 	prevBranchWriteCount           uint64
 	commitThreshold                uint64
-	prevDomainMetrics              *dbstate.SharedDomainsMetrics
+	prevDomainMetrics              *dbstate.DomainMetrics
 	logPrefix                      string
 	logger                         log.Logger
 }
@@ -1512,7 +1512,7 @@ func ExecV3(ctx context.Context,
 							fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
 						}
 						blockUpdateCount += applyResult.stateUpdates.UpdateCount()
-						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
+						err := pe.rs.ApplyState4(ctx, applyTx.(kv.TemporalRwTx), applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, applyResult.rules, false)
 						blockApplyCount += applyResult.stateUpdates.UpdateCount()

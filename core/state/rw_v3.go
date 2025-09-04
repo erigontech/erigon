@@ -60,7 +60,7 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.Tx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *dbstate.SharedDomains, rules *chain.Rules) error {
+func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *dbstate.SharedDomains, rules *chain.Rules) error {
 
 	if stateUpdates.BTreeG != nil {
 		var err error
@@ -183,7 +183,7 @@ func (rs *StateV3) SetTxNum(blockNum, txNum uint64) {
 }
 
 func (rs *StateV3) ApplyState4(ctx context.Context,
-	roTx kv.Tx,
+	roTx kv.TemporalTx,
 	blockNum uint64,
 	txNum uint64,
 	accountUpdates StateUpdates,
@@ -221,7 +221,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(tx kv.Tx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *dbstate.SharedDomains) error {
+func (rs *StateV3) ApplyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *dbstate.SharedDomains) error {
 	for addr := range traceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txNum); err != nil {
 			return err
