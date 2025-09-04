@@ -106,12 +106,6 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	progress := tx.Debug().DomainProgress(kv.AccountsDomain)
 	require.Equal(t, 5, int(progress/aggStep))
 
-	//latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
-	//require.Equal(t, 5, int(latestStepInDB))
-	//
-	//latestStepInDBNsoHist := agg.d[kv.AccountsDomain].maxStepInDBNoHistory(tx)
-	//require.Equal(t, 2, int(latestStepInDBNoHist))
-
 	err = tx.Commit()
 	require.NoError(t, err)
 
