@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p/forkid"
@@ -44,11 +44,11 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		Genesis:         chainspec.Mainnet.GenesisHash,
 		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.Mainnet.GenesisHash, 0, 0),
 	}
-	status := proto_sentry.StatusData{
+	status := sentryproto.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(new(uint256.Int)),
 		BestHash:        nil,
-		ForkData: &proto_sentry.Forks{
+		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(chainspec.Mainnet.GenesisHash),
 			HeightForks: heightForks,
 			TimeForks:   timeForks,

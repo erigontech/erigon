@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -89,7 +89,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 
 		// subscribe to subnets
 		for _, subnet := range syncnets {
-			if _, err := a.sentinel.SetSubscribeExpiry(r.Context(), &sentinel.RequestSubscribeExpiry{
+			if _, err := a.sentinel.SetSubscribeExpiry(r.Context(), &sentinelproto.RequestSubscribeExpiry{
 				Topic:          gossip.TopicNameSyncCommittee(int(subnet)),
 				ExpiryUnixSecs: uint64(expiry.Unix()),
 			}); err != nil {

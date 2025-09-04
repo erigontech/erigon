@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
@@ -73,10 +73,10 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			cs.logger.Error("Could not encode block bodies request", "err", err)
 			return [64]byte{}, false
 		}
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
+		outreq := sentryproto.SendMessageByMinBlockRequest{
 			MinBlock: req.BlockNums[len(req.BlockNums)-1],
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+			Data: &sentryproto.OutboundMessageData{
+				Id:   sentryproto.MessageId_GET_BLOCK_BODIES_66,
 				Data: bytes,
 			},
 			MaxPeers: 1,
@@ -147,10 +147,10 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		}
 		minBlock := req.Number
 
-		outreq := proto_sentry.SendMessageByMinBlockRequest{
+		outreq := sentryproto.SendMessageByMinBlockRequest{
 			MinBlock: minBlock,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+			Data: &sentryproto.OutboundMessageData{
+				Id:   sentryproto.MessageId_GET_BLOCK_HEADERS_66,
 				Data: bytes,
 			},
 			MaxPeers: 5,
@@ -205,9 +205,9 @@ func (cs *MultiClient) randSentryIndex() (int, bool, func() (int, bool)) {
 // sending list of penalties to all sentries
 func (cs *MultiClient) Penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
 	for i := range penalties {
-		outreq := proto_sentry.PenalizePeerRequest{
+		outreq := sentryproto.PenalizePeerRequest{
 			PeerId:  gointerfaces.ConvertHashToH512(penalties[i].PeerID),
-			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+			Penalty: sentryproto.PenaltyKind_Kick, // TODO: Extend penalty kinds
 		}
 		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
 			if ready, ok := cs.sentries[i].(interface{ Ready() bool }); ok && !ready.Ready() {

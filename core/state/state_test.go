@@ -33,9 +33,8 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -45,14 +44,10 @@ var toAddr = common.BytesToAddress
 
 func TestNull(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	txNum := uint64(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -80,14 +75,10 @@ func TestNull(t *testing.T) {
 
 func TestTouchDelete(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	txNum := uint64(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -118,13 +109,9 @@ func TestTouchDelete(t *testing.T) {
 
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx, domains := NewTestRwTx(t)
 
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -162,13 +149,9 @@ func TestSnapshot(t *testing.T) {
 
 func TestSnapshotEmpty(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx, domains := NewTestRwTx(t)
 
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	r := NewReaderV3(domains.AsGetter(tx))
@@ -182,14 +165,10 @@ func TestSnapshotEmpty(t *testing.T) {
 func TestSnapshot2(t *testing.T) {
 	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	txNum := uint64(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
@@ -308,35 +287,29 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.Aggregator) {
+func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.SharedDomains) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
-	tb.Cleanup(db.Close)
 
-	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(tb, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
-	require.NoError(tb, err)
-	tb.Cleanup(agg.Close)
+	dirs := datadir.New(tb.TempDir())
 
-	_db, err := temporal.New(db, agg)
-	require.NoError(tb, err)
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
-	return _db, tx, agg
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+
+	return db, tx, domains
 }
 
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
+	_, tx, domains := NewTestRwTx(t)
 
-	domains, err := state.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
