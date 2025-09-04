@@ -449,7 +449,7 @@ func sequencingBatchStep(
 						cfg.zk.SequencerBlockSealTime == cfg.zk.SequencerEmptyBlockSealTime {
 						break OuterLoopTransactions
 					} else {
-						log.Info(fmt.Sprintf("[%s] Block timeout reached with no transactions processed", logPrefix))
+						log.Debug(fmt.Sprintf("[%s] [elastic] Block timeout reached with no transactions processed — not closing block", logPrefix))
 						blockTimer.Stop()
 						blockTimer.Reset(cfg.zk.SequencerBlockSealTime)
 					}
