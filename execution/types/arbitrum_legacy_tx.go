@@ -53,13 +53,8 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
-	legacyBytes, err := rlp.EncodeToBytes(tx.LegacyTx)
-	if err != nil {
-		return err
-	}
-
-	buf := bytes.NewBuffer(nil)
-	if err := tx.LegacyTx.EncodeRLP(buf); err != nil {
+	legacy := bytes.NewBuffer(nil)
+	if err := tx.LegacyTx.EncodeRLP(legacy); err != nil {
 		return err
 	}
 
@@ -71,7 +66,7 @@ func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
 		L1BlockNumber     uint64
 		OverrideSender    *common.Address `rlp:"nil"`
 	}{
-		LegacyTxBytes:     legacyBytes,
+		LegacyTxBytes:     legacy.Bytes(),
 		HashOverride:      tx.HashOverride,
 		EffectiveGasPrice: tx.EffectiveGasPrice,
 		L1BlockNumber:     tx.L1BlockNumber,
