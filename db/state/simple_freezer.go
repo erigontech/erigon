@@ -45,7 +45,7 @@ func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum,
 		if err != nil {
 			return err
 		}
-		if err := coll(v); err != nil {
+		if err := coll(k, v); err != nil {
 			return err
 		}
 	}
@@ -104,7 +104,7 @@ func (sf *SimpleMarkedFreezer) Freeze(ctx context.Context, from, to RootNum, col
 			return err
 		}
 
-		if err := coll(value); err != nil {
+		if err := coll(k, value); err != nil {
 			return err
 		}
 	}

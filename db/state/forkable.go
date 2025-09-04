@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 const MaxUint64 = ^uint64(0)
@@ -68,8 +69,8 @@ func App_WithUpdateCanonical() AppOpts {
 }
 
 // func App
-func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
-	a, err := create[MarkedTxI](id, kv.Marked, valsTbl, canonicalTbl, relation, dirs, logger, options...)
+func NewMarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
+	a, err := create[MarkedTxI](id, kv.Marked, schema, canonicalTbl, relation, dirs, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,21 +88,22 @@ func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relat
 	return a, nil
 }
 
-func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
-	a, err := create[UnmarkedTxI](id, kv.Unmarked, valsTbl, "", relation, dirs, logger, options...)
+func NewUnmarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
+	a, err := create[UnmarkedTxI](id, kv.Unmarked, schema, "", relation, dirs, logger, options...)
 	if err != nil {
 		return nil, err
 	}
 
 	// un-marked structure have default freezer and builders
 	if a.freezer == nil {
-		freezer := &SimpleRelationalFreezer{rel: relation, valsTbl: valsTbl}
+		freezer := &SimpleRelationalFreezer{rel: relation, valsTbl: schema.ValsTbl}
 		a.freezer = freezer
 	}
 
 	if a.builders == nil {
-		// mapping num -> offset (ordinal map)
-		builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), id, dirs.Tmp, logger)
+		// mapping num -> offset
+		args := NewAccessorArgs(false, false, schema.ValuesOnCompressedPage, a.StepSize())
+		builder := NewSimpleAccessorBuilder(args, id, dirs.Tmp, logger)
 		a.builders = []AccessorIndexBuilder{builder}
 	}
 
@@ -118,12 +120,13 @@ func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, 
 	return a, nil
 }
 
-func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
+func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, schema *statecfg.ForkableCfg, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
 	a := &Forkable[T]{
 		ProtoForkable: NewProto(id, nil, nil, dirs, logger),
 	}
 	a.rel = relation
-	a.valsTbl = valsTbl
+	a.valsTbl = schema.ValsTbl
+	a.cfg = schema
 	a.canonicalTbl = canonicalTbl
 	for _, opt := range options {
 		opt(a)

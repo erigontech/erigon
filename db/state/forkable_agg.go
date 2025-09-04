@@ -75,14 +75,14 @@ func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger l
 func (r *ForkableAgg) RegisterMarkedForkable(ap *Forkable[MarkedTxI]) {
 	r.marked = append(r.marked, ap)
 	if !ap.unaligned {
-		r.alignedEntities = append(r.alignedEntities, ap.a)
+		r.alignedEntities = append(r.alignedEntities, ap.id)
 	}
 }
 
 func (r *ForkableAgg) RegisterUnmarkedForkable(ap *Forkable[UnmarkedTxI]) {
 	r.unmarked = append(r.unmarked, ap)
 	if !ap.unaligned {
-		r.alignedEntities = append(r.alignedEntities, ap.a)
+		r.alignedEntities = append(r.alignedEntities, ap.id)
 	}
 }
 
@@ -375,12 +375,12 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 
 			fromRootNum := firstRootNumNotInFiles
 			if p.unaligned {
-				fromRootNum = tx.MaxRootNum(p.a)
+				fromRootNum = tx.MaxRootNum(p.id)
 			}
 
 			var skip bool
 			if err := r.db.View(ctx2, func(dbtx kv.Tx) (err error) {
-				if dontskip, err := tx.HasRootNumUpto(ctx2, p.a, to, dbtx); err != nil {
+				if dontskip, err := tx.HasRootNumUpto(ctx2, p.id, to, dbtx); err != nil {
 					return err
 				} else {
 					skip = !dontskip
@@ -391,7 +391,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 			}
 
 			if skip {
-				r.logger.Debug("[fork_agg] skipping", "id", p.a, "from", fromRootNum, "to", to)
+				r.logger.Debug("[fork_agg] skipping", "id", p.id, "from", fromRootNum, "to", to)
 				return nil
 			}
 
@@ -404,7 +404,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 				return nil
 			}
 			cfilesMu.Lock()
-			cfiles = append(cfiles, &wrappedFilesItem{df, p.strategy, p.a})
+			cfiles = append(cfiles, &wrappedFilesItem{df, p.strategy, p.id})
 			cfilesMu.Unlock()
 			return nil
 		})
@@ -424,7 +424,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 
 	for _, df := range cfiles {
 		r.loop(func(p *ProtoForkable) error {
-			if p.a == df.id {
+			if p.id == df.id {
 				p.snaps.IntegrateDirtyFile(df.FilesItem)
 			}
 			return nil
@@ -506,11 +506,11 @@ func (r *ForkableAgg) BuildMissedAccessors(ctx context.Context, workers int) err
 	}
 
 	for _, m := range r.marked {
-		m.BuildMissedAccessors(ctx, g, ps, missedFilesItems.marked[m.a])
+		m.BuildMissedAccessors(ctx, g, ps, missedFilesItems.marked[m.id])
 	}
 
 	for _, u := range r.unmarked {
-		u.BuildMissedAccessors(ctx, g, ps, missedFilesItems.unmarked[u.a])
+		u.BuildMissedAccessors(ctx, g, ps, missedFilesItems.unmarked[u.id])
 	}
 
 	if err := g.Wait(); err != nil {
@@ -619,13 +619,13 @@ func (r *ForkableAgg) loop(fn func(p *ProtoForkable) error) error {
 
 func (r *ForkableAgg) IsForkablePresent(id ForkableId) bool {
 	for i := range r.marked {
-		if r.marked[i].a == id {
+		if r.marked[i].id == id {
 			return true
 		}
 	}
 
 	for i := range r.unmarked {
-		if r.unmarked[i].a == id {
+		if r.unmarked[i].id == id {
 			return true
 		}
 	}
@@ -653,12 +653,12 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 
 	for i, ap := range r.marked {
 		marked = append(marked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Marked)
+		mp[ap.id] = (uint32(i) << 2) | uint32(kv.Marked)
 	}
 
 	for i, ap := range r.unmarked {
 		unmarked = append(unmarked, ap.BeginTemporalTx())
-		mp[ap.a] = (uint32(i) << 2) | uint32(kv.Unmarked)
+		mp[ap.id] = (uint32(i) << 2) | uint32(kv.Unmarked)
 	}
 
 	return &ForkableAggTemporalTx{
@@ -817,7 +817,7 @@ func (r ForkableAggTemporalTx) Ids() (ids []kv.ForkableId) {
 // assume AllForkableId when needed to exec for all forkables
 func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) error) error {
 	for i, mt := range r.marked {
-		if forId.MatchAll() || r.f.marked[i].a == forId {
+		if forId.MatchAll() || r.f.marked[i].id == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
 			if err := fn(dbg.DebugDb()); err != nil {
 				return err
@@ -826,7 +826,7 @@ func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(Fo
 	}
 
 	for i, ut := range r.unmarked {
-		if forId.MatchAll() || r.f.unmarked[i].a == forId {
+		if forId.MatchAll() || r.f.unmarked[i].id == forId {
 			dbg := ut.(ForkableDebugAPI[UnmarkedDbTxI])
 			if err := fn(dbg.DebugDb()); err != nil {
 				return err
@@ -840,14 +840,14 @@ func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(Fo
 func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) (R, error)) (R, error) {
 	// since only single call can return, doesn't support AllForkableId
 	for i, mt := range r.marked {
-		if r.f.marked[i].a == forId {
+		if r.f.marked[i].id == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
 			return fn(dbg.DebugDb())
 		}
 	}
 
 	for i, ut := range r.unmarked {
-		if r.f.unmarked[i].a == forId {
+		if r.f.unmarked[i].id == forId {
 			dbg := ut.(ForkableDebugAPI[UnmarkedDbTxI])
 			return fn(dbg.DebugDb())
 		}
@@ -861,7 +861,7 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 		if skipUnaligned && r.f.marked[i].unaligned {
 			continue
 		}
-		if forId.MatchAll() || r.f.marked[i].a == forId {
+		if forId.MatchAll() || r.f.marked[i].id == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
 			return fn(dbg.DebugFiles())
 		}
@@ -871,7 +871,7 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 		if skipUnaligned && r.f.unmarked[i].unaligned {
 			continue
 		}
-		if forId.MatchAll() || r.f.unmarked[i].a == forId {
+		if forId.MatchAll() || r.f.unmarked[i].id == forId {
 			dbg := ut.(ForkableDebugAPI[UnmarkedDbTxI])
 			return fn(dbg.DebugFiles())
 		}

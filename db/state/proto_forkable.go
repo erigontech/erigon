@@ -26,9 +26,10 @@ Can be embedded in other marker/relational/appending entities.
 type ProtoForkable struct {
 	freezer Freezer
 
-	a        ForkableId
-	cfg      *SnapshotConfig
-	parser   SnapNameSchema
+	id       ForkableId
+	snapCfg  *SnapshotConfig
+	fschema  SnapNameSchema
+	cfg      *statecfg.ForkableCfg
 	builders []AccessorIndexBuilder
 	snaps    *SnapshotRepo
 
@@ -39,14 +40,14 @@ type ProtoForkable struct {
 	dirs   datadir.Dirs
 }
 
-func NewProto(a ForkableId, builders []AccessorIndexBuilder, freezer Freezer, dirs datadir.Dirs, logger log.Logger) *ProtoForkable {
+func NewProto(id ForkableId, builders []AccessorIndexBuilder, freezer Freezer, dirs datadir.Dirs, logger log.Logger) *ProtoForkable {
 	return &ProtoForkable{
-		a:        a,
-		cfg:      Registry.SnapshotConfig(a),
-		parser:   Registry.SnapshotConfig(a).Schema,
+		id:       id,
+		snapCfg:  Registry.SnapshotConfig(id),
+		fschema:  Registry.SnapshotConfig(id).Schema,
 		builders: builders,
 		freezer:  freezer,
-		snaps:    NewSnapshotRepoForForkable(a, logger),
+		snaps:    NewSnapshotRepoForForkable(id, logger),
 		dirs:     dirs,
 		logger:   logger,
 	}
@@ -79,14 +80,14 @@ func (a *ProtoForkable) IntegrateDirtyFiles(files []*FilesItem) {
 func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, compressionWorkers int, ps *background.ProgressSet) (builtFile *FilesItem, built bool, err error) {
 	calcFrom, calcTo := from, to
 	var canFreeze bool
-	cfg := Registry.SnapshotConfig(a.a)
+	cfg := Registry.SnapshotConfig(a.id)
 	calcFrom, calcTo, canFreeze = a.snaps.GetFreezingRange(calcFrom, calcTo)
 	if !canFreeze {
 		return nil, false, nil
 	}
 
-	log.Debug(fmt.Sprintf("freezing %s from %d to %d", Registry.Name(a.a), calcFrom, calcTo))
-	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
+	log.Debug(fmt.Sprintf("freezing %s from step %d to %d", Registry.Name(a.id), calcFrom.Uint64()/a.StepSize(), calcTo.Uint64()/a.StepSize()))
+	path := a.fschema.DataFile(version.V1_0, calcFrom, calcTo)
 
 	var exists bool
 	exists, err = dir.FileExist(path)
@@ -97,40 +98,31 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	if !exists {
 		segCfg := seg.DefaultCfg
 		segCfg.Workers = compressionWorkers
-		sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.a), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)
+		sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.id), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)
 		if err != nil {
 			return nil, false, err
 		}
 		defer sn.Close()
 		// TODO: fsync params?
 
-		{
-			compress := a.isCompressionUsed(calcFrom, calcTo)
-			var addWordFn func(values []byte) error
-			if compress {
-				// https://github.com/erigontech/erigon/pull/11222 -- decision taken here
-				// is that 1k and 10k files will be uncompressed, but 10k files also merged
-				// and not built off db, so following decision is okay:
-				// AddWord -- compressed -- slowbuilds (merge etc.)
-				// AddUncompressedWord -- uncompressed -- fast builds
-				addWordFn = sn.AddWord
-			} else {
-				addWordFn = sn.AddUncompressedWord
-			}
-			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, addWordFn, db); err != nil {
-				return nil, false, err
-			}
+		compress := a.isCompressionUsed(calcFrom, calcTo)
+		writer := a.DataWriter(sn, compress)
+		defer writer.Close()
+		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, writer.Add, db); err != nil {
+			return nil, false, err
 		}
 
-		{
-			p := ps.AddNew(filepath.Base(path), 1)
-			defer ps.Delete(p)
-			if err := sn.Compress(); err != nil {
-				return nil, false, err
-			}
-			sn.Close()
-			ps.Delete(p)
+		p := ps.AddNew(filepath.Base(path), 1)
+		defer ps.Delete(p)
+		if err := writer.Flush(); err != nil {
+			return nil, false, err
 		}
+		if err := writer.Compress(); err != nil {
+			return nil, false, err
+		}
+		writer.Close()
+		sn.Close()
+		ps.Delete(p)
 	}
 
 	valuesDecomp, err := seg.NewDecompressor(path)
@@ -149,6 +141,18 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	// TODO: add support for multiple indexes in filesItem.
 	df.index = indexes[0]
 	return df, true, nil
+}
+
+func (a *ProtoForkable) DataWriter(f *seg.Compressor, compress bool) *seg.PagedWriter {
+	return seg.NewPagedWriter(seg.NewWriter(f, a.cfg.Compression), a.cfg.ValuesOnCompressedPage, compress)
+}
+
+func (a *ProtoForkable) DataReader(f *seg.Decompressor, compress bool) *seg.Reader {
+	return seg.NewReader(f.MakeGetter(), a.cfg.Compression)
+}
+
+func (a *ProtoForkable) PagedDataReader(f *seg.Decompressor, compress bool) *seg.PagedReader {
+	return seg.NewPagedReader(a.DataReader(f, compress), a.cfg.ValuesOnCompressedPage, compress)
 }
 
 func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *background.ProgressSet) (indexes []*recsplit.Index, err error) {
@@ -178,7 +182,12 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *
 }
 
 func (a *ProtoForkable) isCompressionUsed(from, to RootNum) bool {
-	return uint64(to-from) > a.cfg.MinimumSize
+	// https://github.com/erigontech/erigon/pull/11222 -- decision taken here
+	// is that 1k and 10k files will be uncompressed, but 10k files also merged
+	// and not built off db, so following decision is okay:
+	// AddWord -- compressed -- slowbuilds (merge etc.)
+	// AddUncompressedWord -- uncompressed -- fast builds
+	return uint64(to-from) > a.snapCfg.MinimumSize
 }
 
 func (a *ProtoForkable) Repo() *SnapshotRepo {
@@ -187,6 +196,10 @@ func (a *ProtoForkable) Repo() *SnapshotRepo {
 
 func (a *ProtoForkable) Close() {
 	a.snaps.Close()
+}
+
+func (a *ProtoForkable) StepSize() uint64 {
+	return a.snaps.stepSize
 }
 
 func (a *ProtoForkable) FilesWithMissedAccessors() *MissedFilesMap {
@@ -214,7 +227,7 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 	}
 
 	return &ProtoForkableTx{
-		id:    a.a,
+		id:    a.id,
 		files: visibleFiles,
 		a:     a,
 	}
@@ -255,7 +268,7 @@ func (a *ProtoForkable) BuildMissedAccessors(ctx context.Context, g *errgroup.Gr
 
 func (a *ProtoForkable) BeginNoFilesRo() *ProtoForkableTx {
 	return &ProtoForkableTx{
-		id:      a.a,
+		id:      a.id,
 		files:   nil,
 		a:       a,
 		noFiles: true,
@@ -337,11 +350,13 @@ func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, file
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
 		if index == len(a.files) {
-			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", Registry.Name(ap.a), entityNum)
+			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", Registry.Name(ap.id), entityNum)
 		}
 
 		v, f, err := a.GetFromFile(entityNum, index)
 		return v, f, index, err
+	} else {
+		a.a.logger.Warn("ordinal lookup not allowed, not other way to get from file", "entity", Registry.Name(a.a.id))
 	}
 
 	return nil, false, -1, nil
@@ -396,7 +411,7 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 		return word, true, nil
 	}
 
-	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", Registry.Name(ap.a), entityNum, a.files[idx].src.decompressor.FileName())
+	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", Registry.Name(ap.id), entityNum, a.files[idx].src.decompressor.FileName())
 }
 
 func (a *ProtoForkableTx) NoFilesCheck() {

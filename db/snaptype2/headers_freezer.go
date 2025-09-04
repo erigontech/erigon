@@ -57,7 +57,7 @@ func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo state.Roo
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
 		copy(value[1:], dataRLP)
-		if err := coll(value); err != nil {
+		if err := coll(k, value); err != nil {
 			return false, err
 		}
 

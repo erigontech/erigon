@@ -70,10 +70,10 @@ func (r *forkableAggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccess
 	}
 
 	for _, m := range r.markedRoTx {
-		mf.marked[m.p.a] = m.p.FilesWithMissedAccessors()
+		mf.marked[m.p.id] = m.p.FilesWithMissedAccessors()
 	}
 	for _, u := range r.unmarkedRoTx {
-		mf.unmarked[u.p.a] = u.p.FilesWithMissedAccessors()
+		mf.unmarked[u.p.id] = u.p.FilesWithMissedAccessors()
 	}
 	return
 }

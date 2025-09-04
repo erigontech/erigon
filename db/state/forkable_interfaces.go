@@ -20,7 +20,7 @@ type Freezer interface {
 	Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error
 }
 
-type Collector func(values []byte) error
+type Collector func(key, value []byte) error
 
 /** index building **/
 

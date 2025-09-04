@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -28,14 +29,16 @@ type ForkableId = kv.ForkableId
 type MarkedTxI = state.MarkedTxI
 type UnmarkedTxI = state.UnmarkedTxI
 
-func registerEntity(dirs datadir.Dirs, name string, id ForkableId) {
+func registerEntity(dirs datadir.Dirs, name string, id ForkableId) *state.SnapshotConfig {
 	stepSize := uint64(10)
-	registerEntityWithSnapshotConfig(dirs, name, id, state.NewSnapshotConfig(&state.SnapshotCreationConfig{
+	snapCfg := state.NewSnapshotConfig(&state.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{20, 40},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+	}, state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize))
+	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
+	return snapCfg
 }
 
 func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, id ForkableId, cfg *state.SnapshotConfig) {
@@ -52,14 +55,14 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 
 func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[state.MarkedTxI]) {
 	headerId := kv.ForkableId(0)
-	registerEntity(dirs, "headers", headerId)
+	cfg := registerEntity(dirs, "headers", headerId)
 	// create marked forkable
 	freezer := snaptype2.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
-	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, dirs.Tmp, log,
+	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true, 1, cfg.RootNumPerStep), headerId, dirs.Tmp, log,
 		state.WithIndexKeyFactory(&snaptype2.HeaderAccessorIndexKeyFactory{}))
 
-	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, state.IdentityRootRelationInstance, dirs, log,
+	ma, err := state.NewMarkedForkable(headerId, &statecfg.ForkableCfg{ValsTbl: kv.Headers}, kv.HeaderCanonical, state.IdentityRootRelationInstance, dirs, log,
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),

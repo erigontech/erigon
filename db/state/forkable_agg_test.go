@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestOpenFolder(t *testing.T) {
@@ -453,12 +454,12 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
 	headerId := ForkableId(1)
-	registerEntity(dirs, "headers", headerId)
+	cfg := registerEntity(dirs, "headers", headerId)
 
-	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), headerId, dirs.Tmp, log,
+	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false, 1, cfg.RootNumPerStep), headerId, dirs.Tmp, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
+	ma, err := NewMarkedForkable(headerId, &statecfg.ForkableCfg{ValsTbl: kv.Headers}, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder),
 		App_WithUpdateCanonical())
@@ -477,12 +478,13 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
 	bodyId := ForkableId(2)
-	registerEntity(dirs, "bodies", bodyId)
+	cfg := registerEntity(dirs, "bodies", bodyId)
 
-	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), bodyId, dirs.Tmp, log,
+	args := NewAccessorArgs(true, false, 1, cfg.RootNumPerStep)
+	builder := NewSimpleAccessorBuilder(args, bodyId, dirs.Tmp, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(bodyId, kv.BlockBody, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
+	ma, err := NewMarkedForkable(bodyId, &statecfg.ForkableCfg{ValsTbl: kv.BlockBody}, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder))
 	require.NoError(t, err)
@@ -497,14 +499,18 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	return bodyId, ma
 }
 
-func registerEntity(dirs datadir.Dirs, name string, id ForkableId) {
+func registerEntity(dirs datadir.Dirs, name string, id ForkableId) *SnapshotConfig {
 	stepSize := uint64(10)
-	registerEntityWithSnapshotConfig(dirs, id, name, NewSnapshotConfig(&SnapshotCreationConfig{
+	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)
+
+	snapCfg := NewSnapshotConfig(&SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{80, 160},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+	}, schema)
+	registerEntityWithSnapshotConfig(dirs, id, name, snapCfg)
+	return snapCfg
 }
 
 func registerEntityWithSnapshotConfig(dirs datadir.Dirs, id ForkableId, name string, cfg *SnapshotConfig) {

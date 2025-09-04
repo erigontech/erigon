@@ -315,10 +315,11 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	RCacheForkable: ForkableCfg{
-		Name:        "rcache",
-		ValsTbl:     kv.TblRCacheFVAls,
-		Accessors:   AccessorHashMap,
-		Compression: seg.CompressNone,
+		Name:                   "rcache",
+		ValsTbl:                kv.TblRCacheFVAls,
+		Accessors:              AccessorHashMap,
+		Compression:            seg.CompressNone,
+		ValuesOnCompressedPage: 16,
 	},
 }
 

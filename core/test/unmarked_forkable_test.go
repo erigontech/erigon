@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -26,7 +27,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 	id := kv.ForkableId(2)
 	stepSize := uint64(10)
 	name := "borspans"
-	registerEntityWithSnapshotConfig(dirs, name, id, state.NewSnapshotConfig(
+	snapCfg := state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
 			MergeStages:    []uint64{200, 400},
@@ -34,15 +35,16 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 			SafetyMargin:   5,
 		},
 		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
-	))
+	)
+	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 
-	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false), id, dirs.Tmp, log)
+	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false, 1, stepSize), id, dirs.Tmp, log)
 	indexb.SetFirstEntityNumFetcher(func(from, to RootNum, seg *seg.Decompressor) Num {
 		return Num(CustomSpanIdAt(uint64(from)))
 	})
 
 	uma, err := state.NewUnmarkedForkable(id,
-		kv.BorSpans,
+		&statecfg.ForkableCfg{ValsTbl: kv.BorSpans},
 		&BorSpanRootRelation{},
 		dirs,
 		log,
