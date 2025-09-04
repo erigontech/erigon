@@ -99,7 +99,7 @@ jobs:
           name: test-results-${{ env.CHAIN }}
           path: |
             ${{ github.workspace }}/result-${{ env.CHAIN }}.json
-            ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ github.workspace }}/erigon_data/logs/
 
       - name: Clean up Erigon data directory
         if: always()

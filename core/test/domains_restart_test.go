@@ -39,11 +39,11 @@ import (
 	state2 "github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -57,24 +57,8 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 		path = fpath
 	}
 	dirs := datadir.New(path)
-
-	logger := log.New()
-	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
-	t.Cleanup(db.Close)
-
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(t, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-	err = agg.OpenFolder()
-	agg.DisableFsync()
-	require.NoError(t, err)
-
-	tdb, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	t.Cleanup(tdb.Close)
-	return tdb, agg, path
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, aggStep)
+	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 
 func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
@@ -415,7 +399,10 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
 		require.NoError(t, err)
-		require.Equal(t, chainspec.TestGenesisStateRoot, common.BytesToHash(rh))
+
+		s, err := chainspec.ChainSpecByName(networkname.Test)
+		require.NoError(t, err)
+		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 

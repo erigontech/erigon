@@ -53,11 +53,13 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
@@ -74,7 +76,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
@@ -85,19 +86,38 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 	return res
 }
 
-var snapshotCommand = cli.Command{
-	Name:    "seg",
-	Aliases: []string{"snapshots", "segments"},
-	Usage:   `Managing historical data segments (partitions)`,
-	Before: func(cliCtx *cli.Context) error {
-		go mem.LogMemStats(cliCtx.Context, log.New())
-		go disk.UpdateDiskStats(cliCtx.Context, log.New())
-		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
-		if err != nil {
-			return err
+// This needs to run *after* subcommand arguments are parsed, in case they alter root flags like data dir.
+func commonBeforeSnapshotCommand(cliCtx *cli.Context) error {
+	go mem.LogMemStats(cliCtx.Context, log.New())
+	go disk.UpdateDiskStats(cliCtx.Context, log.New())
+	_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func init() {
+	// Inject commonBeforeSnapshotCommand into all snapshot subcommands Before handlers.
+	for _, cmd := range snapshotCommand.Subcommands {
+		oldBefore := cmd.Before
+		cmd.Before = func(cliCtx *cli.Context) error {
+			err := commonBeforeSnapshotCommand(cliCtx)
+			if err != nil {
+				return fmt.Errorf("common before snapshot subcommand: %w", err)
+			}
+			if oldBefore == nil {
+				return nil
+			}
+			return oldBefore(cliCtx)
 		}
-		return nil
-	},
+	}
+}
+
+var snapshotCommand = cli.Command{
+	Name:    "snapshots",
+	Aliases: []string{"seg", "snapshot", "segments", "segment"},
+	Usage:   `Managing historical data segments (partitions)`,
 	Subcommands: []*cli.Command{
 		{
 			Name: "ls",
@@ -244,14 +264,15 @@ var snapshotCommand = cli.Command{
 			Name:   "reset",
 			Usage:  "Reset state to resumable initial sync",
 			Action: resetCliAction,
-			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
-			Flags: append(
-				slices.Clone(logging.Flags),
+			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the
+			// environment variable? Followup: It would not go here, as it could modify behaviour in
+			// parent commands.
+			Flags: []cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ChainFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-			),
+			},
 		},
 		{
 			Name:    "rm-state-snapshots",
@@ -545,6 +566,9 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 				if !strings.Contains(res.Name(), domainName) {
 					continue
 				}
+				if removeLatest {
+					_maxFrom = max(_maxFrom, res.From)
+				}
 				domainFiles = append(domainFiles, res)
 			}
 		}
@@ -748,7 +772,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -799,7 +823,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -921,7 +945,7 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		sum += res.To - res.From
 		headerSegName := info.Name()
 		// check that all files exist
-		for _, snapType := range []string{"transactions", "bodies"} {
+		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
 			// check that the file exist
 			if exists, err := dir2.FileExist(filepath.Join(snapDir, segName)); err != nil {
@@ -1035,52 +1059,41 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	}
 
 	for _, res := range accFiles {
-		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
+		accName, err := version.ReplaceVersionWithMask(res.Name())
+		if err != nil {
+			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
+		}
 		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
-			newVersion := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
-			expectedFileName := strings.Replace(res.Name(), "accounts", snapType.String(), 1)
-			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
+			schemaVersionMinSup := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
+			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName), err)
 			}
 
-			oldVersion = newVersion
 			// check that the index file exist
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorBTree) {
-				newVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
+				schemaVersionMinSup = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.MinSupported
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
-				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return err
-				}
-				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
-				newVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
+				schemaVersionMinSup = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.MinSupported
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
-				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return err
-				}
-				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
-				newVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
+				schemaVersionMinSup = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.MinSupported
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
-				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
-				exists, err := dir2.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return err
-				}
-				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 		}
@@ -1147,6 +1160,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
 	for _, res := range accFiles {
+		accName, err := version.ReplaceVersionWithMask(res.Name())
+		if err != nil {
+			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
+		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := statecfg.Schema.GetVersioned(snapType)
@@ -1154,35 +1171,30 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return err
 			}
 
-			oldVersion := versioned.GetVersions().II.DataEF.Current
-			expectedFileName := strings.Replace(res.Name(), "accounts", snapType, 1)
-			expectedFileName = version.ReplaceVersion(expectedFileName, res.Version, oldVersion)
-
-			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
+			schemaVersionMinSup := versioned.GetVersions().II.DataEF.MinSupported
+			expectedFileName := strings.Replace(accName, "accounts", snapType, 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapIdx, expectedFileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName), err)
 			}
 			// Check accessors
-			newVersion := versioned.GetVersions().II.AccessorEFI.Current
-			efiFileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
-			efiFileName = version.ReplaceVersion(efiFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, efiFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", efiFileName, filepath.Join(dirs.SnapAccessors, efiFileName))
+			schemaVersionMinSup = versioned.GetVersions().II.AccessorEFI.MinSupported
+			fileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
 			if !slices.Contains(viTypes, snapType) {
 				continue
 			}
-			newVersion = versioned.GetVersions().Hist.AccessorVI.Current
-			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
-			viFileName = version.ReplaceVersion(viFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, viFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dirs.SnapAccessors, viFileName))
+			schemaVersionMinSup = versioned.GetVersions().Hist.AccessorVI.MinSupported
+			fileName = strings.Replace(expectedFileName, ".ef", ".vi", 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
-			newVersion = versioned.GetVersions().Hist.DataV.Current
+			schemaVersionMinSup = versioned.GetVersions().Hist.DataV.MinSupported
 			// check that .v
-			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
-			vFileName = version.ReplaceVersion(vFileName, oldVersion, newVersion)
-			if _, err := os.Stat(filepath.Join(dirs.SnapHistory, vFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dirs.SnapHistory, vFileName))
+			fileName = strings.Replace(expectedFileName, ".ef", ".v", 1)
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapHistory, fileName), schemaVersionMinSup); err != nil {
+				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapHistory, fileName), err)
 			}
 		}
 	}
@@ -1353,7 +1365,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -1551,7 +1563,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
@@ -1592,7 +1604,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
 
@@ -1874,7 +1886,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer logger.Info("Done")
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2006,7 +2018,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	decomp.Close()
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2033,7 +2045,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	from := uint64(0)
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2263,6 +2275,9 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
+	if err := state.CheckSnapshotsCompatibility(dirs); err != nil {
+		panic(err)
+	}
 	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
 	if err != nil {
 		panic(err)

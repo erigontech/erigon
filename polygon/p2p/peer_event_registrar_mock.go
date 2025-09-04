@@ -119,17 +119,22 @@ func (c *MockpeerEventRegistrarRegisterNewBlockObserverCall) DoAndReturn(f func(
 }
 
 // RegisterPeerEventObserver mocks base method.
-func (m *MockpeerEventRegistrar) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+func (m *MockpeerEventRegistrar) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent], opts ...RegisterOpt) UnregisterFunc {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RegisterPeerEventObserver", observer)
+	varargs := []any{observer}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "RegisterPeerEventObserver", varargs...)
 	ret0, _ := ret[0].(UnregisterFunc)
 	return ret0
 }
 
 // RegisterPeerEventObserver indicates an expected call of RegisterPeerEventObserver.
-func (mr *MockpeerEventRegistrarMockRecorder) RegisterPeerEventObserver(observer any) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
+func (mr *MockpeerEventRegistrarMockRecorder) RegisterPeerEventObserver(observer any, opts ...any) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterPeerEventObserver", reflect.TypeOf((*MockpeerEventRegistrar)(nil).RegisterPeerEventObserver), observer)
+	varargs := append([]any{observer}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterPeerEventObserver", reflect.TypeOf((*MockpeerEventRegistrar)(nil).RegisterPeerEventObserver), varargs...)
 	return &MockpeerEventRegistrarRegisterPeerEventObserverCall{Call: call}
 }
 
@@ -145,13 +150,13 @@ func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) Return(arg0 Unregi
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) Do(f func(event.Observer[*sentryproto.PeerEvent]) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
+func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) Do(f func(event.Observer[*sentryproto.PeerEvent], ...RegisterOpt) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) DoAndReturn(f func(event.Observer[*sentryproto.PeerEvent]) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
+func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) DoAndReturn(f func(event.Observer[*sentryproto.PeerEvent], ...RegisterOpt) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

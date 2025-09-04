@@ -196,7 +196,8 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesDelete = onDel
 }
 
-func (a *Aggregator) StepSize() uint64 { return a.stepSize }
+func (a *Aggregator) StepSize() uint64   { return a.stepSize }
+func (a *Aggregator) Dirs() datadir.Dirs { return a.dirs }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
@@ -205,6 +206,11 @@ func (a *Aggregator) DisableFsync() {
 		ii.DisableFsync()
 	}
 }
+
+func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
+	a.d[domain].ReplaceKeysInValues = v
+}
+func (a *Aggregator) Cfg(domain kv.Domain) statecfg.DomainCfg { return a.d[domain].DomainCfg }
 
 func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
@@ -304,7 +310,36 @@ func (a *Aggregator) OpenFolder() error {
 	return nil
 }
 
+// TODO: convert this func to `map` or struct instead of 4 return params
+func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
+	r = &ScanDirsResult{}
+	r.iiFiles, err = filesFromDir(dirs.SnapIdx)
+	if err != nil {
+		return
+	}
+	r.historyFiles, err = filesFromDir(dirs.SnapHistory)
+	if err != nil {
+		return
+	}
+	r.domainFiles, err = filesFromDir(dirs.SnapDomain)
+	if err != nil {
+		return
+	}
+	return r, nil
+}
+
+type ScanDirsResult struct {
+	domainFiles  []string
+	historyFiles []string
+	iiFiles      []string
+}
+
 func (a *Aggregator) openFolder() error {
+	scanDirsRes, err := scanDirs(a.dirs)
+	if err != nil {
+		return err
+	}
+
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		if d.Disable {
@@ -318,7 +353,7 @@ func (a *Aggregator) openFolder() error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.openFolder()
+			return d.openFolder(scanDirsRes)
 		})
 	}
 	for _, ii := range a.iis {
@@ -326,7 +361,7 @@ func (a *Aggregator) openFolder() error {
 			continue
 		}
 		ii := ii
-		eg.Go(func() error { return ii.openFolder() })
+		eg.Go(func() error { return ii.openFolder(scanDirsRes) })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
@@ -1305,7 +1340,7 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	r := &Ranges{invertedIndex: make([]*MergeRange, len(at.a.iis))}
-	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if commitmentUseReferencedBranches {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange()
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange()
@@ -1389,7 +1424,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}()
 
 	at.a.logger.Info("[snapshots] merge state " + r.String())
-	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 
 	accStorageMerged := new(sync.WaitGroup)
 

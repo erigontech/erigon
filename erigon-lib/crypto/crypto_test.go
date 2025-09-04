@@ -327,8 +327,8 @@ func TestPythonIntegration(t *testing.T) {
 	msg0 := Keccak256([]byte("foo"))
 	sig0, _ := Sign(msg0, k0)
 
-	msg1 := hexutil.FromHex("00000000000000000000000000000000")
-	sig1, _ := Sign(msg0, k0)
+	msg1 := hexutil.FromHex("0000000000000000000000000000000000000000000000000000000000000000")
+	sig1, _ := Sign(msg1, k0)
 
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg0, kh, sig0)
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg1, kh, sig1)

@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -51,7 +52,7 @@ import (
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
 	tb.Cleanup(db.Close)
 
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
@@ -982,7 +983,9 @@ func TestHistoryScanFiles(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
-		require.NoError(h.openFolder())
+		scanDirsRes, err := scanDirs(h.dirs)
+		require.NoError(err)
+		require.NoError(h.openFolder(scanDirsRes))
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1545,7 +1548,9 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = h.openFolder()
+	scanDirsRes, err := scanDirs(h.dirs)
+	require.NoError(t, err)
+	err = h.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }

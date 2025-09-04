@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -434,13 +435,12 @@ func TestClique(t *testing.T) {
 				Epoch:  tt.epoch,
 			}
 
-			cliqueDB := memdb.NewTestDB(t, kv.ConsensusDB)
+			cliqueDB := memdb.NewTestDB(t, dbcfg.ConsensusDB)
 
 			engine := clique.New(&config, chainspec.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
-			checkStateRoot := true
 			// Create a pristine blockchain with the genesis injected
-			m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
+			m := mock.MockWithGenesisEngine(t, genesis, engine, false)
 
 			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block

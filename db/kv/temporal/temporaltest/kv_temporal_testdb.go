@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
@@ -31,28 +32,34 @@ import (
 
 // nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
+	return NewTestDBWithStepSize(tb, dirs, config3.DefaultStepSize)
+}
+
+func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
 
 	var rawDB kv.RwDB
 	if tb != nil {
-		rawDB = memdb.NewTestDB(tb, kv.ChainDB)
+		rawDB = memdb.NewTestDB(tb, dbcfg.ChainDB)
 	} else {
-		rawDB = memdb.New(dirs.DataDir, kv.ChainDB)
+		rawDB = memdb.New(nil, dirs.DataDir, dbcfg.ChainDB)
 	}
 
 	salt, err := state.GetStateIndicesSalt(dirs, true, log.New())
 	if err != nil {
 		panic(err)
 	}
-	agg, err := state.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, rawDB, log.New())
+	agg, err := state.NewAggregator2(context.Background(), dirs, stepSize, salt, rawDB, log.New())
 	if err != nil {
 		panic(err)
 	}
+	agg.DisableFsync()
 	if err := agg.OpenFolder(); err != nil {
 		panic(err)
 	}
+
 	if tb != nil {
 		tb.Cleanup(agg.Close)
 	}

@@ -287,4 +287,5 @@ type Sync struct {
 	AlwaysGenerateChangesets bool
 	KeepExecutionProofs      bool
 	PersistReceiptsCacheV2   bool
+	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
 }
