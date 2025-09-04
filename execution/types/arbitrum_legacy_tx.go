@@ -53,37 +53,14 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
-	// Create a clean struct with only the fields that should be RLP encoded
-	// This avoids encoding the TransactionMisc cache fields
-	legacyData := struct {
-		Nonce    uint64
-		GasPrice *uint256.Int
-		GasLimit uint64
-		To       *common.Address `rlp:"nil"`
-		Value    *uint256.Int
-		Data     []byte
-		V, R, S  uint256.Int
-	}{
-		Nonce:    tx.Nonce,
-		GasPrice: tx.GasPrice,
-		GasLimit: tx.GasLimit,
-		To:       tx.To,
-		Value:    tx.Value,
-		Data:     tx.Data,
-		V:        tx.V,
-		R:        tx.R,
-		S:        tx.S,
-	}
-	
-	// Encode the legacy transaction fields
-	legacyBytes, err := rlp.EncodeToBytes(legacyData)
+	legacyBytes, err := rlp.EncodeToBytes(tx.LegacyTx)
 	if err != nil {
 		return err
 	}
-	
+
 	// Then encode the entire structure with LegacyTx as an encapsulated byte slice
 	return rlp.Encode(w, struct {
-		LegacyTxBytes     []byte          // Encapsulated RLP-encoded LegacyTx fields
+		LegacyTxBytes     []byte // Encapsulated RLP-encoded LegacyTx fields
 		HashOverride      common.Hash
 		EffectiveGasPrice uint64
 		L1BlockNumber     uint64
@@ -106,43 +83,33 @@ func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
 		L1BlockNumber     uint64
 		OverrideSender    *common.Address `rlp:"nil"`
 	}
-	
+
 	if err := s.Decode(&temp); err != nil {
 		return err
 	}
-	
-	// Decode the legacy transaction fields from bytes
-	var legacyData struct {
-		Nonce    uint64
-		GasPrice *uint256.Int
-		GasLimit uint64
-		To       *common.Address `rlp:"nil"`
-		Value    *uint256.Int
-		Data     []byte
-		V, R, S  uint256.Int
-	}
-	
-	if err := rlp.DecodeBytes(temp.LegacyTxBytes, &legacyData); err != nil {
+
+	legacyTx := &LegacyTx{}
+	if err := rlp.DecodeBytes(temp.LegacyTxBytes, &legacyTx); err != nil {
 		return err
 	}
-	
+
 	// Copy the decoded legacy fields to the transaction
-	tx.Nonce = legacyData.Nonce
-	tx.GasPrice = legacyData.GasPrice
-	tx.GasLimit = legacyData.GasLimit
-	tx.To = legacyData.To
-	tx.Value = legacyData.Value
-	tx.Data = legacyData.Data
-	tx.V = legacyData.V
-	tx.R = legacyData.R
-	tx.S = legacyData.S
-	
+	tx.Nonce = legacyTx.Nonce
+	tx.GasPrice = legacyTx.GasPrice
+	tx.GasLimit = legacyTx.GasLimit
+	tx.To = legacyTx.To
+	tx.Value = legacyTx.Value
+	tx.Data = legacyTx.Data
+	tx.V = legacyTx.V
+	tx.R = legacyTx.R
+	tx.S = legacyTx.S
+
 	// Copy Arbitrum-specific fields
 	tx.HashOverride = temp.HashOverride
 	tx.EffectiveGasPrice = temp.EffectiveGasPrice
 	tx.L1BlockNumber = temp.L1BlockNumber
 	tx.OverrideSender = temp.OverrideSender
-	
+
 	return nil
 }
 
