@@ -560,10 +560,10 @@ func (s ArbTxs) EncodeIndex(i int, w *bytes.Buffer) {
 	tx := s[i]
 
 	switch tx.Type() {
-	case ArbitrumLegacyTxType:
-		arbData := tx.inner.(*ArbitrumLegacyTxData)
-		arbData.EncodeOnlyLegacyInto(w)
-	case LegacyTxType:
+	// case ArbitrumLegacyTxType:
+	// arbData := tx.inner.(*ArbitrumLegacyTxData) //
+	// arbData.EncodeOnlyLegacyInto(w)
+	case ArbitrumLegacyTxType, LegacyTxType:
 		rlp.Encode(w, tx.inner)
 	default:
 		tx.encodeTyped(w)

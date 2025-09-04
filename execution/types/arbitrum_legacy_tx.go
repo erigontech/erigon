@@ -2,10 +2,12 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/holiman/uint256"
 )
@@ -51,72 +53,145 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
-func (tx *ArbitrumLegacyTxData) encode(b *bytes.Buffer) error {
-	return rlp.Encode(b, tx)
-}
-
-func (tx *ArbitrumLegacyTxData) decode(input []byte) error {
-	return rlp.DecodeBytes(input, tx)
-}
-
-func (tx *ArbitrumLegacyTxData) EncodeOnlyLegacyInto(w *bytes.Buffer) {
-	rlp.Encode(w, tx.LegacyTx)
-}
-
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
-	// For ArbitrumLegacyTxData, we use the same pattern as other transactions
-	// but we only encode the complete structure when needed for storage/transmission.
-	// The hash comes from HashOverride, not from this RLP encoding.
-	return rlp.Encode(w, []interface{}{
-		tx.Nonce,
-		tx.GasPrice,
-		tx.GasLimit,
-		tx.To,
-		tx.Value,
-		tx.Data,
-		tx.V,
-		tx.R,
-		tx.S,
-		tx.HashOverride,
-		tx.EffectiveGasPrice,
-		tx.L1BlockNumber,
-		tx.OverrideSender,
-	})
+	return rlp.Encode(w, tx)
 }
 
 func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
-	type arbitrumLegacyTx struct {
-		Nonce             uint64
-		GasPrice          *uint256.Int
-		GasLimit          uint64
-		To                *common.Address `rlp:"nil"`
-		Value             *uint256.Int
-		Data              []byte
-		V, R, S           uint256.Int
-		HashOverride      common.Hash
-		EffectiveGasPrice uint64
-		L1BlockNumber     uint64
-		OverrideSender    *common.Address `rlp:"nil"`
-	}
-	
-	var dec arbitrumLegacyTx
-	if err := s.Decode(&dec); err != nil {
+	return s.Decode(tx)
+}
+
+// arbitrumLegacyTxJSON represents the JSON structure for ArbitrumLegacyTxData
+type arbitrumLegacyTxJSON struct {
+	Type              hexutil.Uint64  `json:"type"`
+	Hash              common.Hash     `json:"hash"`
+	Nonce             *hexutil.Uint64 `json:"nonce"`
+	GasPrice          *hexutil.Big    `json:"gasPrice"`
+	Gas               *hexutil.Uint64 `json:"gas"`
+	To                *common.Address `json:"to"`
+	Value             *hexutil.Big    `json:"value"`
+	Data              *hexutil.Bytes  `json:"input"`
+	V                 *hexutil.Big    `json:"v"`
+	R                 *hexutil.Big    `json:"r"`
+	S                 *hexutil.Big    `json:"s"`
+	HashOverride      common.Hash     `json:"hashOverride"`
+	EffectiveGasPrice *hexutil.Uint64 `json:"effectiveGasPrice"`
+	L1BlockNumber     *hexutil.Uint64 `json:"l1BlockNumber"`
+	OverrideSender    *common.Address `json:"overrideSender,omitempty"`
+}
+
+func (tx *ArbitrumLegacyTxData) MarshalJSON() ([]byte, error) {
+	var enc arbitrumLegacyTxJSON
+
+	// These are set for all txn types.
+	enc.Type = hexutil.Uint64(tx.Type())
+	enc.Hash = tx.HashOverride // For ArbitrumLegacyTxData, hash comes from HashOverride
+	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
+	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
+	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
+	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
+	enc.Data = (*hexutil.Bytes)(&tx.Data)
+	enc.To = tx.To
+	enc.V = (*hexutil.Big)(tx.V.ToBig())
+	enc.R = (*hexutil.Big)(tx.R.ToBig())
+	enc.S = (*hexutil.Big)(tx.S.ToBig())
+
+	// Arbitrum-specific fields
+	enc.HashOverride = tx.HashOverride
+	enc.EffectiveGasPrice = (*hexutil.Uint64)(&tx.EffectiveGasPrice)
+	enc.L1BlockNumber = (*hexutil.Uint64)(&tx.L1BlockNumber)
+	enc.OverrideSender = tx.OverrideSender
+
+	return json.Marshal(&enc)
+}
+
+func (tx *ArbitrumLegacyTxData) UnmarshalJSON(input []byte) error {
+	var dec arbitrumLegacyTxJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
-	
-	tx.Nonce = dec.Nonce
-	tx.GasPrice = dec.GasPrice
-	tx.GasLimit = dec.GasLimit
-	tx.To = dec.To
-	tx.Value = dec.Value
-	tx.Data = dec.Data
-	tx.V = dec.V
-	tx.R = dec.R
-	tx.S = dec.S
+
+	// Validate and set common fields
+	if dec.To != nil {
+		tx.To = dec.To
+	}
+	if dec.Nonce == nil {
+		return errors.New("missing required field 'nonce' in transaction")
+	}
+	tx.Nonce = uint64(*dec.Nonce)
+
+	if dec.GasPrice == nil {
+		return errors.New("missing required field 'gasPrice' in transaction")
+	}
+	var overflow bool
+	tx.GasPrice, overflow = uint256.FromBig(dec.GasPrice.ToInt())
+	if overflow {
+		return errors.New("'gasPrice' in transaction does not fit in 256 bits")
+	}
+
+	if dec.Gas == nil {
+		return errors.New("missing required field 'gas' in transaction")
+	}
+	tx.GasLimit = uint64(*dec.Gas)
+
+	if dec.Value == nil {
+		return errors.New("missing required field 'value' in transaction")
+	}
+	tx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+	if overflow {
+		return errors.New("'value' in transaction does not fit in 256 bits")
+	}
+
+	if dec.Data == nil {
+		return errors.New("missing required field 'input' in transaction")
+	}
+	tx.Data = *dec.Data
+
+	// Decode signature fields
+	if dec.V == nil {
+		return errors.New("missing required field 'v' in transaction")
+	}
+	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	if overflow {
+		return errors.New("dec.V higher than 2^256-1")
+	}
+
+	if dec.R == nil {
+		return errors.New("missing required field 'r' in transaction")
+	}
+	overflow = tx.R.SetFromBig(dec.R.ToInt())
+	if overflow {
+		return errors.New("dec.R higher than 2^256-1")
+	}
+
+	if dec.S == nil {
+		return errors.New("missing required field 's' in transaction")
+	}
+	overflow = tx.S.SetFromBig(dec.S.ToInt())
+	if overflow {
+		return errors.New("dec.S higher than 2^256-1")
+	}
+
+	// Validate signature if present
+	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
+	if withSignature {
+		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
+			return err
+		}
+	}
+
+	// Arbitrum-specific fields
 	tx.HashOverride = dec.HashOverride
-	tx.EffectiveGasPrice = dec.EffectiveGasPrice
-	tx.L1BlockNumber = dec.L1BlockNumber
+
+	if dec.EffectiveGasPrice != nil {
+		tx.EffectiveGasPrice = uint64(*dec.EffectiveGasPrice)
+	}
+
+	if dec.L1BlockNumber != nil {
+		tx.L1BlockNumber = uint64(*dec.L1BlockNumber)
+	}
+
 	tx.OverrideSender = dec.OverrideSender
-	
+
 	return nil
 }
