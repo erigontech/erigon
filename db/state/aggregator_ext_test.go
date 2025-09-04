@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -40,6 +42,107 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+	ctx := context.Background()
+	aggStep := uint64(20)
+
+	db, _ := testDbAndAggregatorv3(t, aggStep)
+
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	var latestCommitTxNum uint64
+	commit := func(txn uint64) error {
+		err = domains.Flush(ctx, tx)
+		require.NoError(t, err)
+
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		tx, err = db.BeginTemporalRw(context.Background())
+		require.NoError(t, err)
+
+		domains, err = state.NewSharedDomains(tx, log.New())
+		require.NoError(t, err)
+		atomic.StoreUint64(&latestCommitTxNum, txn)
+		return nil
+	}
+
+	txs := (aggStep) * config3.StepsInFrozenFile
+	t.Logf("step=%d tx_count=%d", aggStep, txs)
+
+	rnd := newRnd(0)
+	keys := make([][]byte, txs/2)
+
+	var prev1, prev2 []byte
+	var txNum uint64
+	for txNum = uint64(1); txNum <= txs/2; txNum++ {
+		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
+		n, err := rnd.Read(addr)
+		require.NoError(t, err)
+		require.Equal(t, length.Addr, n)
+
+		n, err = rnd.Read(loc)
+		require.NoError(t, err)
+		require.Equal(t, length.Hash, n)
+		keys[txNum-1] = append(addr, loc...)
+
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(0),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
+
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, prev1, 0)
+		require.NoError(t, err)
+		prev1 = buf
+
+		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev2, 0)
+		require.NoError(t, err)
+		prev2 = []byte{addr[0], loc[0]}
+
+	}
+	require.NoError(t, commit(txNum))
+
+	half := txs / 2
+	for txNum = txNum + 1; txNum <= txs; txNum++ {
+		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
+
+		prev, step, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
+		require.NoError(t, err)
+		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
+		require.NoError(t, err)
+	}
+
+	err = tx.Commit()
+
+	tx, err = db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	for i, key := range keys {
+
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		require.NotNil(t, storedV, "key %x not found %d", key, i)
+		require.NoError(t, err)
+		require.Equal(t, key[0], storedV[0])
+		require.Equal(t, key[length.Addr], storedV[1])
+	}
+	require.NoError(t, err)
+}
 
 func TestAggregatorV3_Merge(t *testing.T) {
 	if testing.Short() {
