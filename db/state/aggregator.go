@@ -56,7 +56,7 @@ import (
 )
 
 type Aggregator struct {
-	db       kv.RoDB
+	db       kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
 	d        [kv.DomainLen]*Domain
 	iis      []*InvertedIndex
 	dirs     datadir.Dirs

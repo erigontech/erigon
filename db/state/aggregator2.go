@@ -10,11 +10,68 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
+
+// AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
+type AggOpts struct {
+	schema   statecfg.SchemaGen // biz-logic
+	dirs     datadir.Dirs
+	logger   log.Logger
+	stepSize uint64
+
+	genNewSaltIfNeed bool
+	sanityOldNaming  bool // prevent start directory with old file names
+}
+
+func New(dirs datadir.Dirs) AggOpts {
+	return AggOpts{ //Defaults
+		logger:           log.Root(),
+		schema:           statecfg.Schema,
+		dirs:             dirs,
+		stepSize:         config3.DefaultStepSize,
+		genNewSaltIfNeed: false,
+		sanityOldNaming:  false,
+	}
+}
+
+func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
+	//TODO: rename `OpenFolder` to `ReopenFolder`
+	if opts.sanityOldNaming {
+		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
+			panic(err)
+		}
+	}
+	salt, err := GetStateIndicesSalt(opts.dirs, opts.genNewSaltIfNeed, opts.logger)
+	if err != nil {
+		return nil, err
+	}
+	return NewAggregator2(ctx, opts.dirs, opts.stepSize, salt, db, opts.logger)
+}
+
+func (opts AggOpts) MustOpen(db kv.RoDB) *Aggregator {
+	agg, err := opts.Open(context.Background(), db)
+	if err != nil {
+		panic(fmt.Errorf("fail to open mdbx: %w", err))
+	}
+	return agg
+}
+
+// Setters
+
+func (opts AggOpts) SanityOldNaming() AggOpts {
+	opts.sanityOldNaming = true
+	return opts
+}
+func (opts AggOpts) StepSize(s uint64) AggOpts   { opts.stepSize = s; return opts }
+func (opts AggOpts) GenNewSaltIfNeed() AggOpts   { opts.genNewSaltIfNeed = true; return opts }
+func (opts AggOpts) Logger(l log.Logger) AggOpts { opts.logger = l; return opts }
+
+// Getters
 
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	salt, err := GetStateIndicesSalt(dirs, false, logger)
@@ -29,7 +86,7 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err != nil {
 		return nil, err
 	}
-	if err := statecfg.Configure(a, dirs, salt, logger); err != nil {
+	if err := statecfg.Configure(statecfg.Schema, a, dirs, salt, logger); err != nil {
 		return nil, err
 	}
 

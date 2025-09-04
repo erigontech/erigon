@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -141,7 +140,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	aggOld, err := state.NewAggregator(ctx, dirsOld, config3.DefaultStepSize, db, logger)
+	aggOld, err := state.New(dirsOld).Logger(logger).Open(ctx, db)
 	if err != nil {
 		panic(err)
 	}
@@ -182,10 +181,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
-	if err != nil {
-		return err
-	}
+	agg := state.New(dirs).Logger(logger).MustOpen(db)
 	defer agg.Close()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
@@ -193,7 +189,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
 		return err
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
