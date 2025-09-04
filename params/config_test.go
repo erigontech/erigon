@@ -171,8 +171,9 @@ func TestCalculateCoinbaseAmoy(t *testing.T) {
 	}{
 		{0, addr0, "at genesis block"},
 		{10_000, addr0, "before transition"},
+		{26272255, addr0, "just before transition"},
 		{26272256, expectedCoinbaseAddr, "at transition"},
-		{30000000, expectedCoinbaseAddr, "at transition"},
+		{30000000, expectedCoinbaseAddr, "after transition"},
 	}
 	for _, tc := range testCases {
 		result := config.Bor.CalculateCoinbase(tc.blockNumber)
