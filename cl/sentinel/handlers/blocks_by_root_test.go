@@ -60,7 +60,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
