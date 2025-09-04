@@ -87,7 +87,6 @@ jobs:
     # Upgrade + tip-tracking test
 
     - name: Print datadir contents before upgrade (for debugging)
-      if: ${{ inputs.explicit_upgrade }}
       working-directory: ${{ github.workspace }}
       run: |
         find $ERIGON_TESTBED_DATA_DIR
