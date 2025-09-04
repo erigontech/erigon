@@ -29,7 +29,7 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err != nil {
 		return nil, err
 	}
-	if err := statecfg.Configure(a, dirs, salt, logger); err != nil {
+	if err := statecfg.Configure(statecfg.Schema, a, dirs, salt, logger); err != nil {
 		return nil, err
 	}
 

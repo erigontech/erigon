@@ -479,12 +479,12 @@ func (w *Writer) DeleteAccount(address common.Address, original *accounts.Accoun
 		fmt.Printf("del acc: %x\n", address)
 	}
 	//TODO: move logic from SD
-	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
-	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
-	//	return err
-	//}
+	if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:], w.txNum); err != nil {
+		return err
+	}
+	if err := w.tx.DomainDel(kv.CodeDomain, address[:], w.txNum, nil, 0); err != nil {
+		return err
+	}
 	if err := w.tx.DomainDel(kv.AccountsDomain, address[:], w.txNum, nil, 0); err != nil {
 		return err
 	}
