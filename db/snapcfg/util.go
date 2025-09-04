@@ -363,10 +363,6 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 	return cfg
 }
 
-func NewNonSeededCfg(networkName string) *Cfg {
-	return newCfg(networkName, Preverified{})
-}
-
 type Cfg struct {
 	ExpectBlocks      uint64
 	Preverified       Preverified          // immutable
