@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
@@ -367,21 +366,4 @@ func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 		return
 	}
 	sd.mem.DiscardWrites(d)
-}
-
-func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
-}
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
-
-func AggTx(tx kv.Tx) *AggregatorRoTx {
-	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
-		return withAggTx.AggTx().(*AggregatorRoTx)
-	}
-
-	return nil
 }

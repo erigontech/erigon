@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -215,11 +216,6 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
-	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
-	//if err != nil {
-	//	return err
-	//}
-
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
@@ -236,6 +232,7 @@ func (sd *TemporalMemBatch) flushDiffSet(ctx context.Context, tx kv.RwTx) error 
 	}
 	return nil
 }
+
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for di, w := range sd.domainWriters {
@@ -259,7 +256,25 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 	}
 	return nil
 }
+
 func (sd *TemporalMemBatch) DiscardWrites(domain kv.Domain) {
 	sd.domainWriters[domain].discard = true
 	sd.domainWriters[domain].h.discard = true
 }
+
+func AggTx(tx kv.Tx) *AggregatorRoTx {
+	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
+		return withAggTx.AggTx().(*AggregatorRoTx)
+	}
+
+	return nil
+}
+
+func toStringZeroCopy(v []byte) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return unsafe.String(&v[0], len(v))
+}
+
+func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
