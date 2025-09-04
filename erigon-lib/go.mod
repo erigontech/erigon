@@ -15,14 +15,14 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/holiman/uint256 v1.3.2
-	github.com/mattn/go-colorable v0.1.13
+	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/prometheus/client_golang v1.23.0
 	github.com/prometheus/client_model v0.6.2
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/shirou/gopsutil/v4 v4.24.8
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/mock v0.6.0
