@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 // DBSchemaVersion versions list
@@ -43,15 +44,6 @@ const (
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
 )
-
-const (
-
-	//key - contract code hash
-	//value - contract code
-	Code = "Code"
-)
-
-const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
 
 const (
 	// DatabaseInfo is used to store information about data layout.
@@ -308,7 +300,6 @@ var (
 var ChaindataTables = []string{
 	E2AccountsHistory,
 	E2StorageHistory,
-	Code,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
@@ -594,21 +585,21 @@ var PolygonBridgeTablesCfg = TableCfg{}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
-	case TxPoolDB:
+	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
-	case SentryDB:
+	case dbcfg.SentryDB:
 		return SentryTablesCfg
-	case DownloaderDB:
+	case dbcfg.DownloaderDB:
 		return DownloaderTablesCfg
-	case DiagnosticsDB:
+	case dbcfg.DiagnosticsDB:
 		return DiagnosticsTablesCfg
-	case HeimdallDB:
+	case dbcfg.HeimdallDB:
 		return HeimdallTablesCfg
-	case PolygonBridgeDB:
+	case dbcfg.PolygonBridgeDB:
 		return PolygonBridgeTablesCfg
-	case ConsensusDB:
+	case dbcfg.ConsensusDB:
 		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
@@ -790,11 +781,6 @@ func String2Enum(in string) (uint16, error) {
 	}
 	return uint16(ii), nil
 }
-
-const (
-	ReceiptsAppendable Appendable = 0
-	AppendableLen      Appendable = 0
-)
 
 func (d Domain) String() string {
 	switch d {

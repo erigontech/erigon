@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cmd/pics/visual"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
@@ -91,7 +92,6 @@ var bucketLabels = map[string]string{
 	kv.BlockBody:                "Block Bodies",
 	kv.HeaderNumber:             "Header Numbers",
 	kv.TxLookup:                 "Transaction Index",
-	kv.Code:                     "Code Of Contracts",
 	kv.SyncStageProgress:        "Sync Progress",
 	kv.PlainState:               "Plain State",
 	kv.HashedAccountsDeprecated: "Hashed Accounts",
@@ -426,7 +426,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New(nil, "", kv.ChainDB)
+	emptyKv := memdb.New(nil, "", dbcfg.ChainDB)
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

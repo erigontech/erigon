@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
@@ -36,7 +37,7 @@ func TestKvServer_renew(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	require, ctx, db := require.New(t), context.Background(), memdb.NewTestDB(t, kv.ChainDB)
+	require, ctx, db := require.New(t), context.Background(), memdb.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(db.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)

@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 type TemporaryMdbx struct {
@@ -39,7 +40,7 @@ func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := New(kv.ChainDB, log.Root()).InMem(nil, path).Open(ctx)
+	db, err := New(dbcfg.ChainDB, log.Root()).InMem(nil, path).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
@@ -56,7 +57,7 @@ func NewUnboundedTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, er
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := New(kv.ChainDB, log.Root()).InMem(nil, path).MapSize(32 * datasize.TB).PageSize(16 * datasize.KB).Open(ctx)
+	db, err := New(dbcfg.ChainDB, log.Root()).InMem(nil, path).MapSize(32 * datasize.TB).PageSize(16 * datasize.KB).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}

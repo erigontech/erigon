@@ -188,6 +188,12 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 				l["agent"] = str
 			}
 		}
+
+		streamDeadline := time.Now().Add(5 * time.Second)
+		s.SetReadDeadline(streamDeadline)
+		s.SetWriteDeadline(streamDeadline)
+		s.SetDeadline(streamDeadline)
+
 		if err := fn(s); err != nil {
 			if errors.Is(err, ErrResourceUnavailable) {
 				// write resource unavailable prefix

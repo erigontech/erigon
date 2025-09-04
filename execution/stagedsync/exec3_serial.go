@@ -287,7 +287,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx.(kv.TemporalTx)) {
 				logIndexAfterTx -= uint32(len(result.Logs))
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx.(kv.TemporalTx)), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
 		}
