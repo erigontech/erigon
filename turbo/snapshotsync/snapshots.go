@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/version"
 
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -469,9 +470,12 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
 		}
 		fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-		if err != nil || !ok {
+		if err != nil {
+			return fmt.Errorf("%w, fileName: %s", err, fileName)
+		}
+		if !ok {
 			_, fName := filepath.Split(fPath)
-			return fmt.Errorf("[open index] find files by pattern err %w fname %s", err, fName)
+			return fmt.Errorf("[open index] find files by pattern err %w fname %s", os.ErrNotExist, fName)
 		}
 		index, err := recsplit.OpenIndex(fPath)
 

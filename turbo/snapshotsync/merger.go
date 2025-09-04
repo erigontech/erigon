@@ -4,11 +4,13 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon-lib/version"
 
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
@@ -173,9 +175,13 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 				return fmt.Errorf("[merge] can't replace with mask in file %s: %w", fPathMask, err)
 			}
 			fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-			if err != nil || !ok {
+			if err != nil {
 				_, fName := filepath.Split(fPath)
 				return fmt.Errorf("[merge] find files by pattern err %w fname %s", err, fName)
+			}
+			if !ok {
+				_, fName := filepath.Split(fPath)
+				return fmt.Errorf("[merge] find files by pattern err %w fname %s", os.ErrNotExist, fName)
 			}
 			fileInfo, _, ok := snaptype.ParseFileName("", fPath)
 			if !ok {

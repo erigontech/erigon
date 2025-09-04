@@ -443,9 +443,13 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 		return fmt.Errorf("[build index] can't replace with mask in file %s: %w", info.Name(), err)
 	}
 	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-	if err != nil || !ok {
+	if err != nil {
 		_, fName := filepath.Split(fPath)
 		return fmt.Errorf("build index err %w fname %s", err, fName)
+	}
+	if !ok {
+		_, fName := filepath.Split(fPath)
+		return fmt.Errorf("build index err %w fname %s", os.ErrNotExist, fName)
 	}
 	info.Version = fileVer
 	info.Path = fPath
