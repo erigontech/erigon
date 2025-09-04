@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -415,4 +416,27 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.PagedReader, resBuf
 
 	cmp, k := g.Cmp(k, b.ef.Get(di))
 	return cmp, k, nil
+}
+
+func TestNewBtIndex(t *testing.T) {
+	t.Parallel()
+	keyCount := 10000
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	require.NotNil(t, kv)
+	require.NotNil(t, bt)
+	bplus := bt.bplus
+	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
+
+	for i := 1; i < len(bt.bplus.mx); i++ {
+		require.NotZero(t, bt.bplus.mx[i].di)
+		require.NotZero(t, bt.bplus.mx[i].off)
+		require.NotEmpty(t, bt.bplus.mx[i].key)
+	}
 }

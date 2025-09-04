@@ -27,7 +27,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
@@ -100,19 +100,19 @@ func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
 	return DownloadRequest{Path: path, TorrentHash: torrentHash}
 }
 
-func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddRequest {
-	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
+func BuildProtoRequest(downloadRequest []DownloadRequest) *downloaderproto.AddRequest {
+	req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
 			continue
 		}
 		if r.TorrentHash != "" {
-			req.Items = append(req.Items, &proto_downloader.AddItem{
+			req.Items = append(req.Items, &downloaderproto.AddItem{
 				TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
 				Path:        r.Path,
 			})
 		} else {
-			req.Items = append(req.Items, &proto_downloader.AddItem{
+			req.Items = append(req.Items, &downloaderproto.AddItem{
 				Path: r.Path,
 			})
 		}
@@ -124,10 +124,10 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddR
 func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []DownloadRequest,
-	downloader proto_downloader.DownloaderClient,
+	downloader downloaderproto.DownloaderClient,
 	logPrefix string,
 ) error {
-	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
+	preq := &downloaderproto.SetLogPrefixRequest{Prefix: logPrefix}
 	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
@@ -354,7 +354,7 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader proto_downloader.DownloaderClient,
+	snapshotDownloader downloaderproto.DownloaderClient,
 	syncCfg ethconfig.Sync,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
@@ -507,7 +507,7 @@ func SyncSnapshots(
 	// Check for completion immediately, then growing intervals.
 	interval := time.Second
 	for {
-		completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+		completedResp, err := snapshotDownloader.Completed(ctx, &downloaderproto.CompletedRequest{})
 		if err != nil {
 			return fmt.Errorf("waiting for snapshot download: %w", err)
 		}

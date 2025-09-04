@@ -594,6 +594,32 @@ type Body struct {
 	Withdrawals  []*Withdrawal
 }
 
+func (b *Body) MatchesHeader(h *Header) error {
+	if hash := DeriveSha(Transactions(b.Transactions)); hash != h.TxHash {
+		return fmt.Errorf("body has invalid transaction hash: have %x, exp: %x", hash, h.TxHash)
+	}
+
+	if hash := CalcUncleHash(b.Uncles); hash != h.UncleHash {
+		return fmt.Errorf("body has invalid uncle hash: have %x, exp: %x", hash, h.UncleHash)
+	}
+
+	if h.WithdrawalsHash == nil {
+		if b.Withdrawals != nil {
+			return errors.New("body has unexpected withdrawals")
+		}
+	} else {
+		if b.Withdrawals == nil {
+			return errors.New("body is missing withdrawals")
+		}
+
+		if hash := DeriveSha(Withdrawals(b.Withdrawals)); hash != *h.WithdrawalsHash {
+			return fmt.Errorf("body has invalid withdrawals hash: have %x, exp: %x", hash, h.WithdrawalsHash)
+		}
+	}
+
+	return nil
+}
+
 // RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
 // It is useful in the situations when actual transaction context is not important, for example
 // when downloading Block bodies from other peers or serving them to other peers
@@ -1346,8 +1372,8 @@ func (b *Block) SanityCheck() error {
 
 // HashCheck checks that transactions, receipts, uncles, and withdrawals hashes are correct.
 func (b *Block) HashCheck(fullCheck bool) error {
-	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
-		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
+	if err := b.Body().MatchesHeader(b.header); err != nil {
+		return err
 	}
 
 	if fullCheck {
@@ -1361,24 +1387,6 @@ func (b *Block) HashCheck(fullCheck bool) error {
 
 	if len(b.transactions) == 0 && b.ReceiptHash() != empty.RootHash {
 		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
-	}
-
-	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
-		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
-	}
-
-	if b.WithdrawalsHash() == nil {
-		if b.Withdrawals() != nil {
-			return errors.New("header missing WithdrawalsHash")
-		}
-		return nil
-	}
-	if b.Withdrawals() == nil {
-		return errors.New("body missing Withdrawals")
-	}
-
-	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
-		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
 
 	return nil
