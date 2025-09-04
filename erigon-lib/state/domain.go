@@ -363,7 +363,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 
 				if fileVer.Less(d.version.DataKV.MinSupported) {
 					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, d.version.DataKV)
+					version.VersionTooLowPanic(fName, d.version.DataKV)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -391,7 +391,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				if ok {
 					if fileVer.Less(d.version.AccessorKVI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.AccessorKVI)
+						version.VersionTooLowPanic(fName, d.version.AccessorKVI)
 					}
 					if item.index, err = d.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -410,7 +410,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				if ok {
 					if fileVer.Less(d.version.AccessorBT.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.AccessorBT)
+						version.VersionTooLowPanic(fName, d.version.AccessorBT)
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -429,7 +429,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				if ok {
 					if fileVer.Less(d.version.AccessorKVEI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, d.version.AccessorKVEI)
+						version.VersionTooLowPanic(fName, d.version.AccessorKVEI)
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
@@ -2141,12 +2141,3 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
 func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
-
-func versionTooLowPanic(filename string, version version.Versions) {
-	panic(fmt.Sprintf(
-		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
-		filename,
-		version.MinSupported,
-		version.Current,
-	))
-}

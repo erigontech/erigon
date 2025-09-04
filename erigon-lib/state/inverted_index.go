@@ -357,7 +357,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 
 				if fileVer.Less(ii.version.DataEF.MinSupported) {
 					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, ii.version.DataEF)
+					version.VersionTooLowPanic(fName, ii.version.DataEF)
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -386,7 +386,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 				if ok {
 					if fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 						_, fName := filepath.Split(fPath)
-						versionTooLowPanic(fName, ii.version.AccessorEFI)
+						version.VersionTooLowPanic(fName, ii.version.AccessorEFI)
 					}
 					if item.index, err = ii.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
