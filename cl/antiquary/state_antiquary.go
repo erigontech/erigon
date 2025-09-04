@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
@@ -568,15 +568,15 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		paths := s.stateSn.SegFileNames(from, to)
-		downloadItems := make([]*proto_downloader.AddItem, len(paths))
+		downloadItems := make([]*downloaderproto.AddItem, len(paths))
 		for i, path := range paths {
-			downloadItems[i] = &proto_downloader.AddItem{
+			downloadItems[i] = &downloaderproto.AddItem{
 				Path: path,
 			}
 		}
 		if s.downloader != nil {
 			// Notify bittorent to seed the new snapshots
-			if _, err := s.downloader.Add(s.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+			if _, err := s.downloader.Add(s.ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
 		}

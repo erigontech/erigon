@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 	"unsafe"
 
@@ -37,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/estimate"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
@@ -79,7 +81,8 @@ type MdbxOpts struct {
 	mergeThreshold  uint64
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
-	inMem           bool
+
+	inMem, autoRemove bool
 
 	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
 	// most of db must set explicit `roTxsLimiter <= 9K`.
@@ -104,9 +107,9 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
 		label:           label,
-		metrics:         label == kv.ChainDB,
+		metrics:         label == dbcfg.ChainDB,
 	}
-	if label == kv.ChainDB {
+	if label == dbcfg.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
 	}
 	return opts
@@ -140,12 +143,13 @@ func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	}
 	return opts.RemoveFlags(flag)
 }
-func (opts MdbxOpts) WriteMap(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.WriteMap) }
-func (opts MdbxOpts) Exclusive(v bool) MdbxOpts { return opts.boolToFlag(v, mdbx.Exclusive) }
-func (opts MdbxOpts) Readonly(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Readonly) }
-func (opts MdbxOpts) Accede(v bool) MdbxOpts    { return opts.boolToFlag(v, mdbx.Accede) }
+func (opts MdbxOpts) WriteMap(v bool) MdbxOpts   { return opts.boolToFlag(v, mdbx.WriteMap) }
+func (opts MdbxOpts) Exclusive(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Exclusive) }
+func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdbx.Readonly) }
+func (opts MdbxOpts) Accede(v bool) MdbxOpts     { return opts.boolToFlag(v, mdbx.Accede) }
+func (opts MdbxOpts) AutoRemove(v bool) MdbxOpts { opts.autoRemove = v; return opts }
 
-func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
+func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	if tmpDir != "" {
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			panic(err)
@@ -157,10 +161,11 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	}
 	opts.path = path
 	opts.inMem = true
+	opts.autoRemove = tb == nil
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
-	opts.dirtySpace = uint64(32 * datasize.MB)
+	opts.dirtySpace = uint64(16 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts
@@ -225,7 +230,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if opts.label == kv.ChainDB && opts.verbosity != -1 {
+	if opts.label == dbcfg.ChainDB && opts.verbosity != -1 {
 		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 		if err != nil {
 			return nil, fmt.Errorf("db verbosity set: %w", err)
@@ -273,7 +278,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		if err != nil {
 			return nil, err
 		}
-		if opts.label == kv.ChainDB {
+		if opts.label == dbcfg.ChainDB {
 			if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
 				return nil, err
 			}
@@ -302,9 +307,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			const dirtySpaceMaxChainDB = uint64(1 * datasize.GB)
 			const dirtySpaceMaxDefault = uint64(64 * datasize.MB)
 
-			if opts.label == kv.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
+			if opts.label == dbcfg.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
 				dirtySpace = dirtySpaceMaxChainDB
-			} else if opts.label != kv.ChainDB && dirtySpace > dirtySpaceMaxDefault {
+			} else if opts.label != dbcfg.ChainDB && dirtySpace > dirtySpaceMaxDefault {
 				dirtySpace = dirtySpaceMaxDefault
 			}
 		}
@@ -333,7 +338,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	opts.pageSize = datasize.ByteSize(in.PageSize)
 	opts.mapSize = datasize.ByteSize(in.MapSize)
-	if opts.label == kv.ChainDB {
+	if opts.label == dbcfg.ChainDB {
 		opts.log.Info("[db] open", "label", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	} else {
 		opts.log.Debug("[db] open", "label", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
@@ -428,7 +433,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	db.path = opts.path
 	addToPathDbMap(opts.path, db)
-	if dbg.MdbxLockInRam() && opts.label == kv.ChainDB {
+	if dbg.MdbxLockInRam() && opts.label == dbcfg.ChainDB {
 		log.Info("[dbg] locking db in mem", "label", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
@@ -571,7 +576,7 @@ func (db *MdbxKV) Close() {
 	db.env.Close()
 	db.env = nil
 
-	if db.opts.inMem {
+	if db.opts.autoRemove {
 		if err := dir.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}

@@ -922,19 +922,6 @@ func (m Mode) String() string {
 	}
 }
 
-func ParseCommitmentMode(s string) Mode {
-	var mode Mode
-	switch s {
-	case "off":
-		mode = ModeDisabled
-	case "update":
-		mode = ModeUpdate
-	default:
-		mode = ModeDirect
-	}
-	return mode
-}
-
 type Updates struct {
 	hasher keyHasher
 

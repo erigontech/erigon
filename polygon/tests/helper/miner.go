@@ -60,25 +60,7 @@ func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types
 	return *genesis
 }
 
-func NewEthConfig() *ethconfig.Config {
-	ethConfig := &ethconfig.Defaults
-	return ethConfig
-}
-
-func NewNodeConfig() *nodecfg.Config {
-	nodeConfig := nodecfg.DefaultConfig
-	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit := version.GitCommit; commit != "" {
-		nodeConfig.Version = version.VersionWithCommit(commit)
-	} else {
-		nodeConfig.Version = version.VersionNoMeta
-	}
-	nodeConfig.IPCPath = "" // force-disable IPC endpoint
-	nodeConfig.Name = "erigon"
-	return &nodeConfig
-}
-
-// InitNode initializes a node with the given genesis file and config
+// InitMiner initializes a node with the given genesis file and config
 func InitMiner(
 	ctx context.Context,
 	logger log.Logger,
