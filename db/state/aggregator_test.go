@@ -374,6 +374,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 	require.NoError(t, agg.OpenFolder())
 
 	aggTx := agg.BeginFilesRo()
+	defer aggTx.Close()
 
 	checkFn := func(files visibleFiles, merged bool) {
 		if merged {
@@ -425,7 +426,7 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 	// 	stepSize:                         10,
 	// 	disableCommitmentBranchTransform: false,
 	// })
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
 
 	require.NotNil(t, agg.d[kv.AccountsDomain].checker)
 	require.NotNil(t, agg.d[kv.StorageDomain].checker)
@@ -439,13 +440,9 @@ func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
 
 	require.NoError(t, agg.OpenFolder())
 
-	tdb := wrapDbWithCtx(db, agg)
-	defer tdb.Close()
-	tx, err := tdb.BeginTemporalRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	aggTx := agg.BeginFilesRo()
+	defer aggTx.Close()
 
-	aggTx := AggTx(tx)
 	checkFn := func(files visibleFiles, merged bool) {
 		if merged {
 			require.Equal(t, 1, len(files))
