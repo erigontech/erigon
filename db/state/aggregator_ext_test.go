@@ -32,16 +32,154 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	aggStep := uint64(100)
+	ctx := context.Background()
+	db, agg := testDbAndAggregatorv3(t, aggStep)
+	dirs := agg.Dirs()
+
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txs := aggStep * 5
+	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
+
+	rnd := newRnd(0)
+	keys := make([][]byte, txs)
+
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
+		n, err := rnd.Read(addr)
+		require.NoError(t, err)
+		require.Equal(t, length.Addr, n)
+
+		n, err = rnd.Read(loc)
+		require.NoError(t, err)
+		require.Equal(t, length.Hash, n)
+
+		acc := accounts.Account{
+			Nonce:       txNum,
+			Balance:     *uint256.NewInt(1000000000000),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf[:], txNum, nil, 0)
+		require.NoError(t, err)
+
+		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		require.NoError(t, err)
+
+		keys[txNum-1] = append(addr, loc...)
+	}
+
+	// flush and build files
+	err = domains.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	progress := tx.Debug().DomainProgress(kv.AccountsDomain)
+	require.Equal(t, 5, int(progress/aggStep))
+
+	//latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
+	//require.Equal(t, 5, int(latestStepInDB))
+	//
+	//latestStepInDBNsoHist := agg.d[kv.AccountsDomain].maxStepInDBNoHistory(tx)
+	//require.Equal(t, 2, int(latestStepInDBNoHist))
+
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	err = agg.BuildFiles(txs)
+	require.NoError(t, err)
+
+	agg.Close()
+	db.Close()
+
+	// remove database files
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
+
+	// open new db and aggregator instances
+	newDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(newDb.Close)
+
+	salt, err := state.GetStateIndicesSalt(dirs, false, logger)
+	require.NoError(t, err)
+	require.NotNil(t, salt)
+	newAgg, err := state.NewAggregator2(context.Background(), agg.Dirs(), aggStep, salt, newDb, logger)
+	require.NoError(t, err)
+	require.NoError(t, newAgg.OpenFolder())
+
+	db, _ = temporal.New(newDb, newAgg)
+
+	tx, err = db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	newDoms, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer newDoms.Close()
+
+	err = newDoms.SeekCommitment(ctx, tx)
+	require.NoError(t, err)
+	latestTx := newDoms.TxNum()
+	t.Logf("seek to latest_tx=%d", latestTx)
+
+	miss := uint64(0)
+	for i, key := range keys {
+		if uint64(i+1) >= txs-aggStep {
+			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
+		}
+		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr])
+		require.NoError(t, err)
+		if len(stored) == 0 {
+			miss++
+			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
+			continue
+		}
+		acc := accounts.Account{}
+		err = accounts.DeserialiseV3(&acc, stored)
+		require.NoError(t, err)
+
+		require.Equal(t, i+1, int(acc.Nonce))
+
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, storedV)
+		_ = key[0]
+		_ = storedV[0]
+		require.Equal(t, key[0], storedV[0])
+		require.Equal(t, key[length.Addr], storedV[1])
+	}
+	newAgg.Close()
+
+	require.NoError(t, err)
+}
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	if testing.Short() {
