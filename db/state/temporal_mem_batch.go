@@ -35,7 +35,7 @@ type dataWithPrevStep struct {
 	prevStep kv.Step
 }
 
-// TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+// TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	stepSize uint64
 
@@ -43,7 +43,7 @@ type TemporalMemBatch struct {
 
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string]dataWithPrevStep
-	storage         *btree2.Map[string, dataWithPrevStep]
+	storage         *btree2.Map[string, dataWithPrevStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
