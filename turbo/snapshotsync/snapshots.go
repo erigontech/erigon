@@ -603,11 +603,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles(s.alignMin)
-
-	if cfg.NoDownloader {
-		s.DownloadComplete()
-	}
-
 	return s
 }
 
