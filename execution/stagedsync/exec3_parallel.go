@@ -170,18 +170,18 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	delete(result.TxIn, result.Coinbase)
 	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
 
-	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
-	ibs.SetTrace(task.execTask.Task.(*exec.TxTask).Trace)
-	ibs.SetTxContext(blockNum, txIndex)
-	ibs.SetVersion(txIncarnation)
-	ibs.ApplyVersionedWrites(result.TxOut)
-	ibs.SetVersionMap(&state.VersionMap{})
-
 	txTask, ok := task.Task.(*exec.TxTask)
 
 	if !ok {
 		return nil, nil
 	}
+
+	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	ibs.SetTxContext(blockNum, txIndex)
+	ibs.SetVersion(txIncarnation)
+	ibs.ApplyVersionedWrites(result.TxOut)
+	ibs.SetVersionMap(&state.VersionMap{})
+	ibs.SetTrace(txTask.Trace)
 
 	if task.IsBlockEnd() || txIndex < 0 {
 		if txTask.Config.IsByzantium(blockNum) {
@@ -1397,7 +1397,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
 						ibs.SetVersion(result.Version().Incarnation)
 
-						txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
+						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
+
+						if !ok {
+							return state.StateUpdates{}, nil
+						}
 
 						syscall := func(contract common.Address, data []byte) ([]byte, error) {
 							ret, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)

@@ -295,17 +295,18 @@ func (t *TxTask) TxSender() (*common.Address, error) {
 
 func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
-		var err error
-		if t.signer == nil {
-			t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
-		}
-		message, err := t.Tx().AsMessage(*t.signer, t.Header.BaseFee, t.Rules())
+		if tx := t.Tx(); tx != nil {
+			if t.signer == nil {
+				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
+			}
+			message, err := tx.AsMessage(*t.signer, t.Header.BaseFee, t.Rules())
 
-		if err != nil {
-			return nil, err
-		}
+			if err != nil {
+				return nil, err
+			}
 
-		t.message = message
+			t.message = message
+		}
 	}
 
 	return t.message, nil
@@ -432,7 +433,11 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 			return err
 		}
 
-		evm.ResetBetweenBlocks(t.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, t.Rules())
+		var txContext evmtypes.TxContext
+		if msg != nil {
+			txContext = core.NewEVMTxContext(msg)
+		}
+		evm.ResetBetweenBlocks(t.EvmBlockContext, txContext, ibs, vmCfg, t.Rules())
 	}
 
 	return nil
@@ -953,7 +958,7 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 	select {
 	case <-ctx.Done():
 		return q.results.Len() == 0, ctx.Err()
-	case next, _ := <-q.resultCh:
+	case next := <-q.resultCh:
 		return q.Drain(ctx, next)
 	case <-waitChan:
 		var none T

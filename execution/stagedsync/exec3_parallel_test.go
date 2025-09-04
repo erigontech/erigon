@@ -71,6 +71,7 @@ type Timer func(txIdx int, opIdx int) time.Duration
 type Sender func(int) common.Address
 
 func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *testExecTask {
+
 	return &testExecTask{
 		TxTask: &exec.TxTask{
 			Header: &types.Header{
@@ -517,6 +518,11 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 	defer executorCancel()
 
+	for _, task := range tasks {
+		task := task.(*testExecTask)
+		task.TxTask.Config = chainSpec.Config
+	}
+
 	start := time.Now()
 	_, err = executeParallelWithCheck(t, pe, tasks, false, validation, metadata)
 
@@ -564,8 +570,6 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 
 	pe.execRequests <- &execRequest{0, common.Hash{}, nil, tasks, applyResults, profile}
 
-	defer pe.wait(ctx)
-
 	// TODO get results back
 
 	for applyResult := range applyResults {
@@ -575,11 +579,12 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 		}
 	}
 
+	cancel()
+	pe.wait(ctx)
+
 	if check != nil {
 		err = check(pe)
 	}
-
-	cancel()
 
 	return result, err
 }
