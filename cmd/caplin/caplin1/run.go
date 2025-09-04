@@ -70,6 +70,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -97,11 +98,11 @@ func OpenCaplinDatabase(ctx context.Context,
 	os.MkdirAll(dbPath, 0700)
 	os.MkdirAll(dataDirIndexer, 0700)
 
-	db := mdbx.New(kv.CaplinDB, log.New()).Path(dbPath).
+	db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
 			return kv.ChaindataTablesCfg
 		}).MustOpen()
-	blobDB := mdbx.New(kv.CaplinDB, log.New()).Path(blobDbPath).
+	blobDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(blobDbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.ChaindataTablesCfg
 		}).MustOpen()

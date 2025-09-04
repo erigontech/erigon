@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/db/snaptype"
 
 	"github.com/spaolacci/murmur3"
@@ -148,6 +149,19 @@ func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string
 }
 func (ii *InvertedIndex) efFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep))
+}
+
+var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
+
+func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
+	accessor, err := recsplit.OpenIndex(fPath)
+	if err != nil {
+		return nil, err
+	}
+	if invIdxExistenceForceInMem {
+		accessor.ForceExistenceFilterInRAM()
+	}
+	return accessor, nil
 }
 
 func filesFromDir(dir string) ([]string, error) {
@@ -1128,7 +1142,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
 	}
 	if ii.Accessors.Has(statecfg.AccessorHashMap) {
-		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorNewFilePath(step, step+1)); err != nil {
+		if mapAccessor, err = ii.openHashMapAccessor(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}
 	}

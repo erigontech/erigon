@@ -73,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -298,7 +299,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Assemble the Ethereum object
-	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
+	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -576,7 +577,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
 	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
-	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, kv.ChainDB, logger)
+	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, dbcfg.ChainDB, logger)
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {

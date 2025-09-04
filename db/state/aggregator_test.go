@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -159,7 +160,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator)
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
 	agg := testAgg(tb, db, dirs, aggStep, logger)
@@ -332,7 +333,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
@@ -361,7 +362,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
@@ -390,7 +391,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
@@ -419,7 +420,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 		salt, err := GetStateIndicesSalt(dirs, true, logger)
 		require.NoError(err)

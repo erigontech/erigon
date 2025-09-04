@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/remotedb"
@@ -392,7 +393,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(roTxLimit)
-		rawDB, err := kv2.New(kv.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
+		rawDB, err := kv2.New(dbcfg.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
@@ -573,7 +574,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 			engine = bor.NewRo(cc, blockReader, logger)
 		} else if cc != nil && cc.Aura != nil {
-			consensusDB, err := kv2.New(kv.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
+			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 			}
