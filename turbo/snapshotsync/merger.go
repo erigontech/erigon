@@ -183,6 +183,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 				_, fName := filepath.Split(fPath)
 				return fmt.Errorf("[merge] find files by pattern err %w fname %s", os.ErrNotExist, fName)
 			}
+
 			fileInfo, _, ok := snaptype.ParseFileName("", fPath)
 			if !ok {
 				_, fName := filepath.Split(fPath)
