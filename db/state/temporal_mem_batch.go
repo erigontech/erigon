@@ -72,7 +72,7 @@ func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
 	return sd
 }
 
-func (sd *TemporalMemBatch) PutWithPrev(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (sd *TemporalMemBatch) Put(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	sd.put(domain, k, v, txNum)
 	return sd.putWal(domain, toBytesZeroCopy(k), v, txNum, preval, prevStep)
 }
