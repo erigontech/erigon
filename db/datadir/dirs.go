@@ -437,7 +437,7 @@ func (d *Dirs) RenameNewVersions() error {
 				}
 			}
 			return nil
-		}); err ! = nil {
+		}); err != nil {
 			return err
 		}
 	}
