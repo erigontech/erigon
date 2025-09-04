@@ -347,7 +347,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 
 	_, criticalError = rawdb.WriteRawBodyIfNotExists(txc.Tx, header.Hash(), header.Number.Uint64(), body)
 	if criticalError != nil {
-		return
+		return //nolint:nilnesserr
 	}
 
 	status = engine_types.ValidStatus
