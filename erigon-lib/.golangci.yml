@@ -27,7 +27,6 @@ linters:
     - reassign
     - spancheck
     - thelper
-    - wastedassign
     - govet
   disable:
     - testifylint
@@ -43,9 +42,10 @@ linters:
     - protogetter
     - unparam
     - wrapcheck
-    - rowserrcheck
-    - sqlclosecheck
-    - zerologlint
+    - sqlclosecheck # we don't use SQL
+    - rowserrcheck # we don't use SQL
+    - zerologlint # not don't use Zerolog
+    - wastedassign # `ineffassign` linter is enabled by default
     - spancheck # we don't use OpenTelemetry
     - loggercheck # we don't use Zap
     - unconvert # not enough profit from always enabling
