@@ -38,6 +38,7 @@ import (
 	state2 "github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -120,7 +121,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	newDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	salt, err := state.GetStateIndicesSalt(dirs, false, logger)
