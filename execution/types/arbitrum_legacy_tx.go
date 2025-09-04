@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -57,6 +58,11 @@ func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
+	buf := bytes.NewBuffer(nil)
+	if err := tx.LegacyTx.EncodeRLP(buf); err != nil {
+		return err
+	}
+
 	// Then encode the entire structure with LegacyTx as an encapsulated byte slice
 	return rlp.Encode(w, struct {
 		LegacyTxBytes     []byte // Encapsulated RLP-encoded LegacyTx fields
@@ -88,9 +94,14 @@ func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	legacyTx := &LegacyTx{}
-	if err := rlp.DecodeBytes(temp.LegacyTxBytes, &legacyTx); err != nil {
+	str := rlp.NewStream(bytes.NewReader(temp.LegacyTxBytes), uint64(len(temp.LegacyTxBytes)))
+	if err := legacyTx.DecodeRLP(str); err != nil {
 		return err
 	}
+
+	// if err := rlp.DecodeBytes(temp.LegacyTxBytes, &legacyTx); err != nil {
+	// 	return err
+	// }
 
 	// Copy the decoded legacy fields to the transaction
 	tx.Nonce = legacyTx.Nonce
