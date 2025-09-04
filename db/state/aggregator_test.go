@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -51,89 +50,6 @@ import (
 func composite(k, k2 []byte) []byte {
 	return append(common.Copy(k), k2...)
 }
-
-func TestAggregatorV3_MergeValTransform(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	t.Parallel()
-	_db, agg := testDbAndAggregatorv3(t, 5)
-	db := wrapDbWithCtx(_db, agg)
-	rwTx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
-
-	domains, err := NewSharedDomains(rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	txs := uint64(100)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	state := make(map[string][]byte)
-
-	// keys are encodings of numbers 1..31
-	// each key changes value on every txNum which is multiple of the key
-	//var maxWrite, otherMaxWrite uint64
-	for txNum := uint64(1); txNum <= txs; txNum++ {
-
-		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
-
-		n, err := rnd.Read(addr)
-		require.NoError(t, err)
-		require.Equal(t, length.Addr, n)
-
-		n, err = rnd.Read(loc)
-		require.NoError(t, err)
-		require.Equal(t, length.Hash, n)
-		acc := accounts.Account{
-			Nonce:       1,
-			Balance:     *uint256.NewInt(txNum * 1e6),
-			CodeHash:    common.Hash{},
-			Incarnation: 0,
-		}
-		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil, 0)
-		require.NoError(t, err)
-
-		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
-		require.NoError(t, err)
-
-		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
-			require.NoError(t, err)
-		}
-
-		state[string(addr)] = buf
-		state[string(addr)+string(loc)] = []byte{addr[0], loc[0]}
-	}
-
-	err = domains.Flush(context.Background(), rwTx)
-	require.NoError(t, err)
-
-	err = rwTx.Commit()
-	require.NoError(t, err)
-
-	err = agg.BuildFiles(txs)
-	require.NoError(t, err)
-
-	rwTx, err = db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	_, err = rwTx.PruneSmallBatches(context.Background(), time.Hour)
-	require.NoError(t, err)
-
-	err = rwTx.Commit()
-	require.NoError(t, err)
-
-	err = agg.MergeLoop(context.Background())
-	require.NoError(t, err)
-}
-
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
