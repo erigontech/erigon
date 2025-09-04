@@ -72,7 +72,7 @@ jobs:
         id: pre_test_step
         run: |
           set +e # Disable exit on error
-        
+          
           # Launch the testbed Erigon instance & test its ability to sync 
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-sync/run_and_chase_tip.py \
             --build-dir=${{ github.workspace }}/build/bin \

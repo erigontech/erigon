@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	datadir2 "github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -79,7 +80,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	dirs := datadir2.New(t.TempDir())
 	cfg := statecfg.Schema.AccountsDomain
 
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
@@ -1367,33 +1368,6 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	return db, d, dat
 }
 
-func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string]map[string][]upd {
-	tb.Helper()
-
-	doms := make(map[string]map[string][]upd)
-	r := newRnd(31)
-
-	accs := make(map[string][]upd)
-	stor := make(map[string][]upd)
-	if keyLimit == 1 {
-		key1 := generateRandomKey(r, keySize1)
-		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
-		doms["accounts"] = accs
-		return doms
-	}
-
-	for i := uint64(0); i < keyLimit/2; i++ {
-		key1 := generateRandomKey(r, keySize1)
-		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
-		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
-		stor[key2] = generateArbitraryValueUpdates(r, totalTx, keyTxsLimit, 32)
-	}
-	doms["accounts"] = accs
-	doms["storage"] = stor
-
-	return doms
-}
-
 // generate arbitrary values for arbitrary keys within given totalTx
 func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
 	tb.Helper()
@@ -1423,48 +1397,6 @@ func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
 	return key
-}
-
-func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
-	updates := make([]upd, 0)
-	usedTxNums := make(map[uint64]bool)
-
-	for i := uint64(0); i < keyTxsLimit; i++ {
-		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		jitter := r.IntN(10e7)
-		acc := accounts3.Account{
-			Nonce:       i,
-			Balance:     *uint256.NewInt(i*10e4 + uint64(jitter)),
-			CodeHash:    common.Hash{},
-			Incarnation: 0,
-		}
-		value := accounts3.SerialiseV3(&acc)
-
-		updates = append(updates, upd{txNum: txNum, value: value})
-		usedTxNums[txNum] = true
-	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
-
-	return updates
-}
-
-func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
-	updates := make([]upd, 0)
-	usedTxNums := make(map[uint64]bool)
-	//maxStorageSize := 24 * (1 << 10) // limit on contract code
-
-	for i := uint64(0); i < keyTxsLimit; i++ {
-		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-
-		value := make([]byte, r.IntN(int(maxSize)))
-		r.Read(value)
-
-		updates = append(updates, upd{txNum: txNum, value: value})
-		usedTxNums[txNum] = true
-	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
-
-	return updates
 }
 
 func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
