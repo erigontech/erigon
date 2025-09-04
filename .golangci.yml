@@ -16,12 +16,9 @@ linters:
     - gochecksumtype
     - gocritic
     - gosmopolitan
-    - loggercheck
     - nilnesserr
     - prealloc
     - reassign
-    - spancheck
-    - unconvert
     - wastedassign
     - govet
   disable:
@@ -46,6 +43,9 @@ linters:
     - sqlclosecheck
     - zerologlint
     - rowserrcheck
+    - spancheck # we don't use OpenTelemetry
+    - loggercheck # we don't use Zap
+    - unconvert # not enough profit from always enabling
   settings:
     goconst:
       min-len: 2

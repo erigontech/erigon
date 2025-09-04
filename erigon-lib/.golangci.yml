@@ -46,8 +46,9 @@ linters:
     - rowserrcheck
     - sqlclosecheck
     - zerologlint
-    - loggercheck
-    - unconvert
+    - spancheck # we don't use OpenTelemetry
+    - loggercheck # we don't use Zap
+    - unconvert # not enough profit from always enabling
   settings:
     goconst:
       min-len: 2
