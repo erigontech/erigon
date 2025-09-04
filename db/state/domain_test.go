@@ -792,7 +792,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 					continue
 				}
 				continue
-				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
 			} else { //warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
@@ -800,7 +800,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 				if keyNum == txNum%dom.stepSize {
 					continue
 				}
-				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
+				//fmt.Printf("Put: %d, step=%d\n", keyNum, step)
 			}
 
 			label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txNum, keyNum)
@@ -1335,7 +1335,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 				if !allowInsert {
 					continue
 				}
-				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
 			} else { //warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
@@ -1343,7 +1343,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 				if keyNum == txNum%d.stepSize {
 					continue
 				}
-				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
+				//fmt.Printf("Put: %d, step=%d\n", keyNum, step)
 			}
 
 			binary.BigEndian.PutUint64(k[:], keyNum)
@@ -1457,7 +1457,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		pv, ps := []byte{}, kv.Step(0)
@@ -1532,7 +1532,7 @@ func TestDomainRange(t *testing.T) {
 	keyTxsLimit := uint64(3)
 	keyLimit := uint64(10)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	cutoffTxnum := uint64(190)
 	keysLeftAfterCutoff := make(map[string]struct{})
@@ -1646,7 +1646,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 	SaveExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey, 0)
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
@@ -1746,7 +1746,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	// Key's lengths are variable so lookup should be in commitment mode.
 	d.FilenameBase = kv.CommitmentDomain.String()
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
@@ -1890,7 +1890,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	keyTxsLimit := uint64(150)
 	keyLimit := uint64(2000)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
@@ -2011,7 +2011,7 @@ func TestDomain_Unwind(t *testing.T) {
 
 		for i := uint64(0); i < maxTx; i++ {
 			writer.diff = &kv.DomainDiff{}
-			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
+			if i%3 == 0 && i > 0 { // once in 3 txn Put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
 					err = writer.DeleteWithPrev([]byte("key3"), i, preval3, 0)
 					require.NoError(t, err)
@@ -2412,7 +2412,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
