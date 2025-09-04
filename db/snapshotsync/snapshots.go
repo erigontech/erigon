@@ -668,13 +668,6 @@ func (s *RoSnapshots) LogStat(label string) {
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 }
 
-func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
-	if s.BlocksAvailable() < cfg.ExpectBlocks {
-		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
-	}
-	return nil
-}
-
 func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
 func (s *RoSnapshots) HasType(in snaptype.Type) bool {
 	for _, t := range s.enums {
