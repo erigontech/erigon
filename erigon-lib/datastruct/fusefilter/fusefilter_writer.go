@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"math"
+	randv2 "math/rand/v2"
 	"os"
 	"path/filepath"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/edsrzf/mmap-go"
@@ -26,7 +28,7 @@ type WriterOffHeap struct {
 }
 
 func NewWriterOffHeap(filePath string) (*WriterOffHeap, error) {
-	tmpFilePath := filePath + ".existence.tmp"
+	tmpFilePath := filePath + fmt.Sprintf("%d", randv2.UintN(10000)) + ".existence.tmp"
 	f, err := os.Create(tmpFilePath)
 	if err != nil {
 		return nil, err
@@ -122,9 +124,10 @@ func (w *WriterOffHeap) BuildTo(to io.Writer) (int, error) {
 }
 
 type Writer struct {
-	filePath string
-	fileName string
-	noFsync  bool
+	filePath    string
+	fileName    string
+	noFsync     bool
+	tmpFilePath string
 
 	data *WriterOffHeap
 }
@@ -135,7 +138,12 @@ func NewWriter(filePath string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Writer{filePath: filePath, fileName: fileName, data: w}, nil
+	return &Writer{
+		filePath:    filePath,
+		fileName:    fileName,
+		data:        w,
+		tmpFilePath: filePath + fmt.Sprintf("%d", randv2.UintN(10000)) + ".tmp",
+	}, nil
 }
 
 func (w *Writer) DisableFsync()          { w.noFsync = true }
@@ -143,9 +151,8 @@ func (w *Writer) FileName() string       { return w.fileName }
 func (w *Writer) AddHash(k uint64) error { return w.data.AddHash(k) }
 
 func (w *Writer) Build() error {
-	tmpResultFilePath := w.filePath + ".tmp"
-	defer dir.RemoveFile(tmpResultFilePath)
-	f, err := os.Create(tmpResultFilePath)
+	defer dir.RemoveFile(w.tmpFilePath)
+	f, err := os.Create(w.tmpFilePath)
 	if err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
@@ -168,7 +175,7 @@ func (w *Writer) Build() error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmpResultFilePath, w.filePath); err != nil {
+	if err = os.Rename(w.tmpFilePath, w.filePath); err != nil {
 		return err
 	}
 	return nil
@@ -178,7 +185,7 @@ func (w *Writer) Close() {
 	if w.data != nil {
 		w.data.Close()
 		w.data = nil
-		dir.RemoveFile(w.filePath + ".tmp")
+		dir.RemoveFile(w.tmpFilePath)
 	}
 }
 

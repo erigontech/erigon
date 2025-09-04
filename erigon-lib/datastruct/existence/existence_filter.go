@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"fmt"
 	"hash"
+	randv2 "math/rand/v2"
 	"os"
 	"path/filepath"
 
@@ -109,7 +110,7 @@ func (b *Filter) Build() error {
 	}
 
 	log.Trace("[agg] write file", "file", b.FileName)
-	tmpFilePath := b.FilePath + ".tmp"
+	tmpFilePath := b.FilePath + fmt.Sprintf("%d", randv2.UintN(10000)) + ".tmp"
 	cf, err := os.Create(tmpFilePath)
 	if err != nil {
 		return err

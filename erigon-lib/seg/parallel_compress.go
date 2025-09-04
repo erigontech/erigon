@@ -23,14 +23,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
+	randv2 "math/rand/v2"
 	"os"
 	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
@@ -294,7 +296,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	t := time.Now()
 
 	var err error
-	intermediatePath := segmentFilePath + ".tmp"
+	intermediatePath := segmentFilePath + fmt.Sprintf("%d", randv2.UintN(10000)) + ".tmp"
 	defer dir.RemoveFile(intermediatePath)
 	var intermediateFile *os.File
 	if intermediateFile, err = os.Create(intermediatePath); err != nil {

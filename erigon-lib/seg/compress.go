@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	randv2 "math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -126,9 +127,9 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
 
-	// tmpOutFilePath is a ".seg.tmp" file which will be renamed to ".seg" if everything succeeds.
+	// tmpOutFilePath is a ".seg.<random_string>.tmp" file which will be renamed to ".seg" if everything succeeds.
 	// It allows to atomically create a ".seg" file (the downloader will not see partial ".seg" files).
-	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
+	tmpOutFilePath := filepath.Join(dir, fileName) + fmt.Sprintf("%d", randv2.UintN(10000)) + ".tmp"
 
 	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
 	uncompressedFile, err := NewRawWordsFile(uncompressedPath)

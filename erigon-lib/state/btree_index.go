@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	randv2 "math/rand/v2"
 	"os"
 	"path"
 	"path/filepath"
@@ -185,7 +186,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	}
 
 	btw := &BtIndexWriter{lvl: args.Lvl, logger: logger, args: args,
-		tmpFilePath: args.IndexFile + ".tmp"}
+		tmpFilePath: args.IndexFile + fmt.Sprintf("%d", randv2.UintN(10000)) + ".tmp"}
 
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
