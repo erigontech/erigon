@@ -521,7 +521,6 @@ type BlockSnapshots interface {
 	Delete(fileName string) error
 	Types() []snaptype.Type
 	Close()
-
 	DownloadComplete()
 	RemoveOverlaps(onDelete func(l []string) error) error
 	DownloadReady() bool
@@ -584,11 +583,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
-
-	if cfg.NoDownloader {
-		s.DownloadComplete()
-	}
-
 	return s
 }
 
