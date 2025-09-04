@@ -19,13 +19,13 @@ package recsplit
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/bits"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 
@@ -172,7 +172,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs := &RecSplit{
 		version:    args.Version,
 		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
-		tmpDir: args.TmpDir, filePath: args.IndexFile, tmpFilePath: args.IndexFile + ".tmp",
+		tmpDir: args.TmpDir, filePath: args.IndexFile, tmpFilePath: args.IndexFile + fmt.Sprintf("%d", rand.UintN(10000)) + ".tmp",
 		enums:              args.Enums,
 		baseDataID:         args.BaseDataID,
 		lessFalsePositives: args.LessFalsePositives,
