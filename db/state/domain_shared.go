@@ -165,13 +165,6 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 const CodeSizeTableFake = "CodeSize"
 
-func (sd *SharedDomains) updateAccountCode(addrS string, code []byte, txNum uint64, prevCode []byte, prevStep kv.Step) error {
-	if len(code) == 0 {
-		return sd.mem.Put(kv.CodeDomain, addrS, nil, txNum, prevCode, prevStep)
-	}
-	return sd.mem.Put(kv.CodeDomain, addrS, code, txNum, prevCode, prevStep)
-}
-
 func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, prev []byte, prevStep kv.Step) error {
 	addr := toBytesZeroCopy(addrS)
 	if err := sd.DomainDelPrefix(kv.StorageDomain, roTx, addr, txNum); err != nil {
@@ -183,7 +176,7 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, p
 		return err
 	}
 
-	return sd.mem.Put(kv.AccountsDomain, addrS, nil, txNum, prev, prevStep)
+	return sd.mem.Del(kv.AccountsDomain, addrS, txNum, prev, prevStep)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
@@ -322,10 +315,10 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 		if prevVal == nil {
 			return nil
 		}
-		return sd.updateAccountCode(ks, nil, txNum, prevVal, prevStep)
 	default:
+		//noop
 	}
-	return sd.mem.Put(domain, ks, nil, txNum, prevVal, prevStep)
+	return sd.mem.Del(domain, ks, txNum, prevVal, prevStep)
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte, txNum uint64) error {

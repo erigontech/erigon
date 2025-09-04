@@ -77,6 +77,11 @@ func (sd *TemporalMemBatch) Put(domain kv.Domain, k string, v []byte, txNum uint
 	return sd.putWal(domain, toBytesZeroCopy(k), v, txNum, preval, prevStep)
 }
 
+func (sd *TemporalMemBatch) Del(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error {
+	sd.put(domain, k, nil, txNum)
+	return sd.putWal(domain, toBytesZeroCopy(k), nil, txNum, preval, prevStep)
+}
+
 func (sd *TemporalMemBatch) putWal(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	if len(v) == 0 {
 		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval, prevStep)
