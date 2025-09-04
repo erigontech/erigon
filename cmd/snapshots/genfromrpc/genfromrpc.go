@@ -361,6 +361,8 @@ func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interfa
 	}
 	sender, _ := commonTx.GetSender()
 	tx.OverrideSender = &sender
+
+	// return types.NewArbitrumLegacyTx(&types.LegacyTx{CommonTx: *commonTx, GasPrice: tx.GasPrice}, tx.HashOverride, tx.EffectiveGasPrice, tx.L1BlockNumber, tx.OverrideSender)
 	return tx
 }
 
