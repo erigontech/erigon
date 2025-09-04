@@ -45,7 +45,6 @@ var stateBuckets = []string{
 	kv.HashedAccountsDeprecated,
 	kv.HashedStorageDeprecated,
 	kv.PlainState,
-	kv.Code,
 	kv.E2AccountsHistory,
 	kv.E2StorageHistory,
 	kv.TxLookup,
