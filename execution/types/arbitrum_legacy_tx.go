@@ -53,11 +53,73 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, tx)
+	// Create a struct that explicitly lists all fields to avoid recursion
+	// with the embedded LegacyTx struct
+	return rlp.Encode(w, struct {
+		Nonce             uint64
+		GasPrice          *uint256.Int
+		GasLimit          uint64
+		To                *common.Address `rlp:"nil"`
+		Value             *uint256.Int
+		Data              []byte
+		V, R, S           uint256.Int
+		HashOverride      common.Hash
+		EffectiveGasPrice uint64
+		L1BlockNumber     uint64
+		OverrideSender    *common.Address `rlp:"nil"`
+	}{
+		Nonce:             tx.Nonce,
+		GasPrice:          tx.GasPrice,
+		GasLimit:          tx.GasLimit,
+		To:                tx.To,
+		Value:             tx.Value,
+		Data:              tx.Data,
+		V:                 tx.V,
+		R:                 tx.R,
+		S:                 tx.S,
+		HashOverride:      tx.HashOverride,
+		EffectiveGasPrice: tx.EffectiveGasPrice,
+		L1BlockNumber:     tx.L1BlockNumber,
+		OverrideSender:    tx.OverrideSender,
+	})
 }
 
 func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
-	return s.Decode(tx)
+	// Create a temporary struct for decoding
+	var temp struct {
+		Nonce             uint64
+		GasPrice          *uint256.Int
+		GasLimit          uint64
+		To                *common.Address `rlp:"nil"`
+		Value             *uint256.Int
+		Data              []byte
+		V, R, S           uint256.Int
+		HashOverride      common.Hash
+		EffectiveGasPrice uint64
+		L1BlockNumber     uint64
+		OverrideSender    *common.Address `rlp:"nil"`
+	}
+	
+	if err := s.Decode(&temp); err != nil {
+		return err
+	}
+	
+	// Copy fields back to the transaction
+	tx.Nonce = temp.Nonce
+	tx.GasPrice = temp.GasPrice
+	tx.GasLimit = temp.GasLimit
+	tx.To = temp.To
+	tx.Value = temp.Value
+	tx.Data = temp.Data
+	tx.V = temp.V
+	tx.R = temp.R
+	tx.S = temp.S
+	tx.HashOverride = temp.HashOverride
+	tx.EffectiveGasPrice = temp.EffectiveGasPrice
+	tx.L1BlockNumber = temp.L1BlockNumber
+	tx.OverrideSender = temp.OverrideSender
+	
+	return nil
 }
 
 // arbitrumLegacyTxJSON represents the JSON structure for ArbitrumLegacyTxData
