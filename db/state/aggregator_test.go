@@ -44,10 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func composite(k, k2 []byte) []byte {
-	return append(common.Copy(k), k2...)
-}
-
 func Test_EncodeCommitmentState(t *testing.T) {
 	t.Parallel()
 	cs := commitmentState{
@@ -216,16 +212,6 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	acc := accounts.Account{}
 	_ = accounts.DeserialiseV3(&acc, input)
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
-}
-
-// wrapDbWithCtx - deprecated copy of kv_temporal.go - visible only in tests
-// need to move non-unit-tests to own package
-func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
-	v, err := New(db, ctx)
-	if err != nil {
-		panic(err)
-	}
-	return v
 }
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
