@@ -55,7 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/version"
@@ -255,7 +255,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		_, err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
 		if err != nil {
 			return err
 		}
@@ -721,7 +721,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	if !exists {
 		return nil
 	}
-	db, err := mdbx.New(kv.ChainDB, log.New()).
+	db, err := mdbx.New(dbcfg.ChainDB, log.New()).
 		Path(dirs.Chaindata).
 		Accede(true).
 		Open(ctx)

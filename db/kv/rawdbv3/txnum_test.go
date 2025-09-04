@@ -25,13 +25,14 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 func TestTxNum(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(kv.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	err := db.Update(context.Background(), func(tx kv.RwTx) error {

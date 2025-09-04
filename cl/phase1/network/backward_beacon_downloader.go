@@ -59,7 +59,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		ctx:         ctx,
 		rpc:         rpc,
 		db:          db,
-		reqInterval: time.NewTicker(300 * time.Millisecond),
+		reqInterval: time.NewTicker(600 * time.Millisecond),
 		neverSkip:   true,
 		engine:      engine,
 		sn:          sn,
@@ -142,9 +142,11 @@ Loop:
 				}
 				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 				if err != nil {
+					b.rpc.BanPeer(peerId)
 					return
 				}
 				if responses == nil {
+					b.rpc.BanPeer(peerId)
 					return
 				}
 				if len(responses) == 0 {

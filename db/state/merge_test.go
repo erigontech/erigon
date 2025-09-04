@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
@@ -866,7 +867,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 func TestHistoryAndIIAlignment(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	agg, _ := newAggregatorOld(context.Background(), dirs, 1, db, logger)

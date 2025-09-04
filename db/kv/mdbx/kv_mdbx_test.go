@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -41,7 +42,7 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := New(kv.ChainDB, logger).InMem(t, path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(dbcfg.ChainDB, logger).InMem(t, path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -56,7 +57,7 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	path := b.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := New(kv.ChainDB, logger).InMem(b, path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(dbcfg.ChainDB, logger).InMem(b, path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -626,21 +627,21 @@ func TestDupDelete(t *testing.T) {
 }
 
 func TestBeginRoAfterClose(t *testing.T) {
-	db := New(kv.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRo(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRwAfterClose(t *testing.T) {
-	db := New(kv.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRw(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRoWithDoneContext(t *testing.T) {
-	db := New(kv.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -649,7 +650,7 @@ func TestBeginRoWithDoneContext(t *testing.T) {
 }
 
 func TestBeginRwWithDoneContext(t *testing.T) {
-	db := New(kv.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -664,7 +665,7 @@ func testCloseWaitsAfterTxBegin(
 	txEndFunc func(kv.Getter) error,
 ) {
 	t.Helper()
-	db := New(kv.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	var txs []kv.Getter
 	for i := 0; i < count; i++ {
 		tx, err := txBeginFunc(db)
@@ -1112,7 +1113,7 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 }
 
 func TestMdbxWithSyncBytes(t *testing.T) {
-	db, err := New(kv.TemporaryDB, log.Root()).
+	db, err := New(dbcfg.TemporaryDB, log.Root()).
 		Path(t.TempDir()).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
@@ -1132,7 +1133,7 @@ func TestAutoRemove(t *testing.T) {
 	logger := log.New()
 
 	t.Run("autoRemove enabled", func(t *testing.T) {
-		db := New(kv.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(true).MustOpen()
+		db := New(dbcfg.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(true).MustOpen()
 		mdbxDB := db.(*MdbxKV)
 		dbPath := mdbxDB.Path()
 
@@ -1141,7 +1142,7 @@ func TestAutoRemove(t *testing.T) {
 		require.NoDirExists(t, dbPath)
 	})
 	t.Run("autoRemove disabled", func(t *testing.T) {
-		db := New(kv.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(false).MustOpen()
+		db := New(dbcfg.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(false).MustOpen()
 		mdbxDB := db.(*MdbxKV)
 		dbPath := mdbxDB.Path()
 
