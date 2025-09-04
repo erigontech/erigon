@@ -164,20 +164,6 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 const CodeSizeTableFake = "CodeSize"
 
-func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, prev []byte, prevStep kv.Step) error {
-	addr := toBytesZeroCopy(addrS)
-	if err := sd.DomainDelPrefix(kv.StorageDomain, roTx, addr, txNum); err != nil {
-		return err
-	}
-
-	// commitment delete already has been applied via account
-	if err := sd.DomainDel(kv.CodeDomain, roTx, addr, txNum, nil, prevStep); err != nil {
-		return err
-	}
-
-	return sd.mem.Del(kv.AccountsDomain, addrS, txNum, prev, prevStep)
-}
-
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
 }
@@ -265,6 +251,8 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
+	ks := string(k)
+	sd.sdCtx.TouchKey(domain, ks, v)
 
 	if prevVal == nil {
 		var err error
@@ -273,9 +261,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 			return err
 		}
 	}
-	ks := string(k)
-
-	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
@@ -297,6 +282,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	ks := string(k)
+	sd.sdCtx.TouchKey(domain, ks, nil)
+
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.GetLatest(domain, tx, k)
@@ -305,11 +293,15 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 		}
 	}
 
-	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, nil)
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.deleteAccount(tx, ks, txNum, prevVal, prevStep)
+		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
+			return err
+		}
+		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
+			return err
+		}
+		return sd.mem.Del(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
