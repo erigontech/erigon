@@ -53,30 +53,21 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
-	// Create a struct that explicitly lists all fields to avoid recursion
-	// with the embedded LegacyTx struct
+	// First, encode the LegacyTx part into bytes
+	legacyBytes, err := rlp.EncodeToBytes(&tx.LegacyTx)
+	if err != nil {
+		return err
+	}
+	
+	// Then encode the entire structure with LegacyTx as an encapsulated byte slice
 	return rlp.Encode(w, struct {
-		Nonce             uint64
-		GasPrice          *uint256.Int
-		GasLimit          uint64
-		To                *common.Address `rlp:"nil"`
-		Value             *uint256.Int
-		Data              []byte
-		V, R, S           uint256.Int
+		LegacyTxBytes     []byte          // Encapsulated RLP-encoded LegacyTx
 		HashOverride      common.Hash
 		EffectiveGasPrice uint64
 		L1BlockNumber     uint64
 		OverrideSender    *common.Address `rlp:"nil"`
 	}{
-		Nonce:             tx.Nonce,
-		GasPrice:          tx.GasPrice,
-		GasLimit:          tx.GasLimit,
-		To:                tx.To,
-		Value:             tx.Value,
-		Data:              tx.Data,
-		V:                 tx.V,
-		R:                 tx.R,
-		S:                 tx.S,
+		LegacyTxBytes:     legacyBytes,
 		HashOverride:      tx.HashOverride,
 		EffectiveGasPrice: tx.EffectiveGasPrice,
 		L1BlockNumber:     tx.L1BlockNumber,
@@ -85,15 +76,9 @@ func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
-	// Create a temporary struct for decoding
+	// Decode into a temporary struct with LegacyTx as bytes
 	var temp struct {
-		Nonce             uint64
-		GasPrice          *uint256.Int
-		GasLimit          uint64
-		To                *common.Address `rlp:"nil"`
-		Value             *uint256.Int
-		Data              []byte
-		V, R, S           uint256.Int
+		LegacyTxBytes     []byte
 		HashOverride      common.Hash
 		EffectiveGasPrice uint64
 		L1BlockNumber     uint64
@@ -104,16 +89,12 @@ func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	
-	// Copy fields back to the transaction
-	tx.Nonce = temp.Nonce
-	tx.GasPrice = temp.GasPrice
-	tx.GasLimit = temp.GasLimit
-	tx.To = temp.To
-	tx.Value = temp.Value
-	tx.Data = temp.Data
-	tx.V = temp.V
-	tx.R = temp.R
-	tx.S = temp.S
+	// Decode the embedded LegacyTx from bytes
+	if err := rlp.DecodeBytes(temp.LegacyTxBytes, &tx.LegacyTx); err != nil {
+		return err
+	}
+	
+	// Copy Arbitrum-specific fields
 	tx.HashOverride = temp.HashOverride
 	tx.EffectiveGasPrice = temp.EffectiveGasPrice
 	tx.L1BlockNumber = temp.L1BlockNumber
