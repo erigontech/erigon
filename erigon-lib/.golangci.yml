@@ -19,7 +19,6 @@ linters:
     - gochecksumtype
     - gocritic
     - gosmopolitan
-    - loggercheck
     - nilerr
     - nilnesserr
     - noctx
@@ -28,7 +27,6 @@ linters:
     - reassign
     - spancheck
     - thelper
-    - unconvert
     - wastedassign
     - govet
   disable:
@@ -48,6 +46,8 @@ linters:
     - rowserrcheck
     - sqlclosecheck
     - zerologlint
+    - loggercheck
+    - unconvert
   settings:
     goconst:
       min-len: 2
