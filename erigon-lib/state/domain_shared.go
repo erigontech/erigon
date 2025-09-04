@@ -1195,7 +1195,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if sdc.sharedDomains.trace {
 		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updatesCount, "mode", sdc.updates.Mode())
 	}
-	if updatesCount > 0 {
+	if updatesCount == 0 {
+		// return sdc.patriciaTrie.RootHash()
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		if err != nil {
 			return nil, err
