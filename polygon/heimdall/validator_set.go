@@ -42,6 +42,9 @@ import (
 const (
 	MaxTotalVotingPower      = int64(math.MaxInt64) / 8
 	PriorityWindowSizeFactor = 2
+	// VotingPowerScaleFactor is used to scale voting power to prevent overflow
+	// It represents 10^18 (wei scale) to match Ethereum's denomination system
+	VotingPowerScaleFactor = 1e18
 )
 
 type Validator struct {
@@ -143,9 +146,11 @@ func (v *Validator) PowerBytes() []byte {
 
 // MinimalVal returns block number of last validator update
 func (v *Validator) MinimalVal() MinimalVal {
+	// Scale voting power by 10^18 to prevent overflow and match Ethereum's wei denomination
+	scaledPower := uint64(v.VotingPower) * VotingPowerScaleFactor
 	return MinimalVal{
 		ID:          v.ID,
-		VotingPower: uint64(v.VotingPower),
+		VotingPower: scaledPower,
 		Signer:      v.Address,
 	}
 }
@@ -177,7 +182,7 @@ func ParseValidators(validatorsBytes []byte) ([]*Validator, error) {
 // Used to send validator information to bor validator contract
 type MinimalVal struct {
 	ID          uint64         `json:"ID"`
-	VotingPower uint64         `json:"power"` // TODO add 10^-18 here so that we don't overflow easily
+	VotingPower uint64         `json:"power"` // Scaled by 10^18 to prevent overflow
 	Signer      common.Address `json:"signer"`
 }
 
