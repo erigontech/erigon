@@ -294,12 +294,6 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 
 	switch domain {
 	case kv.AccountsDomain:
-		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
-			return err
-		}
-		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
-			return err
-		}
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {

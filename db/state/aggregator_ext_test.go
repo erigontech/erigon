@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -577,6 +578,8 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	rnd := newRnd(2342)
 	maxTx := stepSize * 8
 
+	w := state2.NewWriter(domains.AsPutDel(rwTx), nil, 0)
+
 	// 1. generate data
 	data := generateSharedDomainsUpdates(t, domains, rwTx, maxTx, rnd, length.Addr, 10, stepSize)
 	fillRawdbTxNumsIndexForSharedDomains(t, rwTx, maxTx, stepSize)
@@ -590,7 +593,8 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
 		txNum = maxTx + 1
-		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
+		w.SetTxNum(txNum)
+		err = w.DeleteAccount(common.BytesToAddress(removedKey), nil)
 		require.NoError(t, err)
 		break
 	}

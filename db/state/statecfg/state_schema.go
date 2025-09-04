@@ -24,7 +24,7 @@ type AggSetters interface {
 	KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64)
 }
 
-func Configure(a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger) error {
+func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger) error { //nolint:gocritic
 	if err := AdjustReceiptCurrentVersionIfNeeded(dirs, logger); err != nil {
 		return err
 	}
