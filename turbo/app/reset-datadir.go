@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -133,8 +134,8 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	// Remove chaindata last, so that the config is available if there's an error.
 	if removeLocal {
 		for _, extraDir := range []string{
-			kv.HeimdallDB,
-			kv.PolygonBridgeDB,
+			dbcfg.HeimdallDB,
+			dbcfg.PolygonBridgeDB,
 		} {
 			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
 			err = dir.RemoveAll(extraFullPath)
@@ -171,7 +172,7 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 	}
 	ctx := cliCtx.Context
 	var db kv.RoDB
-	db, err = mdbx.New(kv.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
+	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
 	if err != nil {
 		err = fmt.Errorf("opening chaindata database: %w", err)
 		return
