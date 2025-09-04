@@ -55,9 +55,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	stepSize := uint64(100)
+	aggStep := uint64(100)
 	ctx := context.Background()
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, aggStep)
 	dirs := agg.Dirs()
 
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -68,8 +68,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := stepSize * 5
-	t.Logf("step=%d tx_count=%d\n", stepSize, txs)
+	txs := aggStep * 5
+	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
 
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
@@ -105,7 +105,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	progress := tx.Debug().DomainProgress(kv.AccountsDomain)
-	require.Equal(t, 5, int(progress/stepSize))
+	require.Equal(t, 5, int(progress/aggStep))
 
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	miss := uint64(0)
 	for i, key := range keys {
-		if uint64(i+1) >= txs-stepSize {
+		if uint64(i+1) >= txs-aggStep {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
 		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr])
