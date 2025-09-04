@@ -273,7 +273,7 @@ func (rs *ParallelExecutionState) SizeEstimate() (r uint64) {
 }
 
 func (rs *ParallelExecutionState) ReadsValid(readLists map[string]*dbstate.KvList) bool {
-	return rs.domains.ReadsValid(readLists)
+	return false
 }
 
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
@@ -330,7 +330,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 			return err
 		}
 
-		if err := w.rs.domains.IterateStoragePrefix(address[:], w.rs.tx, func(k, v []byte, step kv.Step) (bool, error) {
+		if err := w.rs.domains.IteratePrefix(kv.StorageDomain, address[:], w.rs.tx, func(k, v []byte, step kv.Step) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
 			return true, nil
 		}); err != nil {
@@ -399,7 +399,7 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	}
 
 	//seems don't need delete code here - tests starting fail
-	//err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+	//err := w.rs.domains.IteratePrefix(kv.StorageDomain, address[:], func(k, v []byte) error {
 	//	w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 	//	return nil
 	//})
