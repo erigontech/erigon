@@ -53,9 +53,7 @@ func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
 		if legacyData.OverrideSender != nil {
 			return *legacyData.OverrideSender, nil
 		}
-		return tx.Sender(s.Signer)
-		// fakeTx := NewTx(&legacyData.LegacyTx)
-		// return s.Signer.Sender(fakeTx)
+		return s.Signer.Sender(tx)
 	default:
 		return s.Signer.Sender(tx)
 	}
