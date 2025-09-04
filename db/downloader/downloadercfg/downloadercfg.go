@@ -276,12 +276,6 @@ func New(
 		"webseedHttpProviders", webseedHttpProviders,
 		"webseedUrlsOrFiles", webseedUrlsOrFiles)
 
-	// TODO: constructor must not do http requests
-	err = LoadSnapshotsHashes(ctx, dirs, chainName)
-	if err != nil {
-		return nil, err
-	}
-
 	cfg := Cfg{
 		Dirs:                dirs,
 		ChainName:           chainName,
