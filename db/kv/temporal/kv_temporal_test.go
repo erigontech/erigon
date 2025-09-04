@@ -24,7 +24,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
-	agg := state.New(dirs).StepSize(stepSize).GenNewSaltIfNeed().MustOpen(mdbxDb)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
 
 	temporalDb, err := New(mdbxDb, agg)
@@ -222,7 +222,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
-	agg := state.New(dirs).StepSize(stepSize).GenNewSaltIfNeed().MustOpen(mdbxDb)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
 	temporalDb, err := New(mdbxDb, agg)
 	require.NoError(t, err)

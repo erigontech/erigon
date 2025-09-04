@@ -18,43 +18,78 @@ import (
 )
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
-type AggOpts struct {
+type AggOpts struct { //nolint:gocritic
 	schema   statecfg.SchemaGen // biz-logic
 	dirs     datadir.Dirs
 	logger   log.Logger
 	stepSize uint64
 
-	genNewSaltIfNeed bool
-	sanityOldNaming  bool // prevent start directory with old file names
+	genSaltIfNeed   bool
+	sanityOldNaming bool // prevent start directory with old file names
+	disableFsync    bool // for tests speed
 }
 
-func New(dirs datadir.Dirs) AggOpts {
+func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return AggOpts{ //Defaults
-		logger:           log.Root(),
-		schema:           statecfg.Schema,
-		dirs:             dirs,
-		stepSize:         config3.DefaultStepSize,
-		genNewSaltIfNeed: false,
-		sanityOldNaming:  false,
+		logger:          log.Root(),
+		schema:          statecfg.Schema,
+		dirs:            dirs,
+		stepSize:        config3.DefaultStepSize,
+		genSaltIfNeed:   false,
+		sanityOldNaming: false,
+		disableFsync:    false,
 	}
 }
 
-func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
+func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
+	return New(dirs).DisableFsync().GenSaltIfNeed(true)
+}
+
+func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
 	//TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			panic(err)
 		}
 	}
-	salt, err := GetStateIndicesSalt(opts.dirs, opts.genNewSaltIfNeed, opts.logger)
+
+	salt, err := GetStateIndicesSalt(opts.dirs, opts.genSaltIfNeed, opts.logger)
 	if err != nil {
 		return nil, err
 	}
-	return NewAggregator2(ctx, opts.dirs, opts.stepSize, salt, db, opts.logger)
+
+	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, db, opts.logger)
+	if err != nil {
+		return nil, err
+	}
+	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(opts.dirs, opts.logger); err != nil {
+		return nil, err
+	}
+	if err := statecfg.Configure(statecfg.Schema, a, opts.dirs, salt, opts.logger); err != nil {
+		return nil, err
+	}
+
+	func() {
+		a.dirtyFilesLock.Lock()
+		defer a.dirtyFilesLock.Unlock()
+		a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	}()
+
+	if opts.disableFsync {
+		//TODO: maybe move it to some kind of config?
+		for _, d := range a.d {
+			d.DisableFsync()
+		}
+		for _, ii := range a.iis {
+			ii.DisableFsync()
+		}
+	}
+
+	return a, nil
 }
 
-func (opts AggOpts) MustOpen(db kv.RoDB) *Aggregator {
-	agg, err := opts.Open(context.Background(), db)
+func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //nolint:gocritic
+	agg, err := opts.Open(ctx, db)
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
 	}
@@ -63,39 +98,16 @@ func (opts AggOpts) MustOpen(db kv.RoDB) *Aggregator {
 
 // Setters
 
-func (opts AggOpts) SanityOldNaming() AggOpts {
+func (opts AggOpts) StepSize(s uint64) AggOpts    { opts.stepSize = s; return opts }        //nolint:gocritic
+func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
+func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
+func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
+func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts
 }
-func (opts AggOpts) StepSize(s uint64) AggOpts   { opts.stepSize = s; return opts }
-func (opts AggOpts) GenNewSaltIfNeed() AggOpts   { opts.genNewSaltIfNeed = true; return opts }
-func (opts AggOpts) Logger(l log.Logger) AggOpts { opts.logger = l; return opts }
 
 // Getters
-
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	salt, err := GetStateIndicesSalt(dirs, false, logger)
-	if err != nil {
-		return nil, err
-	}
-	return NewAggregator2(ctx, dirs, aggregationStep, salt, db, logger)
-}
-
-func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
-	if err != nil {
-		return nil, err
-	}
-	if err := statecfg.Configure(statecfg.Schema, a, dirs, salt, logger); err != nil {
-		return nil, err
-	}
-
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-
-	return a, nil
-}
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	directories := []string{

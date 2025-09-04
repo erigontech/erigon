@@ -1241,7 +1241,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
 		txNums := blockReader.TxnumReader(ctx)
 
-		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(db)
+		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
