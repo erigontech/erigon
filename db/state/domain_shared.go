@@ -186,14 +186,6 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addrS string, txNum uint64, p
 	return sd.mem.Put(kv.AccountsDomain, addrS, nil, txNum, prev, prevStep)
 }
 
-func (sd *SharedDomains) writeAccountStorage(k string, v []byte, txNum uint64, preVal []byte, prevStep kv.Step) error {
-	return sd.mem.Put(kv.StorageDomain, k, v, txNum, preVal, prevStep)
-}
-
-func (sd *SharedDomains) delAccountStorage(k string, txNum uint64, preVal []byte, prevStep kv.Step) error {
-	return sd.mem.Put(kv.StorageDomain, k, nil, txNum, preVal, prevStep)
-}
-
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	return sd.mem.IndexAdd(table, key, txNum)
 }
@@ -326,16 +318,14 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(tx, ks, txNum, prevVal, prevStep)
-	case kv.StorageDomain:
-		return sd.delAccountStorage(ks, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
 		return sd.updateAccountCode(ks, nil, txNum, prevVal, prevStep)
 	default:
-		return sd.mem.Put(domain, ks, nil, txNum, prevVal, prevStep)
 	}
+	return sd.mem.Put(domain, ks, nil, txNum, prevVal, prevStep)
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte, txNum uint64) error {
