@@ -336,39 +336,39 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		sd.SetTxNum(txn)
 		return 0, nil
 	}
-	// handle case when we have no commitment, but have executed blocks
-	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
-	if err != nil {
-		return 0, err
-	}
-	if len(bnBytes) == 8 {
-		bn = binary.BigEndian.Uint64(bnBytes)
-		txn, err = rawdbv3.TxNums.Max(tx, bn)
-		if err != nil {
-			return 0, err
-		}
-	}
-	if bn == 0 && txn == 0 {
-		sd.SetBlockNum(0)
-		sd.SetTxNum(0)
-		return 0, nil
-	}
-	sd.SetBlockNum(bn)
-	sd.SetTxNum(txn)
-	newRh, err := sd.rebuildCommitment(ctx, tx, bn)
-	if err != nil {
-		return 0, err
-	}
-	if bytes.Equal(newRh, commitment.EmptyRootHash) {
-		sd.SetBlockNum(0)
-		sd.SetTxNum(0)
-		return 0, nil
-	}
-	if sd.trace {
-		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
-	}
-	sd.SetBlockNum(bn)
-	sd.SetTxNum(txn)
+	// // handle case when we have no commitment, but have executed blocks
+	// bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
+	// if err != nil {
+	// 	return 0, err
+	// }
+	// if len(bnBytes) == 8 {
+	// 	bn = binary.BigEndian.Uint64(bnBytes)
+	// 	txn, err = rawdbv3.TxNums.Max(tx, bn)
+	// 	if err != nil {
+	// 		return 0, err
+	// 	}
+	// }
+	// if bn == 0 && txn == 0 {
+	// 	sd.SetBlockNum(0)
+	// 	sd.SetTxNum(0)
+	// 	return 0, nil
+	// }
+	// sd.SetBlockNum(bn)
+	// sd.SetTxNum(txn)
+	// newRh, err := sd.rebuildCommitment(ctx, tx, bn)
+	// if err != nil {
+	// 	return 0, err
+	// }
+	// if bytes.Equal(newRh, commitment.EmptyRootHash) {
+	// 	sd.SetBlockNum(0)
+	// 	sd.SetTxNum(0)
+	// 	return 0, nil
+	// }
+	// if sd.trace {
+	// 	fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
+	// }
+	// sd.SetBlockNum(bn)
+	// sd.SetTxNum(txn)
 	return 0, nil
 }
 
@@ -1195,11 +1195,21 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if sdc.sharedDomains.trace {
 		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updatesCount, "mode", sdc.updates.Mode())
 	}
+	if updatesCount > 0 {
+		rootHash, err = sdc.patriciaTrie.RootHash()
+		if err != nil {
+			return nil, err
+		}
+		if saveState {
+			if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
+				return nil, err
+			}
+		}
+		return rootHash, err
+	}
 
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
-	if updatesCount > 0 {
-		sdc.Reset()
-	}
+	sdc.Reset()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
 	if err != nil {
@@ -1234,8 +1244,8 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	// state could be equal but txnum/blocknum could be different.
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
-		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",
-		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
+		fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",
+			binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), sdc.sharedDomains.TxNum(), blockNum, rootHash)
 		return nil
 	}
 	if sdc.sharedDomains.trace {
