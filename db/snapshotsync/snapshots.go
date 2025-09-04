@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/version"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,8 +29,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/erigontech/erigon-lib/version"
 
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
