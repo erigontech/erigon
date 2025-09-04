@@ -124,11 +124,8 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	stat, err := AggTx(rwTx).prune(context.Background(), rwTx, 0, logEvery)
+	_, err = rwTx.PruneSmallBatches(context.Background(), time.Hour)
 	require.NoError(t, err)
-	t.Logf("Prune: %s", stat)
 
 	err = rwTx.Commit()
 	require.NoError(t, err)
