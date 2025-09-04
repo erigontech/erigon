@@ -34,7 +34,7 @@ type dataWithPrevStep struct {
 	prevStep kv.Step
 }
 
-type AggMemBatch struct {
+type TemporalMemBatch struct {
 	stepSize uint64
 
 	estSize int
@@ -50,8 +50,8 @@ type AggMemBatch struct {
 	pastChangesAccumulator    map[string]*StateChangeSet
 }
 
-func newAggMemBatch(tx kv.TemporalTx) *AggMemBatch {
-	sd := &AggMemBatch{
+func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
+	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 	}
 	aggTx := AggTx(tx)
@@ -71,14 +71,14 @@ func newAggMemBatch(tx kv.TemporalTx) *AggMemBatch {
 	return sd
 }
 
-func (sd *AggMemBatch) PutWithPrev(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (sd *TemporalMemBatch) PutWithPrev(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	if len(v) == 0 {
 		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval, prevStep)
 	}
 	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval, prevStep)
 }
 
-func (sd *AggMemBatch) DomainPut(domain kv.Domain, key string, val []byte, txNum uint64) {
+func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
@@ -99,7 +99,7 @@ func (sd *AggMemBatch) DomainPut(domain kv.Domain, key string, val []byte, txNum
 	sd.domains[domain][key] = valWithPrevStep
 }
 
-func (sd *AggMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
+func (sd *TemporalMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
@@ -115,7 +115,7 @@ func (sd *AggMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevSte
 	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
 }
 
-func (sd *AggMemBatch) SizeEstimate() uint64 {
+func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
@@ -124,7 +124,7 @@ func (sd *AggMemBatch) SizeEstimate() uint64 {
 	return uint64(sd.estSize) * 4
 }
 
-func (sd *AggMemBatch) ClearRam() {
+func (sd *TemporalMemBatch) ClearRam() {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	for i := range sd.domains {
@@ -135,7 +135,7 @@ func (sd *AggMemBatch) ClearRam() {
 	sd.estSize = 0
 }
 
-func (sd *AggMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
@@ -146,7 +146,7 @@ func (sd *AggMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, sd.stepSize, roTx)
 }
 
-func (sd *AggMemBatch) SetChangesetAccumulator(acc *StateChangeSet) {
+func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *StateChangeSet) {
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
 		if sd.currentChangesAccumulator == nil {
@@ -156,7 +156,7 @@ func (sd *AggMemBatch) SetChangesetAccumulator(acc *StateChangeSet) {
 		}
 	}
 }
-func (sd *AggMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet) {
+func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet) {
 	if sd.pastChangesAccumulator == nil {
 		sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
 	}
@@ -166,7 +166,7 @@ func (sd *AggMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, block
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
-func (sd *AggMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
+func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
@@ -181,7 +181,7 @@ func (sd *AggMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber
 	return ReadDiffSet(tx, blockNumber, blockHash)
 }
 
-func (sd *AggMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
+func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
 			return writer.Add(key, txNum)
@@ -190,7 +190,7 @@ func (sd *AggMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) 
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *AggMemBatch) Close() {
+func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		d.Close()
 	}
@@ -198,7 +198,7 @@ func (sd *AggMemBatch) Close() {
 		iiWriter.close()
 	}
 }
-func (sd *AggMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
@@ -215,7 +215,7 @@ func (sd *AggMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (sd *AggMemBatch) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
+func (sd *TemporalMemBatch) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
@@ -225,7 +225,7 @@ func (sd *AggMemBatch) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
 	}
 	return nil
 }
-func (sd *AggMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
+func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for di, w := range sd.domainWriters {
 		if w == nil {
@@ -248,7 +248,7 @@ func (sd *AggMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	}
 	return nil
 }
-func (sd *AggMemBatch) DiscardWrites(domain kv.Domain) {
+func (sd *TemporalMemBatch) DiscardWrites(domain kv.Domain) {
 	sd.domainWriters[domain].discard = true
 	sd.domainWriters[domain].h.discard = true
 }

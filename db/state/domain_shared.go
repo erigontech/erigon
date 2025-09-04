@@ -68,7 +68,7 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	trace    bool //nolint
 
-	mem *AggMemBatch
+	mem *TemporalMemBatch
 }
 
 type HasAgg interface {
@@ -79,7 +79,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		mem: newAggMemBatch(tx),
+		mem: newTemporalMemBatch(tx),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()

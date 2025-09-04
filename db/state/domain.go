@@ -637,7 +637,7 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, batch *AggMemBatch, vt valueTransformer) error {
+func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer) error {
 	if d.Disable || stepFrom == stepTo {
 		return nil
 	}
