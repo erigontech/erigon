@@ -211,6 +211,38 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	return sd.Flush(ctx, rwTx)
 }
 
+func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
+	it, err := sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
+	}
+
+	it, err = sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		sd.sdCtx.TouchKey(kv.StorageDomain, string(k), nil)
+	}
+
+	sd.sdCtx.Reset()
+	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
+}
+
 // DiscardWrites disables updates collection for further flushing into db.
 // Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
 func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
