@@ -341,7 +341,7 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 }
 
 func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
-	tx := &types.ArbitrumLegacyTxData{LegacyTx: types.LegacyTx{CommonTx: *commonTx}}
+	tx := &types.ArbitrumLegacyTxData{LegacyTx: &types.LegacyTx{CommonTx: *commonTx}}
 
 	if gasPriceHex, ok := rawTx["gasPrice"].(string); ok {
 		tx.GasPrice = uint256.MustFromHex(gasPriceHex)
