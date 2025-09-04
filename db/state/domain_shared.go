@@ -419,7 +419,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 		ramIter = sd.storage.Iter()
 	}
 
-	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, sd.stepSize, roTx)
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
 }
 
 func (sd *SharedDomains) Close() {
