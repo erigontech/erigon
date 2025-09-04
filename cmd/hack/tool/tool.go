@@ -32,6 +32,7 @@ func Check(e error) {
 }
 
 func ChainConfig(tx kv.Tx) *chain.Config {
+	return chain.ArbitrumOneChainConfig()
 	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	Check(err)
 	chainConfig, err := core.ReadChainConfig(tx, genesisBlockHash)
