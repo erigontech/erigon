@@ -73,8 +73,7 @@ type Cfg struct {
 	// TODO: Can we get rid of this?
 	ChainName string
 
-	ClientConfig   *torrent.ClientConfig
-	SnapshotConfig *snapcfg.Cfg
+	ClientConfig *torrent.ClientConfig
 
 	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: RemoveFile this.
 	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
@@ -278,7 +277,7 @@ func New(
 		"webseedUrlsOrFiles", webseedUrlsOrFiles)
 
 	// TODO: constructor must not do http requests
-	preverifiedCfg, err := LoadSnapshotsHashes(ctx, dirs, chainName)
+	err = LoadSnapshotsHashes(ctx, dirs, chainName)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +287,6 @@ func New(
 		ChainName:           chainName,
 		ClientConfig:        torrentConfig,
 		AddTorrentsFromDisk: true,
-		SnapshotConfig:      preverifiedCfg,
 		MdbxWriteMap:        mdbxWriteMap,
 		VerifyTorrentData:   opts.Verify,
 	}
@@ -307,22 +305,22 @@ func New(
 
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
-func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
+func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) error {
 	if _, known := snapcfg.KnownCfg(chainName); !known {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
-		return snapcfg.NewNonSeededCfg(chainName), nil
+		return nil
 	}
 
 	preverifiedPath := dirs.PreverifiedPath()
 	exists, err := dir.FileExist(preverifiedPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if exists {
 		// Load hashes from local preverified.toml
 		haveToml, err := os.ReadFile(preverifiedPath)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		snapcfg.SetToml(chainName, haveToml, true)
 	} else {
@@ -330,12 +328,12 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		err := snapcfg.LoadRemotePreverified(ctx)
 		if err != nil {
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
-			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
+			return fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
 		}
 	}
 	cfg, _ := snapcfg.KnownCfg(chainName)
 	cfg.Local = exists
-	return cfg, nil
+	return nil
 }
 
 // Saves snapshot hashes. This is done only after the full set of snapshots is completed so that
