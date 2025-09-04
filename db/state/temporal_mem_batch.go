@@ -34,6 +34,7 @@ type dataWithPrevStep struct {
 	prevStep kv.Step
 }
 
+// TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 type TemporalMemBatch struct {
 	stepSize uint64
 
@@ -71,14 +72,19 @@ func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
 	return sd
 }
 
-func (sd *TemporalMemBatch) PutWithPrev(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (sd *TemporalMemBatch) PutWithPrev(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+	sd.put(domain, k, v, txNum)
+	return sd.putWal(domain, toBytesZeroCopy(k), v, txNum, preval, prevStep)
+}
+
+func (sd *TemporalMemBatch) putWal(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	if len(v) == 0 {
 		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval, prevStep)
 	}
 	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval, prevStep)
 }
 
-func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, key string, val []byte, txNum uint64) {
+func (sd *TemporalMemBatch) put(domain kv.Domain, key string, val []byte, txNum uint64) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
@@ -139,7 +145,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
-	if domain == kv.StorageDomain { //TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	if domain == kv.StorageDomain {
 		ramIter = sd.storage.Iter()
 	}
 
