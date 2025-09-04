@@ -197,13 +197,13 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(rw.chainTx))))
+		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))))
 	}
 
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx), accumulator, 0)
+		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx.(kv.TemporalTx)), accumulator, 0)
 	}
 }
 
@@ -244,11 +244,11 @@ func (rw *Worker) resetTx(chainTx kv.Tx) {
 		}
 
 		if resettable, ok := rw.stateReader.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))
 		}
 
 		if resettable, ok := rw.stateWriter.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -346,7 +346,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.IsHistoric() && rw.historyMode {
-		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))))
 	}
 
 	if rw.background && rw.chainTx == nil {
