@@ -46,15 +46,6 @@ const (
 )
 
 const (
-
-	//key - contract code hash
-	//value - contract code
-	Code = "Code"
-)
-
-const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
-
-const (
 	// DatabaseInfo is used to store information about data layout.
 	DatabaseInfo = "DbInfo"
 
@@ -316,7 +307,6 @@ var (
 var ChaindataTables = []string{
 	E2AccountsHistory,
 	E2StorageHistory,
-	Code,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
@@ -820,11 +810,6 @@ func String2Enum(in string) (uint16, error) {
 	}
 	return uint16(ii), nil
 }
-
-const (
-	ReceiptsAppendable Appendable = 0
-	AppendableLen      Appendable = 0
-)
 
 func (d Domain) String() string {
 	switch d {
