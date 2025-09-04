@@ -44,7 +44,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
 			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
 
-			// In case of coinbase is not set post Rio, use the default coinbase
+			// In case the coinbase is not set post Rio, use the default coinbase
 			if beneficiary == (common.Address{}) {
 				beneficiary, _ = engine.Author(header)
 			}
