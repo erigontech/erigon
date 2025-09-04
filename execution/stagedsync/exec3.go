@@ -898,7 +898,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 
 func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if cfg.badBlockHalt {
-		return false, errors.New("wrong trie root")
+		return false, fmt.Errorf("%w: wrong trie root", consensus.ErrInvalidBlock)
 	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
