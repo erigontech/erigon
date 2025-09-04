@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -504,7 +505,6 @@ type BlockSnapshots interface {
 	Types() []snaptype.Type
 	Close()
 	SetSegmentsMin(uint64)
-
 	DownloadComplete()
 	RemoveOverlaps() error
 	DownloadReady() bool
@@ -571,7 +571,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles(s.alignMin)
 
-	if cfg.NoDownloader {
+	if cfg.Testing { // mark download as complete if we are in a testing scenario
 		s.DownloadComplete()
 	}
 
