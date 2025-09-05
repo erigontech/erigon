@@ -656,13 +656,9 @@ func (tx *tx) dirs() datadir.Dirs   { return tx.aggtx.Dirs() }
 func (tx *Tx) Dirs() datadir.Dirs   { return tx.dirs() }
 func (tx *RwTx) Dirs() datadir.Dirs { return tx.dirs() }
 
-func (tx *tx) stepSize() uint64 {
-	return tx.aggtx.StepSize()
-}
-func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
-func (tx *RwTx) StepSize() uint64 {
-	return tx.stepSize()
-}
+func (tx *tx) stepSize() uint64   { return tx.aggtx.StepSize() }
+func (tx *Tx) StepSize() uint64   { return tx.stepSize() }
+func (tx *RwTx) StepSize() uint64 { return tx.stepSize() }
 
 func (tx *tx) newMemBatch() kv.TemporalMemBatch   { return tx.aggtx.NewMemBatch() }
 func (tx *Tx) NewMemBatch() kv.TemporalMemBatch   { return tx.newMemBatch() }
