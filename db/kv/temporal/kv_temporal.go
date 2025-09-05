@@ -649,9 +649,9 @@ func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.RwTx)
 }
 
-func (tx *tx) dirs() datadir.Dirs { return tx.aggtx.Dirs() }
-func (tx *Tx) Dirs() uint64       { return tx.stepSize() }
-func (tx *RwTx) Dirs() uint64     { return tx.stepSize() }
+func (tx *tx) dirs() datadir.Dirs   { return tx.aggtx.Dirs() }
+func (tx *Tx) Dirs() datadir.Dirs   { return tx.dirs() }
+func (tx *RwTx) Dirs() datadir.Dirs { return tx.dirs() }
 
 func (tx *tx) stepSize() uint64 {
 	return tx.aggtx.StepSize()

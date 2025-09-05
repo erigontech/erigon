@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -259,6 +260,7 @@ func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.
 	panic("not implemented")
 }
 func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
+func (tx *tx) Dirs() datadir.Dirs                                   { panic("not implemented") }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { panic("not implemented") }
