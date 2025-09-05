@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -169,26 +167,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		}
 
 		for _, t := range snapTypes {
-			fPathMask, err := version.ReplaceVersionWithMask(filepath.Join(snapDir, t.FileName(t.Versions().Current, r.From(), r.To())))
-			if err != nil {
-				return fmt.Errorf("[merge] can't replace with mask in file %s: %w", fPathMask, err)
-			}
-			fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
-			if err != nil {
-				_, fName := filepath.Split(fPath)
-				return fmt.Errorf("[merge] find files by pattern err %w fname %s", err, fName)
-			}
-			if !ok {
-				_, fName := filepath.Split(fPath)
-				return fmt.Errorf("[merge] find files by pattern err %w fname %s", os.ErrNotExist, fName)
-			}
-
-			fileInfo, _, ok := snaptype.ParseFileName("", fPath)
-			if !ok {
-				_, fName := filepath.Split(fPath)
-				return fmt.Errorf("[merge] parse file err %w fname %s", err, fName)
-			}
-			newDirtySegment, err := m.mergeSubSegment(ctx, v, fileInfo, toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t), onMerge)
+			newDirtySegment, err := m.mergeSubSegment(ctx, v, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t), onMerge)
 			if err != nil {
 				return err
 			}
