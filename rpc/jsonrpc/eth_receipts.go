@@ -253,7 +253,10 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	it := rawdbv3.TxNums2BlockNums(tx, api._txNumReader, txNumbers, order.Asc)
 	defer it.Close()
 
+	processedTransactions := 0
+
 	for it.HasNext() {
+		processedTransactions++
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -347,6 +350,22 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				Removed:     filteredLog.Removed,
 				Timestamp:   header.Time,
 			})
+		}
+	}
+
+	// If no transactions were processed via indexing but we're querying a single block,
+	// treat this as missing data instead of returning 0 logs. If the block exists and has
+	// transactions, indexes are not yet complete – return an explicit error so clients retry.
+	if processedTransactions == 0 && begin == end && begin > 0 {
+		block, err := api.blockByNumberWithSenders(ctx, tx, begin)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
+			return nil, fmt.Errorf("block %d not found", begin)
+		}
+		if len(block.Transactions()) > 0 {
+			return nil, fmt.Errorf("block %d exists but transaction indexing is not yet complete, please try again later", begin)
 		}
 	}
 
