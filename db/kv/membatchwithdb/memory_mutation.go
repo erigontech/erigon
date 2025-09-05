@@ -775,3 +775,4 @@ func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
 func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	return m.db.(kv.TemporalTx).Unmarked(id)
 }
+func (m *MemoryMutation) NewMemBatch() kv.TemporalMemBatch { return m.db.(kv.TemporalTx).NewMemBatch() }
