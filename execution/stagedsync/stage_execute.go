@@ -39,7 +39,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
@@ -200,7 +202,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 
 	t := time.Now()
-	var changeset *[kv.DomainLen][]kv.DomainEntryDiff
+	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
 		currentHash, ok, err := br.CanonicalHash(ctx, tx, currentBlock)
 		if err != nil {
@@ -217,15 +219,15 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		if err != nil {
 			return err
 		}
-		if changeset == nil {
-			changeset = &currentKeys
+		if changeSet == nil {
+			changeSet = &currentKeys
 		} else {
 			for i := range currentKeys {
-				changeset[i] = state.MergeDiffSets(changeset[i], currentKeys[i])
+				changeSet[i] = changeset.MergeDiffSets(changeSet[i], currentKeys[i])
 			}
 		}
 	}
-	if err := unwindExec3State(ctx, tx, domains, u.UnwindPoint, txNum, accumulator, changeset, logger); err != nil {
+	if err := unwindExec3State(ctx, tx, domains, u.UnwindPoint, txNum, accumulator, changeSet, logger); err != nil {
 		return fmt.Errorf("ParallelExecutionState.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
@@ -369,7 +371,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	unwindToLimit, ok, err := txc.Ttx.Debug().CanUnwindBeforeBlockNum(u.UnwindPoint)
+	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Ttx)
 	if err != nil {
 		return err
 	}

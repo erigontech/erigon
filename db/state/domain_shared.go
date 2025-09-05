@@ -28,8 +28,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // KvList sort.Interface to sort write list by keys
@@ -57,7 +59,7 @@ func (l *KvList) Swap(i, j int) {
 }
 
 type SharedDomains struct {
-	sdCtx *SharedDomainsCommitmentContext
+	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
 	stepSize uint64
 
@@ -80,15 +82,14 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		//trace:   true,
 		mem: newTemporalMemBatch(tx),
 	}
-	aggTx := AggTx(tx)
-	sd.stepSize = aggTx.StepSize()
+	sd.stepSize = tx.Debug().StepSize()
 
 	tv := commitment.VariantHexPatriciaTrie
 	if statecfg.ExperimentalConcurrentCommitment {
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, aggTx.a.dirs.Tmp)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -117,7 +118,7 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum
 func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
-func (sd *SharedDomains) TrieCtxForTests() *SharedDomainsCommitmentContext {
+func (sd *SharedDomains) TrieCtxForTests() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
 }
 
@@ -138,11 +139,11 @@ func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd, tx}
 }
 
-func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
+func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
 	sd.mem.SetChangesetAccumulator(acc)
 }
 
-func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet) {
+func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	sd.mem.SavePastChangesetAccumulator(blockHash, blockNumber, acc)
 }
 
@@ -152,8 +153,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment {
-		sd.sdCtx.updates.Reset()
-		sd.sdCtx.Reset()
+		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
 }
@@ -174,7 +174,7 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	sd.sdCtx.mainTtx.txNum = txNum
+	sd.sdCtx.SetTxNum(txNum)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
