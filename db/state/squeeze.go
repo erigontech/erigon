@@ -111,6 +111,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 // Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
 func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
 	stepSize := at.StepSize()
+	dirs := at.Dirs()
 
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if !commitmentUseReferencedBranches {
@@ -216,7 +217,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
-			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, at.a.dirs.Tmp,
+			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
 				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
