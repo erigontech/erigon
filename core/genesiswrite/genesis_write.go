@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -414,11 +413,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
-	salt, err := dbstate.GetStateIndicesSalt(dirs, false, logger)
-	if err != nil {
-		return nil, nil, err
-	}
-	agg, err := dbstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, genesisTmpDB, logger)
+	agg, err := dbstate.New(dirs).Logger(logger).Open(ctx, genesisTmpDB)
 	if err != nil {
 		return nil, nil, err
 	}

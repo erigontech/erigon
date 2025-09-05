@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -1249,11 +1248,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
 		txNums := blockReader.TxnumReader(ctx)
 
-		_aggSingleton, err = dbstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
-		if err != nil {
-			err = fmt.Errorf("aggregator init: %w", err)
-			return
-		}
+		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 

@@ -100,12 +100,8 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *state.Aggregator {
 	tb.Helper()
 
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(tb, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(tb, err)
+	agg := state.NewTest(dirs).StepSize(aggStep).Logger(logger).MustOpen(tb.Context(), db)
 	tb.Cleanup(agg.Close)
-	agg.DisableFsync()
 	return agg
 }
 
@@ -414,11 +410,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	agg.Close()
 
 	// Start another aggregator on same datadir
-	salt, err := state.GetStateIndicesSalt(agg.Dirs(), false, logger)
-	require.NoError(t, err)
-	require.NotNil(t, salt)
-	anotherAgg, err := state.NewAggregator2(context.Background(), agg.Dirs(), aggStep, salt, db, logger)
-	require.NoError(t, err)
+	anotherAgg := state.NewTest(agg.Dirs()).StepSize(aggStep).Logger(logger).MustOpen(t.Context(), db)
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
 
