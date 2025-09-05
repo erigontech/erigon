@@ -63,6 +63,8 @@ type DomainMetrics struct {
 	Domains map[kv.Domain]*DomainIOMetrics
 }
 
+var domainMetrics = DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}}
+
 type DomainIOMetrics struct {
 	CacheReadCount    int64
 	CacheReadDuration time.Duration
@@ -87,7 +89,6 @@ type SharedDomains struct {
 	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
-	metrics           DomainMetrics
 	mem               *TemporalMemBatch
 }
 
@@ -99,8 +100,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics: DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}},
-		mem:     newTemporalMemBatch(tx),
+		mem: newTemporalMemBatch(tx),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -185,8 +185,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 		sd.sdCtx.Reset()
 	}
 	sd.mem.ClearRam()
-	sd.metrics.CacheGetSize = 0
-	sd.metrics.CachePutSize = 0
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
@@ -267,20 +265,20 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	start := time.Now()
 	if v, prevStep, ok := sd.mem.GetLatest(domain, k); ok {
-		sd.metrics.Lock()
-		sd.metrics.CacheReadCount++
+		domainMetrics.Lock()
+		domainMetrics.CacheReadCount++
 		readDuration := time.Since(start)
-		sd.metrics.CacheReadDuration += readDuration
-		if dm, ok := sd.metrics.Domains[domain]; ok {
+		domainMetrics.CacheReadDuration += readDuration
+		if dm, ok := domainMetrics.Domains[domain]; ok {
 			dm.CacheReadCount++
 			dm.CacheReadDuration += readDuration
 		} else {
-			sd.metrics.Domains[domain] = &DomainIOMetrics{
+			domainMetrics.Domains[domain] = &DomainIOMetrics{
 				CacheReadCount:    1,
 				CacheReadDuration: readDuration,
 			}
 		}
-		sd.metrics.Unlock()
+		domainMetrics.Unlock()
 		return v, prevStep, nil
 	}
 	v, step, err = tx.GetLatest(domain, k)
@@ -292,40 +290,40 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 }
 
 func (sd *SharedDomains) Metrics() *DomainMetrics {
-	return &sd.metrics
+	return &domainMetrics
 }
 
 func (sd *SharedDomains) LogMetrics() []any {
 	var metrics []any
 
-	sd.metrics.RLock()
-	defer sd.metrics.RUnlock()
+	domainMetrics.RLock()
+	defer domainMetrics.RUnlock()
 
-	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
+	if readCount := domainMetrics.CacheReadCount; readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
-			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
-			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
-			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
+			"puts", common.PrettyCounter(domainMetrics.CachePutCount), "size", common.PrettyCounter(domainMetrics.CachePutSize),
+			"gets", common.PrettyCounter(domainMetrics.CacheGetCount), "size", common.PrettyCounter(domainMetrics.CacheGetSize),
+			"cdur", common.Round(domainMetrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
-	if readCount := sd.metrics.DbReadCount; readCount > 0 {
-		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
+	if readCount := domainMetrics.DbReadCount; readCount > 0 {
+		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(domainMetrics.DbReadDuration/time.Duration(readCount), 0))
 	}
 
-	if readCount := sd.metrics.FileReadCount; readCount > 0 {
-		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
+	if readCount := domainMetrics.FileReadCount; readCount > 0 {
+		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(domainMetrics.DbReadDuration/time.Duration(readCount), 0))
 	}
 
 	return metrics
 }
 
 func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
-	var domainMetrics = map[kv.Domain][]any{}
+	var logMetrics = map[kv.Domain][]any{}
 
-	sd.metrics.RLock()
-	defer sd.metrics.RUnlock()
+	domainMetrics.RLock()
+	defer domainMetrics.RUnlock()
 
-	for domain, dm := range sd.metrics.Domains {
+	for domain, dm := range domainMetrics.Domains {
 		var metrics []any
 
 		if readCount := dm.CacheReadCount; readCount > 0 {
@@ -341,11 +339,11 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 		}
 
 		if len(metrics) > 0 {
-			domainMetrics[domain] = metrics
+			logMetrics[domain] = metrics
 		}
 	}
 
-	return domainMetrics
+	return logMetrics
 }
 
 // DomainPut
