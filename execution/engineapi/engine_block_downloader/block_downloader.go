@@ -25,8 +25,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon-lib/common"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -86,11 +88,12 @@ type EngineBlockDownloader struct {
 	logger log.Logger
 
 	// V2 downloader
-	v2    bool
-	bbdV2 *bbd.BackwardBlockDownloader
+	v2           bool
+	bbdV2        *bbd.BackwardBlockDownloader
+	badHeadersV2 *lru.Cache[common.Hash, common.Hash]
 }
 
-func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
+func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient executionproto.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
 	tmpdir string, syncCfg ethconfig.Sync,
@@ -102,9 +105,15 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 	var s atomic.Value
 	s.Store(Idle)
 	var bbdV2 *bbd.BackwardBlockDownloader
+	var badHeadersV2 *lru.Cache[common.Hash, common.Hash]
 	if v2 {
 		hr := headerReader{db: db, blockReader: blockReader}
 		bbdV2 = bbd.NewBackwardBlockDownloader(logger, sentryClient, statusDataProvider.GetStatusData, hr, tmpdir)
+		var err error
+		badHeadersV2, err = lru.New[common.Hash, common.Hash](1_000_000) // 64mb
+		if err != nil {
+			panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
+		}
 	}
 	return &EngineBlockDownloader{
 		bacgroundCtx:    ctx,
@@ -123,6 +132,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
 		v2:              v2,
 		bbdV2:           bbdV2,
+		badHeadersV2:    badHeadersV2,
 	}
 }
 
@@ -133,6 +143,23 @@ func (e *EngineBlockDownloader) Run(ctx context.Context) error {
 		return e.bbdV2.Run(ctx)
 	}
 	return nil
+}
+
+func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
+	if e.v2 {
+		e.badHeadersV2.Add(badHeader, lastValidAncestor)
+	} else {
+		e.hd.ReportBadHeaderPoS(badHeader, lastValidAncestor)
+	}
+}
+
+func (s *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash) {
+	if s.v2 {
+		lastValidAncestor, bad = s.badHeadersV2.Get(h)
+		return bad, lastValidAncestor
+	} else {
+		return s.hd.IsBadHeaderPoS(h)
+	}
 }
 
 func (e *EngineBlockDownloader) scheduleHeadersDownload(
@@ -202,7 +229,7 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 			return err
 		}
 		if badChainError != nil {
-			e.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
+			e.ReportBadHeader(h.Hash(), lastValidHash)
 			return nil
 		}
 		lastValidHash = h.ParentHash

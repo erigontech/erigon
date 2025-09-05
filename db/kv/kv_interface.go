@@ -382,7 +382,6 @@ func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
 type (
 	Domain      uint16
-	Appendable  uint16
 	InvertedIdx uint16
 	ForkableId  uint16
 )
@@ -540,19 +539,6 @@ type PendingMutations interface {
 
 type DBVerbosityLvl int8
 type Label string
-
-const (
-	ChainDB         = "chaindata"
-	TxPoolDB        = "txpool"
-	SentryDB        = "sentry"
-	ConsensusDB     = "consensus"
-	DownloaderDB    = "downloader"
-	HeimdallDB      = "heimdall"
-	DiagnosticsDB   = "diagnostics"
-	PolygonBridgeDB = "polygon-bridge"
-	CaplinDB        = "caplin"
-	TemporaryDB     = "temporary"
-)
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 const dbLabelName = "db"

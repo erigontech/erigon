@@ -1146,7 +1146,7 @@ var (
 	ElBlockDownloaderV2 = cli.BoolFlag{
 		Name:  "el.block.downloader.v2",
 		Usage: "Enables the EL engine v2 block downloader",
-		Value: false,
+		Value: true,
 	}
 )
 

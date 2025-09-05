@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -32,10 +32,10 @@ import (
 
 func readAndValidatePeerStatus[T StatusPacket](
 	rw p2p.MsgReadWriter,
-	status *proto_sentry.StatusData,
+	status *sentryproto.StatusData,
 	version uint,
 	minVersion uint,
-	compat func(T, *proto_sentry.StatusData, uint, uint) error,
+	compat func(T, *sentryproto.StatusData, uint, uint) error,
 ) (T, *p2p.PeerError) {
 	var zero T
 	msg, err := rw.ReadMsg()
@@ -62,15 +62,15 @@ func readAndValidatePeerStatus[T StatusPacket](
 	return reply, nil
 }
 
-func compatStatusPacket(reply eth.StatusPacket, status *proto_sentry.StatusData, version, minVersion uint) error {
+func compatStatusPacket(reply eth.StatusPacket, status *sentryproto.StatusData, version, minVersion uint) error {
 	return checkCompatibility(reply.NetworkID, reply.ProtocolVersion, reply.Genesis, reply.ForkID, status, version, minVersion)
 }
 
-func compatStatusPacket69(reply eth.StatusPacket69, status *proto_sentry.StatusData, version, minVersion uint) error {
+func compatStatusPacket69(reply eth.StatusPacket69, status *sentryproto.StatusData, version, minVersion uint) error {
 	return checkCompatibility(reply.NetworkID, reply.ProtocolVersion, reply.Genesis, reply.ForkID, status, version, minVersion)
 }
 
-func checkCompatibility(networkID uint64, protocolVersion uint32, genesis common.Hash, forkID forkid.ID, status *proto_sentry.StatusData, version, minVersion uint) error {
+func checkCompatibility(networkID uint64, protocolVersion uint32, genesis common.Hash, forkID forkid.ID, status *sentryproto.StatusData, version, minVersion uint) error {
 	expectedNetworkID := status.NetworkId
 	if networkID != expectedNetworkID {
 		return fmt.Errorf("network id does not match: theirs %d, ours %d", networkID, expectedNetworkID)
@@ -96,12 +96,12 @@ type StatusPacket interface {
 
 func handShakeGeneric[T StatusPacket](
 	ctx context.Context,
-	status *proto_sentry.StatusData,
+	status *sentryproto.StatusData,
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
-	encode func(*proto_sentry.StatusData, uint) T,
-	compat func(T, *proto_sentry.StatusData, uint, uint) error,
+	encode func(*sentryproto.StatusData, uint) T,
+	compat func(T, *sentryproto.StatusData, uint, uint) error,
 	head func(T) common.Hash,
 	timeout time.Duration,
 ) (*common.Hash, *p2p.PeerError) {
@@ -160,7 +160,7 @@ func handShakeGeneric[T StatusPacket](
 }
 
 // Encoders for status messages
-func encodeStatusPacket(status *proto_sentry.StatusData, version uint) eth.StatusPacket {
+func encodeStatusPacket(status *sentryproto.StatusData, version uint) eth.StatusPacket {
 	ourTD := gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	return eth.StatusPacket{
@@ -173,7 +173,7 @@ func encodeStatusPacket(status *proto_sentry.StatusData, version uint) eth.Statu
 	}
 }
 
-func encodeStatusPacket69(status *proto_sentry.StatusData, version uint) eth.StatusPacket69 {
+func encodeStatusPacket69(status *sentryproto.StatusData, version uint) eth.StatusPacket69 {
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	return eth.StatusPacket69{
 		ProtocolVersion: uint32(version),

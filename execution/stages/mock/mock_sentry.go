@@ -36,11 +36,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	ptypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/genesiswrite"
@@ -48,8 +48,9 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -95,7 +96,7 @@ const MockInsertAsInitialCycle = false
 
 // MockSentry is a Netwrork Inverface mock. So, unit-tests can test many Erigon's components - but without net-interaction
 type MockSentry struct {
-	proto_sentry.UnimplementedSentryServer
+	sentryproto.UnimplementedSentryServer
 	Ctx                  context.Context
 	Log                  log.Logger
 	tb                   testing.TB
@@ -112,9 +113,9 @@ type MockSentry struct {
 	Key                  *ecdsa.PrivateKey
 	Genesis              *types.Block
 	SentryClient         direct.SentryClient
-	PeerId               *ptypes.H512
-	streams              map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
-	sentMessages         []*proto_sentry.OutboundMessageData
+	PeerId               *typesproto.H512
+	streams              map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessages         []*sentryproto.OutboundMessageData
 	StreamWg             sync.WaitGroup
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
@@ -155,7 +156,7 @@ func (ms *MockSentry) Close() {
 }
 
 // Stream returns stream, waiting if necessary
-func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) (errs []error) {
+func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
 	ms.StreamWg.Wait()
 	for _, stream := range ms.streams[req.Id] {
 		if err := stream.Send(req); err != nil {
@@ -165,11 +166,11 @@ func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) (errs []error) {
 	return errs
 }
 
-func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
-	return &proto_sentry.SetStatusReply{}, nil
+func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
+	return &sentryproto.SetStatusReply{}, nil
 }
 
-func (ms *MockSentry) PenalizePeer(context.Context, *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
+func (ms *MockSentry) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
@@ -181,36 +182,36 @@ func (ms *MockSentry) SetPeerLatestBlock(context.Context, *proto_sentry.SetPeerL
 	return nil, nil
 }
 
-func (ms *MockSentry) SetPeerBlockRange(context.Context, *proto_sentry.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
+func (ms *MockSentry) SetPeerBlockRange(context.Context, *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
-	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH69}, nil
+func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
+	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
-func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageById(_ context.Context, r *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToAll(_ context.Context, r *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
 }
-func (ms *MockSentry) SentMessage(i int) *proto_sentry.OutboundMessageData {
+func (ms *MockSentry) SentMessage(i int) *sentryproto.OutboundMessageData {
 	return ms.sentMessages[i]
 }
 
-func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_sentry.Sentry_MessagesServer) error {
+func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	if ms.streams == nil {
-		ms.streams = map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer{}
+		ms.streams = map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer{}
 	}
 
 	for _, id := range req.Ids {
@@ -225,20 +226,20 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 	}
 }
 
-func (ms *MockSentry) Peers(context.Context, *emptypb.Empty) (*proto_sentry.PeersReply, error) {
-	return &proto_sentry.PeersReply{}, nil
+func (ms *MockSentry) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
+	return &sentryproto.PeersReply{}, nil
 }
-func (ms *MockSentry) PeerCount(context.Context, *proto_sentry.PeerCountRequest) (*proto_sentry.PeerCountReply, error) {
-	return &proto_sentry.PeerCountReply{Count: 0}, nil
+func (ms *MockSentry) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
+	return &sentryproto.PeerCountReply{Count: 0}, nil
 }
-func (ms *MockSentry) PeerById(context.Context, *proto_sentry.PeerByIdRequest) (*proto_sentry.PeerByIdReply, error) {
-	return &proto_sentry.PeerByIdReply{}, nil
+func (ms *MockSentry) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
+	return &sentryproto.PeerByIdReply{}, nil
 }
-func (ms *MockSentry) PeerEvents(req *proto_sentry.PeerEventsRequest, server proto_sentry.Sentry_PeerEventsServer) error {
+func (ms *MockSentry) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
 	return nil
 }
 
-func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInfoReply, error) {
+func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
 	return nil, nil
 }
 
@@ -357,7 +358,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
 	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
-	sentries := []proto_sentry.SentryClient{mock.SentryClient}
+	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
@@ -378,7 +379,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
-				return memdb.NewWithLabel(tmpdir, kv.TxPoolDB), nil
+				return mdbx.New(dbcfg.TxPoolDB, logger).InMem(tb, tmpdir).MustOpen(), nil
 			}),
 		)
 		if err != nil {
@@ -606,8 +607,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller) *proto_downloader.MockDownloaderClient {
-	snapDownloader := proto_downloader.NewMockDownloaderClient(ctrl)
+func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClient {
+	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
 		Add(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -619,7 +620,7 @@ func mockDownloader(ctrl *gomock.Controller) *proto_downloader.MockDownloaderCli
 		AnyTimes()
 	snapDownloader.EXPECT().
 		Completed(gomock.Any(), gomock.Any()).
-		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
+		Return(&downloaderproto.CompletedReply{Completed: true}, nil).
 		AnyTimes()
 
 	return snapDownloader
@@ -751,7 +752,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
+	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}
@@ -766,7 +767,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
+	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}
@@ -785,7 +786,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		return err
 	}
 	ms.ReceiveWg.Add(1)
-	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
+	for _, err = range ms.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}
@@ -847,7 +848,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}); err != nil {
 		return err
 	}
-	if status != execution.ExecutionStatus_Success {
+	if status != executionproto.ExecutionStatus_Success {
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 

@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -393,8 +393,8 @@ type bridgeReader interface {
 type APIImpl struct {
 	*BaseAPI
 	ethBackend                  rpchelper.ApiBackend
-	txPool                      txpool.TxpoolClient
-	mining                      txpool.MiningClient
+	txPool                      txpoolproto.TxpoolClient
+	mining                      txpoolproto.MiningClient
 	gasCache                    *GasPriceCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64
@@ -407,7 +407,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}

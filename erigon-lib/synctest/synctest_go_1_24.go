@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,15 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package peers
+//go:build go1.24 && !go1.25
 
-const (
-	maxBadPeers       = 50000
-	maxPeerRecordSize = 1000
-	MaxBadResponses   = 50
+package synctest
+
+import (
+	"testing"
+	"testing/synctest"
 )
 
-type PeeredObject[T any] struct {
-	Peer string
-	Data T
+var Test testFunc = func(t *testing.T, f func(*testing.T)) {
+	synctest.Run(func() {
+		f(t)
+	})
 }
