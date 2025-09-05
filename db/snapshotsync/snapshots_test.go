@@ -56,7 +56,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -216,8 +216,12 @@ func TestMergeSnapshots(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
-		for _, snT := range snaptype2.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
+		for i, snT := range snaptype2.BlockSnapshotTypes {
+			ver := version.V1_0
+			if i%2 == 1 {
+				ver = version.V1_1
+			}
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, ver, logger)
 		}
 	}
 
