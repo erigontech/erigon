@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -150,9 +150,9 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
 	if tx != nil {
-		if aggTx := state.AggTx(tx); aggTx != nil {
+		if ttx, ok := tx.(kv.TemporalTx); ok {
 			// protect from too far unwind
-			unwindPointWithCommitment, ok, err := aggTx.CanUnwindBeforeBlockNum(unwindPoint, tx)
+			unwindPointWithCommitment, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindPoint, ttx)
 			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
 			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
 			if errors.Is(err, commitmentdb.ErrBehindCommitment) {
