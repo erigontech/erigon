@@ -222,7 +222,11 @@ func RemoveAll(path string) error {
 
 // CreateTemp creates a temporary file using `file` as base
 func CreateTemp(file string) (*os.File, error) {
+	return CreateTempWithExtension(file, "tmp")
+}
+
+func CreateTempWithExtension(file string, extension string) (*os.File, error) {
 	directory := filepath.Dir(file)
 	filename := filepath.Base(file)
-	return os.CreateTemp(directory, fmt.Sprintf("%s.*.tmp", filename))
+	return os.CreateTemp(directory, fmt.Sprintf("%s.*.%s", filename, extension))
 }

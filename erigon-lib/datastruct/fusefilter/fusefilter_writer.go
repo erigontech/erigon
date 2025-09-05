@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	randv2 "math/rand/v2"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -28,8 +27,7 @@ type WriterOffHeap struct {
 }
 
 func NewWriterOffHeap(filePath string) (*WriterOffHeap, error) {
-	tmpFilePath := filePath + fmt.Sprintf("%d", randv2.UintN(10000)) + ".existence.tmp"
-	f, err := os.Create(tmpFilePath)
+	f, err := dir.CreateTempWithExtension(filePath, "existence.tmp")
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +35,7 @@ func NewWriterOffHeap(filePath string) (*WriterOffHeap, error) {
 	if IsLittleEndian {
 		features |= IsLittleEndianFeature
 	}
-	return &WriterOffHeap{tmpFile: f, features: features, tmpFilePath: tmpFilePath}, nil
+	return &WriterOffHeap{tmpFile: f, features: features, tmpFilePath: f.Name()}, nil
 }
 
 func (w *WriterOffHeap) Close() {
