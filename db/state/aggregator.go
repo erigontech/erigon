@@ -954,36 +954,6 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	return false
 }
 
-//func (at *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
-//	minUnwindale, err := ReadLowestUnwindableBlock(tx)
-//	if err != nil {
-//		return 0, err
-//	}
-//	if minUnwindale == math.MaxUint64 { // no unwindable block found
-//		stateVal, _, _, err := at.d[kv.CommitmentDomain].GetLatest(KeyCommitmentState, tx)
-//		if err != nil {
-//			return 0, err
-//		}
-//		if len(stateVal) == 0 {
-//			return 0, nil
-//		}
-//		_, minUnwindale = commitment._decodeTxBlockNums(stateVal)
-//	}
-//	return minUnwindale, nil
-//}
-
-// CanUnwindBeforeBlockNum - returns `true` if can unwind to requested `blockNum`, otherwise returns nearest `unwindableBlockNum`
-//func (at *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (unwindableBlockNum uint64, ok bool, err error) {
-//	_minUnwindableBlockNum, err := at.CanUnwindToBlockNum(tx)
-//	if err != nil {
-//		return 0, false, err
-//	}
-//	if blockNum < _minUnwindableBlockNum {
-//		return _minUnwindableBlockNum, false, nil
-//	}
-//	return blockNum, true, nil
-//}
-
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {

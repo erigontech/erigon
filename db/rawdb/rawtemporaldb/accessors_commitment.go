@@ -14,10 +14,11 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 		return 0, err
 	}
 	if minUnwindale == math.MaxUint64 { // no unwindable block found
-		return commitmentdb.CanUnwindToBlockNum(tx)
+		return commitmentdb.LatestBlockNumWithCommitment(tx)
 	}
 	return minUnwindale, nil
 }
+
 func CanUnwindBeforeBlockNum(blockNum uint64, tx kv.TemporalTx) (unwindableBlockNum uint64, ok bool, err error) {
 	_minUnwindableBlockNum, err := CanUnwindToBlockNum(tx)
 	if err != nil {

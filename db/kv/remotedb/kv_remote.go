@@ -243,10 +243,6 @@ func (tx *tx) AggTx() any                { panic("not implemented") }
 func (tx *tx) Debug() kv.TemporalDebugTx { return kv.TemporalDebugTx(tx) }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { panic("not implemented") }
 
-// func (tx *tx) CanUnwindToBlockNum() (uint64, error) { panic("not implemented") }
-func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
-	panic("not implemented")
-}
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
 func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }

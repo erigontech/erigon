@@ -443,9 +443,6 @@ type TemporalDebugTx interface {
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	Dirs() datadir.Dirs
-
-	//CanUnwindToBlockNum() (uint64, error)
-	//CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
 }
 
 type TemporalDebugDB interface {
