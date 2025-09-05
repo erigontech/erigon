@@ -124,10 +124,9 @@ func (w *WriterOffHeap) BuildTo(to io.Writer) (int, error) {
 }
 
 type Writer struct {
-	filePath    string
-	fileName    string
-	noFsync     bool
-	tmpFilePath string
+	filePath string
+	fileName string
+	noFsync  bool
 
 	data *WriterOffHeap
 }
@@ -139,10 +138,9 @@ func NewWriter(filePath string) (*Writer, error) {
 		return nil, err
 	}
 	return &Writer{
-		filePath:    filePath,
-		fileName:    fileName,
-		data:        w,
-		tmpFilePath: filePath + fmt.Sprintf("%d", randv2.UintN(10000)) + ".tmp",
+		filePath: filePath,
+		fileName: fileName,
+		data:     w,
 	}, nil
 }
 
@@ -151,11 +149,11 @@ func (w *Writer) FileName() string       { return w.fileName }
 func (w *Writer) AddHash(k uint64) error { return w.data.AddHash(k) }
 
 func (w *Writer) Build() error {
-	defer dir.RemoveFile(w.tmpFilePath)
-	f, err := os.Create(w.tmpFilePath)
+	f, err := dir.CreateTemp(w.filePath)
 	if err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
+	defer dir.RemoveFile(f.Name())
 	defer f.Close()
 
 	fw := bufio.NewWriter(f)
@@ -175,7 +173,7 @@ func (w *Writer) Build() error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(w.tmpFilePath, w.filePath); err != nil {
+	if err = os.Rename(f.Name(), w.filePath); err != nil {
 		return err
 	}
 	return nil
@@ -185,7 +183,6 @@ func (w *Writer) Close() {
 	if w.data != nil {
 		w.data.Close()
 		w.data = nil
-		dir.RemoveFile(w.tmpFilePath)
 	}
 }
 
