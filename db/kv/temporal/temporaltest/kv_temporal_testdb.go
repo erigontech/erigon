@@ -20,7 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -40,22 +39,18 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 		tb.Helper()
 	}
 
+	//TODO: create set of funcs for non-test code. Assert(tb == nil)
+
 	var rawDB kv.RwDB
+	ctx := context.Background()
 	if tb != nil {
+		ctx = tb.Context()
 		rawDB = memdb.NewTestDB(tb, dbcfg.ChainDB)
 	} else {
 		rawDB = memdb.New(nil, dirs.DataDir, dbcfg.ChainDB)
 	}
 
-	salt, err := state.GetStateIndicesSalt(dirs, true, log.New())
-	if err != nil {
-		panic(err)
-	}
-	agg, err := state.NewAggregator2(context.Background(), dirs, stepSize, salt, rawDB, log.New())
-	if err != nil {
-		panic(err)
-	}
-	agg.DisableFsync()
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)
 	if err := agg.OpenFolder(); err != nil {
 		panic(err)
 	}
