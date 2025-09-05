@@ -24,10 +24,11 @@ import (
 	"math/big"
 	"sort"
 
+	"github.com/jinzhu/copier"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/jinzhu/copier"
 )
 
 // See https://github.com/ethereum/execution-spec-tests/pull/2050
