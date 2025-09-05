@@ -437,7 +437,7 @@ func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint6
 		return snapshotMin, nil
 	}
 
-	var dbMin = ^uint64(0)
+	var dbMin = uint64(math.MaxUint64)
 	if kvTx, ok := tx.(kv.Tx); ok {
 		var err error
 		dbMin, err = r.findFirstCompleteBlock(kvTx)
