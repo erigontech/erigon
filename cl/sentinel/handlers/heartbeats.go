@@ -122,7 +122,9 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
-	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
+	status := c.hs.Status()
+	status.EarliestAvailableSlot = nil
+	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {

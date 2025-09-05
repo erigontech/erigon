@@ -277,19 +277,23 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
-		shouldInsert = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
-		secsPerLog   = 30                                                                   // Interval in seconds for logging progress
-		logTicker    = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
-		downloader   = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
-		currentSlot  atomic.Uint64                                                          // Atomic variable to track the current slot
-		startSlot    = cfg.forkChoice.HighestSeen()
+		shouldInsert  = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
+		secsPerLog    = 30                                                                   // Interval in seconds for logging progress
+		logTicker     = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
+		downloader    = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
+		currentSlot   atomic.Uint64                                                          // Atomic variable to track the current slot
+		startSlot     = cfg.forkChoice.HighestSeen()
+		maxReorgRange = uint64(300) // if node falls too much out of sync, we allow a maximum reorg range of 300 slots
 	)
 	// Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
-	if startSlot < 8 {
+	if startSlot < maxReorgRange {
 		startSlot = 0
 	} else {
-		startSlot = startSlot - 8
+		startSlot = startSlot - maxReorgRange
 	}
+
+	finalizedSlot := cfg.forkChoice.FinalizedCheckpoint().Epoch * cfg.beaconCfg.SlotsPerEpoch
+	startSlot = max(startSlot, finalizedSlot, cfg.forkChoice.AnchorSlot()) // we cap how low we go with the finalized slot and anchor slot
 
 	// Initialize the slot to download from the finalized checkpoint
 	currentSlot.Store(startSlot)

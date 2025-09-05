@@ -260,7 +260,7 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	s.peers = peers.NewPool()
+	s.peers = peers.NewPool(host)
 
 	mux := chi.NewRouter()
 	//	mux := httpreqresp.NewRequestHandler(host)
