@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -44,27 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-func Test_EncodeCommitmentState(t *testing.T) {
-	t.Parallel()
-	cs := commitmentState{
-		txNum:     rand.Uint64(),
-		trieState: make([]byte, 1024),
-	}
-	n, err := rand.Read(cs.trieState)
-	require.NoError(t, err)
-	require.Equal(t, len(cs.trieState), n)
-
-	buf, err := cs.Encode()
-	require.NoError(t, err)
-	require.NotEmpty(t, buf)
-
-	var dec commitmentState
-	err = dec.Decode(buf)
-	require.NoError(t, err)
-	require.Equal(t, cs.txNum, dec.txNum)
-	require.Equal(t, cs.trieState, dec.trieState)
-}
 
 // takes first 100k keys from file
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
@@ -156,29 +133,18 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	return compPath
 }
 
-func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
+func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator) {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := testAgg(tb, db, dirs, aggStep, logger)
+	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	tb.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
 	return db, agg
-}
-
-func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *Aggregator {
-	tb.Helper()
-
-	salt, err := GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(tb, err)
-	agg, err := NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(tb, err)
-	tb.Cleanup(agg.Close)
-	agg.DisableFsync()
-	return agg
 }
 
 // generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
@@ -339,10 +305,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
 		touchFn(t, dirs, "v1.0-receipt.2048-2049.kv")
 
-		salt, err := GetStateIndicesSalt(dirs, true, logger)
-		require.NoError(err)
-		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		require.NoError(err)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
@@ -368,10 +331,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
 		touchFn(t, dirs, "v1.1-receipt.2048-2049.kv")
 
-		salt, err := GetStateIndicesSalt(dirs, true, logger)
-		require.NoError(err)
-		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		require.NoError(err)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
@@ -397,10 +357,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
 		touchFn(t, dirs, "v2.0-receipt.2048-2049.kv")
 
-		salt, err := GetStateIndicesSalt(dirs, true, logger)
-		require.NoError(err)
-		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		require.NoError(err)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV
@@ -422,10 +379,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 
 		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
-		salt, err := GetStateIndicesSalt(dirs, true, logger)
-		require.NoError(err)
-		agg, err := NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		require.NoError(err)
+		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
 
 		kv_versions := agg.d[kv.ReceiptDomain].Version.DataKV

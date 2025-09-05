@@ -49,7 +49,7 @@ import (
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
-func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
+func testDbAndAggregatorv3(t *testing.T, fpath string, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
 	t.Helper()
 
 	path := t.TempDir()
@@ -57,7 +57,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 		path = fpath
 	}
 	dirs := datadir.New(path)
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, aggStep)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 

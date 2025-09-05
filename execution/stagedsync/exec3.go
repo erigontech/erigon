@@ -45,9 +45,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/types"
@@ -995,7 +997,7 @@ func ExecV3(ctx context.Context,
 		doms, err = dbstate.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
-		if errors.Is(err, dbstate.ErrBehindCommitment) {
+		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
 			return nil
 		}
 		if err != nil {
@@ -1871,7 +1873,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 		return false, nil
 	}
 
-	unwindToLimit, err := applyTx.Debug().CanUnwindToBlockNum()
+	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1882,7 +1884,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := applyTx.Debug().CanUnwindBeforeBlockNum(unwindTo)
+	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}

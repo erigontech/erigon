@@ -235,7 +235,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	})
 }
 
-func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
+func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	f.Helper()
 	require := require.New(f)
 	dirs := datadir.New(f.TempDir())
@@ -243,14 +243,11 @@ func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.TemporalRwDB, *
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(f, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
+	agg, err := state.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(f.Context(), db)
 	require.NoError(err)
 	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
-	agg.DisableFsync()
 	tdb, err := temporal.New(db, agg)
 	require.NoError(err)
 	return tdb, agg

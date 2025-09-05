@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -100,12 +101,8 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *state.Aggregator {
 	tb.Helper()
 
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(tb, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(tb, err)
+	agg := state.NewTest(dirs).StepSize(aggStep).Logger(logger).MustOpen(tb.Context(), db)
 	tb.Cleanup(agg.Close)
-	agg.DisableFsync()
 	return agg
 }
 
@@ -228,7 +225,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 // by that key stored latest root hash and tree state
 const keyCommitmentStateS = "state"
 
-var keyCommitmentState = []byte(keyCommitmentStateS)
+var KeyCommitmentState = []byte(keyCommitmentStateS)
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -249,7 +246,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, keyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, KeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
 		rootInFiles, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
@@ -414,11 +411,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	agg.Close()
 
 	// Start another aggregator on same datadir
-	salt, err := state.GetStateIndicesSalt(agg.Dirs(), false, logger)
-	require.NoError(t, err)
-	require.NotNil(t, salt)
-	anotherAgg, err := state.NewAggregator2(context.Background(), agg.Dirs(), aggStep, salt, db, logger)
-	require.NoError(t, err)
+	anotherAgg := state.NewTest(agg.Dirs()).StepSize(aggStep).Logger(logger).MustOpen(t.Context(), db)
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
 
@@ -467,8 +460,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err := state.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	changesetAt5 := &state.StateChangeSet{}
-	changesetAt3 := &state.StateChangeSet{}
+	changesetAt5 := &changeset.StateChangeSet{}
+	changesetAt3 := &changeset.StateChangeSet{}
 
 	keys, vals := generateInputData(t, 20, 4, 10)
 	keys = keys[:2]

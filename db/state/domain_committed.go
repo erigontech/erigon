@@ -33,55 +33,10 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-type ValueMerger func(prev, current []byte) (merged []byte, err error)
-
-// TODO revisit encoded commitmentState.
-//   - Add versioning
-//   - add trie variant marker
-//   - simplify decoding. Rn it's 3 embedded structure: RootNode encoded, Trie state encoded and commitmentState wrapper for search.
-//     | search through states seems mostly useless so probably commitmentState should become header of trie state.
-type commitmentState struct {
-	txNum     uint64
-	blockNum  uint64
-	trieState []byte
-}
-
-func (cs *commitmentState) Decode(buf []byte) error {
-	if len(buf) < 10 {
-		return fmt.Errorf("ivalid commitment state buffer size %d, expected at least 10b", len(buf))
-	}
-	pos := 0
-	cs.txNum = binary.BigEndian.Uint64(buf[pos : pos+8])
-	pos += 8
-	cs.blockNum = binary.BigEndian.Uint64(buf[pos : pos+8])
-	pos += 8
-	cs.trieState = make([]byte, binary.BigEndian.Uint16(buf[pos:pos+2]))
-	pos += 2
-	if len(cs.trieState) == 0 && len(buf) == 10 {
-		return nil
-	}
-	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])
-	return nil
-}
-
-func (cs *commitmentState) Encode() ([]byte, error) {
-	buf := bytes.NewBuffer(nil)
-	var v [18]byte
-	binary.BigEndian.PutUint64(v[:], cs.txNum)
-	binary.BigEndian.PutUint64(v[8:16], cs.blockNum)
-	binary.BigEndian.PutUint16(v[16:18], uint16(len(cs.trieState)))
-	if _, err := buf.Write(v[:]); err != nil {
-		return nil, err
-	}
-	if _, err := buf.Write(cs.trieState); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext {
+func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
 }
 
@@ -114,7 +69,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	aggTx := at
 
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
-	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, keyCommitmentState) ||
+	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
 		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
 
 		return branch, nil // do not transform, return as is

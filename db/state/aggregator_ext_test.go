@@ -55,9 +55,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	aggStep := uint64(100)
+	stepSize := uint64(100)
 	ctx := context.Background()
-	db, agg := testDbAndAggregatorv3(t, aggStep)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 	dirs := agg.Dirs()
 
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -68,8 +68,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := aggStep * 5
-	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
+	txs := stepSize * 5
+	t.Logf("step=%d tx_count=%d\n", stepSize, txs)
 
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
@@ -105,7 +105,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	progress := tx.Debug().DomainProgress(kv.AccountsDomain)
-	require.Equal(t, 5, int(progress/aggStep))
+	require.Equal(t, 5, int(progress/stepSize))
 
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -123,11 +123,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	salt, err := state.GetStateIndicesSalt(dirs, false, logger)
-	require.NoError(t, err)
-	require.NotNil(t, salt)
-	newAgg, err := state.NewAggregator2(context.Background(), agg.Dirs(), aggStep, salt, newDb, logger)
-	require.NoError(t, err)
+	newAgg := state.New(agg.Dirs()).StepSize(stepSize).MustOpen(ctx, newDb)
 	require.NoError(t, newAgg.OpenFolder())
 
 	db, _ = temporal.New(newDb, newAgg)
@@ -147,7 +143,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	miss := uint64(0)
 	for i, key := range keys {
-		if uint64(i+1) >= txs-aggStep {
+		if uint64(i+1) >= txs-stepSize {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
 		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr])
