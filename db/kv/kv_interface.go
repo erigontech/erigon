@@ -382,7 +382,6 @@ func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
 type (
 	Domain      uint16
-	Appendable  uint16
 	InvertedIdx uint16
 	ForkableId  uint16
 )
