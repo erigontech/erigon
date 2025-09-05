@@ -51,7 +51,8 @@ func TestFetch(t *testing.T) {
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient := direct.NewSentryClientDirect(direct.ETH67, m)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH67, m, false)
+	require.NoError(t, err)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
@@ -99,7 +100,9 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -129,7 +132,9 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -164,7 +169,9 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -204,7 +211,9 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
