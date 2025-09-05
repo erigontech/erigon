@@ -297,7 +297,7 @@ func makeP2PServer(
 	if len(p2pConfig.BootstrapNodes) == 0 {
 		spec, err := chainspec.ChainSpecByGenesisHash(genesisHash)
 		if err != nil {
-			return nil, fmt.Errorf("no config for given genesis hash: %w", err)
+			log.Warn("Failed to set DNS discovery defaults", "genesis", genesisHash, "err", err)
 		}
 		bootstrapNodes, err := enode.ParseNodesFromURLs(spec.Bootnodes)
 		if err != nil {
