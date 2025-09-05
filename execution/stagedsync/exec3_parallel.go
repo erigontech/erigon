@@ -732,7 +732,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool,
 	}
 }
 
-func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.Tx) (result *blockResult, err error) {
+func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
 	if !ok {
@@ -947,7 +947,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if stateReader == nil {
-					stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx.(kv.TemporalTx))))
+					stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
 				}
 
 				if stateWriter == nil {
@@ -1330,14 +1330,15 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if pe.applyTx == nil {
-				dbTx, err := pe.cfg.db.BeginRo(ctx)
+				temporalDb, ok := pe.cfg.db.(kv.TemporalRwDB)
+				if !ok {
+					return errors.New("pe.cfg.db is not a temporal db")
+				}
+				pe.applyTx, err = temporalDb.BeginTemporalRo(ctx)
 
 				if err != nil {
 					return err
 				}
-
-				pe.applyTx = dbTx.(kv.TemporalRwTx)
-				applyTx = pe.applyTx
 			}
 			return nil
 		}()
@@ -1557,7 +1558,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	return nil
 }
 
-func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx) (blockResult *blockResult, err error) {
+func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
 	rwsIt := pe.rws.Iter()
 	for rwsIt.HasNext() && (blockResult == nil || !blockResult.complete) {
 		txResult := rwsIt.PopNext()

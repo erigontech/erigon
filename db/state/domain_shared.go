@@ -177,6 +177,14 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
 }
 
+func (sd *SharedDomains) Trace() bool {
+	return sd.trace
+}
+
+func (sd *SharedDomains) CommitmentCapture() bool {
+	return sd.commitmentCapture
+}
+
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment {
 		sd.sdCtx.ClearRam()
@@ -214,7 +222,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
-	return sd.sdCtx.patriciaTrie.GetCapture(true)
+	return sd.sdCtx.GetCapture(true)
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {

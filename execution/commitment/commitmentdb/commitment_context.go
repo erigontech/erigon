@@ -37,6 +37,9 @@ type sd interface {
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	StepSize() uint64
+
+	Trace() bool
+	CommitmentCapture() bool
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -83,6 +86,11 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 		sdc.patriciaTrie.Reset()
 	}
 }
+
+func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
+	return sdc.patriciaTrie.GetCapture(truncate)
+}
+
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
 	sdc.updates.Reset()
 	sdc.Reset()
@@ -150,8 +158,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	// data accessing functions should be set when domain is opened/shared context updated
 
 	sdc.patriciaTrie.SetTrace(sdc.trace)
-	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.trace)
-	if sdc.sharedDomains.commitmentCapture {
+	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
+	if sdc.sharedDomains.CommitmentCapture() {
 		if sdc.patriciaTrie.GetCapture(false) == nil {
 			sdc.patriciaTrie.SetCapture([]string{})
 		}
