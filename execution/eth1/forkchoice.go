@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -74,7 +75,7 @@ func isDomainAheadOfBlocks(tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := state.NewSharedDomains(tx, logger)
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err)
-		return errors.Is(err, state.ErrBehindCommitment)
+		return errors.Is(err, commitmentdb.ErrBehindCommitment)
 	}
 	defer doms.Close()
 	return false

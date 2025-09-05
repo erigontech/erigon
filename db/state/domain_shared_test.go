@@ -55,7 +55,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	stateChangeset := &state.StateChangeSet{}
+	stateChangeset := &StateChangeSet{}
 	domains.SetChangesetAccumulator(stateChangeset)
 
 	maxTx := stepSize

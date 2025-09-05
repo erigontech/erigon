@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 
 	"github.com/c2h5oh/datasize"
 
@@ -242,7 +243,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !bytes.Equal(k, keyCommitmentState) {
+				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)

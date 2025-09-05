@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package changeset_test
 
 import (
 	"context"
@@ -23,9 +23,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/changeset"
 )
+
+func testDbAndAggregatorv3(t *testing.T, stepSize uint64) (kv.TemporalRwDB, string) {
+	t.Helper()
+
+	path := t.TempDir()
+	dirs := datadir.New(path)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	return db, path
+}
 
 func TestOverflowPages(t *testing.T) {
 	db, _ := testDbAndAggregatorv3(t, 10)
@@ -33,7 +45,7 @@ func TestOverflowPages(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
+	k, v := make([]byte, changeset.DiffChunkKeyLen), make([]byte, changeset.DiffChunkKeyLen)
 	k[0] = 0
 	_ = tx.Put(kv.ChangeSets3, k, v)
 	k[0] = 1
@@ -56,9 +68,9 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
 	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step1[:]})
 
-	serialized := SerializeDiffSet(d, nil)
+	serialized := changeset.SerializeDiffSet(d, nil)
 	fmt.Println(len(serialized))
-	deserialized := DeserializeDiffSet(serialized)
+	deserialized := changeset.DeserializeDiffSet(serialized)
 
 	require.Equal(t, d, deserialized)
 }
@@ -78,7 +90,7 @@ func TestMergeDiffSet(t *testing.T) {
 	d2 = append(d2, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value6"), PrevStepBytes: step6[:]})
 	d2 = append(d2, kv.DomainEntryDiff{Key: "key488888888", Value: []byte("value4"), PrevStepBytes: step4[:]})
 
-	merged := MergeDiffSets(d1, d2)
+	merged := changeset.MergeDiffSets(d1, d2)
 	require.Len(t, merged, 4)
 
 	require.Equal(t, d2[0], merged[0])
