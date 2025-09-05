@@ -84,8 +84,8 @@ func importChain(cliCtx *cli.Context) error {
 	}
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	ethCfg.Snapshot.NoDownloader = true // no need to run this for import chain (used in hive eest/consume-rlp tests)
-	ethCfg.InternalCL = false           // no need to run this for import chain (used in hive eest/consume-rlp tests)
+	ethCfg.Snapshot.NoDownloader = true // no need to run this for import chain (also used in hive eest/consume-rlp tests)
+	ethCfg.InternalCL = false           // no need to run this for import chain (also used in hive eest/consume-rlp tests)
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
