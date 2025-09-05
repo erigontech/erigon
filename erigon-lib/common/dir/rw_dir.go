@@ -220,7 +220,7 @@ func RemoveAll(path string) error {
 	return os.RemoveAll(path)
 }
 
-// CreateTemp creates a temporal file using `file` as base
+// CreateTemp creates a temporary file using `file` as base
 func CreateTemp(file string) (*os.File, error) {
 	directory := filepath.Dir(file)
 	filename := filepath.Base(file)
