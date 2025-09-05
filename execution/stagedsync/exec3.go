@@ -43,7 +43,9 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	changeset2 "github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -264,7 +266,7 @@ func ExecV3(ctx context.Context,
 		doms, err = dbstate.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
-		if errors.Is(err, dbstate.ErrBehindCommitment) {
+		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
 			return nil
 		}
 		if err != nil {
@@ -469,9 +471,9 @@ Loop:
 			computeCommitmentDuration += time.Since(start)
 			shouldGenerateChangesets = true // now we can generate changesets for the safety net
 		}
-		changeset := &dbstate.StateChangeSet{}
+		changeSet := &changeset2.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
-			executor.domains().SetChangesetAccumulator(changeset)
+			executor.domains().SetChangesetAccumulator(changeSet)
 		}
 		if !parallel {
 			select {
@@ -695,9 +697,9 @@ Loop:
 
 			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
-				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
 				if !inMemExec {
-					if err := dbstate.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
+					if err := changeset2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeSet); err != nil {
 						return err
 					}
 				}
@@ -908,7 +910,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 		return false, nil
 	}
 
-	unwindToLimit, err := applyTx.Debug().CanUnwindToBlockNum()
+	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -919,7 +921,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := applyTx.Debug().CanUnwindBeforeBlockNum(unwindTo)
+	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}

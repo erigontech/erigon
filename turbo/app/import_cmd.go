@@ -58,6 +58,7 @@ var importCommand = cli.Command{
 	Flags: []cli.Flag{
 		&utils.DataDirFlag,
 		&utils.ChainFlag,
+		&utils.NetworkIdFlag,
 	},
 	//Category: "BLOCKCHAIN COMMANDS",
 	Description: `
@@ -81,8 +82,10 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg.Snapshot.NoDownloader = true // no need to run this for import chain (also used in hive eest/consume-rlp tests)
+	ethCfg.InternalCL = false           // no need to run this for import chain (also used in hive eest/consume-rlp tests)
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
