@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -30,11 +29,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
 func TestOverflowPages(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(16 * datasize.KB).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	t.Cleanup(db.Close)
 
 	ctx := context.Background()
