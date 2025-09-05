@@ -55,7 +55,32 @@ func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash commo
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithHash(hash, true), config, stream)
 }
 
-func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) (retErr error) {
+	// Ensure we always close any partially written JSON structures on unexpected crashes.
+	// This keeps the overall JSON-RPC response valid so the handler can append an error.
+	var wroteArray bool
+	var inObject bool
+	var inResult bool
+	defer func() {
+		if r := recover(); r != nil {
+			// Best-effort closure of open JSON structures for this method's result value
+			if wroteArray {
+				if inObject {
+					if inResult {
+						// Complete the current object's result value
+						stream.WriteNil()
+						inResult = false
+					}
+					stream.WriteObjectEnd()
+					inObject = false
+				}
+				stream.WriteArrayEnd()
+			}
+			_ = stream.Flush()
+			// Convert panic into an error so the outer handler writes the error envelope
+			retErr = errors.New("method handler crashed")
+		}
+	}()
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		stream.WriteNil()
@@ -109,6 +134,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	stream.WriteArrayStart()
+	wroteArray = true
 
 	txns := block.Transactions()
 
@@ -144,15 +170,19 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		stream.WriteObjectStart()
+		inObject = true
 		stream.WriteObjectField("txHash")
 		stream.WriteString(txnHash.Hex())
 		stream.WriteMore()
 		stream.WriteObjectField("result")
+		inResult = true
 		select {
 		default:
 		case <-ctx.Done():
 			stream.WriteNil()
+			inResult = false
 			stream.WriteObjectEnd()
+			inObject = false
 			stream.WriteArrayEnd()
 			return ctx.Err()
 		}
@@ -204,7 +234,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			rpc.HandleError(err, stream)
 		}
 
+		inResult = false
 		stream.WriteObjectEnd()
+		inObject = false
 		if txnIndex != len(txns)-1 {
 			stream.WriteMore()
 		}
