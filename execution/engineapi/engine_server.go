@@ -563,7 +563,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 			}
 		}
 		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*int(params.CellsPerExtBlob) {
-			return nil, errors.New(fmt.Sprintf("built invalid blobsBundle len(proofs)=%d", len(payload.BlobsBundle.Proofs)))
+			return nil, fmt.Errorf("built invalid blobsBundle len(blobs)=%d len(commitments)=%d len(proofs)=%d", len(payload.BlobsBundle.Blobs), len(payload.BlobsBundle.Commitments), len(payload.BlobsBundle.Proofs))
 		}
 	}
 	return payload, nil
