@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -1185,9 +1186,9 @@ func ExecV3(ctx context.Context,
 					computeCommitmentDuration += time.Since(start)
 					shouldGenerateChangesets = true // now we can generate changesets for the safety net
 				}
-				changeset := &dbstate.StateChangeSet{}
+				changeSet := &changeset.StateChangeSet{}
 				if shouldGenerateChangesets && blockNum > 0 {
-					executor.domains().SetChangesetAccumulator(changeset)
+					executor.domains().SetChangesetAccumulator(changeSet)
 				}
 
 				select {
@@ -1281,9 +1282,9 @@ func ExecV3(ctx context.Context,
 					}
 
 					computeCommitmentDuration += time.Since(start)
-					executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+					executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
 					if !inMemExec {
-						if err := dbstate.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+						if err := changeset.WriteDiffSet(applyTx, blockNum, b.Hash(), changeSet); err != nil {
 							return err
 						}
 					}
@@ -1490,9 +1491,9 @@ func ExecV3(ctx context.Context,
 				}
 			}()
 
-			changeset := &dbstate.StateChangeSet{}
+			changeSet := &changeset.StateChangeSet{}
 			if shouldGenerateChangesets && blockNum > 0 {
-				executor.domains().SetChangesetAccumulator(changeset)
+				executor.domains().SetChangesetAccumulator(changeSet)
 			}
 
 			blockUpdateCount := 0
@@ -1646,9 +1647,9 @@ func ExecV3(ctx context.Context,
 									return err
 								}
 
-								executor.domains().SavePastChangesetAccumulator(applyResult.BlockHash, blockNum, changeset)
+								executor.domains().SavePastChangesetAccumulator(applyResult.BlockHash, blockNum, changeSet)
 								if !inMemExec {
-									if err := dbstate.WriteDiffSet(applyTx, blockNum, applyResult.BlockHash, changeset); err != nil {
+									if err := changeset.WriteDiffSet(applyTx, blockNum, applyResult.BlockHash, changeSet); err != nil {
 										return err
 									}
 								}
@@ -1693,8 +1694,8 @@ func ExecV3(ctx context.Context,
 						}
 
 						if shouldGenerateChangesets && blockNum > 0 {
-							changeset = &dbstate.StateChangeSet{}
-							executor.domains().SetChangesetAccumulator(changeset)
+							changeSet = &changeset.StateChangeSet{}
+							executor.domains().SetChangesetAccumulator(changeSet)
 						}
 					}
 				case <-executorContext.Done():
