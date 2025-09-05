@@ -52,6 +52,12 @@ jobs:
         run: |
           cd hive
           run_suite() {
+            if [ $# -ne 3 ]; then
+              echo "Error: run_suite requires exactly 3 parameters"
+              echo "Usage: run_suite <sim> <sim.limit> <max_allowed_failures>"
+              echo "Provided: $# parameters"
+              exit 1
+            fi
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
