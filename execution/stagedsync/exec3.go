@@ -958,13 +958,17 @@ func ExecV3(ctx context.Context,
 	totalGasUsed := uint64(0)
 
 	useExternalTx := txc.Tx != nil
-	var applyTx kv.RwTx
+	var applyTx kv.TemporalRwTx
 
 	if useExternalTx {
-		applyTx = txc.Tx
+		applyTx = txc.Tx.(kv.TemporalRwTx)
 	} else {
 		var err error
-		applyTx, err = cfg.db.BeginRw(ctx) //nolint
+		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
+		if !ok {
+			return errors.New("cfg.db is not a temporal db")
+		}
+		applyTx, err := temporalDb.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -988,11 +992,7 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
-		temporalTx, ok := applyTx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("applyTx is not a temporal transaction")
-		}
-		doms, err = dbstate.NewSharedDomains(temporalTx, log.New())
+		doms, err = dbstate.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, dbstate.ErrBehindCommitment) {
@@ -1450,13 +1450,12 @@ func ExecV3(ctx context.Context,
 		var asyncTx kv.Tx
 
 		switch applyTx := applyTx.(type) {
-		case *mdbx.MdbxTx:
-			asyncTx = mdbx.NewAsyncTx(applyTx, 1000)
-			asyncTxChan = asyncTx.(mdbx.TxApplySource).ApplyChan()
 		case *temporal.RwTx:
 			temporalTx := applyTx.AsyncClone(mdbx.NewAsyncRwTx(applyTx.RwTx, 1000))
 			asyncTxChan = temporalTx.ApplyChan()
 			asyncTx = temporalTx
+		default:
+			return fmt.Errorf("expected *temporal.RwTx: got %T", applyTx)
 		}
 
 		applyResults := make(chan applyResult, 100_000)

@@ -103,7 +103,7 @@ type Worker struct {
 	runnable    atomic.Bool
 	logger      log.Logger
 	chainDb     kv.RoDB
-	chainTx     kv.Tx
+	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	in          *exec.QueueWithRetry
@@ -187,7 +187,7 @@ func (rw *Worker) Resume() {
 
 func (rw *Worker) LogLRUStats() { rw.evm.Config().JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
@@ -197,7 +197,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))))
+		rw.SetReader(state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(rw.chainTx))))
 	}
 
 	if stateWriter != nil {
@@ -207,8 +207,8 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	}
 }
 
-func (rw *Worker) Tx() kv.Tx { return rw.chainTx }
-func (rw *Worker) ResetTx(chainTx kv.Tx) {
+func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
+func (rw *Worker) ResetTx(chainTx kv.TemporalTx) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.resetTx(chainTx)
@@ -231,7 +231,7 @@ func (rw *Worker) resetTxNum(txNum uint64) {
 	//rw.rs.Domains().SetTxNum(txTask.TxNum)
 }
 
-func (rw *Worker) resetTx(chainTx kv.Tx) {
+func (rw *Worker) resetTx(chainTx kv.TemporalTx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 	}

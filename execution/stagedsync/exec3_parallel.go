@@ -88,8 +88,8 @@ type executor interface {
 	readState() *state.StateV3Buffered
 	domains() *dbstate.SharedDomains
 
-	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
-	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
+	commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error)
+	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) error
 
 	lastCommittedBlockNum() uint64
 	lastCommittedTxNum() uint64
@@ -360,7 +360,7 @@ type txExecutor struct {
 	u                        Unwinder
 	isMining                 bool
 	inMemExec                bool
-	applyTx                  kv.Tx
+	applyTx                  kv.TemporalTx
 	logger                   log.Logger
 	logPrefix                string
 	progress                 *Progress
@@ -587,7 +587,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 	return nil
 }
 
-func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error) (kv.RwTx, time.Duration, error) {
+func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) error) (kv.TemporalRwTx, time.Duration, error) {
 	err := execStage.Update(tx, te.lastCommittedBlockNum)
 
 	if err != nil {
@@ -613,11 +613,13 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 		}
 
 		t2 = time.Since(tt)
-		tx, err = te.cfg.db.BeginRw(ctx)
+		dbtx, err := te.cfg.db.BeginRw(ctx)
 
 		if err != nil {
 			return nil, t2, err
 		}
+
+		tx = dbtx.(kv.TemporalRwTx)
 	}
 
 	err = resetWorkers(ctx, te.rs, tx)
@@ -1215,7 +1217,7 @@ func (pe *parallelExecutor) lastCommittedTxNum() uint64 {
 	return pe.txExecutor.lastCommittedTxNum
 }
 
-func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *StageState, applyTx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, error) {
+func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *StageState, applyTx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, error) {
 	flushStart := time.Now()
 	var flushTime time.Duration
 
@@ -1237,7 +1239,7 @@ func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *Stage
 	return applyTx, nil
 }
 
-func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error) {
 	pe.pause()
 	defer pe.resume()
 
@@ -1280,7 +1282,7 @@ func (pe *parallelExecutor) resume() {
 	}
 }
 
-func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error {
+func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) error {
 	pe.Lock()
 	defer pe.Unlock()
 
@@ -1328,12 +1330,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if pe.applyTx == nil {
-				pe.applyTx, err = pe.cfg.db.BeginRo(ctx)
+				dbTx, err := pe.cfg.db.BeginRo(ctx)
 
 				if err != nil {
 					return err
 				}
 
+				pe.applyTx = dbTx.(kv.TemporalRwTx)
 				applyTx = pe.applyTx
 			}
 			return nil

@@ -59,11 +59,11 @@ func (se *serialExecutor) lastCommittedTxNum() uint64 {
 	return se.txExecutor.lastCommittedTxNum
 }
 
-func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error) {
 	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 
-func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) (err error) {
+func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) (err error) {
 
 	if se.worker == nil {
 		se.taskExecMetrics = exec3.NewWorkerMetrics()
@@ -79,11 +79,12 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 		if applyTx != nil {
 			se.applyTx = applyTx
 		} else {
-			se.applyTx, err = se.cfg.db.BeginRo(context.Background()) //nolint
+			applyTx, err := se.cfg.db.BeginRo(ctx)
 			if err != nil {
-				se.applyTx.Rollback()
+				applyTx.Rollback()
 				return err
 			}
+			se.applyTx = applyTx.(kv.TemporalTx)
 		}
 	}
 
