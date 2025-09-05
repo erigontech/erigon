@@ -56,7 +56,7 @@ import (
 )
 
 type Aggregator struct {
-	db       kv.RoDB
+	db       kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
 	d        [kv.DomainLen]*Domain
 	iis      []*InvertedIndex
 	dirs     datadir.Dirs
@@ -95,7 +95,7 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -198,14 +198,6 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 
 func (a *Aggregator) StepSize() uint64   { return a.stepSize }
 func (a *Aggregator) Dirs() datadir.Dirs { return a.dirs }
-func (a *Aggregator) DisableFsync() {
-	for _, d := range a.d {
-		d.DisableFsync()
-	}
-	for _, ii := range a.iis {
-		ii.DisableFsync()
-	}
-}
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
 	a.d[domain].ReplaceKeysInValues = v
