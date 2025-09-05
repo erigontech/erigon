@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -1273,7 +1273,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		lenBlobs,
 	)
 	// Broadcast the block and its blobs
-	if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+	if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
 		Name: gossip.TopicNameBeaconBlock,
 		Data: blkSSZ,
 	}); err != nil {
@@ -1283,7 +1283,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
 			idx64 := uint64(idx)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
 				Name:     gossip.TopicNamePrefixBlobSidecar,
 				Data:     blob,
 				SubnetId: &idx64,
@@ -1301,7 +1301,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				continue
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
 				Name:     gossip.TopicNamePrefixDataColumnSidecar,
 				Data:     columnSSZ,
 				SubnetId: &subnet,

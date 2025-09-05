@@ -521,7 +521,6 @@ type BlockSnapshots interface {
 	Delete(fileName string) error
 	Types() []snaptype.Type
 	Close()
-
 	DownloadComplete()
 	RemoveOverlaps(onDelete func(l []string) error) error
 	DownloadReady() bool
@@ -584,11 +583,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
-
-	if cfg.NoDownloader {
-		s.DownloadComplete()
-	}
-
 	return s
 }
 
@@ -666,13 +660,6 @@ func (s *RoSnapshots) LogStat(label string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
 		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-}
-
-func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
-	if s.BlocksAvailable() < cfg.ExpectBlocks {
-		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
-	}
-	return nil
 }
 
 func (s *RoSnapshots) Types() []snaptype.Type { return s.types }

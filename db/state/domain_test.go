@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	datadir2 "github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -79,7 +80,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	dirs := datadir2.New(t.TempDir())
 	cfg := statecfg.Schema.AccountsDomain
 
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
@@ -790,7 +791,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 					continue
 				}
 				continue
-				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
 			} else { //warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
@@ -798,7 +799,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 				if keyNum == txNum%dom.stepSize {
 					continue
 				}
-				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
+				//fmt.Printf("Put: %d, step=%d\n", keyNum, step)
 			}
 
 			label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txNum, keyNum)
@@ -1333,7 +1334,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 				if !allowInsert {
 					continue
 				}
-				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
 			} else { //warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
@@ -1341,7 +1342,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 				if keyNum == txNum%d.stepSize {
 					continue
 				}
-				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
+				//fmt.Printf("Put: %d, step=%d\n", keyNum, step)
 			}
 
 			binary.BigEndian.PutUint64(k[:], keyNum)
@@ -1364,33 +1365,6 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	err = tx.Commit()
 	require.NoError(t, err)
 	return db, d, dat
-}
-
-func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string]map[string][]upd {
-	tb.Helper()
-
-	doms := make(map[string]map[string][]upd)
-	r := newRnd(31)
-
-	accs := make(map[string][]upd)
-	stor := make(map[string][]upd)
-	if keyLimit == 1 {
-		key1 := generateRandomKey(r, keySize1)
-		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
-		doms["accounts"] = accs
-		return doms
-	}
-
-	for i := uint64(0); i < keyLimit/2; i++ {
-		key1 := generateRandomKey(r, keySize1)
-		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
-		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
-		stor[key2] = generateArbitraryValueUpdates(r, totalTx, keyTxsLimit, 32)
-	}
-	doms["accounts"] = accs
-	doms["storage"] = stor
-
-	return doms
 }
 
 // generate arbitrary values for arbitrary keys within given totalTx
@@ -1422,48 +1396,6 @@ func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
 	return key
-}
-
-func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
-	updates := make([]upd, 0)
-	usedTxNums := make(map[uint64]bool)
-
-	for i := uint64(0); i < keyTxsLimit; i++ {
-		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		jitter := r.IntN(10e7)
-		acc := accounts3.Account{
-			Nonce:       i,
-			Balance:     *uint256.NewInt(i*10e4 + uint64(jitter)),
-			CodeHash:    common.Hash{},
-			Incarnation: 0,
-		}
-		value := accounts3.SerialiseV3(&acc)
-
-		updates = append(updates, upd{txNum: txNum, value: value})
-		usedTxNums[txNum] = true
-	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
-
-	return updates
-}
-
-func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
-	updates := make([]upd, 0)
-	usedTxNums := make(map[uint64]bool)
-	//maxStorageSize := 24 * (1 << 10) // limit on contract code
-
-	for i := uint64(0); i < keyTxsLimit; i++ {
-		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-
-		value := make([]byte, r.IntN(int(maxSize)))
-		r.Read(value)
-
-		updates = append(updates, upd{txNum: txNum, value: value})
-		usedTxNums[txNum] = true
-	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
-
-	return updates
 }
 
 func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
@@ -1524,7 +1456,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		pv, ps := []byte{}, kv.Step(0)
@@ -1599,7 +1531,7 @@ func TestDomainRange(t *testing.T) {
 	keyTxsLimit := uint64(3)
 	keyLimit := uint64(10)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	cutoffTxnum := uint64(190)
 	keysLeftAfterCutoff := make(map[string]struct{})
@@ -1713,7 +1645,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 	SaveExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey, 0)
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
@@ -1813,7 +1745,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	// Key's lengths are variable so lookup should be in commitment mode.
 	d.FilenameBase = kv.CommitmentDomain.String()
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
@@ -1957,7 +1889,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	keyTxsLimit := uint64(150)
 	keyLimit := uint64(2000)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
@@ -2078,7 +2010,7 @@ func TestDomain_Unwind(t *testing.T) {
 
 		for i := uint64(0); i < maxTx; i++ {
 			writer.diff = &kv.DomainDiff{}
-			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
+			if i%3 == 0 && i > 0 { // once in 3 txn Put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
 					err = writer.DeleteWithPrev([]byte("key3"), i, preval3, 0)
 					require.NoError(t, err)
@@ -2479,7 +2411,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
-	// put some kvs
+	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
