@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/compress"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -2269,10 +2268,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	if err := state.CheckSnapshotsCompatibility(dirs); err != nil {
-		panic(err)
-	}
-	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}
