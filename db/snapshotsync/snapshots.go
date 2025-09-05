@@ -1134,10 +1134,10 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	return nil
 }
 
-func (s *RoSnapshots) Ranges() []Range {
+func (s *RoSnapshots) Ranges(align bool) []Range {
 	view := s.View()
 	defer view.Close()
-	return view.Ranges()
+	return view.Ranges(align)
 }
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
@@ -1571,8 +1571,41 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool)
 	return nil, false
 }
 
-func (v *View) Ranges() (ranges []Range) {
+func (v *View) Ranges(align bool) (ranges []Range) {
+	if !align {
+		for _, sn := range v.Segments(v.baseSegType) {
+			ranges = append(ranges, sn.Range)
+		}
+
+		return ranges
+	}
+
+	var alignedRangeTo *uint64
+
+	for _, t := range v.s.types {
+		maxRangeTo := uint64(0)
+
+		for _, sn := range v.Segments(t) {
+			if sn.Range.to > maxRangeTo {
+				maxRangeTo = sn.Range.to
+			}
+		}
+
+		if alignedRangeTo == nil {
+			alignedRangeTo = &maxRangeTo
+			continue
+		}
+
+		if maxRangeTo < *alignedRangeTo {
+			alignedRangeTo = &maxRangeTo
+		}
+	}
+
 	for _, sn := range v.Segments(v.baseSegType) {
+		if alignedRangeTo != nil && sn.Range.to > *alignedRangeTo {
+			continue
+		}
+
 		ranges = append(ranges, sn.Range)
 	}
 
