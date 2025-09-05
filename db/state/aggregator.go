@@ -1737,6 +1737,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 }
 
 func (at *AggregatorRoTx) Dirs() datadir.Dirs { return at.a.dirs }
+
 func (at *AggregatorRoTx) NewMemBatch() kv.TemporalMemBatch { return newTemporalMemBatch(at) }
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
