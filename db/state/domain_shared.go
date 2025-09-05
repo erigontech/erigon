@@ -157,10 +157,7 @@ func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []b
 }
 
 func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	if ttx, ok := gt.tx.(kv.TemporalTx); ok {
-		return ttx.StepsInFiles(entitySet...)
-	}
-	return 0
+	return gt.tx.StepsInFiles(entitySet...)
 }
 
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
