@@ -255,7 +255,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		_, err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
 		if err != nil {
 			return err
 		}
