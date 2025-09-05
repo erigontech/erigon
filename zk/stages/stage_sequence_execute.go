@@ -31,8 +31,7 @@ type TxYielder interface {
 	AddMined(hash common.Hash)
 	Discard(hash common.Hash)
 	SetExecutionDetails(executionAt uint64, forkId uint64)
-	BeginYielding()
-	Cleanup()
+	Requeue(tx types.Transaction)
 }
 
 func SpawnSequencingStage(
@@ -331,8 +330,7 @@ func sequencingBatchStep(
 			}
 		}
 
-		yielder.SetExecutionDetails(executionAt, batchState.forkId)
-		yielder.BeginYielding()
+		yielder.SetExecutionDetails(blockNumber-1, batchState.forkId)
 
 		if batchState.isL1Recovery() {
 			blockNumbersInBatchSoFar, err := batchContext.sdb.hermezDb.GetL2BlockNosByBatch(batchState.batchNumber)
@@ -443,6 +441,7 @@ func sequencingBatchStep(
 
 			select {
 			case <-blockTimer.C:
+				log.Debug(fmt.Sprintf("[%s] Outer Block timer expired", logPrefix))
 				if !batchState.isAnyRecovery() {
 					// no transactions or the block seal time is equal to the empty block seal time
 					// break here to avoid log noise
@@ -488,19 +487,10 @@ func sequencingBatchStep(
 
 		InnerLoopTransactions:
 			for {
-				transaction, effectiveGas, ok := yielder.YieldNextTransaction()
-				if !ok {
-					if !batchState.isAnyRecovery() {
-						time.Sleep(cfg.zk.SequencerTimeoutOnEmptyTxPool)
-					}
-					break InnerLoopTransactions
-				}
-
-				yieldedSomething = true
-
 				// quick check if we should stop handling transactions
 				select {
 				case <-blockTimer.C:
+					log.Debug(fmt.Sprintf("[%s] Inner Block timer expired", logPrefix))
 					if !batchState.isAnyRecovery() {
 						innerBreak = true
 						break InnerLoopTransactions
@@ -513,6 +503,16 @@ func sequencingBatchStep(
 					innerBreak = true
 					break InnerLoopTransactions
 				}
+
+				transaction, effectiveGas, ok := yielder.YieldNextTransaction()
+				if !ok {
+					if !batchState.isAnyRecovery() {
+						time.Sleep(cfg.zk.SequencerTimeoutOnEmptyTxPool)
+					}
+					break InnerLoopTransactions
+				}
+
+				yieldedSomething = true
 
 				txHash := transaction.Hash()
 
@@ -581,6 +581,7 @@ func sequencingBatchStep(
 					if errors.Is(err, core.ErrNonceTooHigh) {
 						log.Info(fmt.Sprintf("[%s] nonce too high detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
 						nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
+
 						yielder.Discard(txHash)
 						continue
 					}
@@ -664,7 +665,12 @@ func sequencingBatchStep(
 						panic(fmt.Sprintf("block gas limit overflow in recovery block: %d", blockNumber))
 					}
 					log.Info(fmt.Sprintf("[%s] gas overflowed adding transaction to block", logPrefix), "block", blockNumber, "tx-hash", txHash)
-					runLoopBlocks = false
+
+					yielder.Requeue(transaction)
+					// Close the batch on gas overflow only if not in normalcy
+					if !cfg.chainConfig.IsNormalcy(blockNumber) {
+						runLoopBlocks = false
+					}
 					break OuterLoopTransactions
 				case overflowNone:
 				}
@@ -812,8 +818,6 @@ func sequencingBatchStep(
 			return err
 		}
 	}
-
-	yielder.Cleanup()
 
 	/*
 		if adding something below that line we must ensure

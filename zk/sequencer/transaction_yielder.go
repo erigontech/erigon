@@ -2,7 +2,10 @@ package sequencer
 
 import (
 	"errors"
+	"fmt"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -29,12 +32,6 @@ type PoolTransactionYielder struct {
 	readyTransactions     []common.Hash
 	readyTransactionBytes map[common.Hash][]byte
 
-	// toSkip is used to hold on to a map of hashes for transactions that have been
-	// yielded and mined.  there is a lag between a block being built and the pool
-	// handling the removal.  because we continuosly yield transactions we need a
-	// way to handle this lag so we don't keep yielding the same transaction over and over.
-	toSkip map[common.Hash]struct{}
-
 	pool      txpool.Pool
 	yieldSize uint16
 
@@ -48,9 +45,7 @@ type PoolTransactionYielder struct {
 	executionAt uint64
 	forkId      uint64
 
-	startedYielding    bool
-	startedYieldingMtx sync.Mutex
-	lastYieldIndex     int // used to track the last yielded transaction index
+	refreshing atomic.Bool
 }
 
 func NewPoolTransactionYielder(
@@ -67,15 +62,12 @@ func NewPoolTransactionYielder(
 		readyTransactions:     readyTransactions,
 		readyTransactionBytes: make(map[common.Hash][]byte),
 		readyMtx:              sync.Mutex{},
-		toSkip:                make(map[common.Hash]struct{}),
 		ctx:                   ctx,
 		cfg:                   cfg,
 		pool:                  pool,
 		yieldSize:             yieldSize,
 		db:                    db,
 		decodedTxCache:        decodedTxCache,
-		startedYielding:       false,
-		startedYieldingMtx:    sync.Mutex{},
 	}
 }
 
@@ -88,11 +80,9 @@ func (y *PoolTransactionYielder) YieldNextTransaction() (types.Transaction, uint
 	y.readyMtx.Lock()
 	defer y.readyMtx.Unlock()
 
+	index := 0
 	for idx, hash := range y.readyTransactions {
-		y.lastYieldIndex = idx
-		if _, found := y.toSkip[hash]; found {
-			continue
-		}
+		index = idx
 		if txBytes, found := y.readyTransactionBytes[hash]; found {
 			txPtr, inCache := y.decodedTxCache.Get(hash)
 			if inCache {
@@ -104,59 +94,64 @@ func (y *PoolTransactionYielder) YieldNextTransaction() (types.Transaction, uint
 						"error", err,
 						"id", hash.String())
 					y.pool.MarkForDiscardFromPendingBest(hash)
-					y.toSkip[hash] = struct{}{}
+					y.cleanupTx(hash)
 					continue
 				}
 				y.decodedTxCache.Add(hash, &tx)
 			}
 			effectiveGas = DeriveEffectiveGasPrice(y.cfg, tx)
 			yieldedSomething = true
+			if idx > 0 {
+				log.Warn("Transaction not at front of ready queue", "id", hash.String())
+			}
+			// remove the transaction from the readyTransactions slice. this will save burning CPU for the next yielding
 			break
 		}
+	}
+
+	if index < len(y.readyTransactions) {
+		y.readyTransactions = y.readyTransactions[index+1:]
+	}
+
+	// Lets maintain the size of the readyTransactions slice greater than the yield size
+	if len(y.readyTransactions) < int(y.yieldSize) {
+		y.performNextRefresh()
 	}
 
 	return tx, effectiveGas, yieldedSomething
 }
 
-func (y *PoolTransactionYielder) Cleanup() {
+func (y *PoolTransactionYielder) Requeue(tx types.Transaction) {
 	y.readyMtx.Lock()
 	defer y.readyMtx.Unlock()
 
-	y.toSkip = make(map[common.Hash]struct{})
+	hash := tx.Hash()
+
+	// Add it to the front of the readyTransactions slice
+	y.readyTransactions = append([]common.Hash{hash}, y.readyTransactions...)
+	if _, found := y.readyTransactionBytes[hash]; !found {
+		log.Error("Transaction does not exist in readyTransactionBytes", "id", hash.String())
+	}
+
+	// y.debugVerifyNoncesOrder("requeue")
 }
 
 func (y *PoolTransactionYielder) AddMined(hash common.Hash) {
+	y.readyMtx.Lock()
+	defer y.readyMtx.Unlock()
+
 	y.cleanupTx(hash)
 }
 
 func (y *PoolTransactionYielder) Discard(hash common.Hash) {
+	y.readyMtx.Lock()
+	defer y.readyMtx.Unlock()
+
 	y.cleanupTx(hash)
 }
 
 func (y *PoolTransactionYielder) cleanupTx(hash common.Hash) {
-	y.readyMtx.Lock()
-	defer y.readyMtx.Unlock()
-
-	y.toSkip[hash] = struct{}{}
-
-	// remove the transaction from the readyTransactions slice. this will save burning CPU for the next yielding
-	// for a transaction to execute.  we still maintain the hash in the toSkip map to avoid yielding it again
-	// when we refresh the pool best list into the readyTransactions slice. there is a window where we have
-	// executed something, but the pool hasn't removed it yet, so we could yield it again before this has happened
-
-	// Search from y.lastYieldIndex backwards
-	foundIdx := -1
-	for i := y.lastYieldIndex; i >= 0; i-- {
-		if y.readyTransactions[i] == hash {
-			foundIdx = i
-			break
-		}
-	}
-
-	if foundIdx != -1 {
-		y.readyTransactions = y.readyTransactions[foundIdx+1:]
-		delete(y.readyTransactionBytes, hash)
-	}
+	delete(y.readyTransactionBytes, hash)
 	y.decodedTxCache.Remove(hash)
 }
 
@@ -165,68 +160,81 @@ func (y *PoolTransactionYielder) SetExecutionDetails(executionAt, forkId uint64)
 	y.forkId = forkId
 }
 
-func (y *PoolTransactionYielder) BeginYielding() {
-	y.startedYieldingMtx.Lock()
-	defer y.startedYieldingMtx.Unlock()
-
-	if y.startedYielding {
-		return
-	}
-
-	y.startedYielding = true
-
-	go y.startLoop()
-}
-
-func (y *PoolTransactionYielder) startLoop() {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-y.ctx.Done():
-			log.Info("Transaction yielder context done, stopping yielding")
-			y.setYieldingState(false)
-			return
-		case <-ticker.C:
-			y.performNextRefresh()
-		}
-	}
-}
-
-func (y *PoolTransactionYielder) setYieldingState(state bool) {
-	y.startedYieldingMtx.Lock()
-	defer y.startedYieldingMtx.Unlock()
-	y.startedYielding = state
-}
-
 func (y *PoolTransactionYielder) performNextRefresh() {
-	txHashes, txBytes, err := y.refreshPoolTransactions(y.executionAt, y.forkId)
-	if err != nil {
-		log.Error("Error while yielding next transactions", "error", err)
-		time.Sleep(500 * time.Millisecond) // could be a transient error, wait before retrying
-		// return early as there will be nothing to process now - we'll
-		// wait until the next iteration happens to attempt again
+	if !y.refreshing.CompareAndSwap(false, true) {
 		return
 	}
 
-	y.readyMtx.Lock()
-	defer y.readyMtx.Unlock()
+	go func() {
+		defer y.refreshing.Store(false)
 
-	// Ensure capacity and copy in one operation and keep allocations down
-	if cap(y.readyTransactions) < len(txHashes) {
-		y.readyTransactions = make([]common.Hash, len(txHashes))
-	} else {
-		y.readyTransactions = y.readyTransactions[:len(txHashes)]
+		txHashes, txBytes, err := y.refreshPoolTransactions(y.executionAt, y.forkId)
+		if err != nil {
+			log.Error("Error while yielding next transactions", "error", err)
+			time.Sleep(500 * time.Millisecond) // could be a transient error, wait before retrying
+			// return early as there will be nothing to process now - we'll
+			// wait until the next iteration happens to attempt again
+			return
+		}
+
+		y.readyMtx.Lock()
+		defer y.readyMtx.Unlock()
+
+		for idx, hash := range txHashes {
+			y.readyTransactions = append(y.readyTransactions, hash)
+			y.readyTransactionBytes[hash] = txBytes[idx]
+		}
+
+		// Verify the order of nonces
+		// y.debugVerifyNoncesOrder("refresh")
+	}()
+}
+
+func (y *PoolTransactionYielder) debugVerifyNoncesOrder(prefix string) {
+	nonces := make([]uint64, 0, len(y.readyTransactions))
+	for _, hash := range y.readyTransactions {
+		var tx types.Transaction
+		var err error
+		if txBytes, found := y.readyTransactionBytes[hash]; found {
+			txPtr, inCache := y.decodedTxCache.Get(hash)
+			if inCache {
+				tx = *txPtr
+			} else {
+				tx, err = types.DecodeTransaction(txBytes)
+				if err != nil {
+					log.Error("Failed to decode transaction", "hash", hash.String(), "error", err)
+					continue
+				}
+			}
+		}
+		if tx == nil {
+			log.Error("Failed to get transaction", "hash", hash.String())
+			panic("Failed to get transaction")
+		}
+		// Integrity check: decoded hash must match key
+		if h := tx.Hash(); h != hash {
+			log.Error("Hash/bytes mismatch", "expected", hash.String(), "decoded", h.String(), "prefix", prefix)
+			panic("hash/bytes mismatch")
+		}
+
+		nonces = append(nonces, tx.GetNonce())
 	}
-	copy(y.readyTransactions, txHashes)
 
-	y.readyTransactionBytes = make(map[common.Hash][]byte)
-	for idx, hash := range txHashes {
-		y.readyTransactionBytes[hash] = txBytes[idx]
+	// Verify the order of nonces
+	if !sort.SliceIsSorted(nonces, func(i, j int) bool {
+		notSorted := nonces[i] < nonces[j]
+		if notSorted {
+			log.Error(fmt.Sprintf("Nonces are not sorted! %v", prefix), "i", i, "nonce[i]", nonces[i], "j", j, "nonce[j]", nonces[j])
+			for k := i - 10; k <= i+10; k++ {
+				if k >= 0 && k < len(nonces) {
+					log.Error("Nonce debug", "i", k, "nonce", nonces[k])
+				}
+			}
+		}
+		return notSorted
+	}) {
+		panic("nonces are not sorted")
 	}
-
-	y.lastYieldIndex = -1 // reset the last yielded index as we have new transactions
 }
 
 func (y *PoolTransactionYielder) refreshPoolTransactions(executionAt, forkId uint64) ([]common.Hash, [][]byte, error) {
@@ -236,7 +244,9 @@ func (y *PoolTransactionYielder) refreshPoolTransactions(executionAt, forkId uin
 	defer ti.LogTimer()
 
 	y.pool.PreYield()
-	defer y.pool.PostYield()
+	defer func() {
+		y.pool.PostYield()
+	}()
 
 	var ids []common.Hash
 	var txBytes [][]byte
@@ -309,12 +319,12 @@ func (l *LimboTransactionYielder) SetExecutionDetails(_, _ uint64) {
 	// LimboTransactionYielder does not use executionAt and forkId, so this method can be empty
 }
 
-func (l *LimboTransactionYielder) BeginYielding() {
-	// do nothing
-}
-
 func (l *LimboTransactionYielder) Cleanup() {
 	// LimboTransactionYielder does not maintain any state that needs cleanup
+}
+
+func (l *LimboTransactionYielder) Requeue(tx types.Transaction) {
+	// do nothing
 }
 
 type RecoveryTransactionYielder struct {
@@ -362,10 +372,6 @@ func (d *RecoveryTransactionYielder) SetExecutionDetails(_, _ uint64) {
 	// RecoveryTransactionYielder does not use executionAt and forkId, so this method can be empty
 }
 
-func (d *RecoveryTransactionYielder) BeginYielding() {
+func (d *RecoveryTransactionYielder) Requeue(tx types.Transaction) {
 	// do nothing
-}
-
-func (d *RecoveryTransactionYielder) Cleanup() {
-	// RecoveryTransactionYielder does not maintain any state that needs cleanup
 }

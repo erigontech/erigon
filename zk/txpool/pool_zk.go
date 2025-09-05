@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon-lib/types"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/zk/utils"
 	"github.com/holiman/uint256"
 )
@@ -155,7 +154,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 
 // zk: the implementation of best here is changed only to not take into account block gas limits as we don't care about
 // these in zk.  Instead we do a quick check on the transaction maximum gas in zk
-func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, int, error) {
+func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, yield bool) (bool, int, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -189,6 +188,11 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 
 		mt := best.ms[i]
 		// p.Trace("Processing transaction", "txID", mt.Tx.IDHash)
+
+		// Skip txs that are already yielded
+		if _, ok := p.yielded[string(mt.Tx.IDHash[:])]; ok {
+			continue
+		}
 
 		if !isLondon && mt.Tx.Type == 0x2 {
 			// remove ldn txs when not in london
@@ -245,6 +249,10 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		txs.TxIds[count] = mt.Tx.IDHash
 		copy(txs.Senders.At(count), sender.Bytes())
 		txs.IsLocal[count] = isLocal
+
+		if yield {
+			p.yielded[string(mt.Tx.IDHash[:])] = struct{}{}
+		}
 		count++
 	}
 
@@ -256,6 +264,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			log.Debug("Removed transaction from pending pool", "txID", mt.Tx.IDHash)
 		}
 	}
+
 	return true, count, nil
 }
 
@@ -356,7 +365,7 @@ func (p *TxPool) StartIfNotStarted(ctx context.Context, txPoolDb kv.RoDB, coreTx
 	return nil
 }
 
-func markAsLocal(txSlots *types2.TxSlots) {
+func markAsLocal(txSlots *types.TxSlots) {
 	for i := range txSlots.IsLocal {
 		txSlots.IsLocal[i] = true
 	}
@@ -402,6 +411,8 @@ func (p *TxPool) MoveFromPendingToQueued(toMove map[common.Address][]uint64) {
 				if mt.Tx.Nonce >= lowestNonce {
 					p.pending.Remove(mt)
 					p.queued.Add(mt)
+
+					delete(p.yielded, string(mt.Tx.IDHash[:]))
 				}
 			}
 			return true
