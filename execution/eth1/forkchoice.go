@@ -33,11 +33,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/consensuschain"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -76,7 +74,7 @@ func isDomainAheadOfBlocks(tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := state.NewSharedDomains(tx, logger)
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err)
-		return errors.Is(err, commitmentdb.ErrBehindCommitment)
+		return errors.Is(err, state.ErrBehindCommitment)
 	}
 	defer doms.Close()
 	return false
@@ -169,6 +167,10 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 	}
 	rawdb.WriteHeadBlockHash(tx, blockHash)
 	rawdb.WriteForkchoiceHead(tx, blockHash)
+}
+
+func minUnwindableBlock(tx kv.TemporalTx, number uint64) (uint64, error) {
+	return tx.Debug().CanUnwindToBlockNum()
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) {
@@ -326,7 +328,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 
 		unwindTarget := currentParentNumber
-		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+		minUnwindableBlock, err := minUnwindableBlock(tx, unwindTarget)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return

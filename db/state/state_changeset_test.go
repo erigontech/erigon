@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package changeset_test
+package state
 
 import (
 	"context"
@@ -23,35 +23,26 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
-func TestNoOverflowPages(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	t.Cleanup(db.Close)
-
+func TestOverflowPages(t *testing.T) {
+	db, _ := testDbAndAggregatorv3(t, 10)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	k, v := make([]byte, changeset.DiffChunkKeyLen), make([]byte, changeset.DiffChunkLen)
+	k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
 	k[0] = 0
 	_ = tx.Put(kv.ChangeSets3, k, v)
 	k[0] = 1
 	_ = tx.Put(kv.ChangeSets3, k, v)
 	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
 	require.NoError(t, err)
-
-	// no ofverflow pages: no problems with FreeList maintainance costs
-	require.Equal(t, 0, int(st.OverflowPages))
+	require.Equal(t, 2, int(st.OverflowPages))
 	require.Equal(t, 1, int(st.LeafPages))
+	require.Equal(t, 2, int(st.Entries))
 	require.Equal(t, 2, int(st.Entries))
 }
 
@@ -65,9 +56,9 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
 	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step1[:]})
 
-	serialized := changeset.SerializeDiffSet(d, nil)
+	serialized := SerializeDiffSet(d, nil)
 	fmt.Println(len(serialized))
-	deserialized := changeset.DeserializeDiffSet(serialized)
+	deserialized := DeserializeDiffSet(serialized)
 
 	require.Equal(t, d, deserialized)
 }
@@ -87,7 +78,7 @@ func TestMergeDiffSet(t *testing.T) {
 	d2 = append(d2, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value6"), PrevStepBytes: step6[:]})
 	d2 = append(d2, kv.DomainEntryDiff{Key: "key488888888", Value: []byte("value4"), PrevStepBytes: step4[:]})
 
-	merged := changeset.MergeDiffSets(d1, d2)
+	merged := MergeDiffSets(d1, d2)
 	require.Len(t, merged, 4)
 
 	require.Equal(t, d2[0], merged[0])

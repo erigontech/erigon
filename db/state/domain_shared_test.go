@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/changeset"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -56,7 +55,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	stateChangeset := &changeset.StateChangeSet{}
+	stateChangeset := &state.StateChangeSet{}
 	domains.SetChangesetAccumulator(stateChangeset)
 
 	maxTx := stepSize

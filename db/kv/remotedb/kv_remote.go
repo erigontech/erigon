@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -239,10 +238,13 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo { panic("not implemented") }
-
+func (tx *tx) AggTx() any                           { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx            { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo            { panic("not implemented") }
+func (tx *tx) CanUnwindToBlockNum() (uint64, error) { panic("not implemented") }
+func (tx *tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
+	panic("not implemented")
+}
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
 func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }
@@ -257,7 +259,6 @@ func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.
 	panic("not implemented")
 }
 func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
-func (tx *tx) Dirs() datadir.Dirs                                   { panic("not implemented") }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { panic("not implemented") }

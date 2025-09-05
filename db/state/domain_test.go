@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
@@ -2065,7 +2064,7 @@ func TestDomain_Unwind(t *testing.T) {
 			fmt.Println(currTx)
 			for currentTxNum := currTx - 1; currentTxNum >= unwindTo; currentTxNum-- {
 				d := diffSetMap[currentTxNum]
-				totalDiff = changeset.MergeDiffSets(totalDiff, d)
+				totalDiff = MergeDiffSets(totalDiff, d)
 			}
 		}
 

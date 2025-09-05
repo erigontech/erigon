@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -225,7 +224,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 // by that key stored latest root hash and tree state
 const keyCommitmentStateS = "state"
 
-var KeyCommitmentState = []byte(keyCommitmentStateS)
+var keyCommitmentState = []byte(keyCommitmentStateS)
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -246,7 +245,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, keyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
 		rootInFiles, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
@@ -460,8 +459,8 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err := state.NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	changesetAt5 := &changeset.StateChangeSet{}
-	changesetAt3 := &changeset.StateChangeSet{}
+	changesetAt5 := &state.StateChangeSet{}
+	changesetAt3 := &state.StateChangeSet{}
 
 	keys, vals := generateInputData(t, 20, 4, 10)
 	keys = keys[:2]

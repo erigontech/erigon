@@ -14,14 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package changeset
+package state
 
 import (
 	"encoding/binary"
 	"math"
 	"strings"
 	"sync"
-	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -193,8 +192,8 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 	return ret
 }
 
-const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
+const diffChunkKeyLen = 48
+const diffChunkLen = 4*1024 - 32
 
 type threadSafeBuf struct {
 	b []byte
@@ -209,7 +208,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	writeDiffsetBuf.b = diffSet.SerializeKeys(writeDiffsetBuf.b[:0])
 	keys := writeDiffsetBuf.b
 
-	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
+	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
 	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
@@ -218,10 +217,10 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 		return err
 	}
 
-	key := make([]byte, DiffChunkKeyLen)
+	key := make([]byte, diffChunkKeyLen)
 	for i := 0; i < chunkCount; i++ {
-		start := i * DiffChunkLen
-		end := (i + 1) * DiffChunkLen
+		start := i * diffChunkLen
+		end := (i + 1) * diffChunkLen
 		if end > len(keys) {
 			end = len(keys)
 		}
@@ -251,7 +250,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
+	val := make([]byte, 0, diffChunkLen*chunkCount)
 	for i := uint64(0); i < chunkCount; i++ {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
@@ -268,8 +267,8 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	return DeserializeKeys(val), true, nil
 }
+
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
-	//TODO: move this function somewhere from `commitment`/`state` pkg
 	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
 	if err != nil {
 		return 0, err
@@ -305,11 +304,3 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	return blockNumber, nil
 
 }
-func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
-}
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
