@@ -41,7 +41,7 @@ func TestOverflowPages(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	k, v := make([]byte, changeset.DiffChunkKeyLen), make([]byte, changeset.DiffChunkKeyLen)
+	k, v := make([]byte, changeset.DiffChunkKeyLen), make([]byte, changeset.DiffChunkLen)
 	k[0] = 0
 	_ = tx.Put(kv.ChangeSets3, k, v)
 	k[0] = 1
