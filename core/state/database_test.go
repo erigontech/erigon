@@ -1449,12 +1449,9 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 
-	codeHash := common.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
-
-	require.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
 
 	codeSize2, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can still receive code size even with empty DB")

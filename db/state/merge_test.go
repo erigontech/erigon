@@ -870,7 +870,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, _ := newAggregatorOld(context.Background(), dirs, 1, db, logger)
+	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
 	setup := func() (account *Domain) {
 		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
 		domain := agg.d[kv.AccountsDomain]
