@@ -44,9 +44,9 @@ jobs:
         run: |
           make clean
 
-      - name: Build Erigon RPCDaemon
+      - name: Build Erigon RPCDaemon and integration
         run: |
-          make rpcdaemon
+          make rpcdaemon integration
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
@@ -59,6 +59,12 @@ jobs:
           rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
           echo "Backup chaindata"
           cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+
+      - name: Run Migrations
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          echo "Running migrations on datadir..."
+          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
 
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
