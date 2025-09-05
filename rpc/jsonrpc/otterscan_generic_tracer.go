@@ -46,7 +46,7 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 		log.Warn("[rpc] header is nil", "blockNum", blockNum)
 		return nil
 	}
-	executor.ChangeBlock(header)
+	executor.ChangeBlock(ctx, header)
 
 	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 	if err != nil {
