@@ -52,6 +52,19 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
+func (tx *ArbitrumLegacyTxData) Unwrap() Transaction {
+	return tx
+}
+
+func (tx *ArbitrumLegacyTxData) MarshalBinary(w io.Writer) error {
+	// Write type byte first
+	if _, err := w.Write([]byte{ArbitrumLegacyTxType}); err != nil {
+		return err
+	}
+	// Then encode the RLP payload
+	return tx.EncodeRLP(w)
+}
+
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
 	legacy := bytes.NewBuffer(nil)
 	if err := tx.LegacyTx.EncodeRLP(legacy); err != nil {
@@ -94,22 +107,8 @@ func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// if err := rlp.DecodeBytes(temp.LegacyTxBytes, &legacyTx); err != nil {
-	// 	return err
-	// }
+	tx.LegacyTx = legacyTx
 
-	// Copy the decoded legacy fields to the transaction
-	tx.Nonce = legacyTx.Nonce
-	tx.GasPrice = legacyTx.GasPrice
-	tx.GasLimit = legacyTx.GasLimit
-	tx.To = legacyTx.To
-	tx.Value = legacyTx.Value
-	tx.Data = legacyTx.Data
-	tx.V = legacyTx.V
-	tx.R = legacyTx.R
-	tx.S = legacyTx.S
-
-	// Copy Arbitrum-specific fields
 	tx.HashOverride = temp.HashOverride
 	tx.EffectiveGasPrice = temp.EffectiveGasPrice
 	tx.L1BlockNumber = temp.L1BlockNumber

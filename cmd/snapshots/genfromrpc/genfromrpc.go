@@ -348,19 +348,24 @@ func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interfa
 	}
 	if l1BlockNum, ok := rawTx["l1BlockNumber"].(string); ok {
 		tx.L1BlockNumber = convertHexToBigInt(l1BlockNum).Uint64()
-	} else {
-		if l1BlockNum, ok := rawTx["blockNumber"].(string); ok {
-			tx.L1BlockNumber = convertHexToBigInt(l1BlockNum).Uint64()
-		}
+		// } else {
+		// 	if l1BlockNum, ok := rawTx["blockNumber"].(string); ok {
+		// 		tx.L1BlockNumber = convertHexToBigInt(l1BlockNum).Uint64()
+		// 	}
 	}
 	if effectiveGasPrice, ok := rawTx["effectiveGasPrice"].(string); ok {
 		tx.EffectiveGasPrice = uint256.MustFromHex(effectiveGasPrice).Uint64()
 	}
+	// if hashOverride, ok := rawTx["hashOverride"].(string); ok {
+	// 	tx.HashOverride = common.HexToHash(hashOverride)
+	// }
 	if hashOverride, ok := rawTx["hash"].(string); ok {
 		tx.HashOverride = common.HexToHash(hashOverride)
 	}
-	sender, _ := commonTx.GetSender()
-	tx.OverrideSender = &sender
+	sender, ok := commonTx.GetSender()
+	if ok {
+		tx.OverrideSender = &sender
+	}
 
 	// return types.NewArbitrumLegacyTx(&types.LegacyTx{CommonTx: *commonTx, GasPrice: tx.GasPrice}, tx.HashOverride, tx.EffectiveGasPrice, tx.L1BlockNumber, tx.OverrideSender)
 	return tx
