@@ -1191,16 +1191,24 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
-	updateCount := sdc.updates.Size()
+	updatesCount := sdc.updates.Size()
 	if sdc.sharedDomains.trace {
-		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
+		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updatesCount, "mode", sdc.updates.Mode())
 	}
-	if updateCount == 0 {
+	if updatesCount == 0 {
+		// return sdc.patriciaTrie.RootHash()
 		rootHash, err = sdc.patriciaTrie.RootHash()
+		if err != nil {
+			return nil, err
+		}
+		if saveState {
+			if err := sdc.storeCommitmentState(blockNum, rootHash); err != nil {
+				return nil, err
+			}
+		}
 		return rootHash, err
 	}
 
-	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
 
@@ -1237,8 +1245,8 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	// state could be equal but txnum/blocknum could be different.
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
-		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",
-		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
+		fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",
+			binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), sdc.sharedDomains.TxNum(), blockNum, rootHash)
 		return nil
 	}
 	if sdc.sharedDomains.trace {
