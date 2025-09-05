@@ -174,11 +174,11 @@ func (ms *MockSentry) PenalizePeer(context.Context, *sentryproto.PenalizePeerReq
 	return nil, nil
 }
 
-func (ms *MockSentry) SetPeerMinimumBlock(context.Context, *proto_sentry.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
+func (ms *MockSentry) SetPeerMinimumBlock(context.Context, *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *MockSentry) SetPeerLatestBlock(context.Context, *proto_sentry.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
+func (ms *MockSentry) SetPeerLatestBlock(context.Context, *sentryproto.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 

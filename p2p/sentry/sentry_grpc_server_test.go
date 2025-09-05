@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/p2p"
@@ -31,8 +32,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Handles RLP encoding/decoding for p2p.Msg
@@ -168,12 +167,12 @@ func (m *MockPeer) Disconnect(reason *p2p.PeerError) {
 	// No-op for mock
 }
 
-func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficulty *big.Int, genesisHash common.Hash, earliestBlockHeight uint64, maxBlockHeight uint64) *proto_sentry.StatusData {
-	return &proto_sentry.StatusData{
+func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficulty *big.Int, genesisHash common.Hash, earliestBlockHeight uint64, maxBlockHeight uint64) *sentryproto.StatusData {
+	return &sentryproto.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromBig(totalDifficulty)),
 		BestHash:        gointerfaces.ConvertHashToH256(bestHash),
-		ForkData: &proto_sentry.Forks{
+		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(genesisHash),
 			HeightForks: []uint64{},
 			TimeForks:   []uint64{},
@@ -409,7 +408,7 @@ func (rw *RLPReadWriter) ReadAllWritten() []byte {
 
 // SimulatePeer simulates a peer's behavior in a handshake.
 // It sends its status and then waits to receive the other peer's status.
-func SimulatePeer(ctx context.Context, rw *RLPReadWriter, ownStatus *proto_sentry.StatusData, ownProtocol uint, expectedMinProtocol uint, isETH69 bool) (*common.Hash, *p2p.PeerError) {
+func SimulatePeer(ctx context.Context, rw *RLPReadWriter, ownStatus *sentryproto.StatusData, ownProtocol uint, expectedMinProtocol uint, isETH69 bool) (*common.Hash, *p2p.PeerError) {
 	// Send own status
 	go func() {
 		defer func() {
