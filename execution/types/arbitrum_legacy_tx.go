@@ -52,6 +52,10 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
+func (tx *ArbitrumLegacyTxData) Unwrap() Transaction {
+	return tx
+}
+
 func (tx *ArbitrumLegacyTxData) Hash() common.Hash {
 	if tx.HashOverride != (common.Hash{}) {
 		return tx.HashOverride
@@ -60,60 +64,120 @@ func (tx *ArbitrumLegacyTxData) Hash() common.Hash {
 }
 
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
-	w.Write([]byte{ArbitrumLegacyTxType}) // Write the type prefix
+	if _, err := w.Write([]byte{ArbitrumLegacyTxType}); err != nil {
+		return err
+	}
 
 	legacy := bytes.NewBuffer(nil)
 	if err := tx.LegacyTx.EncodeRLP(legacy); err != nil {
 		return err
 	}
+	legacyBytes := legacy.Bytes()
 
-	// Then encode the entire structure with LegacyTx as an encapsulated byte slice
-	return rlp.Encode(w, struct {
-		LegacyTxBytes     []byte // Encapsulated RLP-encoded LegacyTx fields
-		HashOverride      common.Hash
-		EffectiveGasPrice uint64
-		L1BlockNumber     uint64
-		OverrideSender    *common.Address `rlp:"nil"`
-	}{
-		LegacyTxBytes:     legacy.Bytes(),
-		HashOverride:      tx.HashOverride,
-		EffectiveGasPrice: tx.EffectiveGasPrice,
-		L1BlockNumber:     tx.L1BlockNumber,
-		OverrideSender:    tx.OverrideSender,
-	})
-}
+	payloadSize := rlp.StringLen(legacyBytes)                        // embedded LegacyTx RLP
+	payloadSize += 1 + 32                                            // HashOverride (1 byte length + 32 bytes hash)
+	payloadSize += 1 + rlp.IntLenExcludingHead(tx.EffectiveGasPrice) // EffectiveGasPrice
+	payloadSize += 1 + rlp.IntLenExcludingHead(tx.L1BlockNumber)     // L1BlockNumber
 
-func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
-	// Decode into a temporary struct with LegacyTx as bytes
-	var temp struct {
-		LegacyTxBytes     []byte
-		HashOverride      common.Hash
-		EffectiveGasPrice uint64
-		L1BlockNumber     uint64
-		OverrideSender    *common.Address `rlp:"nil"`
+	if tx.OverrideSender == nil {
+		payloadSize += 1 // empty OverrideSender
+	} else {
+		payloadSize += 1 + 20 // OverrideSender (1 byte length + 20 bytes address)
 	}
 
-	if err := s.Decode(&temp); err != nil {
+	b := make([]byte, 10)
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
-	legacyTx := &LegacyTx{}
-	str := rlp.NewStream(bytes.NewReader(temp.LegacyTxBytes), uint64(len(temp.LegacyTxBytes)))
-	if err := legacyTx.DecodeRLP(str); err != nil {
+	if err := rlp.EncodeString(legacyBytes, w, b); err != nil {
 		return err
 	}
 
-	tx.LegacyTx = legacyTx
+	b[0] = 128 + 32
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(tx.HashOverride[:]); err != nil {
+		return err
+	}
 
-	tx.HashOverride = temp.HashOverride
-	tx.EffectiveGasPrice = temp.EffectiveGasPrice
-	tx.L1BlockNumber = temp.L1BlockNumber
-	tx.OverrideSender = temp.OverrideSender
+	if err := rlp.EncodeInt(tx.EffectiveGasPrice, w, b); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeInt(tx.L1BlockNumber, w, b); err != nil {
+		return err
+	}
+
+	if tx.OverrideSender == nil {
+		b[0] = 0x80
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+	} else {
+		b[0] = 128 + 20
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(tx.OverrideSender[:]); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
 
-// arbitrumLegacyTxJSON represents the JSON structure for ArbitrumLegacyTxData
+func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+
+	legacyBytes, err := s.Bytes()
+	if err != nil {
+		return err
+	}
+
+	legacyTx := &LegacyTx{}
+	str := rlp.NewStream(bytes.NewReader(legacyBytes), uint64(len(legacyBytes)))
+	if err := legacyTx.DecodeRLP(str); err != nil {
+		return err
+	}
+	tx.LegacyTx = legacyTx
+
+	var hash common.Hash
+	if err := s.Decode(&hash); err != nil {
+		return err
+	}
+	tx.HashOverride = hash
+
+	var effectiveGasPrice uint64
+	if err := s.Decode(&effectiveGasPrice); err != nil {
+		return err
+	}
+	tx.EffectiveGasPrice = effectiveGasPrice
+
+	var l1BlockNumber uint64
+	if err := s.Decode(&l1BlockNumber); err != nil {
+		return err
+	}
+	tx.L1BlockNumber = l1BlockNumber
+
+	var sender common.Address
+	if err := s.Decode(&sender); err != nil {
+		if err.Error() == "rlp: input string too short for common.Address" {
+			tx.OverrideSender = nil
+		} else {
+			return err
+		}
+	} else if sender != (common.Address{}) {
+		tx.OverrideSender = &sender
+	}
+
+	return s.ListEnd()
+}
+
 type arbitrumLegacyTxJSON struct {
 	Type              hexutil.Uint64  `json:"type"`
 	Hash              common.Hash     `json:"hash"`

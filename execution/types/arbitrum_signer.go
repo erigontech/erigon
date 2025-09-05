@@ -52,6 +52,9 @@ func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
 		if inner.OverrideSender != nil {
 			return *inner.OverrideSender, nil
 		}
+		if inner.LegacyTx.V.IsZero() && inner.LegacyTx.R.IsZero() && inner.LegacyTx.S.IsZero() {
+			return common.Address{}, nil
+		}
 		return s.Signer.Sender(inner.LegacyTx)
 	default:
 		return s.Signer.Sender(tx)

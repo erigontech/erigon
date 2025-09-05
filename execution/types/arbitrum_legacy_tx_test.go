@@ -11,11 +11,8 @@ import (
 )
 
 func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
-	// Create a sample address
 	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
 	senderOverride := common.HexToAddress("0x1234567890123456789012345678901234567890")
-
-	// Create a LegacyTx with test data
 	legacyTx := &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce:    42,
@@ -30,7 +27,6 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 		GasPrice: uint256.NewInt(20000000000), // 20 gwei
 	}
 
-	// Create ArbitrumLegacyTxData
 	arbLegacyTx := &ArbitrumLegacyTxData{
 		LegacyTx:          legacyTx,
 		HashOverride:      common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"),
@@ -40,24 +36,19 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 	}
 
 	t.Run("RLP Encode and Decode from bytes", func(t *testing.T) {
-		// Test using MarshalBinary which includes type byte
 		var buf bytes.Buffer
-		err := arbLegacyTx.MarshalBinary(&buf)
+		err := arbLegacyTx.EncodeRLP(&buf)
 		require.NoError(t, err)
 
 		encodedBytes := buf.Bytes()
-		
-		// Verify the first byte is the type
 		require.Equal(t, ArbitrumLegacyTxType, encodedBytes[0])
 
-		// Decode from bytes (skip the type byte)
 		decodedTx := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
-		err = rlp.DecodeBytes(encodedBytes[1:], decodedTx)
+		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
+		err = decodedTx.DecodeRLP(stream)
 		require.NoError(t, err)
-
-		// Verify all fields match
 		require.Equal(t, arbLegacyTx.Nonce, decodedTx.Nonce)
 		require.Equal(t, arbLegacyTx.GasLimit, decodedTx.GasLimit)
 		require.Equal(t, arbLegacyTx.To, decodedTx.To)
@@ -73,23 +64,20 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 		require.Equal(t, arbLegacyTx.OverrideSender, decodedTx.OverrideSender)
 	})
 
-	t.Run("RLP Decode from Stream without type byte", func(t *testing.T) {
-		// Encode to RLP bytes first (without type byte)
+	t.Run("RLP Decode from Stream", func(t *testing.T) {
 		var buf bytes.Buffer
 		err := arbLegacyTx.EncodeRLP(&buf)
 		require.NoError(t, err)
 
-		// Create RLP stream
-		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), uint64(buf.Len()))
+		encodedBytes := buf.Bytes()
+		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
 
-		// Decode from stream
 		decodedTx := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
 		err = decodedTx.DecodeRLP(stream)
 		require.NoError(t, err)
 
-		// Verify all fields match
 		require.Equal(t, arbLegacyTx.Nonce, decodedTx.Nonce)
 		require.Equal(t, arbLegacyTx.GasLimit, decodedTx.GasLimit)
 		require.Equal(t, arbLegacyTx.To, decodedTx.To)
@@ -106,7 +94,6 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 	})
 
 	t.Run("RLP with nil OverrideSender", func(t *testing.T) {
-		// Create ArbitrumLegacyTxData without OverrideSender
 		arbLegacyTxNoSender := &ArbitrumLegacyTxData{
 			LegacyTx:          legacyTx,
 			HashOverride:      common.HexToHash("0xdeadbeef"),
@@ -115,20 +102,17 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 			OverrideSender:    nil,
 		}
 
-		// Encode
 		var buf bytes.Buffer
 		err := arbLegacyTxNoSender.EncodeRLP(&buf)
 		require.NoError(t, err)
 
-		// Decode
 		decodedTx := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
-		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), uint64(buf.Len()))
+		encodedBytes := buf.Bytes()
+		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
 		err = decodedTx.DecodeRLP(stream)
 		require.NoError(t, err)
-
-		// Verify OverrideSender is nil
 		require.Nil(t, decodedTx.OverrideSender)
 		require.Equal(t, arbLegacyTxNoSender.HashOverride, decodedTx.HashOverride)
 		require.Equal(t, arbLegacyTxNoSender.EffectiveGasPrice, decodedTx.EffectiveGasPrice)
@@ -136,34 +120,30 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 	})
 
 	t.Run("Type byte verification", func(t *testing.T) {
-		// Verify Type() method returns correct value
 		require.Equal(t, ArbitrumLegacyTxType, arbLegacyTx.Type())
-		
-		// Test MarshalBinary writes type byte as first byte
-		var buf bytes.Buffer
-		err := arbLegacyTx.MarshalBinary(&buf)
-		require.NoError(t, err)
-		
-		bytes := buf.Bytes()
-		require.Greater(t, len(bytes), 0, "encoded bytes should not be empty")
-		require.Equal(t, ArbitrumLegacyTxType, bytes[0], "first byte should be the transaction type")
-	})
 
-	t.Run("LegacyTx embedding verification", func(t *testing.T) {
-		// Test that LegacyTx fields are properly embedded during encoding
 		var buf bytes.Buffer
 		err := arbLegacyTx.EncodeRLP(&buf)
 		require.NoError(t, err)
 
-		// Decode and verify that the LegacyTx data is properly reconstructed
+		bytes := buf.Bytes()
+		require.Greater(t, len(bytes), 0)
+		require.Equal(t, ArbitrumLegacyTxType, bytes[0])
+	})
+
+	t.Run("LegacyTx embedding verification", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := arbLegacyTx.EncodeRLP(&buf)
+		require.NoError(t, err)
+
 		decodedTx := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
-		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), uint64(buf.Len()))
+		encodedBytes := buf.Bytes()
+		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
 		err = decodedTx.DecodeRLP(stream)
 		require.NoError(t, err)
 
-		// Verify LegacyTx is not nil and has correct data
 		require.NotNil(t, decodedTx.LegacyTx)
 		require.Equal(t, legacyTx.Nonce, decodedTx.LegacyTx.Nonce)
 		require.True(t, legacyTx.GasPrice.Eq(decodedTx.LegacyTx.GasPrice))
@@ -172,14 +152,13 @@ func TestArbitrumLegacyTxData_RLPEncodeDecode(t *testing.T) {
 
 func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 	t.Run("Contract creation transaction", func(t *testing.T) {
-		// Test with nil To address (contract creation)
 		legacyTx := &LegacyTx{
 			CommonTx: CommonTx{
 				Nonce:    1,
 				GasLimit: 1000000,
 				To:       nil, // Contract creation
 				Value:    uint256.NewInt(0),
-				Data:     []byte{0x60, 0x80, 0x60, 0x40}, // Sample bytecode
+				Data:     []byte{0x60, 0x80, 0x60, 0x40},
 				V:        *uint256.NewInt(27),
 				R:        *uint256.NewInt(1),
 				S:        *uint256.NewInt(2),
@@ -195,37 +174,34 @@ func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 			OverrideSender:    nil,
 		}
 
-		// Encode
 		var buf bytes.Buffer
 		err := arbLegacyTx.EncodeRLP(&buf)
 		require.NoError(t, err)
 
-		// Decode
 		decodedTx := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
-		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), uint64(buf.Len()))
+		encodedBytes := buf.Bytes()
+		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
 		err = decodedTx.DecodeRLP(stream)
 		require.NoError(t, err)
 
-		// Verify
 		require.Nil(t, decodedTx.To)
 		require.Equal(t, arbLegacyTx.Data, decodedTx.Data)
 	})
 
 	t.Run("Large values", func(t *testing.T) {
-		// Test with large uint256 values
 		maxUint256 := new(uint256.Int)
 		maxUint256.SetAllOne()
 
 		to := common.HexToAddress("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
 		legacyTx := &LegacyTx{
 			CommonTx: CommonTx{
-				Nonce:    ^uint64(0), // Max uint64
+				Nonce:    ^uint64(0),
 				GasLimit: ^uint64(0),
 				To:       &to,
 				Value:    maxUint256,
-				Data:     make([]byte, 1000), // Large data
+				Data:     make([]byte, 1000),
 				V:        *maxUint256,
 				R:        *maxUint256,
 				S:        *maxUint256,
@@ -241,20 +217,18 @@ func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 			OverrideSender:    &to,
 		}
 
-		// Encode
 		var buf bytes.Buffer
 		err := arbLegacyTx.EncodeRLP(&buf)
 		require.NoError(t, err)
 
-		// Decode
 		decodedTx := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
-		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), uint64(buf.Len()))
+		encodedBytes := buf.Bytes()
+		stream := rlp.NewStream(bytes.NewReader(encodedBytes[1:]), uint64(len(encodedBytes)-1))
 		err = decodedTx.DecodeRLP(stream)
 		require.NoError(t, err)
 
-		// Verify large values are preserved
 		require.Equal(t, arbLegacyTx.Nonce, decodedTx.Nonce)
 		require.Equal(t, arbLegacyTx.GasLimit, decodedTx.GasLimit)
 		require.True(t, arbLegacyTx.Value.Eq(decodedTx.Value))
@@ -264,7 +238,6 @@ func TestArbitrumLegacyTxData_ComplexScenarios(t *testing.T) {
 }
 
 func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
-	// Create test data
 	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
 	legacyTx := &LegacyTx{
 		CommonTx: CommonTx{
@@ -288,78 +261,54 @@ func TestArbitrumLegacyTxData_TypeByteHandling(t *testing.T) {
 		OverrideSender:    nil,
 	}
 
-	t.Run("MarshalBinary writes type byte first", func(t *testing.T) {
+	t.Run("EncodeRLP writes type byte first", func(t *testing.T) {
 		var buf bytes.Buffer
-		err := arbLegacyTx.MarshalBinary(&buf)
+		err := arbLegacyTx.EncodeRLP(&buf)
 		require.NoError(t, err)
-		
+
 		encoded := buf.Bytes()
 		require.Greater(t, len(encoded), 1)
 		require.Equal(t, ArbitrumLegacyTxType, encoded[0])
-		
-		// Decode without type byte
+
 		decoded := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
-		err = rlp.DecodeBytes(encoded[1:], decoded)
+		stream := rlp.NewStream(bytes.NewReader(encoded[1:]), uint64(len(encoded)-1))
+		err = decoded.DecodeRLP(stream)
 		require.NoError(t, err)
-		
-		// Verify data integrity
+
 		require.Equal(t, arbLegacyTx.HashOverride, decoded.HashOverride)
 		require.Equal(t, arbLegacyTx.EffectiveGasPrice, decoded.EffectiveGasPrice)
 		require.Equal(t, arbLegacyTx.L1BlockNumber, decoded.L1BlockNumber)
 		require.Equal(t, arbLegacyTx.Nonce, decoded.Nonce)
 	})
 
-	t.Run("EncodeRLP does not write type byte", func(t *testing.T) {
+	t.Run("Round-trip with type byte", func(t *testing.T) {
 		var buf bytes.Buffer
 		err := arbLegacyTx.EncodeRLP(&buf)
 		require.NoError(t, err)
-		
+
 		encoded := buf.Bytes()
-		// First byte should NOT be the type byte - it should be RLP list prefix
-		require.NotEqual(t, ArbitrumLegacyTxType, encoded[0])
-		
-		// Should be able to decode directly with DecodeRLP
+		require.Equal(t, ArbitrumLegacyTxType, encoded[0])
+
+		// Decode skipping type byte
 		decoded := &ArbitrumLegacyTxData{
 			LegacyTx: &LegacyTx{},
 		}
-		stream := rlp.NewStream(bytes.NewReader(encoded), uint64(len(encoded)))
+		stream := rlp.NewStream(bytes.NewReader(encoded[1:]), uint64(len(encoded)-1))
 		err = decoded.DecodeRLP(stream)
 		require.NoError(t, err)
-		
-		// Verify data integrity
-		require.Equal(t, arbLegacyTx.HashOverride, decoded.HashOverride)
-	})
 
-	t.Run("Round-trip with type byte", func(t *testing.T) {
-		// Encode with type byte
-		var buf bytes.Buffer
-		err := arbLegacyTx.MarshalBinary(&buf)
-		require.NoError(t, err)
-		
-		encoded := buf.Bytes()
-		
-		// Manually decode: first byte is type, rest is RLP
-		require.Equal(t, ArbitrumLegacyTxType, encoded[0])
-		
-		decoded := &ArbitrumLegacyTxData{
-			LegacyTx: &LegacyTx{},
-		}
-		err = rlp.DecodeBytes(encoded[1:], decoded)
-		require.NoError(t, err)
-		
 		// Re-encode and compare
 		var buf2 bytes.Buffer
-		err = decoded.MarshalBinary(&buf2)
+		err = decoded.EncodeRLP(&buf2)
 		require.NoError(t, err)
-		
+
 		require.Equal(t, encoded, buf2.Bytes())
 	})
 }
 
 func TestArbitrumLegacyTxData_ArbTxIntegration(t *testing.T) {
-	// Test the integration with ArbTx wrapper
 	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
 
 	legacyTx := &LegacyTx{
@@ -384,28 +333,24 @@ func TestArbitrumLegacyTxData_ArbTxIntegration(t *testing.T) {
 		OverrideSender:    nil,
 	}
 
-	// Wrap in ArbTx
 	arbTx := NewArbTx(arbLegacyTxData)
-
-	// Verify type
 	require.Equal(t, ArbitrumLegacyTxType, arbTx.Type())
 
-	// Encode the full transaction with type byte
+	// Encode using the inner transaction's EncodeRLP (which includes type byte)
 	var buf bytes.Buffer
-	err := arbTx.encodeTyped(&buf)
+	err := arbLegacyTxData.EncodeRLP(&buf)
 	require.NoError(t, err)
 
 	encodedBytes := buf.Bytes()
-	
+
 	// Verify first byte is the type
 	require.Equal(t, ArbitrumLegacyTxType, encodedBytes[0])
 
-	// Decode using ArbTx's decodeTyped
+	// Decode using ArbTx's decodeTyped (skip the type byte)
 	newArbTx := &ArbTx{}
 	decoded, err := newArbTx.decodeTyped(encodedBytes, true)
 	require.NoError(t, err)
 
-	// Cast back to ArbitrumLegacyTxData
 	decodedArbLegacy, ok := decoded.(*ArbitrumLegacyTxData)
 	require.True(t, ok, "Decoded transaction should be ArbitrumLegacyTxData")
 
@@ -415,4 +360,59 @@ func TestArbitrumLegacyTxData_ArbTxIntegration(t *testing.T) {
 	require.Equal(t, arbLegacyTxData.L1BlockNumber, decodedArbLegacy.L1BlockNumber)
 	require.Equal(t, arbLegacyTxData.Nonce, decodedArbLegacy.Nonce)
 	require.Equal(t, arbLegacyTxData.GasLimit, decodedArbLegacy.GasLimit)
+}
+
+func TestArbitrumLegacyTxData_TypeBasedDecodingPattern(t *testing.T) {
+	to := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7")
+	legacyTx := &LegacyTx{
+		CommonTx: CommonTx{
+			Nonce:    42,
+			GasLimit: 50000,
+			To:       &to,
+			Value:    uint256.NewInt(1000000),
+			Data:     []byte{0x01, 0x02, 0x03, 0x04},
+			V:        *uint256.NewInt(28),
+			R:        *uint256.NewInt(100),
+			S:        *uint256.NewInt(200),
+		},
+		GasPrice: uint256.NewInt(20000000000),
+	}
+
+	arbLegacyTx := &ArbitrumLegacyTxData{
+		LegacyTx:          legacyTx,
+		HashOverride:      common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"),
+		EffectiveGasPrice: 15000000000,
+		L1BlockNumber:     1234567,
+		OverrideSender:    nil,
+	}
+
+	var buf bytes.Buffer
+	err := arbLegacyTx.EncodeRLP(&buf)
+	require.NoError(t, err)
+
+	encoded := buf.Bytes()
+	require.Greater(t, len(encoded), 0)
+
+	txType := encoded[0]
+	require.Equal(t, ArbitrumLegacyTxType, txType)
+
+	var decodedTx Transaction
+	switch txType {
+	case ArbitrumLegacyTxType:
+		decodedTx = &ArbitrumLegacyTxData{
+			LegacyTx: &LegacyTx{},
+		}
+	default:
+		t.Fatalf("Unknown transaction type: 0x%x", txType)
+	}
+
+	stream := rlp.NewStream(bytes.NewReader(encoded[1:]), uint64(len(encoded)-1))
+	err = decodedTx.(*ArbitrumLegacyTxData).DecodeRLP(stream)
+	require.NoError(t, err)
+
+	decoded := decodedTx.(*ArbitrumLegacyTxData)
+	require.Equal(t, arbLegacyTx.HashOverride, decoded.HashOverride)
+	require.Equal(t, arbLegacyTx.EffectiveGasPrice, decoded.EffectiveGasPrice)
+	require.Equal(t, arbLegacyTx.L1BlockNumber, decoded.L1BlockNumber)
+	require.Equal(t, arbLegacyTx.Nonce, decoded.Nonce)
 }
