@@ -87,7 +87,7 @@ jobs:
             fi
           }
           run_suite engine exchange-capabilities 0
-          run_suite engine withdrawals 0
+          run_suite engine withdrawals 2
           run_suite engine cancun 0
           run_suite engine api 0
           # run_suite engine auth 0
