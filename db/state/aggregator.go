@@ -1557,8 +1557,8 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-func (at *AggregatorRoTx) DumpStepRangeOnDisk(ctx context.Context, name kv.Domain, stepFrom, stepTo kv.Step, memBatch kv.TemporalMemBatch) error {
-	return at.d[name].d.dumpStepRangeOnDisk(ctx, stepFrom, stepTo, memBatch, nil)
+func (a *Aggregator) DumpStepRangeOnDisk(ctx context.Context, name kv.Domain, stepFrom, stepTo kv.Step, memBatch kv.TemporalMemBatch) error {
+	return a.d[name].dumpStepRangeOnDisk(ctx, stepFrom, stepTo, memBatch, nil)
 }
 
 // Returns channel which is closed when aggregation is done
