@@ -170,8 +170,6 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		return nil, err
 	}
 
-	clear(t.keys)
-
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
