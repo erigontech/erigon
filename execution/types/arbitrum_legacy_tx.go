@@ -52,20 +52,16 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 
 func (tx *ArbitrumLegacyTxData) Type() byte { return ArbitrumLegacyTxType }
 
-func (tx *ArbitrumLegacyTxData) Unwrap() Transaction {
-	return tx
-}
-
-func (tx *ArbitrumLegacyTxData) MarshalBinary(w io.Writer) error {
-	// Write type byte first
-	if _, err := w.Write([]byte{ArbitrumLegacyTxType}); err != nil {
-		return err
+func (tx *ArbitrumLegacyTxData) Hash() common.Hash {
+	if tx.HashOverride != (common.Hash{}) {
+		return tx.HashOverride
 	}
-	// Then encode the RLP payload
-	return tx.EncodeRLP(w)
+	return tx.LegacyTx.Hash()
 }
 
 func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
+	w.Write([]byte{ArbitrumLegacyTxType}) // Write the type prefix
+
 	legacy := bytes.NewBuffer(nil)
 	if err := tx.LegacyTx.EncodeRLP(legacy); err != nil {
 		return err
