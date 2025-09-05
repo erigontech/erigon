@@ -182,7 +182,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
 
-	blobsBundle := &typesproto.BlobsBundleV1{}
+	blobsBundle := &typesproto.BlobsBundle{}
 	for i, txn := range block.Transactions() {
 		if txn.Type() != types.BlobTxType {
 			continue

@@ -243,7 +243,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 	return res
 }
 
-func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundleV1) *BlobsBundle {
+func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundle) *BlobsBundle {
 	if bundle == nil {
 		return nil
 	}
