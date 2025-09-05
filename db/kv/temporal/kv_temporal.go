@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -647,12 +648,15 @@ func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.RwTx)
 }
+
+func (tx *tx) dirs() datadir.Dirs { return tx.aggtx.Dirs() }
+func (tx *Tx) Dirs() uint64       { return tx.stepSize() }
+func (tx *RwTx) Dirs() uint64     { return tx.stepSize() }
+
 func (tx *tx) stepSize() uint64 {
 	return tx.aggtx.StepSize()
 }
-func (tx *Tx) StepSize() uint64 {
-	return tx.stepSize()
-}
+func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
 func (tx *RwTx) StepSize() uint64 {
 	return tx.stepSize()
 }

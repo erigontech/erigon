@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -73,6 +74,9 @@ type SharedDomains struct {
 type HasAgg interface {
 	Agg() any
 }
+type HasDirs interface {
+	Dirs() datadir.Dirs
+}
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
@@ -81,14 +85,14 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		mem: newTemporalMemBatch(tx),
 	}
 	aggTx := AggTx(tx)
-	sd.stepSize = aggTx.StepSize()
+	sd.stepSize = tx.Debug().StepSize()
 
 	tv := commitment.VariantHexPatriciaTrie
 	if statecfg.ExperimentalConcurrentCommitment {
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, aggTx.a.dirs.Tmp)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, aggTx.(HasDirs).Dirs().Tmp)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err

@@ -1762,9 +1762,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-// func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
-// 	return at.d[name].d.maxTxNumInDB(tx)
-// }
+func (at *AggregatorRoTx) Dirs() datadir.Dirs { return at.a.dirs }
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
