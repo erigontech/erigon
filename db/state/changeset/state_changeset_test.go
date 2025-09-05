@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
-func TestOverflowPages(t *testing.T) {
+func TestNoOverflowPages(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	t.Cleanup(db.Close)
@@ -48,8 +48,9 @@ func TestOverflowPages(t *testing.T) {
 	_ = tx.Put(kv.ChangeSets3, k, v)
 	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
 	require.NoError(t, err)
-	// 16 kb
-	require.Equal(t, 0, int(st.OverflowPages)) // no ofverflow pages: no problems with FreeList maintainance costs
+
+	// no ofverflow pages: no problems with FreeList maintainance costs
+	require.Equal(t, 0, int(st.OverflowPages))
 	require.Equal(t, 1, int(st.LeafPages))
 	require.Equal(t, 2, int(st.Entries))
 }
