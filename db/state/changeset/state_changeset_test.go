@@ -49,14 +49,9 @@ func TestOverflowPages(t *testing.T) {
 	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
 	require.NoError(t, err)
 	// 16 kb
-	require.Equal(t, 0, int(st.OverflowPages))
+	require.Equal(t, 0, int(st.OverflowPages)) // no ofverflow pages: no problems with FreeList maintainance costs
 	require.Equal(t, 1, int(st.LeafPages))
 	require.Equal(t, 2, int(st.Entries))
-
-	// 4 kb
-	//require.Equal(t, 2, int(st.OverflowPages))
-	//require.Equal(t, 1, int(st.LeafPages))
-	//require.Equal(t, 2, int(st.Entries))
 }
 
 func TestSerializeDeserializeDiff(t *testing.T) {
