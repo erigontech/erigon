@@ -590,7 +590,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func LatestBlockNumWithCommitment(tx kv.TemporalTx) (uint64, error) {
+func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState)
 	if err != nil {
 		return 0, err
