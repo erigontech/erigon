@@ -205,6 +205,9 @@ func (db *DB) Close() {
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
 }
+func (db *DB) DumpStepRangeOnDisk(ctx context.Context, name kv.Domain, stepFrom, stepTo kv.Step, memBatch kv.TemporalMemBatch) error {
+	return db.stateFiles.DumpStepRangeOnDisk(ctx, name, stepFrom, stepTo, memBatch)
+}
 
 type tx struct {
 	db               *DB
@@ -660,3 +663,7 @@ func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
 func (tx *RwTx) StepSize() uint64 {
 	return tx.stepSize()
 }
+
+func (tx *tx) newMemBatch() kv.TemporalMemBatch   { return tx.aggtx.NewMemBatch() }
+func (tx *Tx) NewMemBatch() kv.TemporalMemBatch   { return tx.newMemBatch() }
+func (tx *RwTx) NewMemBatch() kv.TemporalMemBatch { return tx.newMemBatch() }

@@ -58,6 +58,12 @@ func (l *KvList) Swap(i, j int) {
 	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
+type ITemporalChangeSetsWriter interface {
+	SetChangesetAccumulator(acc *changeset.StateChangeSet)
+	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
+	GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error)
+}
+
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -69,7 +75,7 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	trace    bool //nolint
 
-	mem *TemporalMemBatch
+	mem kv.TemporalMemBatch
 }
 
 type HasAgg interface {
@@ -80,7 +86,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		mem: newTemporalMemBatch(tx),
+		mem: tx.NewMemBatch(),
 	}
 	sd.stepSize = tx.Debug().StepSize()
 
@@ -140,15 +146,15 @@ func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 }
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
-	sd.mem.SetChangesetAccumulator(acc)
+	sd.mem.(ITemporalChangeSetsWriter).SetChangesetAccumulator(acc)
 }
 
 func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
-	sd.mem.SavePastChangesetAccumulator(blockHash, blockNumber, acc)
+	sd.mem.(ITemporalChangeSetsWriter).SavePastChangesetAccumulator(blockHash, blockNumber, acc)
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
-	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
+	return sd.mem.(ITemporalChangeSetsWriter).GetDiffset(tx, blockHash, blockNumber)
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
@@ -357,4 +363,22 @@ func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 		return
 	}
 	sd.mem.DiscardWrites(d)
+}
+
+func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
+	return sd.sdCtx
+}
+
+// SeekCommitment lookups latest available commitment and sets it as current
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
+	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
+	return
 }

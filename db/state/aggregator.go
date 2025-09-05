@@ -1557,6 +1557,10 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
+func (at *AggregatorRoTx) DumpStepRangeOnDisk(ctx context.Context, name kv.Domain, stepFrom, stepTo kv.Step, memBatch kv.TemporalMemBatch) error {
+	return at.d[name].d.dumpStepRangeOnDisk(ctx, stepFrom, stepTo, memBatch, nil)
+}
+
 // Returns channel which is closed when aggregation is done
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
@@ -1732,7 +1736,8 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-func (at *AggregatorRoTx) Dirs() datadir.Dirs { return at.a.dirs }
+func (at *AggregatorRoTx) Dirs() datadir.Dirs               { return at.a.dirs }
+func (at *AggregatorRoTx) NewMemBatch() kv.TemporalMemBatch { return newTemporalMemBatch(at) }
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]

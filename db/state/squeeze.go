@@ -490,7 +490,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				BlockNumber: domains.BlockNum(),
 				TxnNumber:   domains.TxNum(),
 				LogPrefix:   fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
-			})
+			}, rwDb)
 			if err != nil {
 				return nil, err
 			}
@@ -573,8 +573,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
-	aggTx := AggTx(tx)
+func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment, db kv.TemporalRwDB) (*rebuiltCommitment, error) {
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
 	sd.DiscardWrites(kv.CodeDomain)
@@ -604,7 +603,8 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.Tempor
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.mem, nil)
+	//err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.mem, nil)
+	err = db.Debug().DumpStepRangeOnDisk(ctx, kv.CommitmentDomain, cfg.StepFrom, cfg.StepTo, sd.mem)
 	if err != nil {
 		return nil, err
 	}

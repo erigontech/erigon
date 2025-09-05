@@ -53,11 +53,10 @@ type TemporalMemBatch struct {
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
 }
 
-func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
+func newTemporalMemBatch(aggTx *AggregatorRoTx) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 	}
-	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
 
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))

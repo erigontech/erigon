@@ -424,6 +424,22 @@ type TemporalTx interface {
 
 	AggForkablesTx(ForkableId) any // any forkableId, returns that group
 	Unmarked(ForkableId) UnmarkedTx
+
+	NewMemBatch() TemporalMemBatch
+}
+
+type TemporalMemBatch interface {
+	//TODO: re-use TemporalPutDel - but later - bcause here is `string` keys are used to reduce allocations - between MemBatch and Updates
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	GetLatest(table Domain, key []byte) (v []byte, prevStep Step, ok bool)
+	SizeEstimate() uint64
+	ClearRam()
+	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
+	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	Close()
+	Flush(ctx context.Context, tx RwTx) error
+	DiscardWrites(d Domain)
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -455,6 +471,8 @@ type TemporalDebugDB interface {
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+
+	DumpStepRangeOnDisk(ctx context.Context, name Domain, stepFrom, stepTo Step, memBatch TemporalMemBatch) error
 }
 
 type WithFreezeInfo interface {

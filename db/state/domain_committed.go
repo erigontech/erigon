@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -35,24 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
-
-func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
-	return sd.sdCtx
-}
-
-// SeekCommitment lookups latest available commitment and sets it as current
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
-	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
-	return
-}
 
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
 // Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
