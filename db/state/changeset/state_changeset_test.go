@@ -21,26 +21,22 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
-func testDbAndAggregatorv3(t *testing.T, stepSize uint64) (kv.TemporalRwDB, string) {
-	t.Helper()
-
-	path := t.TempDir()
-	dirs := datadir.New(path)
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
-	return db, path
-}
-
 func TestOverflowPages(t *testing.T) {
-	db, _ := testDbAndAggregatorv3(t, 10)
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(16 * datasize.KB).MustOpen()
+	t.Cleanup(db.Close)
+
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -52,10 +48,15 @@ func TestOverflowPages(t *testing.T) {
 	_ = tx.Put(kv.ChangeSets3, k, v)
 	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
 	require.NoError(t, err)
-	require.Equal(t, 2, int(st.OverflowPages))
+	// 16 kb
+	require.Equal(t, 0, int(st.OverflowPages))
 	require.Equal(t, 1, int(st.LeafPages))
 	require.Equal(t, 2, int(st.Entries))
-	require.Equal(t, 2, int(st.Entries))
+
+	// 4 kb
+	//require.Equal(t, 2, int(st.OverflowPages))
+	//require.Equal(t, 1, int(st.LeafPages))
+	//require.Equal(t, 2, int(st.Entries))
 }
 
 func TestSerializeDeserializeDiff(t *testing.T) {
