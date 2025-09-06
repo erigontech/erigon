@@ -187,5 +187,9 @@ func CreateTemp(file string) (*os.File, error) {
 func CreateTempWithExtension(file string, extension string) (*os.File, error) {
 	directory := filepath.Dir(file)
 	filename := filepath.Base(file)
-	return os.CreateTemp(directory, fmt.Sprintf("%s.*.%s", filename, extension))
+	pattern := fmt.Sprintf("%s.*.%s", filename, extension)
+	if !strings.HasSuffix(pattern, ".tmp") {
+		return nil, fmt.Errorf("extension must end with .tmp, erigon cleans these up at restart. pattern: %s", pattern)
+	}
+	return os.CreateTemp(directory, pattern)
 }

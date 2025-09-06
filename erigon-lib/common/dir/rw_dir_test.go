@@ -40,3 +40,24 @@ func Test_CreateTemp(t *testing.T) {
 	base2 := filepath.Base(ogfile)
 	require.True(t, strings.HasPrefix(base1, base2))
 }
+
+func Test_CreateTempWithExt(t *testing.T) {
+	dir := t.TempDir()
+	ogfile := filepath.Join(dir, "hello_world")
+
+	tmpfile, err := CreateTempWithExtension(ogfile, "existence")
+	require.Error(t, err)
+
+	tmpfile, err = CreateTempWithExtension(ogfile, "existence.tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tmpfile.Close()
+	dir1 := filepath.Dir(tmpfile.Name())
+	dir2 := filepath.Dir(ogfile)
+	require.True(t, dir1 == dir2)
+
+	base1 := filepath.Base(tmpfile.Name())
+	base2 := filepath.Base(ogfile)
+	require.True(t, strings.HasPrefix(base1, base2))
+}
