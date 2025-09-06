@@ -95,6 +95,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	d.DisableFsync()
 	return db, d
 }
+
 func TestDomain_CollationBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
