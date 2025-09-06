@@ -217,11 +217,12 @@ var (
 	}
 
 	Olym3TestnetS3 = Spec{
-		Name:        networkname.Olym3TestnetS3,
-		GenesisHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Config:      ReadChainConfig(chainspecs, "chainspecs/olym3-testnet-s3.json"),
-		Genesis:     Olym3TestnetS3GenesisBlock(),
-		DNSNetwork:  dnsPrefix + "all.olym3-testnet-s3.ethdisco.net",
+		Name:             networkname.Olym3TestnetS3,
+		GenesisHash:      common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
+		GenesisStateRoot: common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"),
+		Config:           ReadChainConfig(chainspecs, "chainspecs/olym3-testnet-s3.json"),
+		Genesis:          Olym3TestnetS3GenesisBlock(),
+		DNSNetwork:       dnsPrefix + "all.olym3-testnet-s3.ethdisco.net",
 	}
 )
 
