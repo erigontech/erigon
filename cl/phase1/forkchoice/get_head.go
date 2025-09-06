@@ -108,6 +108,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 // GetHead returns the head of the fork choice store.
 // it can take an optional auxilliary state to determine the current weights instead of computing the justified state.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
+	lowestAvaiableSlot := f.LowestAvailableSlot()
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
 		f.mu.RUnlock()
@@ -130,6 +131,12 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
+
+	// If there is a long period of non-finality, we might lack blocks that are children of the justified checkpoint in memory.
+	if h, has := f.forkGraph.GetHeader(f.headHash); (!has || h.Slot <= lowestAvaiableSlot) && f.probabilisticHeadGetter {
+		f.headHash = f.lastExecutedBlockRoot
+	}
+
 	blocks := f.getFilteredBlockTree(f.headHash)
 	// Do a simple scan to determine the fork votes.
 	votes := f.computeVotes(justifiedCheckpoint, justificationState, auxilliaryState)
