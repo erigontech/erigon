@@ -23,6 +23,7 @@ const (
 	HoodiChainID   = 560048
 	GnosisChainID  = 100
 	ChiadoChainID  = 10200
+	Olym3TestnetS3ChainID = 256003
 )
 
 var NetworkNameByID = make(map[uint64]string)

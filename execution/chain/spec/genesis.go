@@ -62,6 +62,7 @@ var (
 	hoodiChainConfig   = ReadChainConfig(chainspecs, "chainspecs/hoodi.json")
 	gnosisChainConfig  = ReadChainConfig(chainspecs, "chainspecs/gnosis.json")
 	chiadoChainConfig  = ReadChainConfig(chainspecs, "chainspecs/chiado.json")
+	olym3TestnetS3ChainConfig = ReadChainConfig(chainspecs, "chainspecs/olym3-testnet-s3.json")
 )
 
 // MainnetGenesisBlock returns the Ethereum main net genesis block.
@@ -138,6 +139,19 @@ func ChiadoGenesisBlock() *types.Genesis {
 
 func TestGenesisBlock() *types.Genesis {
 	return &types.Genesis{Config: chain.TestChainConfig}
+}
+
+// Olym3TestnetS3GenesisBlock returns the Olym3 Testnet Season 3 genesis block.
+func Olym3TestnetS3GenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     olym3TestnetS3ChainConfig,
+		Nonce:      0,
+		ExtraData:  []byte("Olym3 Testnet Season 3 - The Future of Blockchain!"),
+		GasLimit:   60000000,
+		Difficulty: big.NewInt(1),
+		Timestamp:  1704067200,
+		Alloc:      ReadPrealloc(allocs, "allocs/olym3-testnet-s3.json"),
+	}
 }
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.

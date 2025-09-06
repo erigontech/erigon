@@ -2,6 +2,8 @@ module github.com/erigontech/erigon
 
 go 1.24
 
+toolchain go1.24.0
+
 replace github.com/erigontech/erigon-lib => ./erigon-lib
 
 require github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
