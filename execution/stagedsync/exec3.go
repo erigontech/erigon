@@ -1514,7 +1514,7 @@ func ExecV3(ctx context.Context,
 							fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
 						}
 						blockUpdateCount += applyResult.stateUpdates.UpdateCount()
-						err := pe.rs.ApplyState4(ctx, applyTx.(kv.TemporalRwTx), applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
+						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
 							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, applyResult.rules, false)
 						blockApplyCount += applyResult.stateUpdates.UpdateCount()
@@ -1747,7 +1747,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	lastCommitedStep := kv.Step((executor.lastCommittedTxNum()) / doms.StepSize())
-	lastFrozenStep := applyTx.(kv.TemporalRwTx).StepsInFiles(kv.CommitmentDomain)
+	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
 
 	if lastCommitedStep > 0 && lastCommitedStep <= lastFrozenStep {
 		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
@@ -1810,14 +1810,8 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 
-	temporalRwTx, ok := tx.(kv.TemporalRwTx)
-
-	if !ok {
-		return
-	}
-
 	{
-		it, err := temporalRwTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -1832,7 +1826,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 		}
 	}
 	{
-		it, err := temporalRwTx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1845,7 +1839,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 		}
 	}
 	{
-		it, err := temporalRwTx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1907,7 +1901,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *dbstate.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *dbstate.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -1931,11 +1925,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	applyTx, ok = applyTx.(kv.TemporalRwTx)
-	if !ok {
-		return false, times, errors.New("tx is not a temporal tx")
-	}
-
 	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
@@ -1949,7 +1938,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		ok, err = handleIncorrectRootHashError(header, applyTx.(kv.TemporalRwTx), cfg, e, maxBlockNum, logger, u)
+		ok, err = handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
 		return ok, times, err
 	}
 	if !inMemExec {

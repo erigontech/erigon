@@ -337,7 +337,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
-	statedb := state.New(r)
+	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
 	statedb.SetTrace(false)
 
 	hasConstructorAllocation := false

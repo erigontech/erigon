@@ -1960,25 +1960,35 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			case StatePath:
 				stateKey := writes[i].Key
 				state := val.(uint256.Int)
-				sdb.setState(addr, stateKey, state, true)
+				if err := sdb.setState(addr, stateKey, state, true); err != nil {
+					return err
+				}
 			case BalancePath:
 				balance := val.(uint256.Int)
-				sdb.SetBalance(addr, balance, writes[i].Reason)
+				if err := sdb.SetBalance(addr, balance, writes[i].Reason); err != nil {
+					return err
+				}
 			case NoncePath:
 				nonce := val.(uint64)
-				sdb.SetNonce(addr, nonce)
+				if err := sdb.SetNonce(addr, nonce); err != nil {
+					return err
+				}
 			case CodePath:
 				code := val.([]byte)
-				sdb.SetCode(addr, code)
+				if err := sdb.SetCode(addr, code); err != nil {
+					return err
+				}
 			case CodeHashPath, CodeSizePath:
 				// set by SetCode
 			case SelfDestructPath:
 				deleted := val.(bool)
 				if deleted {
-					sdb.Selfdestruct(addr)
+					if _, err := sdb.Selfdestruct(addr); err != nil {
+						return err
+					}
 				}
 			default:
-				panic(fmt.Errorf("unknown key type: %d", path))
+				return fmt.Errorf("unknown key type: %d", path)
 			}
 		}
 	}

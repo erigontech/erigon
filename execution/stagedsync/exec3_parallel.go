@@ -179,7 +179,9 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	ibs.ApplyVersionedWrites(result.TxOut)
+	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
+		return nil, err
+	}
 	ibs.SetVersionMap(&state.VersionMap{})
 	ibs.SetTrace(txTask.Trace)
 
@@ -1339,6 +1341,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if err != nil {
 					return err
 				}
+
+				applyTx = pe.applyTx
 			}
 			return nil
 		}()
