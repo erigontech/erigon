@@ -35,7 +35,7 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v5
         with:
-          repository: erigontech/hive
+          repository: ethereum/hive
           ref: master
           path: hive
     
@@ -99,7 +99,7 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed > 3 )); then
+            if (( failed > 0 )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1
