@@ -49,13 +49,13 @@ func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
 	case *ArbitrumSubmitRetryableTx:
 		return inner.From, nil
 	case *ArbitrumLegacyTxData:
-		legacyData := tx.(*ArbitrumLegacyTxData)
-		if legacyData.OverrideSender != nil {
-			return *legacyData.OverrideSender, nil
+		if inner.OverrideSender != nil {
+			return *inner.OverrideSender, nil
 		}
-		return tx.Sender(s.Signer)
-		// fakeTx := NewTx(&legacyData.LegacyTx)
-		// return s.Signer.Sender(fakeTx)
+		if inner.LegacyTx.V.IsZero() && inner.LegacyTx.R.IsZero() && inner.LegacyTx.S.IsZero() {
+			return common.Address{}, nil
+		}
+		return s.Signer.Sender(inner.LegacyTx)
 	default:
 		return s.Signer.Sender(tx)
 	}
@@ -74,19 +74,9 @@ func (s ArbitrumSigner) SignatureValues(tx Transaction, sig []byte) (R, S, V *ui
 		return nil, nil, nil, nil
 	case *ArbitrumLegacyTxData:
 		legacyData := tx.(*ArbitrumLegacyTxData)
-		fakeTx := NewArbTx(&legacyData.LegacyTx)
+		fakeTx := NewArbTx(legacyData.LegacyTx)
 		return s.Signer.SignatureValues(fakeTx, sig)
 	default:
 		return s.Signer.SignatureValues(tx, sig)
 	}
 }
-
-// Hash returns the hash to be signed by the sender.
-// It does not uniquely identify the transaction.
-// func (s ArbitrumSigner) Hash(tx Transaction) common.Hash {
-// 	if legacyData, isArbLegacy := tx.(*ArbitrumLegacyTxData); isArbLegacy {
-// 		fakeTx := NewTx(&legacyData.LegacyTx)
-// 		return s.Signer.Hash(fakeTx)
-// 	}
-// 	return s.Signer.Hash(tx)
-// }

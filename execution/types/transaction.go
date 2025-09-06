@@ -222,6 +222,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		t = &ArbitrumSubmitRetryableTx{}
 	case ArbitrumInternalTxType:
 		t = &ArbitrumInternalTx{}
+	case ArbitrumLegacyTxType:
+		t = &ArbitrumLegacyTxData{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
