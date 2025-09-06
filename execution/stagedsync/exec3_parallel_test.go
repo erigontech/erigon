@@ -17,7 +17,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -474,11 +474,11 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	t.Helper()
 
 	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 
 	defer rawDb.Close()
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, logger)
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -595,9 +595,8 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	logger := log.Root()
 
 	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(kv.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, log.New())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
 	assert.NoError(t, err)
 	defer agg.Close()
 
