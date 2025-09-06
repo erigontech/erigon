@@ -37,6 +37,9 @@ type sd interface {
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	StepSize() uint64
+
+	Trace() bool
+	CommitmentCapture() bool
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -63,12 +66,12 @@ func NewSharedDomainsCommitmentContext(sd sd, tx kv.TemporalTx, mode commitment.
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	trieCtx := &TrieContext{
-		roTtx:  tx,
-		getter: sd.AsGetter(tx),
-		putter: sd.AsPutDel(tx),
-
+		roTtx:    tx,
+		getter:   sd.AsGetter(tx),
+		putter:   sd.AsPutDel(tx),
 		stepSize: sd.StepSize(),
 	}
+
 	ctx.mainTtx = trieCtx
 	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
@@ -83,6 +86,11 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 		sdc.patriciaTrie.Reset()
 	}
 }
+
+func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
+	return sdc.patriciaTrie.GetCapture(truncate)
+}
+
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
 	sdc.updates.Reset()
 	sdc.Reset()
@@ -130,7 +138,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, txNum uint64, logPrefix string) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -148,10 +156,18 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
+
 	sdc.patriciaTrie.SetTrace(sdc.trace)
+	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
+	if sdc.sharedDomains.CommitmentCapture() {
+		if sdc.patriciaTrie.GetCapture(false) == nil {
+			sdc.patriciaTrie.SetCapture([]string{})
+		}
+	}
+
 	sdc.Reset()
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -183,9 +199,14 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
-	state, _, err = sdc.mainTtx.Branch(KeyCommitmentState)
+	var step kv.Step
+
+	state, step, err = sdc.mainTtx.Branch(KeyCommitmentState)
 	if err != nil {
 		return 0, 0, nil, err
+	}
+	if frozenSteps := sdc.mainTtx.getter.StepsInFiles(kv.CommitmentDomain); step < frozenSteps {
+		return 0, 0, nil, fmt.Errorf("commitment state out of date: commitment step: %d, expected step: %d", step, frozenSteps)
 	}
 	if len(state) < 16 {
 		return 0, 0, nil, nil
@@ -403,7 +424,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, true, blockNum, txNum, "rebuild commit")
+	return sdc.ComputeCommitment(ctx, true, blockNum, txNum, "rebuild commit", nil)
 }
 
 type TrieContext struct {
@@ -555,6 +576,10 @@ type commitmentState struct {
 	txNum     uint64
 	blockNum  uint64
 	trieState []byte
+}
+
+func NewCommitmentState(txNum uint64, blockNum uint64, trieState []byte) *commitmentState {
+	return &commitmentState{txNum, blockNum, trieState}
 }
 
 func (cs *commitmentState) Decode(buf []byte) error {

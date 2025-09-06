@@ -192,8 +192,8 @@ func (c *Contract) Caller() common.Address {
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
+// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
 func (c *Contract) UseGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
-	// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
 	_ = reason
 
 	if c.Gas < gas {
