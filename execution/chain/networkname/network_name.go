@@ -35,6 +35,7 @@ const (
 	BorE2ETestChain2Val = "bor-e2e-test-2Val"
 	Chiado              = "chiado"
 	Test                = "test"
+	Olym3TestnetS3      = "olym3-testnet-s3"
 )
 
 var All = []string{
@@ -49,6 +50,7 @@ var All = []string{
 	Gnosis,
 	Chiado,
 	Test,
+	Olym3TestnetS3,
 }
 
 // Supported checks if the given network name is supported by Erigon.

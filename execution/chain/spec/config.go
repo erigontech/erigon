@@ -42,6 +42,7 @@ func init() {
 	RegisterChainSpec(networkname.Gnosis, Gnosis)
 	RegisterChainSpec(networkname.Chiado, Chiado)
 	RegisterChainSpec(networkname.Test, Test)
+	RegisterChainSpec(networkname.Olym3TestnetS3, Olym3TestnetS3)
 
 	// verify registered chains
 	for _, spec := range registeredChainsByName {
@@ -214,6 +215,14 @@ var (
 		//Bootnodes:   TestBootnodes,
 		Genesis: TestGenesisBlock(),
 	}
+
+	Olym3TestnetS3 = Spec{
+		Name:        networkname.Olym3TestnetS3,
+		GenesisHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Config:      ReadChainConfig(chainspecs, "chainspecs/olym3-testnet-s3.json"),
+		Genesis:     Olym3TestnetS3GenesisBlock(),
+		DNSNetwork:  dnsPrefix + "all.olym3-testnet-s3.ethdisco.net",
+	}
 )
 
 var chainNamesPoS = []string{
@@ -223,6 +232,7 @@ var chainNamesPoS = []string{
 	networkname.Hoodi,
 	networkname.Gnosis,
 	networkname.Chiado,
+	networkname.Olym3TestnetS3,
 }
 
 func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {

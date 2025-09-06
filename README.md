@@ -395,7 +395,7 @@ Quote your path if it has spaces.
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/docs/DEV_CHAIN.md).</code>
 
 Key features
-============
+============ 
 
 ### Faster Initial Sync
 
