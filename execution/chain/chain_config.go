@@ -446,6 +446,22 @@ func (c *Config) SecondsPerSlot() uint64 {
 	return 12 // Ethereum
 }
 
+func (c *Config) SlotsPerEpoch() uint64 {
+	if c.Bor != nil {
+		// Polygon does not have slots, this is such that block range is updated ~5 minutes similar to Ethereum
+		return 192
+	}
+	if c.Aura != nil {
+		return 16 // Gnosis
+	}
+	return 32 // Ethereum
+}
+
+// EpochDuration returns the duration of one epoch in seconds
+func (c *Config) EpochDuration() time.Duration {
+	return time.Duration(c.SecondsPerSlot()*c.SlotsPerEpoch()) * time.Second
+}
+
 func (c *Config) SystemContracts(time uint64) map[string]common.Address {
 	contracts := map[string]common.Address{}
 	if c.IsCancun(time) {

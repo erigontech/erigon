@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -546,6 +547,7 @@ type RoSnapshots struct {
 
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
+	segmentsMin atomic.Uint64 // all types of .seg files are available - starting from this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
@@ -592,6 +594,7 @@ func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Lo
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -1043,6 +1046,12 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
+	typeMinBlocks := make(map[snaptype.Enum]uint64)
+	coreTypes := []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions}
+	for _, t := range coreTypes {
+		typeMinBlocks[t] = math.MaxUint64
+	}
+
 	wg := &errgroup.Group{}
 	wg.SetLimit(64)
 	//fmt.Println("RS", s)
@@ -1123,10 +1132,29 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 			segmentsMax = 0
 		}
 		segmentsMaxSet = true
+
+		// Track minimum block for this type (only for core types)
+		if _, isCoreType := typeMinBlocks[f.Type.Enum()]; isCoreType {
+			if f.From < typeMinBlocks[f.Type.Enum()] {
+				typeMinBlocks[f.Type.Enum()] = f.From
+			}
+		}
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
+
+	if len(typeMinBlocks) > 0 {
+		minBlocks := make([]uint64, 0, len(typeMinBlocks))
+		for _, minBlock := range typeMinBlocks {
+			minBlocks = append(minBlocks, minBlock)
+		}
+		segmentsMin := slices.Max(minBlocks)
+		if segmentsMin != math.MaxUint64 { // only set if we have valid data for all types
+			s.segmentsMin.Store(segmentsMin)
+		}
+	}
+
 	if err := wg.Wait(); err != nil {
 		return err
 	}

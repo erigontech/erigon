@@ -18,10 +18,13 @@ package freezeblocks
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -63,6 +66,16 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
 	return block, err
 }
+
+func (r *RemoteBlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
+	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
+	if err != nil {
+		return 0, err
+	}
+
+	return reply.BlockNum, nil
+}
+
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
@@ -417,6 +430,49 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
+	snapshotMin := r.sn.SegmentsMin()
+
+	if tx == nil {
+		return snapshotMin, nil
+	}
+
+	var dbMin = uint64(math.MaxUint64)
+	if kvTx, ok := tx.(kv.Tx); ok {
+		var err error
+		dbMin, err = r.findFirstCompleteBlock(kvTx)
+		if err != nil {
+			return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
+		}
+	}
+
+	if dbMin < snapshotMin {
+		return dbMin, nil
+	}
+	return snapshotMin, nil
+}
+
+// findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
+func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
+	bodyKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(bodyKey, 1)
+
+	bodyCursor, err := tx.Cursor(kv.BlockBody)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create BlockBody cursor: %w", err)
+	}
+	defer bodyCursor.Close()
+
+	bodyKey, _, err = bodyCursor.Seek(bodyKey)
+	if err != nil {
+		return 0, fmt.Errorf("failed to seek BlockBody: %w", err)
+	}
+	if len(bodyKey) < 8 {
+		return math.MaxUint64, nil // no body data found
+	}
+
+	return binary.BigEndian.Uint64(bodyKey[:8]), nil
+}
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 	if r.borSn == nil {
 		return 0
