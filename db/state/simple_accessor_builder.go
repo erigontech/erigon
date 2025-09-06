@@ -132,16 +132,11 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-// TODO: this is supposed to go away once we start storing first entity num in the snapshot
-func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumFetcher) {
-	s.fetcher = fetcher
-}
-
-func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
+func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) (*DecompressorIndexInputDataQuery, error) {
 	sgname := s.parser.DataFile(version.V1_0, from, to)
-	decomp, _ := seg.NewDecompressor(sgname)
+	decomp, _ := seg.NewDecompressorWithMetadata(sgname)
 	reader := seg.NewPagedReader(decomp.MakeGetter(), s.args.ValuesOnCompressedPage, s.isCompressionUsed(from, to))
-	return &DecompressorIndexInputDataQuery{reader: reader, baseDataId: uint64(s.fetcher(from, to, decomp))}
+	return NewDecompressorIndexInputDataQuery(reader)
 }
 
 func (s *SimpleAccessorBuilder) isCompressionUsed(from, to RootNum) bool {
@@ -162,11 +157,15 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.parser.IndexTags()[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
-	iidq := s.GetInputDataQuery(from, to)
+	iidq, err := s.GetInputDataQuery(from, to)
+	if err != nil {
+		return nil, err
+	}
 	defer iidq.Close()
+	meta := iidq.Metadata()
 	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
 
-	keyCount := iidq.GetCount()
+	keyCount := meta.count
 	if p != nil {
 		baseFileName := filepath.Base(idxFile)
 		p.Name.Store(&baseFileName)
@@ -187,7 +186,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		NoFsync:            s.args.Nofsync,
 		TmpDir:             s.tmpDir,
 		LessFalsePositives: s.args.LessFalsePositives,
-		BaseDataID:         iidq.GetBaseDataId(),
+		BaseDataID:         uint64(meta.first),
 	}, s.logger)
 	if err != nil {
 		return nil, err
@@ -240,35 +239,48 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 }
 
 type DecompressorIndexInputDataQuery struct {
-	reader     *seg.PagedReader
-	baseDataId uint64
+	reader *seg.PagedReader
+	m      NumMetadata
+}
+
+func NewDecompressorIndexInputDataQuery(reader *seg.PagedReader) (*DecompressorIndexInputDataQuery, error) {
+	d := &DecompressorIndexInputDataQuery{reader: reader}
+	d.m = NumMetadata{}
+	if err := d.m.Unmarshal(reader.GetMetadata()); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // return trio: word, index, offset,
 func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] {
 	// open seg if not yet
-	pds := &pagedSegDataStream{ctx: ctx, reader: d.reader, word: make([]byte, 0, 4096)}
+	pds := &pagedSegDataStream{
+		ctx:    ctx,
+		reader: d.reader,
+		word:   make([]byte, 0, 4096),
+		meta:   d.m,
+		i:      d.m.first.Uint64(),
+	}
 	pds.pageSize = uint64(d.reader.PageSize())
 	return pds
 }
 
-func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
-	// discuss: adding base data id to snapshotfile?
-	// or might need to add callback to get first basedataid...
-	return d.baseDataId
-	//return d.from
-}
-
-func (d *DecompressorIndexInputDataQuery) GetCount() uint64 {
-	return uint64(d.reader.Count())
+func (d *DecompressorIndexInputDataQuery) Metadata() NumMetadata {
+	return d.m
 }
 
 func (d *DecompressorIndexInputDataQuery) Close() {
 	d.reader = nil
 }
 
+// this can handle case where key is stored (pageSize > 1)
+// or when keys are sequential uints
+// case where neither key is stored, nor keys are sequential
+// require a ef file. Which will be done separately.
 type pagedSegDataStream struct {
 	reader    *seg.PagedReader
+	meta      NumMetadata
 	i, offset uint64
 	pageSize  uint64
 	ctx       context.Context

@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -39,9 +38,6 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 
 	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false, 1, stepSize), id, dirs.Tmp, log)
-	indexb.SetFirstEntityNumFetcher(func(from, to RootNum, seg *seg.Decompressor) Num {
-		return Num(CustomSpanIdAt(uint64(from)))
-	})
 
 	uma, err := state.NewUnmarkedForkable(id,
 		&statecfg.ForkableCfg{ValsTbl: kv.BorSpans},

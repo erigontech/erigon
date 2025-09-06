@@ -20,7 +20,16 @@ type Freezer interface {
 	Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error
 }
 
-type Collector func(key, value []byte) error
+type MetadataSetter interface {
+	SetMetadata(metadata []byte)
+}
+
+type Collector interface {
+	MetadataSetter
+	Add(key, value []byte) error
+}
+
+//type Collector
 
 /** index building **/
 

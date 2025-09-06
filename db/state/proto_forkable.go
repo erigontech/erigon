@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"sort"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -32,6 +31,7 @@ type ProtoForkable struct {
 	cfg      *statecfg.ForkableCfg
 	builders []AccessorIndexBuilder
 	snaps    *SnapshotRepo
+	metadata []NumMetadata
 
 	strategy  kv.CanonicityStrategy
 	unaligned bool
@@ -55,6 +55,20 @@ func NewProto(id ForkableId, builders []AccessorIndexBuilder, freezer Freezer, d
 
 func (a *ProtoForkable) RecalcVisibleFiles(toRootNum RootNum) {
 	a.snaps.RecalcVisibleFiles(toRootNum)
+	visibleCount := len(a.snaps.visibleFiles())
+	// Ensure sufficient capacity - simpler approach
+	if cap(a.metadata) < visibleCount {
+		a.metadata = make([]NumMetadata, visibleCount)
+	} else {
+		a.metadata = a.metadata[:visibleCount]
+	}
+	for i, file := range a.snaps.visibleFiles() {
+		m := NumMetadata{}
+		if err := m.Unmarshal(file.src.decompressor.GetMetadata()); err != nil {
+			panic(err)
+		}
+		a.metadata[i] = m
+	}
 }
 
 func (a *ProtoForkable) IntegrateDirtyFile(file *FilesItem) {
@@ -98,6 +112,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	if !exists {
 		segCfg := seg.DefaultCfg
 		segCfg.Workers = compressionWorkers
+		segCfg.ExpectMetadata = true
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.id), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)
 		if err != nil {
 			return nil, false, err
@@ -108,7 +123,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		compress := a.isCompressionUsed(calcFrom, calcTo)
 		writer := a.DataWriter(sn, compress)
 		defer writer.Close()
-		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, writer.Add, db); err != nil {
+		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, writer, db); err != nil {
 			return nil, false, err
 		}
 
@@ -125,7 +140,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		ps.Delete(p)
 	}
 
-	valuesDecomp, err := seg.NewDecompressor(path)
+	valuesDecomp, err := seg.NewDecompressorWithMetadata(path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -209,10 +224,12 @@ func (a *ProtoForkable) FilesWithMissedAccessors() *MissedFilesMap {
 // proto_forkable_rotx
 
 type ProtoForkableTx struct {
-	id      ForkableId
-	files   visibleFiles
-	a       *ProtoForkable
-	noFiles bool
+	id               ForkableId
+	files            visibleFiles
+	m                []NumMetadata
+	a                *ProtoForkable
+	noFiles          bool
+	snappyReadBuffer []byte
 
 	readers []*recsplit.IndexReader
 }
@@ -229,6 +246,7 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 	return &ProtoForkableTx{
 		id:    a.id,
 		files: visibleFiles,
+		m:     a.metadata,
 		a:     a,
 	}
 }
@@ -328,38 +346,46 @@ func (a *ProtoForkableTx) VisibleFilesMaxRootNum() RootNum {
 	return RootNum(a.files.EndTxNum())
 }
 
+// inclusive
 func (a *ProtoForkableTx) VisibleFilesMaxNum() Num {
 	a.NoFilesCheck()
 	lasti := len(a.files) - 1
 	if lasti < 0 {
 		return 0
 	}
-	idx := a.files[lasti].src.index
-	return Num(idx.BaseDataID() + idx.KeyCount())
+	return a.m[lasti].last
 }
 
 // if either found=false or err != nil, then fileIdx = -1
 // can get FileItem on which entityNum was found by a.Files()[fileIdx] etc.
 func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fileIdx int, err error) {
 	a.NoFilesCheck()
-	ap := a.a
-	lastNum := a.VisibleFilesMaxNum()
-	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
-		index := sort.Search(len(a.files), func(i int) bool {
-			idx := a.files[i].src.index
-			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
-		})
-		if index == len(a.files) {
-			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", Registry.Name(ap.id), entityNum)
-		}
-
-		v, f, err := a.GetFromFile(entityNum, index)
-		return v, f, index, err
-	} else {
-		a.a.logger.Warn("ordinal lookup not allowed, not other way to get from file", "entity", Registry.Name(a.a.id))
+	index, found := a.getFileIndex(entityNum)
+	if !found {
+		return nil, false, -1, nil
 	}
 
-	return nil, false, -1, nil
+	v, f, err := a.GetFromFile(entityNum, index)
+	return v, f, index, err
+}
+
+func (a *ProtoForkableTx) getFileIndex(entityNum Num) (int, bool) {
+	a.NoFilesCheck()
+	lastNum := a.VisibleFilesMaxNum()
+	if entityNum > lastNum {
+		return -1, false
+	}
+	for i := range a.files {
+		meta := a.m[i]
+		if entityNum >= meta.first && entityNum <= meta.last {
+			return i, true
+		}
+		if entityNum < meta.first {
+			break
+		}
+	}
+
+	return -1, false
 }
 
 func (a *ProtoForkableTx) VisibleFiles() VisibleFiles {
@@ -384,34 +410,53 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 		return nil, false, fmt.Errorf("index out of range: %d >= %d", idx, len(a.files))
 	}
 
+	pageSize := uint64(a.a.cfg.ValuesOnCompressedPage)
+	isContinuous := pageSize <= 1
+	file := a.files[idx]
+	stepSize := a.a.snaps.stepSize
+	compressionUsed := a.a.isCompressionUsed(RootNum(file.startTxNum), RootNum(file.endTxNum))
+
 	indexR := a.StatelessIdxReader(idx)
-	id := int64(entityNum) - int64(indexR.BaseDataID())
-	if id < 0 {
-		ap.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", idx, "indexR.BaseDataID()", indexR.BaseDataID())
-		panic("ordinal lookup by negative num")
-	}
-	offset := indexR.OrdinalLookup(uint64(id))
-	file := a.files[idx].src
+	if isContinuous {
+		offset, ok := indexR.Lookup(entityNum.EncToBytes(true))
+		if !ok {
+			return nil, false, fmt.Errorf("entity %d not found in index %s:%d-%d", entityNum, a.a.snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
+		}
 
-	g := file.decompressor.MakeGetter()
-	g.Reset(offset)
+		g := file.src.decompressor.MakeGetter()
+		g.Reset(offset)
+		compression := seg.CompressNone
+		if compressionUsed {
+			compression = seg.CompressKeys
+		}
+		reader := seg.NewReader(g, compression)
+		reader.Reset(offset)
+		var word []byte
 
-	start, end := file.Range()
-	compression := seg.CompressNone
-	if a.a.isCompressionUsed(RootNum(start), RootNum(end)) {
-		compression = seg.CompressKeys
-	}
-	reader := seg.NewReader(g, compression)
-	reader.Reset(offset)
-	var word []byte
+		if reader.HasNext() {
+			//start, end
+			word, _ = reader.Next(word[:0])
+			return word, true, nil
+		}
+	} else {
+		// paged, key stored
+		// index stores offsets for page and not entity num
+		pageNum := Num(entityNum.Uint64() / pageSize)
+		offset, ok := indexR.Lookup(pageNum.EncToBytes(true))
+		if !ok {
+			return nil, false, fmt.Errorf("entity %d (page %d) not found in index %s:%d-%d", entityNum, pageNum, a.a.snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
+		}
+		g := file.src.decompressor.MakeGetter()
+		g.Reset(offset)
 
-	if reader.HasNext() {
-		//start, end
-		word, _ = reader.Next(word[:0])
-		return word, true, nil
+		v, _ := g.Next(nil)
+
+		v, a.snappyReadBuffer = seg.GetFromPage(entityNum.EncToBytes(true), v, a.snappyReadBuffer, compressionUsed)
+		return v, true, nil
 	}
 
 	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", Registry.Name(ap.id), entityNum, a.files[idx].src.decompressor.FileName())
+
 }
 
 func (a *ProtoForkableTx) NoFilesCheck() {

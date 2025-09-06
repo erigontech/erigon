@@ -213,6 +213,9 @@ func (m *MarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
 
 	if found {
 		return v, nil
+	} else if num > m.VisibleFilesMaxNum() {
+		// expected in file, but not added to file (gap)
+		return nil, nil
 	}
 
 	return m.GetDb(num, nil, tx)

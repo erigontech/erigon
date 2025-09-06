@@ -104,12 +104,13 @@ func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
 	w.buffer = append(w.buffer, common.Copy(p))
 	return len(p), nil
 }
-func (w *multyBytesWriter) Bytes() [][]byte  { return w.buffer }
-func (w *multyBytesWriter) FileName() string { return "" }
-func (w *multyBytesWriter) Count() int       { return 0 }
-func (w *multyBytesWriter) Close()           {}
-func (w *multyBytesWriter) Compress() error  { return nil }
-func (w *multyBytesWriter) Reset()           { w.buffer = nil }
+func (w *multyBytesWriter) Bytes() [][]byte    { return w.buffer }
+func (w *multyBytesWriter) FileName() string   { return "" }
+func (w *multyBytesWriter) Count() int         { return 0 }
+func (w *multyBytesWriter) Close()             {}
+func (w *multyBytesWriter) Compress() error    { return nil }
+func (w *multyBytesWriter) Reset()             { w.buffer = nil }
+func (w *multyBytesWriter) SetMetadata([]byte) {}
 
 func TestPage(t *testing.T) {
 	buf, require := &multyBytesWriter{}, require.New(t)

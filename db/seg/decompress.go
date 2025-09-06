@@ -516,7 +516,7 @@ func (d *Decompressor) Close() {
 
 func (d *Decompressor) FilePath() string { return d.filePath }
 func (d *Decompressor) FileName() string { return d.fileName }
-func (d *Decompressor) Metadata() []byte {
+func (d *Decompressor) GetMetadata() []byte {
 	if !d.hasMetadata {
 		panic("no metadata stored")
 	}
@@ -593,10 +593,11 @@ func (g *Getter) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
-func (g *Getter) DisableReadAhead() { g.d.DisableReadAhead() }
-func (g *Getter) Trace(t bool)      { g.trace = t }
-func (g *Getter) Count() int        { return g.d.Count() }
-func (g *Getter) FileName() string  { return g.fName }
+func (g *Getter) DisableReadAhead()   { g.d.DisableReadAhead() }
+func (g *Getter) Trace(t bool)        { g.trace = t }
+func (g *Getter) Count() int          { return g.d.Count() }
+func (g *Getter) FileName() string    { return g.fName }
+func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
 
 func (g *Getter) nextPos(clean bool) (pos uint64) {
 	defer func() {
