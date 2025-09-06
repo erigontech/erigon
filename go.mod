@@ -1,6 +1,6 @@
 module github.com/erigontech/erigon
 
-go 1.24
+go 1.22
 
 replace github.com/erigontech/erigon-lib => ./erigon-lib
 
