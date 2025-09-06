@@ -529,7 +529,7 @@ account (SELFDESTRUCT). Naive storage deletion may take several minutes - depend
 will not process any incoming block that time. To protect against this attack:
 PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" -
 just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
-`{account_key}{incarnation}{storage_hash}`. And [execution/trie/trie_root.go](../../execution/trie/trie_root.go) has logic -
+`{account_key}{incarnation}{storage_hash}`. And [execution/commitment/hex_patricia_hashed.go](../../execution/commitment/hex_patricia_hashed.go) has logic -
 every time when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or
 IntermediateTrieHashes with another incarnation.
 
