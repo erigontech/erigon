@@ -1042,7 +1042,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 	// check blob bundle
 	if blobsBundle != nil && blockPayload.Version() >= clparams.DenebVersion {
-		err := func(b *engine_types.BlobsBundleV1) error {
+		err := func(b *engine_types.BlobsBundle) error {
 			// check the length of the blobs bundle
 			if len(b.Commitments) != len(b.Proofs) || len(b.Commitments) != len(b.Blobs) {
 				return errors.New("commitments, proofs and blobs must have the same length")
