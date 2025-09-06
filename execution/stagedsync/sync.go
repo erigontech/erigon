@@ -78,7 +78,7 @@ func (s *Sync) PrevUnwindPoint() *uint64 {
 }
 
 func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64, initialCycle, firstCycle bool) *UnwindState {
-	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s, CurrentSyncCycleInfo{initialCycle, firstCycle}}
+	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{}, s, CurrentSyncCycleInfo{initialCycle, firstCycle}}
 }
 
 // PruneStageState Get the current prune status from the DB
@@ -169,9 +169,9 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 	}
 
 	if reason.Block != nil {
-		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err(), "stack", dbg.Stack())
 	} else {
-		s.logger.Debug("UnwindTo", "block", unwindPoint, "stack", dbg.Stack())
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "err", reason.Err(), "stack", dbg.Stack())
 	}
 
 	s.unwindPoint = &unwindPoint
@@ -311,6 +311,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
+	var errBadBlock error
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
@@ -326,6 +327,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 			s.unwindPoint = nil
 			if s.unwindReason.IsBadBlock() {
 				badBlockUnwind = true
+				errBadBlock = s.unwindReason.ErrBadBlock
 			}
 			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
@@ -376,7 +378,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 	}
 
 	s.currentStage = 0
-	return hasMore, nil
+	return hasMore, errBadBlock
 }
 
 // ErrLoopExhausted is used to allow the sync loop to continue when one of the stages has thrown it due to reaching
@@ -400,6 +402,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
+	var errBadBlock error
 	hasMore := false
 	for !s.IsDone() {
 		var badBlockUnwind bool
@@ -416,6 +419,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			s.unwindPoint = nil
 			if s.unwindReason.IsBadBlock() {
 				badBlockUnwind = true
+				errBadBlock = s.unwindReason.ErrBadBlock
 			}
 			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
@@ -487,7 +491,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	}
 
 	s.currentStage = 0
-	return hasMore, nil
+	return hasMore, errBadBlock
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
