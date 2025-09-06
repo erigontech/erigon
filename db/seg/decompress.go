@@ -131,6 +131,8 @@ type Decompressor struct {
 	modTime         time.Time
 	wordsCount      uint64
 	emptyWordsCount uint64
+	hasMetadata     bool
+	metadata        []byte
 
 	serializedDictSize uint64
 	dictWords          int
@@ -177,13 +179,22 @@ func SetDecompressionTableCondensity(fromBitSize int) {
 	condensePatternTableBitThreshold = fromBitSize
 }
 
+func NewDecompressorWithMetadata(compressedFilePath string) (*Decompressor, error) {
+	return newDecompresor(compressedFilePath, true)
+}
+
 func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
+	return newDecompresor(compressedFilePath, false)
+}
+
+func newDecompresor(compressedFilePath string, hasMetadata bool) (*Decompressor, error) {
 	_, fName := filepath.Split(compressedFilePath)
 	var err error
 	var validationPassed = false
 	d := &Decompressor{
-		filePath: compressedFilePath,
-		fileName: fName,
+		filePath:    compressedFilePath,
+		fileName:    fName,
+		hasMetadata: hasMetadata,
 	}
 
 	defer func() {
@@ -206,7 +217,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		return nil, err
 	}
 	d.size = stat.Size()
-	if d.size < compressedMinSize {
+	if !hasMetadata && d.size < compressedMinSize {
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
@@ -221,6 +232,21 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	d.data = d.mmapHandle1[:d.size]
 	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
 
+	if hasMetadata {
+		metadataLen := binary.BigEndian.Uint32(d.data[:4])
+		d.metadata = d.data[4 : 4+metadataLen]
+		d.data = d.data[4+metadataLen:]
+
+		dataSize := len(d.data)
+		if dataSize < compressedMinSize {
+			return nil, &ErrCompressedFileCorrupted{
+				FileName: fName,
+				Reason: fmt.Sprintf("invalid file size %s, expected at least %s",
+					datasize.ByteSize(dataSize).HR(), datasize.ByteSize(compressedMinSize).HR())}
+		}
+		// not editing d.size because of checkFileLenChanges check
+	}
+
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
 
@@ -228,11 +254,11 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
 	d.serializedDictSize = dictSize
 
-	if pos+dictSize > uint64(d.size) {
+	if pos+dictSize > uint64(len(d.data)) {
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName,
 			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s",
-				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(d.size).HR())}
+				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(len(d.data)).HR())}
 	}
 
 	// todo awskii: want to move dictionary reading to separate function?
@@ -490,6 +516,12 @@ func (d *Decompressor) Close() {
 
 func (d *Decompressor) FilePath() string { return d.filePath }
 func (d *Decompressor) FileName() string { return d.fileName }
+func (d *Decompressor) Metadata() []byte {
+	if !d.hasMetadata {
+		panic("no metadata stored")
+	}
+	return d.metadata
+}
 
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
