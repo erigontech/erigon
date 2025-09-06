@@ -44,6 +44,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -74,6 +76,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
+	hph := commitment.NewHexPatriciaHashed(1, nil)
+
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
@@ -98,6 +102,16 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
+
+		if (txNum+1)%stepSize == 0 {
+			trieState, err := hph.EncodeCurrentState(nil)
+			require.NoError(t, err)
+			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
+			encodedState, err := cs.Encode()
+			require.NoError(t, err)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, KeyCommitmentState, encodedState, txNum, nil, 0)
+			require.NoError(t, err)
+		}
 	}
 
 	// flush and build files

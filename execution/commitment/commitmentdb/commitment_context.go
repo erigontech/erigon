@@ -578,6 +578,10 @@ type commitmentState struct {
 	trieState []byte
 }
 
+func NewCommitmentState(txNum uint64, blockNum uint64, trieState []byte) *commitmentState {
+	return &commitmentState{txNum, blockNum, trieState}
+}
+
 func (cs *commitmentState) Decode(buf []byte) error {
 	if len(buf) < 10 {
 		return fmt.Errorf("ivalid commitment state buffer size %d, expected at least 10b", len(buf))
