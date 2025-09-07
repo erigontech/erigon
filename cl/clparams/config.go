@@ -553,7 +553,7 @@ type BeaconChainConfig struct {
 	DomainApplicationBuilder          common.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
 	DomainBLSToExecutionChange        common.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
 	DomainBlobSideCar                 common.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
-
+	DomainInclusionListCommittee      common.Bytes4 `yaml:"DOMAIN_INCLUSION_LIST_COMMITTEE" spec:"true" json:"DOMAIN_INCLUSION_LIST_COMMITTEE"`
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
 
@@ -672,6 +672,8 @@ type BeaconChainConfig struct {
 	// Fulu
 	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
+	InclusionListCommitteeSize       uint64 `yaml:"INCLUSION_LIST_COMMITTEE_SIZE" spec:"true" json:"INCLUSION_LIST_COMMITTEE_SIZE,string"`
+	InclusionListFreezeDeadLine      uint64 `yaml:"INCLUSION_LIST_FREEZE_DEADLINE" spec:"true" json:"INCLUSION_LIST_FREEZE_DEADLINE,string"`
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
@@ -993,6 +995,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ValidatorCustodyRequirement:      8,
 	BalancePerAdditionalCustodyGroup: 32_000_000_000,
 	BlobSchedule:                     []BlobParameters{},
+	InclusionListCommitteeSize:       16,
+	InclusionListFreezeDeadLine:      8,
 }
 
 func mainnetConfig() BeaconChainConfig {
