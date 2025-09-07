@@ -45,10 +45,10 @@ func Test_CreateTempWithExt(t *testing.T) {
 	dir := t.TempDir()
 	ogfile := filepath.Join(dir, "hello_world")
 
-	tmpfile, err := CreateTempWithExtension(ogfile, "existence")
+	_, err := CreateTempWithExtension(ogfile, "existence")
 	require.Error(t, err)
 
-	tmpfile, err = CreateTempWithExtension(ogfile, "existence.tmp")
+	tmpfile, err := CreateTempWithExtension(ogfile, "existence.tmp")
 	if err != nil {
 		t.Fatal(err)
 	}
