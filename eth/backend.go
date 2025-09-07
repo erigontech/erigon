@@ -927,7 +927,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
-			creds, err = grpcutil.TLS(stack.Config().TLSCACert, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			creds, err = grpcutil.ServerTLS(stack.Config().TLSCACert, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
 			if err != nil {
 				return nil, err
 			}
