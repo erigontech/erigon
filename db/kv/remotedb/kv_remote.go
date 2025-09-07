@@ -42,7 +42,7 @@ import (
 
 // generate the messages and services
 type remoteOpts struct {
-	remoteKV    remoteproto.KVClient
+	remoteKV remoteproto.KVClient
 	log         log.Logger
 	bucketsCfg  kv.TableCfg
 	DialAddress string
@@ -52,7 +52,7 @@ type remoteOpts struct {
 var _ kv.TemporalTx = (*tx)(nil)
 
 type DB struct {
-	remoteKV     remoteproto.KVClient
+	remoteKV remoteproto.KVClient
 	log          log.Logger
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted
@@ -60,7 +60,7 @@ type DB struct {
 }
 
 type tx struct {
-	stream             remoteproto.KV_TxClient
+	stream remoteproto.KV_TxClient
 	ctx                context.Context
 	streamCancelFn     context.CancelFunc
 	db                 *DB
@@ -73,7 +73,7 @@ type tx struct {
 
 type remoteCursor struct {
 	ctx        context.Context
-	stream     remoteproto.KV_TxClient
+	stream remoteproto.KV_TxClient
 	tx         *tx
 	bucketName string
 	bucketCfg  kv.TableCfgItem

@@ -38,7 +38,7 @@ var (
 // AmoyGenesisBlock returns the Amoy network genesis block.
 func AmoyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     amoyChainConfig,
+		Config: amoyChainConfig,
 		Nonce:      0,
 		Timestamp:  1700225065,
 		GasLimit:   10000000,
@@ -52,7 +52,7 @@ func AmoyGenesisBlock() *types.Genesis {
 // BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
 func BorMainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     borMainnetChainConfig,
+		Config: borMainnetChainConfig,
 		Nonce:      0,
 		Timestamp:  1590824836,
 		GasLimit:   10000000,
@@ -65,7 +65,7 @@ func BorMainnetGenesisBlock() *types.Genesis {
 
 func BorDevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     borDevnetChainConfig,
+		Config: borDevnetChainConfig,
 		Nonce:      0,
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
