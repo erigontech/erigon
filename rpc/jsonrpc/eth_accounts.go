@@ -49,6 +49,14 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
 	}
 	if acc == nil {
+		latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		if blockNrOrHash.BlockNumber.Uint64() > latestBlockNumber {
+			return nil, fmt.Errorf("block not found")
+		}
+
 		// Special case - non-existent account is assumed to have zero balance
 		return (*hexutil.Big)(big.NewInt(0)), nil
 	}
