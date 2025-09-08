@@ -18,6 +18,8 @@ package bor
 
 import (
 	"fmt"
+
+	"github.com/erigontech/erigon-lib/common"
 )
 
 type MaxCheckpointLengthExceededError struct {
@@ -53,13 +55,15 @@ func (e *MismatchingValidatorsError) Error() string {
 
 type BlockTooSoonError struct {
 	Number     uint64
+	Hash       common.Hash
 	Succession int
 }
 
 func (e *BlockTooSoonError) Error() string {
 	return fmt.Sprintf(
-		"Block %d was created too soon. Signer turn-ness number is %d\n",
+		"Block %d, blockHash=%x was created too soon. Signer turn-ness number is %d\n",
 		e.Number,
+		e.Hash,
 		e.Succession,
 	)
 }
