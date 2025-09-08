@@ -213,7 +213,7 @@ func (m *MarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
 
 	if found {
 		return v, nil
-	} else if num > m.VisibleFilesMaxNum() {
+	} else if num < m.VisibleFilesMaxNum() {
 		// expected in file, but not added to file (gap)
 		return nil, nil
 	}
@@ -438,7 +438,7 @@ func progress(tbl string, tx kv.Tx, f ForkableFilesTxI) (Num, error) {
 		num = binary.BigEndian.Uint64(k)
 	}
 
-	return max(Num(num), f.VisibleFilesMaxNum()), nil
+	return max(Num(num), f.VisibleFilesMaxNum()-1), nil
 }
 
 var (

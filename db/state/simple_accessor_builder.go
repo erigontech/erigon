@@ -165,7 +165,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	meta := iidq.Metadata()
 	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
 
-	keyCount := meta.count
+	keyCount := iidq.Count()
 	if p != nil {
 		baseFileName := filepath.Base(idxFile)
 		p.Name.Store(&baseFileName)
@@ -266,6 +266,10 @@ func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.
 	return pds
 }
 
+func (d *DecompressorIndexInputDataQuery) Count() uint64 {
+	return uint64(d.reader.Count())
+}
+
 func (d *DecompressorIndexInputDataQuery) Metadata() NumMetadata {
 	return d.m
 }
@@ -295,7 +299,6 @@ func (s *pagedSegDataStream) Next() (word []byte, index uint64, offset uint64, e
 		//for
 		k, word, s.word, pageOffset = s.reader.Next2(s.word[:0])
 		defer func() {
-			s.offset = pageOffset
 			s.i++
 			for s.reader.HasNext() && s.pageSize > 1 && s.i%s.pageSize != 0 {
 				s.reader.Skip()
@@ -307,6 +310,7 @@ func (s *pagedSegDataStream) Next() (word []byte, index uint64, offset uint64, e
 			index = s.i
 		} else {
 			// keys are present
+			s.offset = pageOffset
 			index = binary.BigEndian.Uint64(k)
 		}
 		return word, index, s.offset, nil

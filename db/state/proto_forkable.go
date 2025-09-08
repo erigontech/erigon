@@ -346,14 +346,14 @@ func (a *ProtoForkableTx) VisibleFilesMaxRootNum() RootNum {
 	return RootNum(a.files.EndTxNum())
 }
 
-// inclusive
+// exclusive
 func (a *ProtoForkableTx) VisibleFilesMaxNum() Num {
 	a.NoFilesCheck()
 	lasti := len(a.files) - 1
 	if lasti < 0 {
 		return 0
 	}
-	return a.m[lasti].last
+	return a.m[lasti].last + 1 // .last is inclusive
 }
 
 // if either found=false or err != nil, then fileIdx = -1
@@ -372,7 +372,7 @@ func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, file
 func (a *ProtoForkableTx) getFileIndex(entityNum Num) (int, bool) {
 	a.NoFilesCheck()
 	lastNum := a.VisibleFilesMaxNum()
-	if entityNum > lastNum {
+	if entityNum >= lastNum {
 		return -1, false
 	}
 	for i := range a.files {
@@ -441,7 +441,7 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 	} else {
 		// paged, key stored
 		// index stores offsets for page and not entity num
-		pageNum := Num(entityNum.Uint64() / pageSize)
+		pageNum := Num((entityNum.Uint64() / pageSize) * pageSize)
 		offset, ok := indexR.Lookup(pageNum.EncToBytes(true))
 		if !ok {
 			return nil, false, fmt.Errorf("entity %d (page %d) not found in index %s:%d-%d", entityNum, pageNum, a.a.snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
