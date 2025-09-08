@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -145,6 +144,8 @@ var (
 	mxCommitmentmentDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="commitment"}`)
 	mxCommitmentmentDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="commitment"}`)
 )
+
+var ErrWrongTrieRoot = errors.New("wrong trie root")
 
 const (
 	changesetSafeRange     = 32   // Safety net for long-sync, keep last 32 changesets
@@ -1296,7 +1297,7 @@ func ExecV3(ctx context.Context,
 
 					if !bytes.Equal(rh, header.Root.Bytes()) {
 						logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-						return fmt.Errorf("wrong trie root: %d", blockNum)
+						return fmt.Errorf("%w: %d", ErrWrongTrieRoot, blockNum)
 					}
 				}
 
@@ -1423,9 +1424,11 @@ func ExecV3(ctx context.Context,
 			return nil
 		}()
 
-		if execErr == nil {
-			if u != nil && !u.HasUnwindPoint() {
-				if b != nil {
+		if u != nil && !u.HasUnwindPoint() {
+			if b != nil {
+				if errors.Is(execErr, ErrWrongTrieRoot) {
+					execErr = handleIncorrectRootHashError(b.HeaderNoCopy(), applyTx, cfg, execStage, maxBlockNum, logger, u)
+				} else {
 					_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 					if err != nil {
 						return err
@@ -1447,9 +1450,9 @@ func ExecV3(ctx context.Context,
 					}
 
 					uncommitedGas = 0
-				} else {
-					fmt.Printf("[dbg] mmmm... do we need action here????\n")
 				}
+			} else {
+				fmt.Printf("[dbg] mmmm... do we need action here????\n")
 			}
 		}
 	} else {
@@ -1862,21 +1865,21 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 	}
 }
 
-func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
-		return false, errors.New("wrong trie root")
+		return ErrWrongTrieRoot
 	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
 	minBlockNum := e.BlockNumber
 	if maxBlockNum <= minBlockNum {
-		return false, nil
+		return nil
 	}
 
 	unwindToLimit, err := rawtemporaldb.CanUnwindToBlockNum(applyTx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	minBlockNum = max(minBlockNum, unwindToLimit)
 
@@ -1887,18 +1890,18 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	// protect from too far unwind
 	allowedUnwindTo, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if !ok {
-		return false, fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
+		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	if u != nil {
 		if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
-			return false, err
+			return err
 		}
 	}
-	return false, nil
+	return nil
 }
 
 type FlushAndComputeCommitmentTimes struct {
@@ -1935,7 +1938,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
-		return false, times, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
+		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
 	if cfg.blockProduction {
@@ -1944,8 +1947,8 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		ok, err = handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
-		return ok, times, err
+		err = handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
+		return false, times, err
 	}
 	if !inMemExec {
 		start = time.Now()
@@ -1957,22 +1960,4 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	return true, times, nil
 
-}
-
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
-	if tx == nil {
-		tx, err = db.BeginRo(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
-	}
-	b, err = blockReader.BlockByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-	return b, err
 }
