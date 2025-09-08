@@ -964,7 +964,11 @@ func ExecV3(ctx context.Context,
 	var applyTx kv.TemporalRwTx
 
 	if useExternalTx {
-		applyTx = txc.Tx.(kv.TemporalRwTx)
+		var ok bool
+		applyTx, ok = txc.Tx.(kv.TemporalRwTx)
+		if !ok {
+			return errors.New("txc.Tx is not a temporal tx")
+		}
 	} else {
 		var err error
 		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
@@ -1362,12 +1366,12 @@ func ExecV3(ctx context.Context,
 					if initialCycle {
 						pruneTimeout = 10 * time.Hour
 
-						if err = applyTx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+						if err = applyTx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 							return err
 						}
 					}
 
-					if _, err := applyTx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+					if _, err := applyTx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
 						return err
 					}
 
@@ -1419,31 +1423,33 @@ func ExecV3(ctx context.Context,
 			return nil
 		}()
 
-		if u != nil && !u.HasUnwindPoint() {
-			if b != nil {
-				_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
-				if err != nil {
-					return err
+		if execErr == nil {
+			if u != nil && !u.HasUnwindPoint() {
+				if b != nil {
+					_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+					if err != nil {
+						return err
+					}
+
+					se.txExecutor.lastCommittedBlockNum = b.NumberU64()
+					committedTransactions := inputTxNum - se.txExecutor.lastCommittedTxNum
+					se.txExecutor.lastCommittedTxNum = inputTxNum
+
+					commitStart := time.Now()
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
+					applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
+					if err != nil {
+						return err
+					}
+
+					if !useExternalTx {
+						executor.LogCommitted(commitStart, 0, committedTransactions, uncommitedGas, stepsInDb, commitment.CommitProgress{})
+					}
+
+					uncommitedGas = 0
+				} else {
+					fmt.Printf("[dbg] mmmm... do we need action here????\n")
 				}
-
-				se.txExecutor.lastCommittedBlockNum = b.NumberU64()
-				committedTransactions := inputTxNum - se.txExecutor.lastCommittedTxNum
-				se.txExecutor.lastCommittedTxNum = inputTxNum
-
-				commitStart := time.Now()
-				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
-				applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
-				if err != nil {
-					return err
-				}
-
-				if !useExternalTx {
-					executor.LogCommitted(commitStart, 0, committedTransactions, uncommitedGas, stepsInDb, commitment.CommitProgress{})
-				}
-
-				uncommitedGas = 0
-			} else {
-				fmt.Printf("[dbg] mmmm... do we need action here????\n")
 			}
 		}
 	} else {
@@ -1743,7 +1749,7 @@ func ExecV3(ctx context.Context,
 	executor.wait(ctx)
 
 	if false && !inMemExec {
-		dumpPlainStateDebug(applyTx.(kv.TemporalRwTx), executor.domains())
+		dumpPlainStateDebug(applyTx, executor.domains())
 	}
 
 	lastCommitedStep := kv.Step((executor.lastCommittedTxNum()) / doms.StepSize())
