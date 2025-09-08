@@ -2,17 +2,19 @@ package state
 
 import (
 	"encoding/hex"
+	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
-func IsValidInclusionListSignature(b abstract.BeaconStateBasic, signed solid.SignedInclusionList) bool {
+func IsValidInclusionListSignature(b *CachingBeaconState, signed solid.SignedInclusionList) bool {
 	msg := signed.Message
 
 	validatorIndexInt, err := strconv.Atoi(msg.ValidatorIndex)
@@ -44,7 +46,7 @@ func IsValidInclusionListSignature(b abstract.BeaconStateBasic, signed solid.Sig
 		return false
 	}
 
-	slot, err := strconv.Atoi(msg.ValidatorIndex)
+	slot, err := strconv.Atoi(msg.Slot)
 	if err != nil {
 		return false
 	}
@@ -69,4 +71,43 @@ func IsValidInclusionListSignature(b abstract.BeaconStateBasic, signed solid.Sig
 
 	// if all checks passes then IL is valid
 	return true
+}
+
+func GetInclusionListCommittee(b *CachingBeaconState, signed solid.SignedInclusionList) ([]uint64, error) {
+	msg := signed.Message
+
+	slot, err := strconv.Atoi(msg.Slot)
+	if err != nil {
+		return nil, err
+	}
+	epoch := GetEpochAtSlot(b.BeaconConfig(), uint64(slot))
+	beaconConfig := b.BeaconConfig()
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+
+	mix := b.GetRandaoMix(int(mixPosition))
+	seed := shuffling.GetSeed(beaconConfig, mix, epoch, beaconConfig.DomainInclusionListCommittee)
+
+	indices := b.GetActiveValidatorsIndices(epoch)
+	n := uint64(len(indices))
+
+	if n == 0 {
+		return nil, fmt.Errorf("no active validators found in the cache")
+	}
+
+	start := uint64(slot%int(beaconConfig.SlotsPerEpoch)) * beaconConfig.InclusionListCommitteeSize
+	end := start + beaconConfig.InclusionListCommitteeSize
+
+	preInputs := shuffling.ComputeShuffledIndexPreInputs(beaconConfig, seed)
+	committee := make([]uint64, len(indices))
+
+	for i := start; i < end; i++ {
+		pos := i % n
+		shuffled, err := shuffling.ComputeShuffledIndex(beaconConfig, pos, n, seed, preInputs, utils.Sha256)
+		if err != nil {
+			return nil, err
+		}
+		committee[i-start] = indices[shuffled]
+	}
+	return committee[start:end], nil
 }
