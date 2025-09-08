@@ -130,8 +130,12 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 // GetStatusData returns the current StatusData.
 // Uses DB head, falls back to snapshot data when unavailable
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
-	earliestBlock, err := s.blockReader.EarliestBlockNum(ctx, nil)
-	if err != nil {
+	var earliestBlock uint64
+	if err := s.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		earliestBlock, err = s.blockReader.EarliestBlockNum(ctx, tx)
+		return err
+	}); err != nil {
 		return nil, fmt.Errorf("GetStatusData: earliest block number error: %w", err)
 	}
 

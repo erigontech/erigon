@@ -469,24 +469,28 @@ func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint6
 
 // findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
-	bodyKey := make([]byte, 8)
-	binary.BigEndian.PutUint64(bodyKey, 1)
-
 	bodyCursor, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create BlockBody cursor: %w", err)
 	}
 	defer bodyCursor.Close()
 
-	bodyKey, _, err = bodyCursor.Seek(bodyKey)
+	_, _, err = bodyCursor.First()
 	if err != nil {
-		return 0, fmt.Errorf("failed to seek BlockBody: %w", err)
+		return 0, fmt.Errorf("failed to get genesis BlockBody key: %w", err)
 	}
-	if len(bodyKey) < 8 {
+
+	// Get first key after genesis, otherwise this function always returns 0
+	firstKey, _, err := bodyCursor.Next()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
+	}
+	if len(firstKey) < 8 {
 		return math.MaxUint64, nil // no body data found
 	}
 
-	return binary.BigEndian.Uint64(bodyKey[:8]), nil
+	result := binary.BigEndian.Uint64(firstKey[:8])
+	return result, nil
 }
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 	if r.borSn == nil {
