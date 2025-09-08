@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type MaxCheckpointLengthExceededError struct {
@@ -57,14 +58,16 @@ type BlockTooSoonError struct {
 	Number     uint64
 	Hash       common.Hash
 	Succession int
+	Validators *valset.ValidatorSet
 }
 
 func (e *BlockTooSoonError) Error() string {
 	return fmt.Sprintf(
-		"Block %d, blockHash=%x was created too soon. Signer turn-ness number is %d\n",
+		"Block %d, blockHash=%x was created too soon. Signer turn-ness number is %d, validatorSet=%+v\n",
 		e.Number,
 		e.Hash,
 		e.Succession,
+		e.Validators,
 	)
 }
 

@@ -269,7 +269,7 @@ func ValidateHeaderTime(
 	header *types.Header,
 	now time.Time,
 	parent *types.Header,
-	validatorSet ValidateHeaderTimeSignerSuccessionNumber,
+	validatorSet *valset.ValidatorSet,
 	config *borcfg.BorConfig,
 	signaturesCache *lru.ARCCache[common.Hash, common.Address],
 ) error {
@@ -310,7 +310,7 @@ func ValidateHeaderTime(
 	}
 
 	if header.Time < MinNextBlockTime(parent, succession, config) {
-		return &BlockTooSoonError{header.Number.Uint64(), header.Hash(), succession}
+		return &BlockTooSoonError{header.Number.Uint64(), header.Hash(), succession, validatorSet}
 	}
 
 	return nil
