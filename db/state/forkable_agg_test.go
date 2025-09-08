@@ -594,7 +594,7 @@ func (i *inspectingFreezer) Expect(from, to RootNum) {
 	i.expectTo = append(i.expectTo, uint64(to))
 }
 
-func (i *inspectingFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error {
+func (i *inspectingFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) (NumMetadata, error) {
 	require.GreaterOrEqual(i.t, len(i.expectFrom), 1)
 	require.Equal(i.t, i.expectFrom[0], uint64(from))
 	require.Equal(i.t, i.expectTo[0], uint64(to))

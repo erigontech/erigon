@@ -17,54 +17,48 @@ type SimpleRelationalFreezer struct {
 	valsTbl string
 }
 
-func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error {
+func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) (metadata NumMetadata, err error) {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
-		return err
+		return
 	}
 	defer tx.Rollback()
 	_entityNumFrom, err := sf.rel.RootNum2Num(from, tx)
 	if err != nil {
-		return err
+		return
 	}
 	entityNumFrom := hexutil.EncodeTs(uint64(_entityNumFrom))
 
 	_entityNumTo, err := sf.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return err
+		return
 	}
 	entityNumTo := hexutil.EncodeTs(uint64(_entityNumTo))
 
 	cursor, err := tx.Cursor(sf.valsTbl)
 	if err != nil {
-		return err
+		return
 	}
 
 	defer cursor.Close()
 
 	// bytes.Compare assume big endianness
-	var metadata NumMetadata
 	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, v, err = cursor.Next() {
 		if err != nil {
-			return err
+			return metadata, err
 		}
 		knum := Num(binary.BigEndian.Uint64(k))
-		if metadata.count == 0 {
-			metadata.first = knum
+		if metadata.Count == 0 {
+			metadata.First = knum
 		}
-		metadata.last = knum
-		metadata.count++
+		metadata.Last = knum
+		metadata.Count++
 		if err := coll.Add(k, v); err != nil {
-			return err
+			return metadata, err
 		}
 	}
-	mbytes, err := metadata.Marshal()
-	if err != nil {
-		return err
-	}
-	coll.SetMetadata(mbytes)
 
-	return nil
+	return
 }
 
 // a simple freezer for marked forkables
@@ -73,88 +67,80 @@ type SimpleMarkedFreezer struct {
 	mfork *Forkable[MarkedTxI]
 }
 
-func (sf *SimpleMarkedFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error {
+func (sf *SimpleMarkedFreezer) Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) (metadata NumMetadata, err error) {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
-		return err
+		return
 	}
 	defer tx.Rollback()
 	mfork := sf.mfork
 	_entityNumFrom, err := mfork.rel.RootNum2Num(from, tx)
 	if err != nil {
-		return err
+		return
 	}
 	entityNumFrom := mfork.encTs(_entityNumFrom)
 
 	_entityNumTo, err := mfork.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return err
+		return
 	}
 	entityNumTo := mfork.encTs(_entityNumTo)
 
 	cursor, err := tx.Cursor(mfork.canonicalTbl)
 	if err != nil {
-		return err
+		return
 	}
 
 	defer cursor.Close()
 
 	vcursor, err := tx.Cursor(mfork.valsTbl)
 	if err != nil {
-		return err
+		return
 	}
 	defer vcursor.Close()
 
 	combK := mfork.valsTblKey2
 
 	// bytes.Compare assume big endianness
-	var metadata NumMetadata
 	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, v, err = cursor.Next() {
 		if err != nil {
-			return err
+			return metadata, err
 		}
 		knum := Num(binary.BigEndian.Uint64(k))
-		if metadata.count == 0 {
-			metadata.first = knum
+		if metadata.Count == 0 {
+			metadata.First = knum
 		}
-		metadata.last = knum
-		metadata.count++
+		metadata.Last = knum
+		metadata.Count++
 		valsKey := combK(k, v)
 		_, value, err := vcursor.SeekExact(valsKey)
 		if err != nil {
-			return err
+			return metadata, err
 		}
 
 		if err := coll.Add(k, value); err != nil {
-			return err
+			return metadata, err
 		}
 	}
-	mbytes, err := metadata.Marshal()
-	if err != nil {
-		return err
-	}
-	coll.SetMetadata(mbytes)
-
-	return nil
-
+	return
 }
 
 // / metadata for seg files
 type NumMetadata struct {
-	first Num
-	last  Num
-	count uint64 // num count in file
+	First Num
+	Last  Num
+	Count uint64 // num count in file
 }
 
 func (nm *NumMetadata) Marshal() ([]byte, error) {
 	var buf bytes.Buffer
-	if err := binary.Write(&buf, binary.BigEndian, nm.first); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, nm.First); err != nil {
 		return nil, err
 	}
-	if err := binary.Write(&buf, binary.BigEndian, nm.last); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, nm.Last); err != nil {
 		return nil, err
 	}
-	if err := binary.Write(&buf, binary.BigEndian, nm.count); err != nil {
+	if err := binary.Write(&buf, binary.BigEndian, nm.Count); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -162,10 +148,10 @@ func (nm *NumMetadata) Marshal() ([]byte, error) {
 
 func (nm *NumMetadata) Unmarshal(data []byte) error {
 	if len(data) < 16 {
-		return errors.New("data too short")
+		return errors.New("num metadata too short")
 	}
-	nm.first = Num(binary.BigEndian.Uint64(data[:8]))
-	nm.last = Num(binary.BigEndian.Uint64(data[8:16]))
-	nm.count = binary.BigEndian.Uint64(data[16:])
+	nm.First = Num(binary.BigEndian.Uint64(data[:8]))
+	nm.Last = Num(binary.BigEndian.Uint64(data[8:16]))
+	nm.Count = binary.BigEndian.Uint64(data[16:])
 	return nil
 }

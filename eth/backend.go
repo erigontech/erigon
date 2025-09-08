@@ -1574,7 +1574,11 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
 	forkableAgg := state.NewForkableAgg(ctx, dirs, db, logger)
-	rcacheForkable, err := forkables.NewRcacheForkable(snConfig.Downloader.SnapshotConfig.Preverified.Items, dirs, agg.StepSize(), logger)
+	var items snapcfg.PreverifiedItems
+	if snConfig.Downloader != nil {
+		items = snConfig.Downloader.SnapshotConfig.Preverified.Items
+	}
+	rcacheForkable, err := forkables.NewRcacheForkable(items, dirs, agg.StepSize(), logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

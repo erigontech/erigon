@@ -123,9 +123,15 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		compress := a.isCompressionUsed(calcFrom, calcTo)
 		writer := a.DataWriter(sn, compress)
 		defer writer.Close()
-		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, writer, db); err != nil {
+		meta, err := a.freezer.Freeze(ctx, calcFrom, calcTo, writer, db)
+		if err != nil {
 			return nil, false, err
 		}
+		mbytes, err := meta.Marshal()
+		if err != nil {
+			return nil, false, err
+		}
+		writer.SetMetadata(mbytes)
 
 		p := ps.AddNew(filepath.Base(path), 1)
 		defer ps.Delete(p)
@@ -353,7 +359,7 @@ func (a *ProtoForkableTx) VisibleFilesMaxNum() Num {
 	if lasti < 0 {
 		return 0
 	}
-	return a.m[lasti].last + 1 // .last is inclusive
+	return a.m[lasti].Last + 1 // .last is inclusive
 }
 
 // if either found=false or err != nil, then fileIdx = -1
@@ -377,10 +383,10 @@ func (a *ProtoForkableTx) getFileIndex(entityNum Num) (int, bool) {
 	}
 	for i := range a.files {
 		meta := a.m[i]
-		if entityNum >= meta.first && entityNum <= meta.last {
+		if entityNum >= meta.First && entityNum <= meta.Last {
 			return i, true
 		}
-		if entityNum < meta.first {
+		if entityNum < meta.First {
 			break
 		}
 	}

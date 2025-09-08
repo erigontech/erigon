@@ -17,7 +17,7 @@ type Freezer interface {
 	// baseNumFrom/To represent num which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
 	// to ensure this.
-	Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) error
+	Freeze(ctx context.Context, from, to RootNum, coll Collector, db kv.RoDB) (NumMetadata, error)
 }
 
 type MetadataSetter interface {
@@ -25,7 +25,6 @@ type MetadataSetter interface {
 }
 
 type Collector interface {
-	MetadataSetter
 	Add(key, value []byte) error
 }
 

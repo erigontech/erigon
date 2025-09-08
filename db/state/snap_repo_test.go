@@ -525,7 +525,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 }
 
 func TestSegMetadata_Marshal_UM(t *testing.T) {
-	metadata := NumMetadata{first: Num(89), last: Num(120), count: 28}
+	metadata := NumMetadata{First: Num(89), Last: Num(120), Count: 28}
 	data, err := metadata.Marshal()
 	require.NoError(t, err)
 	metadata2 := NumMetadata{}

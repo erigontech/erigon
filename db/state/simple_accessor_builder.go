@@ -186,7 +186,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		NoFsync:            s.args.Nofsync,
 		TmpDir:             s.tmpDir,
 		LessFalsePositives: s.args.LessFalsePositives,
-		BaseDataID:         uint64(meta.first),
+		BaseDataID:         uint64(meta.First),
 	}, s.logger)
 	if err != nil {
 		return nil, err
@@ -260,7 +260,7 @@ func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.
 		reader: d.reader,
 		word:   make([]byte, 0, 4096),
 		meta:   d.m,
-		i:      d.m.first.Uint64(),
+		i:      d.m.First.Uint64(),
 	}
 	pds.pageSize = uint64(d.reader.PageSize())
 	return pds

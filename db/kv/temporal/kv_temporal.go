@@ -185,6 +185,12 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	if len(db.forkaggs) > 0 {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
