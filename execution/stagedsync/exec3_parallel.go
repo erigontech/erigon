@@ -1625,7 +1625,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 }
 
 func (pe *parallelExecutor) wait(ctx context.Context) error {
-	doneCh := make(chan error)
+	doneCh := make(chan error, 1)
 
 	go func() {
 		if pe.execLoopGroup != nil {
