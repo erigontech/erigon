@@ -187,7 +187,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	ibs.SetTrace(txTask.Trace)
 
 	if task.IsBlockEnd() || txIndex < 0 {
-		if txTask.Config.IsByzantium(blockNum) {
+		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
 			ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
 		}
 		return nil, nil
