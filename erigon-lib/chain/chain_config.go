@@ -183,6 +183,7 @@ type BorConfig interface {
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
+	CalculateCoinbase(number uint64) common.Address
 }
 
 func timestampToTime(unixTime *big.Int) *time.Time {
