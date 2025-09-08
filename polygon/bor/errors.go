@@ -57,15 +57,17 @@ func (e *MismatchingValidatorsError) Error() string {
 type BlockTooSoonError struct {
 	Number     uint64
 	Hash       common.Hash
+	Signer     common.Address
 	Succession int
 	Validators *valset.ValidatorSet
 }
 
 func (e *BlockTooSoonError) Error() string {
 	return fmt.Sprintf(
-		"Block %d, blockHash=%x was created too soon. Signer turn-ness number is %d, validatorSet=%+v\n",
+		"Block %d, blockHash=%x was created too soon.  Signer (%x) turn-ness number is %d, validatorSet=%+v\n",
 		e.Number,
 		e.Hash,
+		e.Signer,
 		e.Succession,
 		e.Validators,
 	)

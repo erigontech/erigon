@@ -310,7 +310,7 @@ func ValidateHeaderTime(
 	}
 
 	if header.Time < MinNextBlockTime(parent, succession, config) {
-		return &BlockTooSoonError{header.Number.Uint64(), header.Hash(), succession, validatorSet}
+		return &BlockTooSoonError{header.Number.Uint64(), header.Hash(), signer, succession, validatorSet}
 	}
 
 	return nil
