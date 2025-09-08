@@ -230,12 +230,33 @@ func (ccb *CanonicalChainBuilder) recalcTip() *forkTreeNode {
 // Returns the list of newly connected headers (filtering out headers that already exist in the tree)
 // or an error in case the header is invalid or the header chain cannot reach any of the nodes in the tree.
 func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.Header) ([]*types.Header, error) {
-	if (len(headers) > 0) && (headers[0].Number != nil) && (headers[0].Number.Cmp(ccb.root.header.Number) == 0) {
-		headers = headers[1:]
-	}
 	if len(headers) == 0 {
 		return nil, nil
 	}
+
+	var isBehindRoot = func(h *types.Header) bool {
+		return h.Number.Cmp(ccb.Root().Number) < 0
+	}
+
+	// early return check: if last header is behind root, there is no connection point
+	if isBehindRoot(headers[len(headers)-1]) {
+		return nil, nil
+	}
+	var connectionIdx int = 0
+	if headers[0].Number.Cmp(ccb.Root().Number) <= 0 {
+		// try to find connection point: i.e. smallest idx such that the header[idx] is not behind the root
+		for ; connectionIdx < len(headers) && isBehindRoot(headers[connectionIdx]); connectionIdx++ {
+		}
+		connectionIdx++
+	}
+
+	// this shouldn't happen due to early check above but it doesn't hurt to check anyway
+	if connectionIdx >= len(headers) {
+		return nil, nil
+	}
+
+	// cut off headers before the connection point
+	headers = headers[connectionIdx:]
 
 	parent := ccb.nodeByHash(headers[0].ParentHash)
 	if parent == nil {
