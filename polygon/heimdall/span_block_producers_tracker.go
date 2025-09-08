@@ -110,6 +110,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
 
 	lastProducerSelection, ok, err := t.store.LastEntity(ctx)
+	t.logger.Debug("OBSERVE_SPAN ", "lastProducerSelection", lastProducerSelection)
 	if err != nil {
 		return err
 	}
@@ -161,7 +162,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
-
+	t.logger.Debug("OBSERVE_SPAN ", "newSpan.Producers()", newSpan.Producers())
 	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducers.IncrementProposerPriority(1)
 	newProducerSelection := &SpanBlockProducerSelection{
@@ -170,7 +171,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		EndBlock:   newSpan.EndBlock,
 		Producers:  newProducers,
 	}
-
+	t.logger.Debug("OBSERVE_SPAN ", "newSpanProducerSelection", newProducerSelection)
 	err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
 	if err != nil {
 		return err
