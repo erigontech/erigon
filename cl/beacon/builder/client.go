@@ -61,7 +61,6 @@ func NewBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainCon
 	}
 	if err := c.GetStatus(context.Background()); err != nil {
 		log.Error("cannot connect to builder client", "url", baseUrl, "error", err)
-		panic("cannot connect to builder client")
 	}
 	log.Info("Builder client is ready", "url", baseUrl)
 	return c
