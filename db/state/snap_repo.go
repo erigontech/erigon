@@ -39,12 +39,11 @@ type SnapshotRepo struct {
 	entity  UniversalEntity
 	name    string
 
-	cfg        *SnapshotConfig
-	schema     SnapNameSchema
-	accessors  statecfg.Accessors
-	stepSize   uint64
-	integrity  *DependencyIntegrityChecker
-	hasMetdata bool
+	cfg       *SnapshotConfig
+	schema    SnapNameSchema
+	accessors statecfg.Accessors
+	stepSize  uint64
+	integrity *DependencyIntegrityChecker
 
 	logger log.Logger
 }

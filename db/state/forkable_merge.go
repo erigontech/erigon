@@ -94,7 +94,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 		{
 			count := 0
 			for _, item := range filesToMerge {
-				count += item.src.decompressor.Count()
+				count += item.src.decompressor.Count() * max(f.cfg.ValuesOnCompressedPage, 1) // approx
 			}
 			p.Total.Store(uint64(count))
 		}
