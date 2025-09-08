@@ -20,6 +20,9 @@
 package core
 
 import (
+	"github.com/erigontech/erigon/execution/chain/params"
+	"math/big"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -84,23 +87,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = &types.Receipt{Type: txn.Type(), CumulativeGasUsed: *gasUsed}
-		if result.Failed() {
-			receipt.Status = types.ReceiptStatusFailed
-		} else {
-			receipt.Status = types.ReceiptStatusSuccessful
-		}
-		receipt.TxHash = txn.Hash()
-		receipt.GasUsed = result.GasUsed
-		// if the transaction created a contract, store the creation address in the receipt.
-		if msg.To() == nil {
-			receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce())
-		}
-		// Set the receipt logs and create a bloom for filtering
-		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash())
-		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-		receipt.BlockNumber = header.Number
-		receipt.TransactionIndex = uint(ibs.TxnIndex())
+		receipt = MakeReceipt(header.Number, header.Hash(), msg, txn, *gasUsed, result, ibs, evm)
 	}
 
 	return receipt, result.ReturnData, err
@@ -143,4 +130,39 @@ func ApplyTransactionWithEVM(config *chain.Config, engine consensus.EngineReader
 	cfg vm.Config, vmenv *vm.EVM,
 ) (*types.Receipt, []byte, error) {
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
+}
+
+func MakeReceipt(
+	blockNumber *big.Int,
+	blockHash common.Hash,
+	msg *types.Message,
+	txn types.Transaction,
+	cumulativeGasUsed uint64,
+	result *evmtypes.ExecutionResult,
+	ibs *state.IntraBlockState,
+	evm *vm.EVM,
+) *types.Receipt {
+	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed}
+	if result.Failed() {
+		receipt.Status = types.ReceiptStatusFailed
+	} else {
+		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	receipt.TxHash = txn.Hash()
+	receipt.GasUsed = result.GasUsed
+	if txn.Type() == types.BlobTxType {
+		blobTx := txn.(*types.BlobTx)
+		receipt.BlobGasUsed = uint64(len(blobTx.GetBlobHashes()) * int(params.GasPerBlob))
+	}
+	// If the transaction created a contract, store the creation address in the receipt.
+	if msg.To() == nil {
+		receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce())
+	}
+	// Set the receipt logs and create a bloom for filtering
+	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	// receipt.BlockHash = blockHash
+	receipt.BlockNumber = blockNumber
+	receipt.TransactionIndex = uint(ibs.TxnIndex())
+	return receipt
 }

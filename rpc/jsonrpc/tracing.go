@@ -410,7 +410,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(ctx, engine, header, dbtx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	if config != nil && config.BlockOverrides != nil {
 		err := config.BlockOverrides.Override(blockCtx)
 		if err != nil {
@@ -532,8 +532,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	stream.WriteArrayStart()
 	for bundleIndex, bundle := range bundles {
 		stream.WriteArrayStart()
-		// first change blockContext
-		transactions.BlockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
+		// first change block context
+		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
 		// do not reset ibs, because we want to keep the overrides and state change
 		// ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {
