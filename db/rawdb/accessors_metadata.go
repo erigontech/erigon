@@ -82,13 +82,15 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 	return nil
 }
 
-func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
-	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
-	if err != nil {
-		return err
-	}
-	if has {
-		return nil
+func WriteGenesis(db kv.RwTx, g *types.Genesis, allowOverride bool) error {
+	if !allowOverride {
+		has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
+		if err != nil {
+			return err
+		}
+		if has {
+			return nil
+		}
 	}
 
 	// Marshal json g

@@ -106,7 +106,7 @@ func initGenesis(cliCtx *cli.Context) error {
 			tracer.Hooks.OnBlockchainInit(genesis.Config)
 		}
 	}
-	_, hash, err := genesiswrite.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
+	_, hash, err := genesiswrite.CommitGenesisBlockWithOverride(chaindb, genesis, nil /* overrideOsakaTime */, true /* allowGenesisOverride */, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}
