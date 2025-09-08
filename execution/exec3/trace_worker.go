@@ -17,7 +17,6 @@
 package exec3
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -46,14 +45,14 @@ type Resetable interface {
 }
 
 type TraceWorker struct {
-	stateReader     *state.HistoryReaderV3
-	engine          consensus.EngineReader
-	canonicalReader services.CanonicalReader
-	tx              kv.Getter
-	chainConfig     *chain.Config
-	tracer          GenericTracer
-	ibs             *state.IntraBlockState
-	evm             *vm.EVM
+	stateReader  *state.HistoryReaderV3
+	engine       consensus.EngineReader
+	headerReader services.HeaderReader
+	tx           kv.Getter
+	chainConfig  *chain.Config
+	tracer       GenericTracer
+	ibs          *state.IntraBlockState
+	evm          *vm.EVM
 
 	// calculated by .changeBlock()
 	blockHash common.Hash
@@ -65,20 +64,20 @@ type TraceWorker struct {
 	vmConfig  *vm.Config
 }
 
-func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, cr services.CanonicalReader, tracer GenericTracer) *TraceWorker {
+func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 
 	ie := &TraceWorker{
-		tx:              tx,
-		engine:          engine,
-		chainConfig:     cc,
-		canonicalReader: cr,
-		stateReader:     stateReader,
-		tracer:          tracer,
-		evm:             vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{}),
-		vmConfig:        &vm.Config{NoBaseFee: true},
-		ibs:             state.New(stateReader),
+		tx:           tx,
+		engine:       engine,
+		chainConfig:  cc,
+		headerReader: br,
+		stateReader:  stateReader,
+		tracer:       tracer,
+		evm:          vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{}),
+		vmConfig:     &vm.Config{NoBaseFee: true},
+		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
 		ie.vmConfig.Tracer = tracer.TracingHooks()
@@ -90,9 +89,9 @@ func (e *TraceWorker) Close() {
 	e.evm.Config().JumpDestCache.LogStats()
 }
 
-func (e *TraceWorker) ChangeBlock(ctx context.Context, header *types.Header) {
+func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()
-	blockCtx := transactions.NewEVMBlockContext(ctx, e.engine, header, e.tx, e.canonicalReader, e.evm.ChainConfig())
+	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.headerReader, e.evm.ChainConfig())
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header

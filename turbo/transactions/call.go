@@ -53,27 +53,50 @@ type BlockOverrides struct {
 
 type BlockHashOverrides map[uint64]common.Hash
 
-func BlockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOverrides, overrideBlockHash BlockHashOverrides) {
-	if blockOverride.BlockNumber != nil {
-		blockCtx.BlockNumber = uint64(*blockOverride.BlockNumber)
+func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
+	h := types.CopyHeader(header)
+	if o.BlockNumber != nil {
+		h.Number = new(big.Int).SetUint64(uint64(*o.BlockNumber))
 	}
-	if blockOverride.BaseFee != nil {
-		blockCtx.BaseFee = blockOverride.BaseFee
+	if o.Difficulty != nil {
+		h.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
 	}
-	if blockOverride.Coinbase != nil {
-		blockCtx.Coinbase = *blockOverride.Coinbase
+	if o.Timestamp != nil {
+		h.Time = o.Timestamp.Uint64()
 	}
-	if blockOverride.Difficulty != nil {
-		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*blockOverride.Difficulty))
+	if o.GasLimit != nil {
+		h.GasLimit = uint64(*o.GasLimit)
 	}
-	if blockOverride.Timestamp != nil {
-		blockCtx.Time = uint64(*blockOverride.Timestamp)
+	if o.Coinbase != nil {
+		h.Coinbase = *o.Coinbase
 	}
-	if blockOverride.GasLimit != nil {
-		blockCtx.GasLimit = uint64(*blockOverride.GasLimit)
+	if o.BaseFee != nil {
+		h.BaseFee = o.BaseFee.ToBig()
 	}
-	if blockOverride.BlockHash != nil {
-		for blockNum, hash := range *blockOverride.BlockHash {
+	return h
+}
+
+func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, overrideBlockHash BlockHashOverrides) {
+	if o.BlockNumber != nil {
+		blockCtx.BlockNumber = uint64(*o.BlockNumber)
+	}
+	if o.BaseFee != nil {
+		blockCtx.BaseFee = o.BaseFee
+	}
+	if o.Coinbase != nil {
+		blockCtx.Coinbase = *o.Coinbase
+	}
+	if o.Difficulty != nil {
+		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
+	}
+	if o.Timestamp != nil {
+		blockCtx.Time = uint64(*o.Timestamp)
+	}
+	if o.GasLimit != nil {
+		blockCtx.GasLimit = uint64(*o.GasLimit)
+	}
+	if o.BlockHash != nil {
+		for blockNum, hash := range *o.BlockHash {
 			overrideBlockHash[blockNum] = hash
 		}
 	}
@@ -86,15 +109,13 @@ func DoCall(
 	tx kv.Tx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 	header *types.Header,
-	stateOverrides *ethapi2.StateOverrides,
-	blockOverrides *BlockOverrides,
-	blockHashOverrides BlockHashOverrides,
+	overrides *ethapi2.StateOverrides,
 	gasCap uint64,
 	chainConfig *chain.Config,
 	stateReader state.StateReader,
-	canonicalReader services.CanonicalReader,
+	headerReader services.HeaderReader,
 	callTimeout time.Duration,
-) (*evmtypes.ExecutionResult, types.Logs, error) {
+) (*evmtypes.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -103,12 +124,12 @@ func DoCall(
 		}
 	*/
 
-	intraBlockState := state.New(stateReader)
+	state := state.New(stateReader)
 
 	// Override the fields of specified contracts before execution.
-	if stateOverrides != nil {
-		if err := stateOverrides.Override(intraBlockState); err != nil {
-			return nil, nil, err
+	if overrides != nil {
+		if err := overrides.Override(state); err != nil {
+			return nil, err
 		}
 	}
 
@@ -125,30 +146,26 @@ func DoCall(
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	// Create a custom block context and apply any custom block overrides
-	blockCtx := NewEVMBlockContextWithOverrides(ctx, engine, header, tx, canonicalReader, chainConfig, blockOverrides, blockHashOverrides)
-
-	// Prepare the transaction message
+	// Get a new instance of the EVM.
 	var baseFee *uint256.Int
-	if blockCtx.BaseFee != nil {
-		baseFee = blockCtx.BaseFee
-	} else if header != nil && header.BaseFee != nil {
+	if header != nil && header.BaseFee != nil {
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
-			return nil, nil, errors.New("header.BaseFee uint256 overflow")
+			return nil, errors.New("header.BaseFee uint256 overflow")
 		}
 	}
 	msg, err := args.ToMessage(gasCap, baseFee)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
-	// Get a new instance of the EVM
-	evm := vm.NewEVM(blockCtx, txCtx, intraBlockState, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
-	// Wait for the context to be done and cancel the EVM. Even if the EVM has finished, cancelling may be done (repeatedly)
+	// Wait for the context to be done and cancel the evm. Even if the
+	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
 		<-ctx.Done()
 		evm.Cancel()
@@ -157,14 +174,14 @@ func DoCall(
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// If the timer caused an abort, return an appropriate error message
 	if evm.Cancelled() {
-		return nil, nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
+		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
-	return result, intraBlockState.Logs(), nil
+	return result, nil
 }
 
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine consensus.EngineReader, header *types.Header, tx kv.Getter,
@@ -172,31 +189,15 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine consensus.Engin
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
 	blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 	if blockOverrides != nil {
-		BlockHeaderOverride(&blockContext, *blockOverrides, blockHashOverrides)
+		blockOverrides.OverrideBlockContext(&blockContext, blockHashOverrides)
 	}
 	return blockContext
 }
 
-func NewEVMBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, tx kv.Getter,
-	reader services.CanonicalReader, config *chain.Config) evmtypes.BlockContext {
-	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, BlockHashOverrides{})
-	blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
-	return blockContext
-}
-
-func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) (common.Hash, error) {
-	return func(n uint64) (common.Hash, error) {
-		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
-		if err != nil {
-			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
-			return common.Hash{}, err
-		}
-		if h == nil {
-			log.Warn("[evm] header is nil", "blockNum", n)
-			return common.Hash{}, nil
-		}
-		return h.Hash(), nil
-	}
+func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
+	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
+	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
+	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
 
 type BlockHashProvider func(blockNum uint64) (common.Hash, error)
@@ -211,6 +212,21 @@ func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader services.Ca
 			log.Debug("Can't get block hash by number", "blockNum", blockNum, "ok", ok, "err", err)
 		}
 		return blockHash, err
+	}
+}
+
+func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) BlockHashProvider {
+	return func(n uint64) (common.Hash, error) {
+		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
+		if err != nil {
+			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
+			return common.Hash{}, err
+		}
+		if h == nil {
+			log.Warn("[evm] header is nil", "blockNum", n)
+			return common.Hash{}, nil
+		}
+		return h.Hash(), nil
 	}
 }
 
@@ -273,15 +289,15 @@ func (r *ReusableCaller) DoCallWithNewGas(
 }
 
 func NewReusableCaller(
-	ctx context.Context,
 	engine consensus.EngineReader,
 	stateReader state.StateReader,
 	overrides *ethapi2.StateOverrides,
 	header *types.Header,
 	initialArgs ethapi2.CallArgs,
 	gasCap uint64,
+	blockNrOrHash rpc.BlockNumberOrHash,
 	tx kv.Tx,
-	canonicalReader services.CanonicalReader,
+	headerReader services.HeaderReader,
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
@@ -307,7 +323,7 @@ func NewReusableCaller(
 		return nil, err
 	}
 
-	blockCtx := NewEVMBlockContext(ctx, engine, header, tx, canonicalReader, chainConfig)
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})

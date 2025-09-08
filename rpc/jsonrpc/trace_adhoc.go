@@ -1131,7 +1131,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(ctx, engine, header, tx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 
 	blockCtx.GasLimit = math.MaxUint64
@@ -1344,7 +1344,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(ctx, engine, header, dbtx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
 
@@ -1560,7 +1560,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(ctx, engine, header, dbtx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 
 	if isHistoricalStateReader {
 		historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
