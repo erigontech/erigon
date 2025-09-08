@@ -545,12 +545,12 @@ type RoSnapshots struct {
 	visibleLock sync.RWMutex                   // guards  `visible` field
 	visible     []VisibleSegments              // ordered map `type.Enum()` -> VisbileSegments
 
-	dir         string
-	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
-	segmentsMin atomic.Uint64 // all types of .seg files are available - starting from this number
-	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
-	logger      log.Logger
+	dir               string
+	segmentsMax       atomic.Uint64                    // all types of .seg files are available - up to this number
+	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
+	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
+	cfg               ethconfig.BlocksFreezing
+	logger            log.Logger
 
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
@@ -576,9 +576,10 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 	s := &RoSnapshots{dir: snapDir, cfg: cfg, logger: logger,
 		types: types, enums: enums,
-		dirty:     make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
-		alignMin:  alignMin,
-		operators: map[snaptype.Enum]*retireOperators{},
+		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
+		alignMin:          alignMin,
+		operators:         map[snaptype.Enum]*retireOperators{},
+		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
 	}
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
@@ -594,7 +595,23 @@ func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Lo
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
-func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
+func (s *RoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
+	if s == nil {
+		return 0, false
+	}
+
+	minStore, exists := s.segmentsMinByType[t]
+	if !exists {
+		return 0, false
+	}
+
+	min = minStore.Load()
+	if min == math.MaxUint64 {
+		return 0, false
+	}
+
+	return min, true
+}
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -1047,8 +1064,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMaxSet bool
 
 	typeMinBlocks := make(map[snaptype.Enum]uint64)
-	coreTypes := []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions}
-	for _, t := range coreTypes {
+	for _, t := range s.enums { // init min tracking for all configured types
 		typeMinBlocks[t] = math.MaxUint64
 	}
 
@@ -1133,26 +1149,19 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		}
 		segmentsMaxSet = true
 
-		// Track minimum block for this type (only for core types)
-		if _, isCoreType := typeMinBlocks[f.Type.Enum()]; isCoreType {
-			if f.From < typeMinBlocks[f.Type.Enum()] {
-				typeMinBlocks[f.Type.Enum()] = f.From
-			}
+		if f.From < typeMinBlocks[f.Type.Enum()] {
+			typeMinBlocks[f.Type.Enum()] = f.From
 		}
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
 
-	if len(typeMinBlocks) > 0 {
-		minBlocks := make([]uint64, 0, len(typeMinBlocks))
-		for _, minBlock := range typeMinBlocks {
-			minBlocks = append(minBlocks, minBlock)
+	for typ, minBlock := range typeMinBlocks {
+		if s.segmentsMinByType[typ] == nil {
+			s.segmentsMinByType[typ] = &atomic.Uint64{}
 		}
-		segmentsMin := slices.Max(minBlocks)
-		if segmentsMin != math.MaxUint64 { // only set if we have valid data for all types
-			s.segmentsMin.Store(segmentsMin)
-		}
+		s.segmentsMinByType[typ].Store(minBlock)
 	}
 
 	if err := wg.Wait(); err != nil {

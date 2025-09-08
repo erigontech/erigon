@@ -431,24 +431,39 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
 func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
-	snapshotMin := r.sn.SegmentsMin()
+	// Find the earliest block that has complete data across all types (headers, bodies, transactions)
+	snapshotTypes := []snaptype.Enum{
+		snaptype2.Enums.Headers,
+		snaptype2.Enums.Bodies,
+		snaptype2.Enums.Transactions,
+	}
+
+	snapshotMin := uint64(0)
+	for _, snapType := range snapshotTypes {
+		if minBlock, ok := r.sn.SegmentsMinByType(snapType); ok {
+			if minBlock > snapshotMin {
+				snapshotMin = minBlock
+			}
+		}
+	}
 
 	if tx == nil {
 		return snapshotMin, nil
 	}
 
-	var dbMin = uint64(math.MaxUint64)
+	var dbMinBlock = uint64(math.MaxUint64)
 	if kvTx, ok := tx.(kv.Tx); ok {
 		var err error
-		dbMin, err = r.findFirstCompleteBlock(kvTx)
+		dbMinBlock, err = r.findFirstCompleteBlock(kvTx)
 		if err != nil {
 			return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
 		}
 	}
 
-	if dbMin < snapshotMin {
-		return dbMin, nil
+	if dbMinBlock != math.MaxUint64 && dbMinBlock < snapshotMin {
+		return dbMinBlock, nil
 	}
+
 	return snapshotMin, nil
 }
 
