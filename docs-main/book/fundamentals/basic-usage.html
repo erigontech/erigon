@@ -1,0 +1,311 @@
+<!DOCTYPE HTML>
+<html lang="en" class="ayu sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Basic Usage - Erigon 3 Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Erigon 3 documentation!">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "ayu";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('ayu')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Erigon 3 Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/erigontech/docs" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="basic-usage"><a class="header" href="#basic-usage">Basic Usage</a></h1>
+<p>Erigon is primarily controlled using the command line, started using the <code>./build/bin/erigon</code> command and stopped by pressing <code>CTRL-C</code>.</p>
+<p>Using the command-line options allows for configurations, and several functionalities can be called using sub commands. To add a configuration flag to the command line simply add the argument and, optionally, its value:</p>
+<pre><code class="language-shell">./build/bin/erigon [flag]
+</code></pre>
+<p>for example:</p>
+<pre><code class="language-shell">./build/bin/erigon --chain=holesky
+</code></pre>
+<p>See here the full list of available <a href="">flags</a>.</p>
+<h2 id="all-in-one-client"><a class="header" href="#all-in-one-client">All-in-One Client</a></h2>
+<p>The all-in-one client is the preferred option for most users:</p>
+<pre><code class="language-bash">./build/bin/erigon
+</code></pre>
+<p>This CLI command allows you to run an Ethereum <strong>full node</strong> where every process is integrated and no special configuration is needed.</p>
+<p>The default Consensus Layer utilized is <a href="./fundamentals/caplin.html">Caplin</a>, the Erigon flagship embedded CL.</p>
+<h2 id="basic-configuration"><a class="header" href="#basic-configuration">Basic Configuration​</a></h2>
+<ul>
+<li>
+<p>Default data directory is <code>/home/usr/.local/share/erigon</code>. If you want to store Erigon files in a non-default location, add flag:</p>
+<pre><code class="language-bash">--datadir=&lt;your_data_dir&gt;
+</code></pre>
+</li>
+<li>
+<p>Based on the <a href="fundamentals/sync-modes.html">sync mode</a> you want to run you can add <code>--prune.mode=archive</code> to run a archive node, <code>--prune.mode=full</code> for a full node or <code>--prune.mode=minimal</code> for a minimal node.
+The default node is full node.</p>
+</li>
+<li>
+<p><code>--chain=mainnet</code>, add the flag <code>--chain=sepolia</code> for Sepolia testnet or <code>--chain=holesky</code> for Holesky testnet.</p>
+</li>
+<li>
+<p><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="fundamentals/web3-wallet.html">wallet</a>.</p>
+</li>
+<li>
+<p>To increase download speed add <code>--torrent.download.rate=512mb</code> (default is 16mb).</p>
+</li>
+</ul>
+<p>To stop the Erigon node you can use the <code>CTRL+C</code> command.</p>
+<p>Additional flags can be added to configure the node with several <a href="fundamentals/fundamentals.html">options</a>.</p>
+<h2 id="testnets"><a class="header" href="#testnets">Testnets</a></h2>
+<p>If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public <a href="fundamentals/supported-networks.html#testnets">testnets</a>, Holesky, adding the option <code>--chain=holesky</code> and using the default Consensus Layer, Caplin. You can also had the flag <code>--prune.mode=minimal</code> to have a node that is syncing fast while taking not so much disk space:</p>
+<pre><code class="language-bash">./build/bin/erigon --chain=holesky --prune.mode=minimal
+</code></pre>
+<h2 id="help"><a class="header" href="#help">Help</a></h2>
+<p>To learn about the available commands, open your terminal in your Erigon 3 installation directory and run:</p>
+<pre><code class="language-bash">make help
+</code></pre>
+<p>This command will display a list of convenience commands available in the Makefile, along with their descriptions.</p>
+<pre><code> go-version:                        print and verify go version
+ validate_docker_build_args:        ensure docker build args are valid
+ docker:                            validate, update submodules and build with docker
+ setup_xdg_data_home:               TODO
+ docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
+ dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
+ erigon:                            build erigon
+ all:                               run erigon with all commands
+ db-tools:                          build db tools
+ test:                              run unit tests with a 100s timeout
+ test-integration:                  run integration tests with a 30m timeout
+ lint-deps:                         install lint dependencies
+ lintci:                            run golangci-lint linters
+ lint:                              run all linters
+ clean:                             cleans the go cache, build dir, libmdbx db dir
+ devtools:                          installs dev tools (and checks for npm installation etc.)
+ mocks:                             generate test mocks
+ mocks-clean:                       cleans all generated test mocks
+ solc:                              generate all solidity contracts
+ abigen:                            generate abis using abigen
+ gencodec:                          generate marshalling code using gencodec
+ graphql:                           generate graphql code
+ gen:                               generate all auto-generated code in the codebase
+ bindings:                          generate test contracts and core contracts
+ prometheus:                        run prometheus and grafana with docker-compose
+ escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
+ git-submodules:                    update git submodules
+ install:                           copies binaries and libraries to DIST
+ user_linux:                        create "erigon" user (Linux)
+ user_macos:                        create "erigon" user (MacOS)
+ hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive
+ automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
+ help:                              print commands help
+
+</code></pre>
+<p>For example, from your Erigon 3 installation directory, run:</p>
+<pre><code class="language-bash">make clean
+</code></pre>
+<p>This will execute the clean target in the Makefile, which cleans the <code>go cache</code>, <code>build</code> directory, and <code>libmdbx</code> db directory.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../fundamentals/fundamentals.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../fundamentals/configuring-erigon.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../fundamentals/fundamentals.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../fundamentals/configuring-erigon.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

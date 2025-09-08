@@ -1,0 +1,6 @@
+[book]
+authors = ["Bloxster"]
+language = "en"
+multilingual = false
+src = "src"
+title = "docs-dev"
