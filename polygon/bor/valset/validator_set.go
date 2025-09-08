@@ -850,11 +850,11 @@ func GetUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator,
 		changes = append(changes, ov)
 	}
 
-	for _, nv := range newVals {
-		if _, ok := validatorContains(changes, nv); !ok {
-			changes = append(changes, nv)
-		}
-	}
+	// for _, nv := range newVals {
+	// 	if _, ok := validatorContains(changes, nv); !ok {
+	// 		changes = append(changes, nv)
+	// 	}
+	// }
 
 	if err := v.UpdateWithChangeSet(changes); err != nil {
 		logger.Error("error while updating change set", "err", err)
