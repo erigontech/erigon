@@ -1427,7 +1427,8 @@ func ExecV3(ctx context.Context,
 		if u != nil && !u.HasUnwindPoint() {
 			if b != nil {
 				if errors.Is(execErr, ErrWrongTrieRoot) {
-					execErr = handleIncorrectRootHashError(b.HeaderNoCopy(), applyTx, cfg, execStage, maxBlockNum, logger, u)
+					execErr = handleIncorrectRootHashError(
+						b.NumberU64(), b.Hash(), b.ParentHash(), applyTx, cfg, execStage, maxBlockNum, logger, u)
 				} else {
 					_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 					if err != nil {
@@ -1673,7 +1674,10 @@ func ExecV3(ctx context.Context,
 
 										dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 									}
-									return fmt.Errorf("wrong trie root: %d", applyResult.BlockNum)
+
+									return handleIncorrectRootHashError(
+										applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash,
+										applyTx, cfg, execStage, maxBlockNum, logger, u)
 								}
 								// fix these here - they will contain estimates after commit logging
 								pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
@@ -1865,12 +1869,12 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 	}
 }
 
-func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) error {
+func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
-		return ErrWrongTrieRoot
+		return fmt.Errorf("%w: %d", ErrWrongTrieRoot, blockNumber)
 	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
-		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+		cfg.hd.ReportBadHeaderPoS(blockHash, parentHash)
 	}
 	minBlockNum := e.BlockNumber
 	if maxBlockNum <= minBlockNum {
@@ -1897,7 +1901,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	if u != nil {
-		if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
+		if err := u.UnwindTo(allowedUnwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
 			return err
 		}
 	}
@@ -1947,7 +1951,8 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		err = handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
+		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash,
+			applyTx, cfg, e, maxBlockNum, logger, u)
 		return false, times, err
 	}
 	if !inMemExec {

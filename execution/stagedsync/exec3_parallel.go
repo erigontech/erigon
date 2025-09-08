@@ -106,6 +106,7 @@ type blockResult struct {
 	BlockNum    uint64
 	BlockTime   uint64
 	BlockHash   common.Hash
+	ParentHash  common.Hash
 	StateRoot   common.Hash
 	Err         error
 	GasUsed     uint64
@@ -1065,6 +1066,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.blockNum,
 			txTask.BlockTime(),
 			txTask.BlockHash(),
+			txTask.ParentHash(),
 			txTask.BlockRoot(),
 			nil,
 			be.gasUsed,
@@ -1093,6 +1095,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.blockNum,
 		txTask.BlockTime(),
 		txTask.BlockHash(),
+		txTask.ParentHash(),
 		txTask.BlockRoot(),
 		nil,
 		be.gasUsed,

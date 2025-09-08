@@ -70,6 +70,7 @@ type Task interface {
 
 	BlockNumber() uint64
 	BlockHash() common.Hash
+	ParentHash() common.Hash
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
@@ -328,6 +329,13 @@ func (t *TxTask) BlockHash() common.Hash {
 		return common.Hash{}
 	}
 	return t.Header.Hash()
+}
+
+func (t *TxTask) ParentHash() common.Hash {
+	if t.Header == nil {
+		return common.Hash{}
+	}
+	return t.Header.ParentHash
 }
 
 func (t *TxTask) BlockRoot() common.Hash {
