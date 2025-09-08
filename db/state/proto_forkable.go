@@ -147,7 +147,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		ps.Delete(p)
 	}
 
-	valuesDecomp, err := seg.NewDecompressorWithMetadata(path)
+	valuesDecomp, err := seg.NewDecompressorWithMetadata(path, cfg.HasMetadata)
 	if err != nil {
 		return nil, false, err
 	}

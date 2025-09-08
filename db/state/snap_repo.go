@@ -39,11 +39,12 @@ type SnapshotRepo struct {
 	entity  UniversalEntity
 	name    string
 
-	cfg       *SnapshotConfig
-	schema    SnapNameSchema
-	accessors statecfg.Accessors
-	stepSize  uint64
-	integrity *DependencyIntegrityChecker
+	cfg        *SnapshotConfig
+	schema     SnapNameSchema
+	accessors  statecfg.Accessors
+	stepSize   uint64
+	integrity  *DependencyIntegrityChecker
+	hasMetdata bool
 
 	logger log.Logger
 }
@@ -371,7 +372,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+				if item.decompressor, err = seg.NewDecompressorWithMetadata(fPath, f.cfg.HasMetadata); err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 					invalidFilesMu.Lock()

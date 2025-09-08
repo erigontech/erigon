@@ -78,6 +78,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	if !exists {
 		cfg := seg.DefaultCfg
 		cfg.Workers = compressWorkers
+		cfg.ExpectMetadata = true
 		r := Registry
 		var comp *seg.Compressor
 		comp, err = seg.NewCompressor(ctx, "merge_forkable_"+r.String(f.id), segPath, f.dirs.Tmp, cfg, log.LvlTrace, f.logger)
@@ -98,6 +99,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			p.Total.Store(uint64(count))
 		}
 
+		meta := NumMetadata{}
 		for _, item := range filesToMerge {
 			var word = make([]byte, 0, 4096)
 			startRootNum, endRootNum := item.src.Range()
@@ -106,6 +108,15 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			if err = item.src.decompressor.WithReadAhead(func() error {
 				reader := f.PagedDataReader(item.src.decompressor, compression)
 				var k, v []byte
+				var fmeta NumMetadata
+				if err := fmeta.Unmarshal(reader.GetMetadata()); err != nil {
+					return err
+				}
+				if meta.Count == 0 {
+					meta.First = fmeta.First
+				}
+				meta.Last = fmeta.Last
+				meta.Count += fmeta.Count
 
 				for reader.HasNext() {
 					k, v, word, _ = reader.Next2(word[:0])
@@ -121,15 +132,21 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 
 		}
 
-		if err = writer.Compress(); err != nil {
-			return
+		mbytes, err := meta.Marshal()
+		if err != nil {
+			return nil, err
 		}
+		writer.SetMetadata(mbytes)
+		if err = writer.Compress(); err != nil {
+			return nil, err
+		}
+
 		comp.Close()
 		ps.Delete(p)
 	}
 
 	mergedFile = newFilesItemWithSnapConfig(from.Uint64(), to.Uint64(), f.snapCfg)
-	if mergedFile.decompressor, err = seg.NewDecompressor(segPath); err != nil {
+	if mergedFile.decompressor, err = seg.NewDecompressorWithMetadata(segPath, f.snapCfg.HasMetadata); err != nil {
 		return
 	}
 	indexes, err := f.BuildIndexes(ctx, from, to, ps)

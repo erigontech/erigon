@@ -49,6 +49,8 @@ type SnapshotConfig struct {
 	//Integrity *DependencyIntegrityChecker
 
 	Schema SnapNameSchema
+
+	HasMetadata bool // data file (.v etc) has metadata
 }
 
 func NewSnapshotConfig(cfg *SnapshotCreationConfig, schema SnapNameSchema) *SnapshotConfig {

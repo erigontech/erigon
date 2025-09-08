@@ -134,7 +134,7 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) (*DecompressorIndexInputDataQuery, error) {
 	sgname := s.parser.DataFile(version.V1_0, from, to)
-	decomp, _ := seg.NewDecompressorWithMetadata(sgname)
+	decomp, _ := seg.NewDecompressorWithMetadata(sgname, true)
 	reader := seg.NewPagedReader(decomp.MakeGetter(), s.args.ValuesOnCompressedPage, s.isCompressionUsed(from, to))
 	return NewDecompressorIndexInputDataQuery(reader)
 }
@@ -300,7 +300,8 @@ func (s *pagedSegDataStream) Next() (word []byte, index uint64, offset uint64, e
 		k, word, s.word, pageOffset = s.reader.Next2(s.word[:0])
 		defer func() {
 			s.i++
-			for s.reader.HasNext() && s.pageSize > 1 && s.i%s.pageSize != 0 {
+			s.offset = pageOffset
+			for s.reader.HasNextOnPage() {
 				s.reader.Skip()
 				s.i++
 			}

@@ -122,12 +122,7 @@ func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadat
 		t.Fatal(err)
 	}
 	var d *Decompressor
-	if hasMetadata {
-		d, err = NewDecompressorWithMetadata(file)
-	} else {
-		d, err = NewDecompressor(file)
-	}
-	if err != nil {
+	if d, err = NewDecompressorWithMetadata(file, hasMetadata); err != nil {
 		t.Fatal(err)
 	}
 	return d

@@ -59,6 +59,8 @@ func RegisterForkable(name string, forkableId kv.ForkableId, dirs datadir.Dirs, 
 		panic("snapshotCreationConfig is required")
 	}
 
+	h.snapshotConfig.HasMetadata = true
+
 	mu.Lock()
 	Registry.entityRegistry[forkableId] = *h
 	h.snapshotConfig.LoadPreverified(pre)

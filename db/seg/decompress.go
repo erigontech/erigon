@@ -179,15 +179,11 @@ func SetDecompressionTableCondensity(fromBitSize int) {
 	condensePatternTableBitThreshold = fromBitSize
 }
 
-func NewDecompressorWithMetadata(compressedFilePath string) (*Decompressor, error) {
-	return newDecompresor(compressedFilePath, true)
-}
-
 func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
-	return newDecompresor(compressedFilePath, false)
+	return NewDecompressorWithMetadata(compressedFilePath, false)
 }
 
-func newDecompresor(compressedFilePath string, hasMetadata bool) (*Decompressor, error) {
+func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*Decompressor, error) {
 	_, fName := filepath.Split(compressedFilePath)
 	var err error
 	var validationPassed = false

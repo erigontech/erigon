@@ -271,45 +271,6 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	}
 }
 
-func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwDB) (ForkableId, *state.Forkable[UnmarkedTxI]) {
-	t.Helper()
-	id := kv.ForkableId(3)
-	stepSize := uint64(50)
-	name := "random_paged_data"
-	snapCfg := state.NewSnapshotConfig(
-		&state.SnapshotCreationConfig{
-			RootNumPerStep: stepSize,
-			MergeStages:    []uint64{400, 800},
-			MinimumSize:    50,
-			SafetyMargin:   5,
-		},
-		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
-	)
-	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
-
-	cfg := &statecfg.ForkableCfg{ValsTbl: "TestPagedTable", ValuesOnCompressedPage: 10}
-	indexb := state.NewSimpleAccessorBuilder(
-		state.NewAccessorArgs(false, false, cfg.ValuesOnCompressedPage, stepSize),
-		id, dirs.Tmp, log)
-
-	rwtx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer rwtx.Commit()
-
-	require.NoError(t, rwtx.CreateTable(cfg.ValsTbl))
-
-	uma, err := state.NewUnmarkedForkable(id,
-		cfg,
-		&state.IdentityRootRelation{},
-		dirs,
-		log,
-		state.App_WithIndexBuilders(indexb))
-	require.NoError(t, err)
-
-	cleanup(t, uma.ProtoForkable, db, dirs)
-	return id, uma
-}
-
 func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	dir, db, log := setup(t)
 	pagedDataId, uma := setupPagedEntity(t, log, dir, db)
@@ -406,4 +367,43 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 			require.True(t, returnv == nil)
 		}
 	}
+}
+
+func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwDB) (ForkableId, *state.Forkable[UnmarkedTxI]) {
+	t.Helper()
+	id := kv.ForkableId(3)
+	stepSize := uint64(50)
+	name := "random_paged_data"
+	snapCfg := state.NewSnapshotConfig(
+		&state.SnapshotCreationConfig{
+			RootNumPerStep: stepSize,
+			MergeStages:    []uint64{400, 800},
+			MinimumSize:    50,
+			SafetyMargin:   5,
+		},
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+	)
+	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
+
+	cfg := &statecfg.ForkableCfg{ValsTbl: "TestPagedTable", ValuesOnCompressedPage: 10}
+	indexb := state.NewSimpleAccessorBuilder(
+		state.NewAccessorArgs(false, false, cfg.ValuesOnCompressedPage, stepSize),
+		id, dirs.Tmp, log)
+
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+
+	require.NoError(t, rwtx.CreateTable(cfg.ValsTbl))
+
+	uma, err := state.NewUnmarkedForkable(id,
+		cfg,
+		&state.IdentityRootRelation{},
+		dirs,
+		log,
+		state.App_WithIndexBuilders(indexb))
+	require.NoError(t, err)
+
+	cleanup(t, uma.ProtoForkable, db, dirs)
+	return id, uma
 }

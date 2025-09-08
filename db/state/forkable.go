@@ -437,8 +437,11 @@ func progress(tbl string, tx kv.Tx, f ForkableFilesTxI) (Num, error) {
 	if k != nil {
 		num = binary.BigEndian.Uint64(k)
 	}
-
-	return max(Num(num), f.VisibleFilesMaxNum()-1), nil
+	filesProgress := f.VisibleFilesMaxNum()
+	if filesProgress > 0 {
+		filesProgress--
+	}
+	return max(Num(num), filesProgress), nil
 }
 
 var (
