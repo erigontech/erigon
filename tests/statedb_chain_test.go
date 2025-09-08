@@ -65,7 +65,7 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 
@@ -102,8 +102,8 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx.(kv.TemporalTx)))
+	if err := m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(address)
 		if err != nil {
 			return err

@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -447,7 +448,7 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	return dirs, db, logger
 }
 
@@ -456,10 +457,11 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	headerId := ForkableId(1)
 	cfg := registerEntity(dirs, "headers", headerId)
 
-	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false, 1, cfg.RootNumPerStep), headerId, dirs.Tmp, log,
+	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.Headers, ValuesOnCompressedPage: 1}
+	builder := NewSimpleAccessorBuilder(NewAccessorArgs(false, false, fcfg.ValuesOnCompressedPage, cfg.RootNumPerStep), headerId, dirs.Tmp, log,
 		WithIndexKeyFactory(NewSimpleIndexKeyFactory()))
 
-	ma, err := NewMarkedForkable(headerId, &statecfg.ForkableCfg{ValsTbl: kv.Headers}, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
+	ma, err := NewMarkedForkable(headerId, fcfg, kv.HeaderCanonical, IdentityRootRelationInstance, dirs, log,
 		App_WithPruneFrom(Num(1)),
 		App_WithIndexBuilders(builder),
 		App_WithUpdateCanonical())

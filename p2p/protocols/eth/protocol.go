@@ -25,7 +25,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -64,65 +64,65 @@ const (
 	PooledTransactionsMsg         = 0x0a
 )
 
-var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
+var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 	direct.ETH67: {
-		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
-		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
-		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
-		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
-		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
-		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
-		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
-		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
-		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
-		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
-		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 	},
 	direct.ETH68: {
-		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
-		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
-		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
-		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
-		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
-		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
-		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
-		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
-		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
-		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, // Modified in eth/68
-		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
-		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, // Modified in eth/68
+		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 	},
 }
 
-var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+var FromProto = map[uint]map[sentryproto.MessageId]uint64{
 	direct.ETH67: {
-		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
-		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
-		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
-		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
-		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
-		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
-		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
-		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
-		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
-		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
-		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		sentryproto.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		sentryproto.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
 	direct.ETH68: {
-		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
-		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
-		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
-		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
-		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
-		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
-		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
-		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
-		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
-		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
-		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		sentryproto.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		sentryproto.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
 }
 

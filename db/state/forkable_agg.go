@@ -577,7 +577,7 @@ func (r *ForkableAgg) recalcVisibleFiles() {
 			// unaligned forkables recalcvisible with no restriction
 			rn = RootNum(MaxUint64)
 		}
-		maxr := p.snaps.RecalcVisibleFiles(rn)
+		maxr := p.RecalcVisibleFiles(rn)
 		if !p.unaligned {
 			vfMinimaxRootNum = min(vfMinimaxRootNum, maxr)
 		}

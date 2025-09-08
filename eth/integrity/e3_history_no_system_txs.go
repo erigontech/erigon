@@ -112,7 +112,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 			return err
 		}
 
-		blk, _min, _max := int64(-1), int64(-1), int64(-1)
+		blk, _min := int64(-1), int64(-1)
 
 		for it.HasNext() {
 			txNum, err := it.Next()
@@ -124,7 +124,8 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 				continue
 			}
 
-			if int64(txNum) > _max {
+			// Descending iteration: when we cross below current block's min, reset to find new block bounds
+			if _min != -1 && int64(txNum) < _min {
 				blk = -1
 			}
 
@@ -145,11 +146,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 					return err
 				}
 				_min = int64(minT)
-				maxT, err := rawdbv3.TxNums.Max(tx, blockNum)
-				if err != nil {
-					return err
-				}
-				_max = int64(maxT)
+
 			}
 
 			if int64(txNum) == _min {

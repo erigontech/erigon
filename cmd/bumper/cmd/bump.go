@@ -12,8 +12,10 @@ import (
 )
 
 var bumpCmd = &cobra.Command{
-	Use:   "bump",
-	Short: "Edit versions.yaml in TUI and regenerate code",
+	Use:     "bump",
+	Short:   "Edit versions.yaml in TUI and regenerate code",
+	Long:    `bump is a TUI&CLI (in development) for bumping versions of files in erigon codebase`,
+	Example: `to run TUI: go run ./cmd/bumper bump`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file := "./db/state/statecfg/versions.yaml"
 		out := "./db/state/statecfg/version_schema_gen.go"

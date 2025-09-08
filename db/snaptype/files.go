@@ -332,6 +332,10 @@ func IsStateFile(name string) bool {
 	return ok
 }
 
+func IsTorrentPartial(ext string) bool {
+	return strings.HasPrefix(ext, ".torrent") && len(ext) > len(".torrent")
+}
+
 func SeedableV2Extensions() []string {
 	return []string{".seg"}
 }

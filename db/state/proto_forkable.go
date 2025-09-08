@@ -53,8 +53,8 @@ func NewProto(id ForkableId, builders []AccessorIndexBuilder, freezer Freezer, d
 	}
 }
 
-func (a *ProtoForkable) RecalcVisibleFiles(toRootNum RootNum) {
-	a.snaps.RecalcVisibleFiles(toRootNum)
+func (a *ProtoForkable) RecalcVisibleFiles(toRootNum RootNum) (maxRootNum RootNum) {
+	maxRootNum = a.snaps.RecalcVisibleFiles(toRootNum)
 	visibleCount := len(a.snaps.visibleFiles())
 	// Ensure sufficient capacity - simpler approach
 	if cap(a.metadata) < visibleCount {
@@ -69,6 +69,7 @@ func (a *ProtoForkable) RecalcVisibleFiles(toRootNum RootNum) {
 		}
 		a.metadata[i] = m
 	}
+	return maxRootNum
 }
 
 func (a *ProtoForkable) IntegrateDirtyFile(file *FilesItem) {

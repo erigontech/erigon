@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -209,7 +210,7 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	db.stateFiles.Close()
+	//db.stateFiles.Close()
 	db.RwDB.Close()
 }
 
@@ -708,27 +709,17 @@ func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 func (tx *RwTx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.RwTx)
 }
+
+func (tx *tx) dirs() datadir.Dirs   { return tx.aggtx.Dirs() }
+func (tx *Tx) Dirs() datadir.Dirs   { return tx.dirs() }
+func (tx *RwTx) Dirs() datadir.Dirs { return tx.dirs() }
+
 func (tx *tx) stepSize() uint64 {
 	return tx.aggtx.StepSize()
 }
-func (tx *Tx) StepSize() uint64 {
-	return tx.stepSize()
-}
+func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
 func (tx *RwTx) StepSize() uint64 {
 	return tx.stepSize()
-}
-
-func (tx *Tx) CanUnwindToBlockNum() (uint64, error) {
-	return tx.aggtx.CanUnwindToBlockNum(tx.Tx)
-}
-func (tx *RwTx) CanUnwindToBlockNum() (uint64, error) {
-	return tx.aggtx.CanUnwindToBlockNum(tx.RwTx)
-}
-func (tx *Tx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
-	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.Tx)
-}
-func (tx *RwTx) CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error) {
-	return tx.aggtx.CanUnwindBeforeBlockNum(blockNum, tx.RwTx)
 }
 func (tx *Tx) AllForkableIds() (ids []kv.ForkableId) {
 	for _, forkagg := range tx.tx.forkaggs {

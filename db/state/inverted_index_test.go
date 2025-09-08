@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -50,7 +51,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -614,7 +615,10 @@ func TestInvIndexScanFiles(t *testing.T) {
 	require.NoError(err)
 	defer ii.Close()
 	ii.salt.Store(&salt)
-	err = ii.openFolder()
+
+	scanDirsRes, err := scanDirs(ii.dirs)
+	require.NoError(err)
+	err = ii.openFolder(scanDirsRes)
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
@@ -802,7 +806,9 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = ii.openFolder()
+	scanDirsRes, err := scanDirs(ii.dirs)
+	require.NoError(t, err)
+	err = ii.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	ii.Close()
 }

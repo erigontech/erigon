@@ -23,49 +23,49 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 type EthBackendClientDirect struct {
-	server remote.ETHBACKENDServer
+	server remoteproto.ETHBACKENDServer
 }
 
-func NewEthBackendClientDirect(server remote.ETHBACKENDServer) *EthBackendClientDirect {
+func NewEthBackendClientDirect(server remoteproto.ETHBACKENDServer) *EthBackendClientDirect {
 	return &EthBackendClientDirect{server: server}
 }
 
-func (s *EthBackendClientDirect) Etherbase(ctx context.Context, in *remote.EtherbaseRequest, opts ...grpc.CallOption) (*remote.EtherbaseReply, error) {
+func (s *EthBackendClientDirect) Etherbase(ctx context.Context, in *remoteproto.EtherbaseRequest, opts ...grpc.CallOption) (*remoteproto.EtherbaseReply, error) {
 	return s.server.Etherbase(ctx, in)
 }
 
-func (s *EthBackendClientDirect) NetVersion(ctx context.Context, in *remote.NetVersionRequest, opts ...grpc.CallOption) (*remote.NetVersionReply, error) {
+func (s *EthBackendClientDirect) NetVersion(ctx context.Context, in *remoteproto.NetVersionRequest, opts ...grpc.CallOption) (*remoteproto.NetVersionReply, error) {
 	return s.server.NetVersion(ctx, in)
 }
 
-func (s *EthBackendClientDirect) NetPeerCount(ctx context.Context, in *remote.NetPeerCountRequest, opts ...grpc.CallOption) (*remote.NetPeerCountReply, error) {
+func (s *EthBackendClientDirect) NetPeerCount(ctx context.Context, in *remoteproto.NetPeerCountRequest, opts ...grpc.CallOption) (*remoteproto.NetPeerCountReply, error) {
 	return s.server.NetPeerCount(ctx, in)
 }
 
-func (s *EthBackendClientDirect) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+func (s *EthBackendClientDirect) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error) {
 	return s.server.Version(ctx, in)
 }
 
-func (s *EthBackendClientDirect) Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.SyncingReply, error) {
+func (s *EthBackendClientDirect) Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.SyncingReply, error) {
 	return s.server.Syncing(ctx, in)
 }
 
-func (s *EthBackendClientDirect) ProtocolVersion(ctx context.Context, in *remote.ProtocolVersionRequest, opts ...grpc.CallOption) (*remote.ProtocolVersionReply, error) {
+func (s *EthBackendClientDirect) ProtocolVersion(ctx context.Context, in *remoteproto.ProtocolVersionRequest, opts ...grpc.CallOption) (*remoteproto.ProtocolVersionReply, error) {
 	return s.server.ProtocolVersion(ctx, in)
 }
 
-func (s *EthBackendClientDirect) ClientVersion(ctx context.Context, in *remote.ClientVersionRequest, opts ...grpc.CallOption) (*remote.ClientVersionReply, error) {
+func (s *EthBackendClientDirect) ClientVersion(ctx context.Context, in *remoteproto.ClientVersionRequest, opts ...grpc.CallOption) (*remoteproto.ClientVersionReply, error) {
 	return s.server.ClientVersion(ctx, in)
 }
 
 // -- start Subscribe
 
-func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remote.SubscribeRequest, opts ...grpc.CallOption) (remote.ETHBACKEND_SubscribeClient, error) {
+func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remoteproto.SubscribeRequest, opts ...grpc.CallOption) (remoteproto.ETHBACKEND_SubscribeClient, error) {
 	ch := make(chan *subscribeReply, 16384)
 	streamServer := &SubscribeStreamS{ch: ch, ctx: ctx}
 	go func() {
@@ -76,7 +76,7 @@ func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remote.Subsc
 }
 
 type subscribeReply struct {
-	r   *remote.SubscribeReply
+	r   *remoteproto.SubscribeReply
 	err error
 }
 type SubscribeStreamS struct {
@@ -85,7 +85,7 @@ type SubscribeStreamS struct {
 	grpc.ServerStream
 }
 
-func (s *SubscribeStreamS) Send(m *remote.SubscribeReply) error {
+func (s *SubscribeStreamS) Send(m *remoteproto.SubscribeReply) error {
 	s.ch <- &subscribeReply{r: m}
 	return nil
 }
@@ -103,7 +103,7 @@ type SubscribeStreamC struct {
 	grpc.ClientStream
 }
 
-func (c *SubscribeStreamC) Recv() (*remote.SubscribeReply, error) {
+func (c *SubscribeStreamC) Recv() (*remoteproto.SubscribeReply, error) {
 	select {
 	case m, ok := <-c.ch:
 		if !ok || m == nil {
@@ -121,7 +121,7 @@ func (c *SubscribeStreamC) Context() context.Context { return c.ctx }
 
 // -- SubscribeLogs
 
-func (s *EthBackendClientDirect) SubscribeLogs(ctx context.Context, opts ...grpc.CallOption) (remote.ETHBACKEND_SubscribeLogsClient, error) {
+func (s *EthBackendClientDirect) SubscribeLogs(ctx context.Context, opts ...grpc.CallOption) (remoteproto.ETHBACKEND_SubscribeLogsClient, error) {
 	subscribeLogsRequestChan := make(chan *subscribeLogsRequest, 16384)
 	subscribeLogsReplyChan := make(chan *subscribeLogsReply, 16384)
 	srv := &SubscribeLogsStreamS{
@@ -150,21 +150,21 @@ type SubscribeLogsStreamS struct {
 }
 
 type subscribeLogsReply struct {
-	r   *remote.SubscribeLogsReply
+	r   *remoteproto.SubscribeLogsReply
 	err error
 }
 
 type subscribeLogsRequest struct {
-	r   *remote.LogsFilterRequest
+	r   *remoteproto.LogsFilterRequest
 	err error
 }
 
-func (s *SubscribeLogsStreamS) Send(m *remote.SubscribeLogsReply) error {
+func (s *SubscribeLogsStreamS) Send(m *remoteproto.SubscribeLogsReply) error {
 	s.chSend <- &subscribeLogsReply{r: m}
 	return nil
 }
 
-func (s *SubscribeLogsStreamS) Recv() (*remote.LogsFilterRequest, error) {
+func (s *SubscribeLogsStreamS) Recv() (*remoteproto.LogsFilterRequest, error) {
 	select {
 	case m, ok := <-s.chRecv:
 		if !ok || m == nil {
@@ -190,12 +190,12 @@ type SubscribeLogsStreamC struct {
 	grpc.ClientStream
 }
 
-func (c *SubscribeLogsStreamC) Send(m *remote.LogsFilterRequest) error {
+func (c *SubscribeLogsStreamC) Send(m *remoteproto.LogsFilterRequest) error {
 	c.chSend <- &subscribeLogsRequest{r: m}
 	return nil
 }
 
-func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
+func (c *SubscribeLogsStreamC) Recv() (*remoteproto.SubscribeLogsReply, error) {
 	select {
 	case m, ok := <-c.chRecv:
 		if !ok || m == nil {
@@ -209,58 +209,58 @@ func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
 
 // -- end SubscribeLogs
 
-func (s *EthBackendClientDirect) CanonicalBodyForStorage(ctx context.Context, in *remote.CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*remote.CanonicalBodyForStorageReply, error) {
+func (s *EthBackendClientDirect) CanonicalBodyForStorage(ctx context.Context, in *remoteproto.CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*remoteproto.CanonicalBodyForStorageReply, error) {
 	return s.server.CanonicalBodyForStorage(ctx, in)
 }
 
-func (s *EthBackendClientDirect) CanonicalHash(ctx context.Context, in *remote.CanonicalHashRequest, opts ...grpc.CallOption) (*remote.CanonicalHashReply, error) {
+func (s *EthBackendClientDirect) CanonicalHash(ctx context.Context, in *remoteproto.CanonicalHashRequest, opts ...grpc.CallOption) (*remoteproto.CanonicalHashReply, error) {
 	return s.server.CanonicalHash(ctx, in)
 }
 
-func (s *EthBackendClientDirect) HeaderNumber(ctx context.Context, in *remote.HeaderNumberRequest, opts ...grpc.CallOption) (*remote.HeaderNumberReply, error) {
+func (s *EthBackendClientDirect) HeaderNumber(ctx context.Context, in *remoteproto.HeaderNumberRequest, opts ...grpc.CallOption) (*remoteproto.HeaderNumberReply, error) {
 	return s.server.HeaderNumber(ctx, in)
 }
 
-func (s *EthBackendClientDirect) Block(ctx context.Context, in *remote.BlockRequest, opts ...grpc.CallOption) (*remote.BlockReply, error) {
+func (s *EthBackendClientDirect) Block(ctx context.Context, in *remoteproto.BlockRequest, opts ...grpc.CallOption) (*remoteproto.BlockReply, error) {
 	return s.server.Block(ctx, in)
 }
 
-func (s *EthBackendClientDirect) TxnLookup(ctx context.Context, in *remote.TxnLookupRequest, opts ...grpc.CallOption) (*remote.TxnLookupReply, error) {
+func (s *EthBackendClientDirect) TxnLookup(ctx context.Context, in *remoteproto.TxnLookupRequest, opts ...grpc.CallOption) (*remoteproto.TxnLookupReply, error) {
 	return s.server.TxnLookup(ctx, in)
 }
 
-func (s *EthBackendClientDirect) NodeInfo(ctx context.Context, in *remote.NodesInfoRequest, opts ...grpc.CallOption) (*remote.NodesInfoReply, error) {
+func (s *EthBackendClientDirect) NodeInfo(ctx context.Context, in *remoteproto.NodesInfoRequest, opts ...grpc.CallOption) (*remoteproto.NodesInfoReply, error) {
 	return s.server.NodeInfo(ctx, in)
 }
 
-func (s *EthBackendClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PeersReply, error) {
+func (s *EthBackendClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.PeersReply, error) {
 	return s.server.Peers(ctx, in)
 }
 
-func (s *EthBackendClientDirect) AddPeer(ctx context.Context, in *remote.AddPeerRequest, opts ...grpc.CallOption) (*remote.AddPeerReply, error) {
+func (s *EthBackendClientDirect) AddPeer(ctx context.Context, in *remoteproto.AddPeerRequest, opts ...grpc.CallOption) (*remoteproto.AddPeerReply, error) {
 	return s.server.AddPeer(ctx, in)
 }
 
-func (s *EthBackendClientDirect) RemovePeer(ctx context.Context, in *remote.RemovePeerRequest, opts ...grpc.CallOption) (*remote.RemovePeerReply, error) {
+func (s *EthBackendClientDirect) RemovePeer(ctx context.Context, in *remoteproto.RemovePeerRequest, opts ...grpc.CallOption) (*remoteproto.RemovePeerReply, error) {
 	return s.server.RemovePeer(ctx, in)
 }
 
-func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PendingBlockReply, error) {
+func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.PendingBlockReply, error) {
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remote.BorTxnLookupRequest, opts ...grpc.CallOption) (*remote.BorTxnLookupReply, error) {
+func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remoteproto.BorTxnLookupRequest, opts ...grpc.CallOption) (*remoteproto.BorTxnLookupReply, error) {
 	return s.server.BorTxnLookup(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEventsRequest, opts ...grpc.CallOption) (*remote.BorEventsReply, error) {
+func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remoteproto.BorEventsRequest, opts ...grpc.CallOption) (*remoteproto.BorEventsReply, error) {
 	return s.server.BorEvents(ctx, in)
 }
 
-func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remote.AAValidationRequest, opts ...grpc.CallOption) (*remote.AAValidationReply, error) {
+func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remoteproto.AAValidationRequest, opts ...grpc.CallOption) (*remoteproto.AAValidationReply, error) {
 	return s.server.AAValidation(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remote.BlockForTxNumRequest, opts ...grpc.CallOption) (*remote.BlockForTxNumResponse, error) {
+func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remoteproto.BlockForTxNumRequest, opts ...grpc.CallOption) (*remoteproto.BlockForTxNumResponse, error) {
 	return s.server.BlockForTxNum(ctx, in)
 }

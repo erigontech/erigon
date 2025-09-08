@@ -29,7 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/estimate"
-	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
@@ -50,8 +52,6 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type SnapshotsCfg struct {
@@ -60,7 +60,7 @@ type SnapshotsCfg struct {
 	dirs        datadir.Dirs
 
 	blockRetire        services.BlockRetire
-	snapshotDownloader protodownloader.DownloaderClient
+	snapshotDownloader downloaderproto.DownloaderClient
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 
@@ -77,7 +77,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
-	snapshotDownloader protodownloader.DownloaderClient,
+	snapshotDownloader downloaderproto.DownloaderClient,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,
@@ -414,7 +414,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				if noDl {
 					return nil
 				}
-				if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l}); err != nil {
+				if _, err := cfg.snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: l}); err != nil {
 					return err
 				}
 				return nil
@@ -507,7 +507,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 			if filepath.IsAbs(file) {
 				relativePathToFile, _ = filepath.Rel(cfg.dirs.Snap, file)
 			}
-			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{relativePathToFile}}); err != nil {
+			if _, err := cfg.snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{relativePathToFile}}); err != nil {
 				return filesDeleted, err
 			}
 		}

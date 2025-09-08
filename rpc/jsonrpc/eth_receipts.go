@@ -108,7 +108,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				}
 			}
 
-			if uint64(fromBlock) > latest {
+			if begin > latest {
 				return types.RPCLogs{}, nil
 			}
 		}

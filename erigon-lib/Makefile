@@ -8,8 +8,7 @@ ifeq ($(CGO_CXXFLAGS),)
 endif
 
 GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
-GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath
-GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go test -trimpath --tags=nofuzz
+GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GOEXPERIMENT=synctest go test -trimpath
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -36,7 +35,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v31.1/protoc-31.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v32.0/protoc-32.0-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -108,7 +107,7 @@ lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
 test-short:
-	$(GOTEST_NOFUZZ) -short ./...
+	$(GOTEST) -short ./...
 
 test-all:
 	$(GOTEST) -coverprofile=coverage-test-all.out ./...

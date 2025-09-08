@@ -109,8 +109,7 @@ func (b *Filter) Build() error {
 	}
 
 	log.Trace("[agg] write file", "file", b.FileName)
-	tmpFilePath := b.FilePath + ".tmp"
-	cf, err := os.Create(tmpFilePath)
+	cf, err := dir.CreateTemp(b.FilePath)
 	if err != nil {
 		return err
 	}
@@ -125,7 +124,7 @@ func (b *Filter) Build() error {
 	if err = cf.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpFilePath, b.FilePath); err != nil {
+	if err := os.Rename(cf.Name(), b.FilePath); err != nil {
 		return err
 	}
 	return nil

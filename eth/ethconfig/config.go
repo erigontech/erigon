@@ -118,6 +118,8 @@ var Defaults = Config{
 	},
 }
 
+const DefaultChainDBPageSize = 16 * datasize.KB
+
 func init() {
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -287,4 +289,5 @@ type Sync struct {
 	AlwaysGenerateChangesets bool
 	KeepExecutionProofs      bool
 	PersistReceiptsCacheV2   bool
+	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
 }

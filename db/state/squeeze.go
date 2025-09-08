@@ -13,6 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -107,7 +110,11 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 // SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
 // Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
 func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
-	if !at.a.commitmentValuesTransform {
+	stepSize := at.StepSize()
+	dirs := at.Dirs()
+
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	if !commitmentUseReferencedBranches {
 		return nil
 	}
 
@@ -117,19 +124,19 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.StepSize(),
+				aggStep: stepSize,
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.StepSize(),
+				aggStep: stepSize,
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.StepSize(),
+				aggStep: stepSize,
 			},
 		},
 	}
@@ -199,18 +206,18 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		cf.decompressor.MadvNormal()
 
 		err = func() error {
-			steps := cf.endTxNum/at.a.stepSize - cf.startTxNum/at.a.stepSize
+			steps := cf.endTxNum/stepSize - cf.startTxNum/stepSize
 			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
-			at.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
+			logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
-			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, at.a.dirs.Tmp,
+			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
 				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
@@ -239,7 +246,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !bytes.Equal(k, keyCommitmentState) {
+				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
@@ -279,7 +286,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
 
-			at.a.logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
+			logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			processedFiles++
@@ -296,9 +303,9 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
 			return err
 		}
-		at.a.logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
+		logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
 	}
-	at.a.logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
+	logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
 	return nil
 }
@@ -321,7 +328,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 		return "", err
 	}
 	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, commitmentValuesTransform enabled %t\n", a.StepSize(), a.commitmentValuesTransform)
+	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues)
 	return s, nil
 }
 
@@ -368,9 +375,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
 	start := time.Now()
-
-	originalCommitmentValuesTransform := a.commitmentValuesTransform
-	a.commitmentValuesTransform = false
 
 	var totalKeysCommitted uint64
 
@@ -531,7 +535,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				break
 			}
 		}
-		a.commitmentValuesTransform = originalCommitmentValuesTransform // disable only while merging, to squeeze later. If enabled in Scheme, must be enabled while computing commitment to correctly dereference keys
 
 	}
 
@@ -539,11 +542,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	dbg.ReadMemStats(&m)
 	logger.Info("[rebuild_commitment] done", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
-	a.commitmentValuesTransform = originalCommitmentValuesTransform
-
 	acRo.Close()
 
-	if !squeeze {
+	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
@@ -572,21 +573,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, nil
 }
 
-// discardWrites disables updates collection for further flushing into db.
-// Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
-func (sd *SharedDomains) discardWrites(d kv.Domain) {
-	if d >= kv.DomainLen {
-		return
-	}
-	sd.domainWriters[d].discard = true
-	sd.domainWriters[d].h.discard = true
-}
-
 func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
-	sd.discardWrites(kv.AccountsDomain)
-	sd.discardWrites(kv.StorageDomain)
-	sd.discardWrites(kv.CodeDomain)
+	sd.DiscardWrites(kv.AccountsDomain)
+	sd.DiscardWrites(kv.StorageDomain)
+	sd.DiscardWrites(kv.CodeDomain)
 
 	logger := sd.logger
 
@@ -613,7 +604,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.Tempor
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.mem, nil)
 	if err != nil {
 		return nil, err
 	}

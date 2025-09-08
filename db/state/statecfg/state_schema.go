@@ -24,10 +24,7 @@ type AggSetters interface {
 	KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64)
 }
 
-func Configure(a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger) error {
-	if err := AdjustReceiptCurrentVersionIfNeeded(dirs, logger); err != nil {
-		return err
-	}
+func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger) error { //nolint:gocritic
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.AccountsDomain), salt, dirs, logger); err != nil {
 		return err
 	}
@@ -219,7 +216,7 @@ var Schema = SchemaGen{
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		Accessors:           AccessorHashMap,
-		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues,
+		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
