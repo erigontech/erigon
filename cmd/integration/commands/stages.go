@@ -1376,7 +1376,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
-	borSn.DownloadComplete() // mark as ready
+	if borSn != nil {
+		borSn.DownloadComplete() // mark as ready
+	}
 	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
