@@ -119,7 +119,10 @@ func (u UnwindReason) Err() error {
 	if u.ErrBadBlock != nil {
 		return fmt.Errorf("bad block err: %w", u.ErrBadBlock)
 	}
-	return fmt.Errorf("operational err: %w", u.ErrOperational)
+	if u.ErrOperational != nil {
+		return fmt.Errorf("operational err: %w", u.ErrOperational)
+	}
+	return nil
 }
 
 var StagedUnwind = UnwindReason{}
