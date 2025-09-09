@@ -214,9 +214,6 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 	if selection, ok := t.recentSelections.Get(prevSprintNum); ok && spanId == selection.SpanId {
 		producersCopy := selection.Producers.Copy()
-		if blockNum != 26160367 && blockNum != 26161087 {
-			producersCopy.IncrementProposerPriority(1)
-		}
 		selectionCopy := selection
 		selectionCopy.Producers = producersCopy
 		t.recentSelections.Add(currentSprintNum, selectionCopy)
@@ -248,10 +245,9 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	increments := int(currentSprintNum - spanStartSprintNum)
 	for i := 0; i < increments; i++ {
 		sprintNum := spanStartSprintNum + uint64(increments)
-		if sprintNum == uint64(badSprint1) || sprintNum == uint64(badSprint2) {
-			continue
+		if sprintNum != uint64(badSprint1) && sprintNum != uint64(badSprint2) {
+			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		}
-		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		producers.IncrementProposerPriority(1)
 	}
 
