@@ -31,16 +31,25 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
+type iodir int
+
+const (
+	get iodir = iota
+	put
+)
+
 type dataWithPrevStep struct {
 	data     []byte
 	prevStep kv.Step
+	dir      iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	stepSize uint64
 
-	estSize int
+	putCacheSize int
+	getCacheSize int
 
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string]dataWithPrevStep
@@ -95,21 +104,33 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
+	putSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
-			sd.estSize += len(val) - len(old.data)
+			putSize += len(val) - len(old.data)
 		} else {
-			sd.estSize += len(key) + len(val)
+			putSize += len(key) + len(val)
 		}
+
+		sd.putCacheSize += putSize
+		domainMetrics.Lock()
+		domainMetrics.CachePutSize += putSize
+		domainMetrics.Unlock()
 		return
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		sd.estSize += len(val) - len(old.data)
+		putSize += len(val) - len(old.data)
 	} else {
-		sd.estSize += len(key) + len(val)
+		putSize += len(key) + len(val)
 	}
 	sd.domains[domain][key] = valWithPrevStep
+
+	sd.putCacheSize += putSize
+
+	domainMetrics.Lock()
+	domainMetrics.CachePutSize += putSize
+	domainMetrics.Unlock()
 }
 
 func (sd *TemporalMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
@@ -134,7 +155,7 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.estSize) * 4
+	return uint64(sd.putCacheSize) * 4
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
@@ -145,7 +166,13 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	sd.estSize = 0
+	domainMetrics.Lock()
+	defer domainMetrics.Unlock()
+	domainMetrics.CachePutSize -= sd.putCacheSize
+	if domainMetrics.CachePutSize < 0 {
+		domainMetrics.CachePutSize = 0
+	}
+	sd.putCacheSize = 0
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {

@@ -11,6 +11,7 @@ import (
 
 const FlagDone = 0
 const FlagEstimate = 1
+const UnknownDep = -2
 
 type AccountPath int8
 
@@ -147,7 +148,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
-	res.depIdx = -1
+	res.depIdx = UnknownDep
 	res.incarnation = -1
 
 	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] {
@@ -159,7 +160,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 	}
 
 	var floor = func(i int) (key int, val *WriteCell) {
-		key = -1
+		key = UnknownDep
 		cells.Descend(i, func(k int, v *WriteCell) bool {
 			key = k
 			val = v
@@ -170,7 +171,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 
 	fk, fv := floor(txIdx - 1)
 
-	if fk != -1 && fv != nil {
+	if fk != UnknownDep && fv != nil {
 		switch fv.flag {
 		case FlagEstimate:
 			res.depIdx = fk
@@ -254,6 +255,95 @@ func (vm *VersionMap) DeleteAll(addr common.Address, txIdx int) {
 	}
 }
 
+type VersionValidity int
+
+func (v VersionValidity) String() string {
+	switch v {
+	case VersionValid:
+		return "valid"
+	case VersionInvalid:
+		return "invalid"
+	case VersionTooEarly:
+		return "too early"
+	default:
+		return "unknown"
+	}
+}
+
+const (
+	VersionValid VersionValidity = iota
+	VersionInvalid
+	VersionTooEarly
+)
+
+func (vm *VersionMap) validateRead(txIndex int, addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version,
+	checkVersion func(readVersion, writeVersion Version) VersionValidity,
+	traceInvalid bool, tracePrefix string) VersionValidity {
+
+	valid := VersionValid
+
+	rr := vm.Read(addr, path, key, txIndex)
+	switch rr.Status() {
+	case MVReadResultDone:
+		if source != MapRead {
+			valid = VersionInvalid
+		} else {
+			valid = checkVersion(version, rr.Version())
+		}
+	case MVReadResultDependency:
+		valid = VersionInvalid
+	case MVReadResultNone:
+		if source != StorageRead {
+			valid = VersionInvalid
+		} else {
+			if valid = checkVersion(version, version); valid == VersionValid {
+				if path == BalancePath || path == NoncePath || path == CodeHashPath {
+					valid = vm.validateRead(txIndex, addr, AddressPath, common.Hash{}, source,
+						version, checkVersion, traceInvalid, tracePrefix)
+				}
+			}
+		}
+	default:
+		panic(fmt.Errorf("undefined vm read status: %v", rr.Status()))
+	}
+
+	if vm.trace || (traceInvalid && valid == VersionInvalid) {
+		if len(tracePrefix) > 0 {
+			tracePrefix = tracePrefix + "  RD"
+		} else {
+			tracePrefix = "RD"
+		}
+		fmt.Printf("%s %x %s, %d %s, %s (%d.%d)!=(%d.%d) %s\n", tracePrefix, addr,
+			AccountKey{path, key}.String(), txIndex, func() string {
+				switch rr.Status() {
+				case MVReadResultDone:
+					return "done"
+				case MVReadResultDependency:
+					return "dependency"
+				case MVReadResultNone:
+					return "none"
+				default:
+					return "unknown"
+				}
+			}(),
+			source, version.TxIndex, version.Incarnation, rr.depIdx, rr.incarnation, valid)
+	}
+
+	return valid
+}
+
+func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
+	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
+		readSet.Scan(func(vr *VersionedRead) bool {
+			valid = vm.validateRead(txIdx, vr.Address, vr.Path, vr.Key, vr.Source, vr.Version,
+				checkVersion, traceInvalid, tracePrefix)
+			return valid == VersionValid
+		})
+	}
+
+	return
+}
+
 type WriteCell struct {
 	flag        uint
 	incarnation int
@@ -266,6 +356,8 @@ type Version struct {
 	TxIndex     int
 	Incarnation int
 }
+
+var UnknownVersion = Version{TxIndex: UnknownDep, Incarnation: -1}
 
 const (
 	MVReadResultDone       = 0
@@ -299,7 +391,7 @@ func (res *ReadResult) Version() Version {
 }
 
 func (mvr ReadResult) Status() int {
-	if mvr.depIdx != -1 {
+	if mvr.depIdx != UnknownDep {
 		if mvr.incarnation == -1 {
 			return MVReadResultDependency
 		} else {
@@ -308,43 +400,4 @@ func (mvr ReadResult) Status() int {
 	}
 
 	return MVReadResultNone
-}
-
-func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(source ReadSource, readVersion, writeVersion Version) bool) (valid bool) {
-	valid = true
-
-	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
-		readSet.Scan(func(vr *VersionedRead) bool {
-			rr := versionMap.Read(vr.Address, vr.Path, vr.Key, txIdx)
-			switch rr.Status() {
-			case MVReadResultDone:
-				valid = checkVersion(vr.Source, vr.Version, rr.Version())
-			case MVReadResultDependency:
-				valid = false
-			case MVReadResultNone:
-				valid = vr.Source == StorageRead
-			default:
-				panic(fmt.Errorf("should not happen - undefined vm read status: %v", rr.Status()))
-			}
-
-			if versionMap.trace {
-				fmt.Println("RD", vr.Address, AccountKey{vr.Path, vr.Key}.String(), txIdx, func() string {
-					switch rr.Status() {
-					case MVReadResultDone:
-						return "done"
-					case MVReadResultDependency:
-						return "dependency"
-					case MVReadResultNone:
-						return "none"
-					default:
-						return "unknown"
-					}
-				}(), vr.Version, rr.depIdx, rr.incarnation, valid)
-			}
-
-			return valid
-		})
-	}
-
-	return
 }
