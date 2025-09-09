@@ -158,8 +158,8 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	spanStartSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
 	spanEndSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
 	increments := int(spanEndSprintNum - spanStartSprintNum)
-	badSprint1 := t.borConfig.CalculateSprintNumber(26160367)
-	badSprint2 := t.borConfig.CalculateSprintNumber(26161087)
+	badSprint1 := t.borConfig.CalculateSprintNumber(26160367 + 1)
+	badSprint2 := t.borConfig.CalculateSprintNumber(26161087 + 1)
 	for i := 0; i < increments; i++ {
 		sprintNum := spanStartSprintNum + uint64(i)
 		if sprintNum != uint64(badSprint1) && sprintNum != uint64(badSprint2) {
@@ -247,8 +247,8 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		return nil, 0, err
 	}
 
-	badSprint1 := t.borConfig.CalculateSprintNumber(26160367)
-	badSprint2 := t.borConfig.CalculateSprintNumber(26161087)
+	badSprint1 := t.borConfig.CalculateSprintNumber(26160367 + 1)
+	badSprint2 := t.borConfig.CalculateSprintNumber(26161087 + 1)
 
 	spanStartSprintNum := t.borConfig.CalculateSprintNumber(producerSelection.StartBlock)
 	increments := int(currentSprintNum - spanStartSprintNum)
