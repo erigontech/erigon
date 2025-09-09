@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -348,6 +349,8 @@ func (s *SnapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 		if !exists {
 			continue
 		}
+		fmt.Println("LAL found txn in file:", txnHash.String(), sn.Src().FileName1)
+
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.Src().MakeGetter()
 		gg.Reset(offset)

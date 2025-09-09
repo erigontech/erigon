@@ -103,6 +103,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		if err != nil {
 			return nil, err
 		}
+
+		fmt.Println("LAL found header for blockNum", header, blockNum)
+
 		if header == nil {
 			return nil, nil
 		}
