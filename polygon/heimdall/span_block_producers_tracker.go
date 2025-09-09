@@ -164,6 +164,12 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		sprintNum := spanStartSprintNum + uint64(i)
 		if sprintNum != uint64(badSprint1) && sprintNum != uint64(badSprint2) {
 			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		} else {
+			emptyProducers := make([]*valset.Validator, len(producers.Validators))
+			for i := 0; i < len(emptyProducers); i++ {
+				emptyProducers[i] = valset.NewValidator(producers.Validators[i].Address, 0)
+			}
+			producers = valset.GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
 		}
 		producers.IncrementProposerPriority(1)
 	}
@@ -250,6 +256,12 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		sprintNum := spanStartSprintNum + uint64(i)
 		if sprintNum != uint64(badSprint1) && sprintNum != uint64(badSprint2) {
 			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		} else {
+			emptyProducers := make([]*valset.Validator, len(producers.Validators))
+			for i := 0; i < len(emptyProducers); i++ {
+				emptyProducers[i] = valset.NewValidator(producers.Validators[i].Address, 0)
+			}
+			producers = valset.GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
 		}
 		producers.IncrementProposerPriority(1)
 	}
