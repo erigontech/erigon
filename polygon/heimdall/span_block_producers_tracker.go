@@ -233,10 +233,12 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 
 	producers := producerSelection.Producers
-	producers.UpdateValidatorMap()
-	err = producers.UpdateTotalVotingPower()
-	if err != nil {
-		return nil, 0, err
+	if blockNum != 26160367 && blockNum != 26161087 {
+		producers.UpdateValidatorMap()
+		err = producers.UpdateTotalVotingPower()
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	badSprint1 := (26160367 + 1) / 16
