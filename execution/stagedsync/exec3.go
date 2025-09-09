@@ -46,6 +46,7 @@ import (
 	changeset2 "github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -611,7 +612,7 @@ Loop:
 					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 						hooks.OnBlockEnd(err)
 					}
-					return err
+					return fmt.Errorf("%w: %w", consensus.ErrInvalidBlock, err) // new payload can contain invalid txs
 				}
 			}
 
@@ -904,7 +905,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 
 func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if cfg.badBlockHalt {
-		return false, errors.New("wrong trie root")
+		return false, fmt.Errorf("%w: wrong trie root", consensus.ErrInvalidBlock)
 	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
