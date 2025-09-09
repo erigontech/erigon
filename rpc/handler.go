@@ -178,7 +178,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
-		answersWithNils := make([]interface{}, len(msgs))
+		answersWithNils := make([]any, len(msgs))
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
 		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
 		defer close(boundedConcurrency)
@@ -210,7 +210,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 			}(i)
 		}
 		wg.Wait()
-		answers := make([]interface{}, 0, len(msgs))
+		answers := make([]any, 0, len(msgs))
 		for _, answer := range answersWithNils {
 			if answer != nil {
 				answers = append(answers, answer)
