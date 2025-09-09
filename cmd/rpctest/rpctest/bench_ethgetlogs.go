@@ -203,7 +203,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				if failFast {
 					return fmt.Errorf("error getting modified accounts (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
 				} else {
-					log.Error("[ethGetLogsInvariants]", "error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
+					log.Error("[ethGetLogsInvariants] error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
 				}
 			}
 			if err := noDuplicates(resp.Result); err != nil {

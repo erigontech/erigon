@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/forkables"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
@@ -62,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
@@ -497,7 +499,19 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		onNewSnapshot()
 
-		db, err = temporal.New(rawDB, agg)
+		forkableAgg := dbstate.NewForkableAgg(ctx, cfg.Dirs, db, logger)
+		snapCfg, knownSnapCfg := snapcfg.KnownCfg(cfg.Snap.ChainName)
+		var items snapcfg.PreverifiedItems
+		if knownSnapCfg {
+			items = snapCfg.Preverified.Items
+		}
+		rcacheForkable, err := forkables.NewRcacheForkable(items, cfg.Dirs, agg.StepSize(), logger)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
+		forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
+
+		db, err = temporal.New(rawDB, agg, forkableAgg)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
