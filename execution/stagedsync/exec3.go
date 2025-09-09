@@ -968,7 +968,11 @@ func ExecV3(ctx context.Context,
 		var ok bool
 		applyTx, ok = txc.Tx.(kv.TemporalRwTx)
 		if !ok {
-			return errors.New("txc.Tx is not a temporal tx")
+			applyTx, ok = txc.Ttx.(kv.TemporalRwTx)
+
+			if !ok {
+				return errors.New("txc.Tx is not a temporal tx")
+			}
 		}
 	} else {
 		var err error
