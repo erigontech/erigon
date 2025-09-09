@@ -118,6 +118,8 @@ var Defaults = Config{
 	},
 }
 
+const DefaultChainDBPageSize = 16 * datasize.KB
+
 func init() {
 	home := os.Getenv("HOME")
 	if home == "" {

@@ -1,7 +1,6 @@
 package temporal
 
 import (
-	"context"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state"
@@ -19,31 +19,25 @@ import (
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
+	ctx := t.Context()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
-
-	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
+	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
-	_, err := state.GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
-	require.NoError(t, err)
-	aggStep := uint64(1)
-	agg, err := state.NewAggregator(ctx, dirs, aggStep, mdbxDb, logger)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
+	stepSize := uint64(1)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
+	defer agg.Close()
+
 	temporalDb, err := New(mdbxDb, agg)
 	require.NoError(t, err)
-	t.Cleanup(temporalDb.Close)
+	defer temporalDb.Close()
 
 	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	t.Cleanup(rwTtx1.Rollback)
-	sd, err := state.NewSharedDomains(rwTtx1, logger)
+	defer rwTtx1.Rollback()
+
+	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
 	require.NoError(t, err)
-	t.Cleanup(sd.Close)
+	defer sd.Close()
 
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
@@ -74,10 +68,10 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		// make sure it is indeed in db using a db tx
 		dbRoTx1, err := mdbxDb.BeginRo(ctx)
 		require.NoError(t, err)
-		t.Cleanup(dbRoTx1.Rollback)
+		defer dbRoTx1.Rollback()
 		c1, err := dbRoTx1.CursorDupSort(kv.TblStorageVals)
 		require.NoError(t, err)
-		t.Cleanup(c1.Close)
+		defer c1.Close()
 		k, v, err := c1.Next()
 		require.NoError(t, err)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
@@ -94,7 +88,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		// now move on to temporal tx
 		roTtx1, err := temporalDb.BeginTemporalRo(ctx)
 		require.NoError(t, err)
-		t.Cleanup(roTtx1.Rollback)
+		defer roTtx1.Rollback()
 
 		// make sure there are no files yet and we are only hitting the DB
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
@@ -119,7 +113,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		// move data to files and trigger prune (need one more step for prune so write to some other storage)
 		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
-		t.Cleanup(rwTtx2.Rollback)
+		defer rwTtx2.Rollback()
 		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx2)
@@ -132,7 +126,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
-		t.Cleanup(rwTtx3.Rollback)
+		defer rwTtx3.Rollback()
 
 		// prune
 		haveMore, err := rwTtx3.PruneSmallBatches(ctx, time.Minute)
@@ -144,10 +138,10 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		// double check acc1 storage data not in the mdbx DB
 		dbRoTx2, err := mdbxDb.BeginRo(ctx)
 		require.NoError(t, err)
-		t.Cleanup(dbRoTx2.Rollback)
+		defer dbRoTx2.Rollback()
 		c2, err := dbRoTx2.CursorDupSort(kv.TblStorageVals)
 		require.NoError(t, err)
-		t.Cleanup(c2.Close)
+		defer c2.Close()
 		k, v, err := c2.Next() // acc2 storage from step 2 will be there
 		require.NoError(t, err)
 		require.Equal(t, append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...), k)
@@ -163,7 +157,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		// double check files for 2 steps have been created
 		roTtx2, err := temporalDb.BeginTemporalRo(ctx)
 		require.NoError(t, err)
-		t.Cleanup(roTtx2.Rollback)
+		defer roTtx2.Rollback()
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify TemporalTx.HasPrefix returns true
@@ -178,7 +172,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	{
 		rwTtx4, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
-		t.Cleanup(rwTtx4.Rollback)
+		defer rwTtx4.Rollback()
 		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx4)
@@ -188,7 +182,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 		roTtx3, err := temporalDb.BeginTemporalRo(ctx)
 		require.NoError(t, err)
-		t.Cleanup(roTtx3.Rollback)
+		defer roTtx3.Rollback()
 
 		firstKey, firstVal, ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
@@ -201,7 +195,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	{
 		rwTtx5, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
-		t.Cleanup(rwTtx5.Rollback)
+		defer rwTtx5.Rollback()
 		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx5)
@@ -211,7 +205,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 		roTtx4, err := temporalDb.BeginTemporalRo(ctx)
 		require.NoError(t, err)
-		t.Cleanup(roTtx4.Rollback)
+		defer roTtx4.Rollback()
 
 		firstKey, firstVal, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
@@ -223,24 +217,16 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	t.Parallel()
+	ctx := t.Context()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
-
-	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
+	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
-	_, err := state.GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
-	require.NoError(t, err)
-	aggStep := uint64(1)
-	agg, err := state.NewAggregator(ctx, dirs, aggStep, mdbxDb, logger)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
+	stepSize := uint64(1)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
+	defer agg.Close()
 	temporalDb, err := New(mdbxDb, agg)
 	require.NoError(t, err)
-	t.Cleanup(temporalDb.Close)
+	defer temporalDb.Close()
 
 	// empty range when nothing has been written yet
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
@@ -253,10 +239,11 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// txn num 1
 	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	t.Cleanup(rwTtx1.Rollback)
-	sd, err := state.NewSharedDomains(rwTtx1, logger)
+	defer rwTtx1.Rollback()
+	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
 	require.NoError(t, err)
-	t.Cleanup(sd.Close)
+	defer sd.Close()
+
 	err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx1)
@@ -266,7 +253,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// txn num 2
 	rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	t.Cleanup(rwTtx2.Rollback)
+	defer rwTtx2.Rollback()
 	err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK1, []byte{2}, 2, nil, 0)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx2)
@@ -276,7 +263,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// txn num 3
 	rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	t.Cleanup(rwTtx3.Rollback)
+	defer rwTtx3.Rollback()
 	err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx3, acc1.Bytes(), 3)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx3)
@@ -286,7 +273,8 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// txn num 4
 	rwTtx4, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	t.Cleanup(rwTtx4.Rollback)
+	defer rwTtx4.Rollback()
+
 	err = sd.DomainPut(kv.StorageDomain, rwTtx4, storageK1, []byte{3}, 4, nil, 0)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx4)
@@ -297,10 +285,11 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// empty value at txn 0
 	roTtx1, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)
-	t.Cleanup(roTtx1.Rollback)
+	defer roTtx1.Rollback()
 	it1, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 1, order.Asc, kv.Unlim)
 	require.NoError(t, err)
-	t.Cleanup(it1.Close)
+	defer it1.Close()
+
 	require.True(t, it1.HasNext())
 	k, v, err := it1.Next()
 	require.NoError(t, err)
@@ -311,7 +300,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// value 1 at txn num 1
 	it2, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 2, order.Asc, kv.Unlim)
 	require.NoError(t, err)
-	t.Cleanup(it2.Close)
+	defer it2.Close()
 	require.True(t, it2.HasNext())
 	k, v, err = it2.Next()
 	require.NoError(t, err)
@@ -322,7 +311,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// value 2 at txn num 2
 	it3, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 3, order.Asc, kv.Unlim)
 	require.NoError(t, err)
-	t.Cleanup(it3.Close)
+	defer it3.Close()
 	require.True(t, it3.HasNext())
 	k, v, err = it3.Next()
 	require.NoError(t, err)
@@ -333,7 +322,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// empty value at txn num 3
 	it4, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 4, order.Asc, kv.Unlim)
 	require.NoError(t, err)
-	t.Cleanup(it4.Close)
+	defer it4.Close()
 	require.True(t, it4.HasNext())
 	k, v, err = it4.Next()
 	require.NoError(t, err)
@@ -344,7 +333,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	// value 3 at txn num 4 - note under the hood this will use latest vals instead of historical
 	it5, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nextSubTree, 5, order.Asc, kv.Unlim)
 	require.NoError(t, err)
-	t.Cleanup(it5.Close)
+	defer it5.Close()
 	require.True(t, it5.HasNext())
 	k, v, err = it5.Next()
 	require.NoError(t, err)

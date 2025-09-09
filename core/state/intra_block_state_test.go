@@ -21,7 +21,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -36,12 +35,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -242,26 +237,9 @@ func (test *snapshotTest) String() string {
 }
 
 func (test *snapshotTest) run(t *testing.T) bool {
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
+	_, tx, _ := NewTestRwTx(t)
 
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer tx.Rollback()
-
-	//domains, err := stateLib.NewSharedDomains(tx, log.New())
-	//if err != nil {
-	//	test.err = err
-	//	return false
-	//}
-	//defer domains.Close()
-	//
-	//domains.SetTxNum(1)
-	//domains.SetBlockNum(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
 		return false
@@ -447,16 +425,7 @@ func TestTransientStorage(t *testing.T) {
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
-
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
@@ -529,19 +498,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 func TestVersionMapRevert(t *testing.T) {
 	t.Parallel()
 
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
+	_, tx, domains := NewTestRwTx(t)
 
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -599,20 +559,10 @@ func TestVersionMapRevert(t *testing.T) {
 
 func TestVersionMapMarkEstimate(t *testing.T) {
 	t.Parallel()
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
-
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 	states := []*IntraBlockState{s}
@@ -678,20 +628,10 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 func TestVersionMapOverwrite(t *testing.T) {
 	t.Parallel()
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
-
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -775,20 +715,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 func TestVersionMapWriteNoConflict(t *testing.T) {
 	t.Parallel()
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
-
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -905,20 +835,9 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
-
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
-
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 

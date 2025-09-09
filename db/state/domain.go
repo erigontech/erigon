@@ -397,9 +397,11 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
-		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace),
 	}
-	w.values.SortAndFlushInBackground(true)
+	if !discard {
+		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+	}
 	return w
 }
 
@@ -635,10 +637,12 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, txnFrom, txnTo uint64, wal *DomainBufferedWriter, vt valueTransformer) error {
+func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer) error {
 	if d.Disable || stepFrom == stepTo {
 		return nil
 	}
+	wal := batch.domainWriters[d.Name]
+
 	if stepFrom > stepTo {
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
@@ -967,7 +971,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(stepFrom, stepTo))
+		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(stepFrom, stepTo))
 		if err != nil {
 			return StaticFiles{}, err
 		}
@@ -1069,7 +1073,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorNewFilePath(step, step+1))
+		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
 		if err != nil {
 			return StaticFiles{}, err
 		}
@@ -1965,8 +1969,6 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 	return append(res, dt.ht.Files()...)
 }
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
-
-func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
 
 func versionTooLowPanic(filename string, version version.Versions) {
 	panic(fmt.Sprintf(

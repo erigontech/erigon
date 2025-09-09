@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bor
+package tests
 
 import (
 	"bytes"
@@ -46,7 +46,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/tests/bor/helper"
+	"github.com/erigontech/erigon/polygon/tests/helper"
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
