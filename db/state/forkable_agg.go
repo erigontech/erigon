@@ -257,8 +257,8 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 			mf.Close()
 		}
 
-		if err := recover(); err != nil {
-			err = fmt.Errorf("[fork_agg] merge: %s, %s", err, dbg.Stack())
+		if err2 := recover(); err2 != nil {
+			err = fmt.Errorf("[fork_agg] merge: %s, %s", err2, dbg.Stack())
 		}
 	}()
 
