@@ -55,6 +55,10 @@
         }
       }
     },
+    "coinbase": {
+        "0":        "0x0000000000000000000000000000000000000000",
+        "49439808": "0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0"
+    },
     "jaipurBlock": 22770000,
     "delhiBlock": 29638656,
     "indoreBlock": 37075456,
@@ -62,6 +66,6 @@
     "napoliBlock": 45648608,
 	  "ahmedabadBlock": 48467456,
 	  "bhilaiBlock":  48467456,
-	  "veBlopBlock": 48473856
+	  "rioBlock": 48473856
   }
 }
