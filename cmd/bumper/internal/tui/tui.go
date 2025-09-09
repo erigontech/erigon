@@ -2,10 +2,11 @@ package tui
 
 import (
 	"errors"
-	"github.com/erigontech/erigon/db/version"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
