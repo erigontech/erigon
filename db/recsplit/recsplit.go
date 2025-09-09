@@ -84,8 +84,8 @@ type RecSplit struct {
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
-	fileName              string
-	filePath, tmpFilePath string
+	fileName string
+	filePath string
 
 	tmpDir            string
 	gr                GolombRice // Helper object to encode the tree of hash function salts using Golomb-Rice code.
@@ -171,7 +171,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs := &RecSplit{
 		version:    args.Version,
 		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
-		tmpDir: args.TmpDir, filePath: args.IndexFile, tmpFilePath: args.IndexFile + ".tmp",
+		tmpDir: args.TmpDir, filePath: args.IndexFile,
 		enums:              args.Enums,
 		baseDataID:         args.BaseDataID,
 		lessFalsePositives: args.LessFalsePositives,
@@ -636,7 +636,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
-	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
+	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
 	}
 
@@ -774,8 +774,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	if err = os.Rename(rs.tmpFilePath, rs.filePath); err != nil {
-		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
+	if err = os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
+		rs.logger.Warn("[index] rename", "file", rs.indexF.Name(), "err", err)
 		return err
 	}
 	rs.logger.Debug("[index] created", "file", rs.fileName)
@@ -824,7 +824,7 @@ func (rs *RecSplit) fsync() error {
 		return nil
 	}
 	if err := rs.indexF.Sync(); err != nil {
-		rs.logger.Warn("couldn't fsync", "err", err, "file", rs.tmpFilePath)
+		rs.logger.Warn("couldn't fsync", "err", err, "file", rs.indexF.Name())
 		return err
 	}
 	return nil

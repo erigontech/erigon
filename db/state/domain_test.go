@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
@@ -94,6 +95,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	d.DisableFsync()
 	return db, d
 }
+
 func TestDomain_CollationBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -2063,7 +2065,7 @@ func TestDomain_Unwind(t *testing.T) {
 			fmt.Println(currTx)
 			for currentTxNum := currTx - 1; currentTxNum >= unwindTo; currentTxNum-- {
 				d := diffSetMap[currentTxNum]
-				totalDiff = MergeDiffSets(totalDiff, d)
+				totalDiff = changeset.MergeDiffSets(totalDiff, d)
 			}
 		}
 

@@ -954,36 +954,6 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	return false
 }
 
-func (at *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
-	minUnwindale, err := ReadLowestUnwindableBlock(tx)
-	if err != nil {
-		return 0, err
-	}
-	if minUnwindale == math.MaxUint64 { // no unwindable block found
-		stateVal, _, _, err := at.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, tx)
-		if err != nil {
-			return 0, err
-		}
-		if len(stateVal) == 0 {
-			return 0, nil
-		}
-		_, minUnwindale = _decodeTxBlockNums(stateVal)
-	}
-	return minUnwindale, nil
-}
-
-// CanUnwindBeforeBlockNum - returns `true` if can unwind to requested `blockNum`, otherwise returns nearest `unwindableBlockNum`
-func (at *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (unwindableBlockNum uint64, ok bool, err error) {
-	_minUnwindableBlockNum, err := at.CanUnwindToBlockNum(tx)
-	if err != nil {
-		return 0, false, err
-	}
-	if blockNum < _minUnwindableBlockNum {
-		return _minUnwindableBlockNum, false, nil
-	}
-	return blockNum, true, nil
-}
-
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
@@ -1762,9 +1732,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-// func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
-// 	return at.d[name].d.maxTxNumInDB(tx)
-// }
+func (at *AggregatorRoTx) Dirs() datadir.Dirs { return at.a.dirs }
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
@@ -1774,7 +1742,7 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 		// terms of exact txNum
 		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize)
 	}
-	return at.d[name].HistoryProgress(tx)
+	return at.d[name].ht.iit.Progress(tx)
 }
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
