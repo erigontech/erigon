@@ -158,10 +158,10 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	spanStartSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
 	spanEndSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
 	increments := int(spanEndSprintNum - spanStartSprintNum)
-	badSprint1 := (26160367 + 1) / 16
-	badSprint2 := (26161087 + 1) / 16
+	badSprint1 := t.borConfig.CalculateSprintNumber(26160367)
+	badSprint2 := t.borConfig.CalculateSprintNumber(26161087)
 	for i := 0; i < increments; i++ {
-		sprintNum := spanStartSprintNum + uint64(increments)
+		sprintNum := spanStartSprintNum + uint64(i)
 		if sprintNum != uint64(badSprint1) && sprintNum != uint64(badSprint2) {
 			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		}
