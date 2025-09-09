@@ -21,7 +21,6 @@ type BufferFactory interface {
 	New() etl.Buffer
 }
 
-var _ StartRoTx[ForkableBaseTxI] = (*Forkable[ForkableBaseTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
 type Forkable[T ForkableBaseTxI] struct {
@@ -36,8 +35,8 @@ type Forkable[T ForkableBaseTxI] struct {
 	valsTbl string
 
 	//	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
-	pruneFrom  Num                // should this be rootnum? Num is fine for now.
-	beginTxGen func(files bool) T // returns a tx, with "files ro tx" or not
+	pruneFrom  Num      // should this be rootnum? Num is fine for now.
+	beginTxGen func() T // returns a tx over files
 
 	rel RootRelationI
 }
@@ -75,14 +74,8 @@ func NewMarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, canonicalTbl
 		return nil, err
 	}
 
-	a.beginTxGen = func(files bool) MarkedTxI {
-		m := &MarkedTx{ap: a}
-		if files {
-			m.ProtoForkableTx = a.ProtoForkable.BeginFilesRo()
-		} else {
-			m.ProtoForkableTx = a.ProtoForkable.BeginNoFilesRo()
-		}
-		return m
+	a.beginTxGen = func() MarkedTxI {
+		return &MarkedTx{ap: a, ProtoForkableTx: a.ProtoForkable.BeginFilesRo()}
 	}
 
 	return a, nil
@@ -107,14 +100,8 @@ func NewUnmarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, relation R
 		a.builders = []AccessorIndexBuilder{builder}
 	}
 
-	a.beginTxGen = func(files bool) UnmarkedTxI {
-		m := &UnmarkedTx{ap: a}
-		if files {
-			m.ProtoForkableTx = a.ProtoForkable.BeginFilesRo()
-		} else {
-			m.ProtoForkableTx = a.ProtoForkable.BeginNoFilesRo()
-		}
-		return m
+	a.beginTxGen = func() UnmarkedTxI {
+		return &UnmarkedTx{ap: a, ProtoForkableTx: a.ProtoForkable.BeginFilesRo()}
 	}
 
 	return a, nil
@@ -166,11 +153,7 @@ func (a *Forkable[MarkedTxI]) valsTblKey2(ts []byte, hash []byte) []byte {
 }
 
 func (a *Forkable[T]) BeginTemporalTx() T {
-	return a.beginTxGen(true)
-}
-
-func (a *Forkable[T]) BeginNoFilesTx() T {
-	return a.beginTxGen(false)
+	return a.beginTxGen()
 }
 
 func (a *Forkable[T]) SetFreezer(freezer Freezer) {

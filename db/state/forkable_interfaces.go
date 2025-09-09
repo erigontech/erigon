@@ -37,16 +37,6 @@ type AccessorIndexBuilder interface {
 	AllowsOrdinalLookupByNum() bool
 }
 
-// generator for the two interfaces
-// T: temporal interface (db + files)
-// D: db interface
-// we don't need a separate interface for files...
-// since tx is provided separately anyway.
-type StartRoTx[T ForkableBaseTxI] interface {
-	BeginTemporalTx() T
-	BeginNoFilesTx() T
-}
-
 // why we need temporal + db + snapshot txs
 // db, snapshot txs separate is low-level api. Sometimes I just want to query only db or only snapshot
 // for example...
