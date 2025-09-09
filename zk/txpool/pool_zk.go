@@ -190,7 +190,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// p.Trace("Processing transaction", "txID", mt.Tx.IDHash)
 
 		// Skip txs that are already yielded
-		if _, ok := p.yielded[string(mt.Tx.IDHash[:])]; ok {
+		if _, ok := p.yielded[mt.Tx.IDHash]; ok {
 			continue
 		}
 
@@ -251,7 +251,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		txs.IsLocal[count] = isLocal
 
 		if yield {
-			p.yielded[string(mt.Tx.IDHash[:])] = struct{}{}
+			p.yielded[mt.Tx.IDHash] = struct{}{}
 		}
 		count++
 	}
@@ -335,7 +335,17 @@ func (p *TxPool) TriggerSenderStateChanges(ctx context.Context, tx kv.Tx, blockG
 func (p *TxPool) discardOverflowZkCountersFromPending(pending *PendingPool, discard func(*metaTx, DiscardReason), sendersWithChangedState map[uint64]struct{}) {
 	for _, mt := range p.overflowZkCounters {
 		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", common.BytesToHash(mt.Tx.IDHash[:]))
-		pending.Remove(mt)
+		// Remove from the correct sub-pool
+		switch mt.currentSubPool {
+		case PendingSubPool:
+			pending.Remove(mt)
+		case BaseFeeSubPool:
+			p.baseFee.Remove(mt)
+		case QueuedSubPool:
+			p.queued.Remove(mt)
+		default:
+			// already removed; nothing to do
+		}
 		discard(mt, OverflowZkCounters)
 		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
 		// do not hold on to the discard reason for an OOC issue
@@ -412,7 +422,7 @@ func (p *TxPool) MoveFromPendingToQueued(toMove map[common.Address][]uint64) {
 					p.pending.Remove(mt)
 					p.queued.Add(mt)
 
-					delete(p.yielded, string(mt.Tx.IDHash[:]))
+					delete(p.yielded, mt.Tx.IDHash)
 				}
 			}
 			return true

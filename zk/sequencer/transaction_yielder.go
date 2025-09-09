@@ -104,7 +104,6 @@ func (y *PoolTransactionYielder) YieldNextTransaction() (types.Transaction, uint
 			if idx > 0 {
 				log.Warn("Transaction not at front of ready queue", "id", hash.String())
 			}
-			// remove the transaction from the readyTransactions slice. this will save burning CPU for the next yielding
 			break
 		}
 	}
@@ -128,12 +127,11 @@ func (y *PoolTransactionYielder) Requeue(tx types.Transaction) {
 	hash := tx.Hash()
 
 	// Add it to the front of the readyTransactions slice
-	y.readyTransactions = append([]common.Hash{hash}, y.readyTransactions...)
 	if _, found := y.readyTransactionBytes[hash]; !found {
-		log.Error("Transaction does not exist in readyTransactionBytes", "id", hash.String())
+		log.Warn("Transaction does not exist in readyTransactionBytes", "id", hash.String())
+		return
 	}
-
-	// y.debugVerifyNoncesOrder("requeue")
+	y.readyTransactions = append([]common.Hash{hash}, y.readyTransactions...)
 }
 
 func (y *PoolTransactionYielder) AddMined(hash common.Hash) {
@@ -191,7 +189,7 @@ func (y *PoolTransactionYielder) performNextRefresh() {
 }
 
 func (y *PoolTransactionYielder) debugVerifyNoncesOrder(prefix string) {
-	nonces := make([]uint64, 0, len(y.readyTransactions))
+	noncesBySender := make(map[common.Address][]uint64)
 	for _, hash := range y.readyTransactions {
 		var tx types.Transaction
 		var err error
@@ -216,24 +214,26 @@ func (y *PoolTransactionYielder) debugVerifyNoncesOrder(prefix string) {
 			log.Error("Hash/bytes mismatch", "expected", hash.String(), "decoded", h.String(), "prefix", prefix)
 			panic("hash/bytes mismatch")
 		}
-
-		nonces = append(nonces, tx.GetNonce())
+		sender, _ := tx.GetSender()
+		noncesBySender[sender] = append(noncesBySender[sender], tx.GetNonce())
 	}
 
-	// Verify the order of nonces
-	if !sort.SliceIsSorted(nonces, func(i, j int) bool {
-		notSorted := nonces[i] < nonces[j]
-		if notSorted {
-			log.Error(fmt.Sprintf("Nonces are not sorted! %v", prefix), "i", i, "nonce[i]", nonces[i], "j", j, "nonce[j]", nonces[j])
-			for k := i - 10; k <= i+10; k++ {
-				if k >= 0 && k < len(nonces) {
-					log.Error("Nonce debug", "i", k, "nonce", nonces[k])
+	for sender, nonces := range noncesBySender {
+		// Verify the order of nonces
+		if !sort.SliceIsSorted(nonces, func(i, j int) bool {
+			notSorted := nonces[i] < nonces[j]
+			if notSorted {
+				log.Error(fmt.Sprintf("Nonces are not sorted for sender %v", sender.String()), "i", i, "nonce[i]", nonces[i], "j", j, "nonce[j]", nonces[j])
+				for k := i - 10; k <= i+10; k++ {
+					if k >= 0 && k < len(nonces) {
+						log.Error("Nonce debug", "i", k, "nonce", nonces[k])
+					}
 				}
 			}
+			return notSorted
+		}) {
+			panic("nonces are not sorted")
 		}
-		return notSorted
-	}) {
-		panic("nonces are not sorted")
 	}
 }
 
@@ -317,10 +317,6 @@ func (l *LimboTransactionYielder) Discard(hash common.Hash) {
 
 func (l *LimboTransactionYielder) SetExecutionDetails(_, _ uint64) {
 	// LimboTransactionYielder does not use executionAt and forkId, so this method can be empty
-}
-
-func (l *LimboTransactionYielder) Cleanup() {
-	// LimboTransactionYielder does not maintain any state that needs cleanup
 }
 
 func (l *LimboTransactionYielder) Requeue(tx types.Transaction) {

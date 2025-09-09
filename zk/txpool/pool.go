@@ -346,7 +346,7 @@ type TxPool struct {
 	metrics *Metrics
 
 	// yielded txs (returned by best) that must be skipped by subsequent best() calls
-	yielded map[string]struct{}
+	yielded map[[32]byte]struct{}
 }
 
 func CreateTxPoolBuckets(tx kv.RwTx) error {
@@ -439,7 +439,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		normalcyBlock:           normalcyBlock,
 		auths:                   map[common.Address]*metaTx{},
 		priorityList:            priorityList,
-		yielded:                 make(map[string]struct{}),
+		yielded:                 make(map[[32]byte]struct{}),
 	}
 
 	res.updatePendingPoolPrioritySenders()
@@ -631,10 +631,10 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	// Clear yielded marks for mined and unwound txs
 	if len(p.yielded) > 0 {
 		for _, s := range minedTxs.Txs {
-			delete(p.yielded, string(s.IDHash[:]))
+			delete(p.yielded, s.IDHash)
 		}
 		for _, s := range unwindTxs.Txs {
-			delete(p.yielded, string(s.IDHash[:]))
+			delete(p.yielded, s.IDHash)
 		}
 	}
 
@@ -1596,7 +1596,7 @@ func (p *TxPool) discardLocked(mt *metaTx, reason DiscardReason) {
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt)
 	p.discardReasonsLRU.Add(hashStr, reason)
-	delete(p.yielded, hashStr)
+	delete(p.yielded, mt.Tx.IDHash)
 
 	if mt.Tx.Type == types.BlobTxType {
 		t := p.totalBlobsInPool.Load()
@@ -1875,7 +1875,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					// drain newTxs for emptying newTx channel
 					// newTx channel will be filled only with local transactions
 					// early return to avoid outbound transaction propagation
-					log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
+					// log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
 					return
 				}
 

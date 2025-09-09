@@ -525,6 +525,8 @@ func sequencingBatchStep(
 							"error", err,
 							"hash", transaction.Hash())
 						batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
+						yielder.Discard(txHash)
+						cfg.txPool.MarkForDiscardFromPendingBest(txHash)
 						continue
 					}
 
@@ -533,10 +535,14 @@ func sequencingBatchStep(
 				}
 
 				if _, found := sendersToSkip[txSender]; found {
+					// Lets not keep the data for such senders
+					yielder.Discard(txHash)
+					nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
 					continue
 				}
 
 				if _, found := nonceTooHighSenders[txSender]; found {
+					// tx will be requeued at the end of the batch
 					continue
 				}
 
@@ -630,6 +636,7 @@ func sequencingBatchStep(
 							ocs, _ := tempCounters.CounterStats(l1TreeUpdateIndex != 0)
 							// mark the transaction to be removed from the pool
 							cfg.txPool.MarkForDiscardFromPendingBest(txHash)
+							yielder.Discard(txHash)
 							counter, err := handleBadTxHashCounter(sdb.hermezDb, txHash)
 							if err != nil {
 								return err
@@ -646,8 +653,15 @@ func sequencingBatchStep(
 								if len(batchState.blockState.builtBlockElements.transactions) == 0 {
 									emptyBlockOverflow = true
 								}
+								yielder.Requeue(transaction)
 								break OuterLoopTransactions
 							}
+							// Here we did not discard the transaction as it may be valid in the next batch
+							// We did not requeue it either because it would overflow this batch again
+							// But if we have another transaction from the same sender, we'll have a NonceTooHigh error
+							// and discard the subsequent transactions.
+							// We need add the nonce to the list to be requeued at the end of the batch
+							nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
 						}
 
 						// now we have finished with logging the overflow,remove the last attempted counters as we may want to continue processing this batch with other transactions
