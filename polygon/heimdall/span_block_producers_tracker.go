@@ -158,8 +158,13 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	spanStartSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
 	spanEndSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
 	increments := int(spanEndSprintNum - spanStartSprintNum)
+	badSprint1 := (26160367 + 1) / 16
+	badSprint2 := (26161087 + 1) / 16
 	for i := 0; i < increments; i++ {
-		producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		sprintNum := spanStartSprintNum + uint64(increments)
+		if sprintNum != uint64(badSprint1) && sprintNum != uint64(badSprint2) {
+			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		}
 		producers.IncrementProposerPriority(1)
 	}
 	t.logger.Debug("OBSERVE_SPAN ", "newSpan.Producers()", newSpan.Producers())
@@ -230,12 +235,10 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	}
 
 	producers := producerSelection.Producers
-	if blockNum != 26160367 && blockNum != 26161087 {
-		producers.UpdateValidatorMap()
-		err = producers.UpdateTotalVotingPower()
-		if err != nil {
-			return nil, 0, err
-		}
+	producers.UpdateValidatorMap()
+	err = producers.UpdateTotalVotingPower()
+	if err != nil {
+		return nil, 0, err
 	}
 
 	badSprint1 := (26160367 + 1) / 16
