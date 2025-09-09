@@ -249,6 +249,9 @@ type Config struct {
 
 	OverrideOsakaTime *big.Int `toml:",omitempty"`
 
+	// Whether to avoid overriding chain config already stored in the DB
+	KeepStoredChainConfig bool
+
 	// Embedded Silkworm support
 	SilkwormExecution            bool
 	SilkwormRpcDaemon            bool
