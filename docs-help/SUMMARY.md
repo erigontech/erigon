@@ -1,0 +1,17 @@
+# Table of contents
+
+* [Help Center](README.md)
+* [Frequently Asked Questions (FAQs)](src/faqs.md)
+* [Troubleshooting](src/troubleshooting-steps.md)
+* [Known issues](src/known-issues.md)
+* [Best Practices](src/best-practices.md)
+* [Common Errors and Solutions](src/common-errors-and-solutions.md)
+* [Glossary of Key Terms](src/glossary-of-key-terms.md)
+* [easy-nodes](easy-nodes/README.md)
+  * [SUMMARY](src/easy-nodes/SUMMARY.md)
+  * [Easy Nodes](src/easy-nodes/easy-nodes.md)
+  * [Ethereum with an external CL](src/easy-nodes/ethereum-with-an-external-cl.md)
+  * [Gnosis with an external CL](src/easy-nodes/gnosis-with-an-external-cl.md)
+  * [how-to-run-a-gnosis-chain-node](src/easy-nodes/how-to-run-a-gnosis-chain-node.md)
+  * [how-to-run-a-polygon-node](src/easy-nodes/how-to-run-a-polygon-node.md)
+  * [how-to-run-an-ethereum-node](src/easy-nodes/how-to-run-an-ethereum-node.md)
