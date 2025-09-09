@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
-var amoyBadBlocks = []uint64{26160367 + 1, 26161087 + 1, 26171567 + 1, 26173743 + 1, 26175647 + 1}
+var amoyBadBlocks = []uint64{26160367, 26161087, 26171567, 26173743, 26175647}
 
 func newSpanBlockProducersTracker(
 	logger log.Logger,
@@ -195,28 +195,30 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	for i := 0; i < len(amoyPatchedSprints); i++ {
 		amoyPatchedSprints[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
+	printFrom := uint64(1635021 - 10)
 	var oldProducers *valset.ValidatorSet
 	for i := 0; i < increments; i++ {
 		sprintNum := spanStartSprintNum + uint64(i)
+		if sprintNum >= printFrom {
+			t.logger.Info(fmt.Sprintf("SPRINT_NUM=%d PRODUCERS (BEFORE UPDATE) %+v\n", sprintNum, producers))
+		}
 		if slices.Contains(amoyPatchedSprints, sprintNum) {
-			emptyProducers := make([]*valset.Validator, len(producers.Validators))
-			for i := 0; i < len(emptyProducers); i++ {
-				emptyProducers[i] = valset.NewValidator(producers.Validators[i].Address, 0)
-				emptyProducers[i].ID = producers.Validators[i].ID
-				emptyProducers[i].ProposerPriority = producers.Validators[i].ProposerPriority
-			}
-			emptyProducers = nil
+			var emptyProducers []*valset.Validator = nil
 			oldProducers = producers.Copy()
 			oldProducers.IncrementProposerPriority(1)
 			producers = valset.GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
-			// } else if slices.Contains(amoyPatchedSprints, sprintNum-1) {
-			// 	producers = valset.GetUpdatedValidatorSet(oldProducers, oldProducers.Validators, t.logger)
 		} else if slices.Contains(amoyPatchedSprints, sprintNum-1) {
 			producers = valset.GetUpdatedValidatorSet(producers, oldProducers.Validators, t.logger)
 		} else {
 			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		}
+		if sprintNum >= printFrom {
+			t.logger.Info(fmt.Sprintf("SPRINT_NUM=%d PRODUCERS  (BEFORE INCREMENT_PRIORITY) %+v\n", sprintNum, producers))
+		}
 		producers.IncrementProposerPriority(1)
+		if sprintNum >= printFrom {
+			t.logger.Info(fmt.Sprintf("SPRINT_NUM=%d PRODUCERS  (AFTER INCREMENT_PRIORITY) %+v\n", sprintNum, producers))
+		}
 	}
 	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducers.IncrementProposerPriority(1)
