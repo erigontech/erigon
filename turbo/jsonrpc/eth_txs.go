@@ -54,6 +54,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 
+	fmt.Println("LAL txnLookup", blockNum, txNum)
+
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.useBridgeReader {
@@ -63,8 +65,13 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 				if err != nil {
 					return nil, err
 				}
+				fmt.Println("LAL EventTxnLookup txNum", blockNum, txNum)
+
 				txNum = txNumNextBlock
 			}
+
+			fmt.Println("LAL EventTxnLookup ok", ok, blockNum)
+
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
 		}
@@ -90,6 +97,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
+		fmt.Println("LAL TxnByIdxInBlock ok", txn, txnIndex)
+
 		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -111,13 +120,18 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if chainConfig.Bor == nil {
 				return nil, nil
 			}
+
 			borTx := bortypes.NewBorTransaction()
 			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 			if err != nil {
 				return nil, err
 			}
+			fmt.Println("LAL return  NewRPCBorTransaction")
+
 			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
 		}
+
+		fmt.Println("LAL return  NewRPCTransaction")
 
 		return ethapi.NewRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
 	}
