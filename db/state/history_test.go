@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -1422,7 +1423,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 		common.FromHex("a4dba136b5541817a78b160dd140190d9676d0f0"),
 		common.FromHex("01"),
 		common.FromHex("00"),
-		keyCommitmentState,
+		commitmentdb.KeyCommitmentState,
 		common.FromHex("8240a92799b51e7d99d3ef53c67bca7d068bd8d64e895dd56442c4ac01c9a27d"),
 		common.FromHex("cedce3c4eb5e0eedd505c33fd0f8c06d1ead96e63d6b3a27b5186e4901dce59e"),
 	}

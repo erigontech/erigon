@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 
 	"github.com/c2h5oh/datasize"
 
@@ -110,6 +111,9 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 // SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
 // Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
 func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
+	stepSize := at.StepSize()
+	dirs := at.Dirs()
+
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if !commitmentUseReferencedBranches {
 		return nil
@@ -121,19 +125,19 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.StepSize(),
+				aggStep: stepSize,
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.StepSize(),
+				aggStep: stepSize,
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: at.StepSize(),
+				aggStep: stepSize,
 			},
 		},
 	}
@@ -203,13 +207,18 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		cf.decompressor.MadvNormal()
 
 		err = func() error {
-			at.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg)
+			steps := cf.endTxNum/stepSize - cf.startTxNum/stepSize
+			compression := commitment.d.Compression
+			if steps < DomainMinStepsToCompress {
+				compression = seg.CompressNone
+			}
+			logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
+				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
-			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, at.a.dirs.Tmp,
+			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
 				commitment.d.CompressCfg.WordLvlCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
@@ -237,7 +246,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !bytes.Equal(k, keyCommitmentState) {
+				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
@@ -273,7 +282,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
 
-			at.a.logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
+			logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			processedFiles++
@@ -290,9 +299,9 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
 			return err
 		}
-		at.a.logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
+		logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
 	}
-	at.a.logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
+	logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
 	return nil
 }
@@ -315,7 +324,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 		return "", err
 	}
 	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", a.StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues)
+	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues)
 	return s, nil
 }
 

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -146,7 +147,6 @@ type BtIndexWriter struct {
 	args BtIndexWriterArgs
 
 	indexFileName string
-	tmpFilePath   string
 
 	numBuf      [8]byte
 	keysWritten uint64
@@ -178,8 +178,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 		args.Lvl = log.LvlTrace
 	}
 
-	btw := &BtIndexWriter{lvl: args.Lvl, logger: logger, args: args,
-		tmpFilePath: args.IndexFile + ".tmp"}
+	btw := &BtIndexWriter{lvl: args.Lvl, logger: logger, args: args}
 
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
@@ -230,8 +229,8 @@ func (btw *BtIndexWriter) Build() error {
 		return errors.New("already built")
 	}
 	var err error
-	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
-		return fmt.Errorf("create index file %s: %w", btw.args.IndexFile, err)
+	if btw.indexF, err = dir.CreateTemp(btw.args.IndexFile); err != nil {
+		return fmt.Errorf("create temp index file for %s: %w", btw.args.IndexFile, err)
 	}
 	defer btw.indexF.Close()
 	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
@@ -277,7 +276,7 @@ func (btw *BtIndexWriter) Build() error {
 	if err = btw.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(btw.tmpFilePath, btw.args.IndexFile); err != nil {
+	if err = os.Rename(btw.indexF.Name(), btw.args.IndexFile); err != nil {
 		return err
 	}
 	return nil
@@ -293,7 +292,7 @@ func (btw *BtIndexWriter) fsync() error {
 		return nil
 	}
 	if err := btw.indexF.Sync(); err != nil {
-		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.tmpFilePath)
+		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.indexF.Name())
 		return err
 	}
 	return nil

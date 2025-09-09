@@ -185,7 +185,7 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 	return cc.chainRW.HasBlock(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }
 

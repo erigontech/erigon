@@ -1,4 +1,4 @@
-package state
+package commitmentdb
 
 import (
 	"bytes"
@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -24,9 +25,21 @@ import (
 	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
+var (
+	mxCommitmentRunning = metrics.GetOrCreateGauge("domain_running_commitment")
+	mxCommitmentTook    = metrics.GetOrCreateSummary("domain_commitment_took")
+)
+
+type sd interface {
+	SetBlockNum(blockNum uint64)
+	SetTxNum(blockNum uint64)
+	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
+	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	StepSize() uint64
+}
+
 type SharedDomainsCommitmentContext struct {
-	//mu            sync.Mutex // protects reads from sharedDomains when trie is concurrent
-	sharedDomains *SharedDomains
+	sharedDomains sd
 	mainTtx       *TrieContext
 
 	updates      *commitment.Updates
@@ -42,7 +55,7 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, d
 	sdc.mainTtx.SetLimitReadAsOfTxNum(txNum, domainOnly)
 }
 
-func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd sd, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 	}
@@ -68,6 +81,14 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
+}
+func (sdc *SharedDomainsCommitmentContext) ClearRam() {
+	sdc.updates.Reset()
+	sdc.Reset()
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetTxNum(txNum uint64) {
+	sdc.mainTtx.txNum = txNum
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
@@ -147,7 +168,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 // by that key stored latest root hash and tree state
 const keyCommitmentStateS = "state"
 
-var keyCommitmentState = []byte(keyCommitmentStateS)
+var KeyCommitmentState = []byte(keyCommitmentStateS)
 
 var ErrBehindCommitment = errors.New("behind commitment")
 
@@ -161,7 +182,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
-	state, _, err = sdc.mainTtx.Branch(keyCommitmentState)
+	state, _, err = sdc.mainTtx.Branch(KeyCommitmentState)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -258,7 +279,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNu
 	if err != nil {
 		return err
 	}
-	prevState, prevStep, err := sdc.mainTtx.Branch(keyCommitmentState)
+	prevState, prevStep, err := sdc.mainTtx.Branch(KeyCommitmentState)
 	if err != nil {
 		return err
 	}
@@ -274,7 +295,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNu
 	}
 
 	//log.Debug("[commitment] store state", "block", blockNum, "txNum", txNum, "rootHash", hex.EncodeToString(rootHash))
-	return sdc.mainTtx.PutBranch(keyCommitmentState, encodedState, prevState, prevStep)
+	return sdc.mainTtx.PutBranch(KeyCommitmentState, encodedState, prevState, prevStep)
 }
 
 // Encodes current trie state and returns it
@@ -520,4 +541,62 @@ func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err erro
 func (sdc *TrieContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.limitReadAsOfTxNum = txNum
 	sdc.withHistory = !domainOnly
+}
+
+type ValueMerger func(prev, current []byte) (merged []byte, err error)
+
+// TODO revisit encoded commitmentState.
+//   - Add versioning
+//   - add trie variant marker
+//   - simplify decoding. Rn it's 3 embedded structure: RootNode encoded, Trie state encoded and commitmentState wrapper for search.
+//     | search through states seems mostly useless so probably commitmentState should become header of trie state.
+type commitmentState struct {
+	txNum     uint64
+	blockNum  uint64
+	trieState []byte
+}
+
+func (cs *commitmentState) Decode(buf []byte) error {
+	if len(buf) < 10 {
+		return fmt.Errorf("ivalid commitment state buffer size %d, expected at least 10b", len(buf))
+	}
+	pos := 0
+	cs.txNum = binary.BigEndian.Uint64(buf[pos : pos+8])
+	pos += 8
+	cs.blockNum = binary.BigEndian.Uint64(buf[pos : pos+8])
+	pos += 8
+	cs.trieState = make([]byte, binary.BigEndian.Uint16(buf[pos:pos+2]))
+	pos += 2
+	if len(cs.trieState) == 0 && len(buf) == 10 {
+		return nil
+	}
+	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])
+	return nil
+}
+
+func (cs *commitmentState) Encode() ([]byte, error) {
+	buf := bytes.NewBuffer(nil)
+	var v [18]byte
+	binary.BigEndian.PutUint64(v[:], cs.txNum)
+	binary.BigEndian.PutUint64(v[8:16], cs.blockNum)
+	binary.BigEndian.PutUint16(v[16:18], uint16(len(cs.trieState)))
+	if _, err := buf.Write(v[:]); err != nil {
+		return nil, err
+	}
+	if _, err := buf.Write(cs.trieState); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
+	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState)
+	if err != nil {
+		return 0, err
+	}
+	if len(stateVal) == 0 {
+		return 0, nil
+	}
+	_, minUnwindale := _decodeTxBlockNums(stateVal)
+	return minUnwindale, nil
 }

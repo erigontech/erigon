@@ -32,6 +32,7 @@ var (
 	amoyChainConfig       = readBorChainSpec("chainspecs/amoy.json")
 	borMainnetChainConfig = readBorChainSpec("chainspecs/bor-mainnet.json")
 	borDevnetChainConfig  = readBorChainSpec("chainspecs/bor-devnet.json")
+	mumbaiChainConfig     = readBorChainSpec("chainspecs/mumbai.json")
 )
 
 // AmoyGenesisBlock returns the Amoy network genesis block.
@@ -72,5 +73,19 @@ func BorDevnetGenesisBlock() *types.Genesis {
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
+	}
+}
+
+// MumbaiGenesisBlock returns the Mumbai network genesis block.
+func MumbaiGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     mumbaiChainConfig,
+		Nonce:      0,
+		Timestamp:  1558348305,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/mumbai.json"),
 	}
 }
