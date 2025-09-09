@@ -91,11 +91,11 @@ Organising Ethereum State into a Merkle Tree
 Ethereum network produces checkpoints of the Ethereum State after every block. These checkpoints come in a form of
 32-byte binary string, which is the root hash of the Merkle tree constructed out of the accounts in the state. This root
 hash is often referred to as "State root". It is part of block header, and is contained in the field `Root` of the type
-`Header` [core/types/block.go](../../core/types/block.go)
+`Header` [execution/types/block.go](../../execution/types/block.go)
 
 Prior to Byzantium release, the state root was also part of every transaction receipt, and was contained in the
 field `PostState`
-of the type `Receipt` [core/types/receipt.go](../../core/types/receipt.go).
+of the type `Receipt` [execution/types/receipt.go](../../execution/types/receipt.go).
 
 To keep the Merkle Patricia trie of Ethereum state balanced, all the keys (either addresses of Ethereum accounts and
 contracts, or storage positions within contract storage) are converted into their respective hashes using `Keccak256`
@@ -529,7 +529,7 @@ account (SELFDESTRUCT). Naive storage deletion may take several minutes - depend
 will not process any incoming block that time. To protect against this attack:
 PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" -
 just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
-`{account_key}{incarnation}{storage_hash}`. And [execution/trie/trie_root.go](../../execution/trie/trie_root.go) has logic -
+`{account_key}{incarnation}{storage_hash}`. And [db/state/domain_committed.go](../../db/state/domain_committed.go) has logic -
 every time when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or
 IntermediateTrieHashes with another incarnation.
 
