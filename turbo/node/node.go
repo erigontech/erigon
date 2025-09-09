@@ -100,6 +100,8 @@ func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Lo
 		logger.Info("Starting Erigon on Hoodi testnet...")
 	case networkname.Dev:
 		logger.Info("Starting Erigon in ephemeral dev mode...")
+	case networkname.Mumbai:
+		logger.Info("Starting Erigon on Mumbai testnet...")
 	case networkname.Amoy:
 		logger.Info("Starting Erigon on Amoy testnet...")
 	case networkname.BorMainnet:
