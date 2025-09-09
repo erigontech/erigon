@@ -107,7 +107,7 @@ func (m *unmarkedTx) Unwind(ctx context.Context, from RootNum) error {
 	return err
 }
 
-func (m *unmarkedTx) BufferedWriter() any {
+func (m *unmarkedTx) BufferedWriter() kv.BufferedWriter {
 	return m.s.(*state.UnmarkedTx).BufferedWriter()
 }
 

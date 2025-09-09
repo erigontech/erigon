@@ -21,6 +21,36 @@ type ForkableTxCommons interface {
 	Type() CanonicityStrategy
 }
 
+// unmarked
+type UnmarkedDbTx interface {
+	GetDb(num Num) ([]byte, error)
+}
+
+type UnmarkedDbRwTx interface {
+	UnmarkedDbTx
+	Prune(ctx context.Context, to RootNum, limit uint64) (uint64, error)
+	Unwind(ctx context.Context, from RootNum) error
+}
+
+type UnmarkedTx interface {
+	Get(num Num) ([]byte, error)
+
+	Debug() ForkableTxCommons
+	RoDbDebug() UnmarkedDbTx
+	BufferedWriter() BufferedWriter
+}
+
+type UnmarkedRwTx interface {
+	UnmarkedTx
+	RwDbDebug() UnmarkedDbRwTx
+	Append(num Num, value []byte) error
+}
+
+// equivalent of TemporalPutDel
+type UnmarkedPutter interface {
+	Put(num Num, value []byte) error
+}
+
 // marked
 type MarkedDbTx interface {
 	GetDb(num Num, hash []byte) ([]byte, error) // db only (hash==nil => canonical value)
@@ -46,32 +76,10 @@ type MarkedRwTx interface {
 	RwDbDebug() MarkedDbRwTx
 }
 
-// unmarked
-type UnmarkedDbTx interface {
-	GetDb(num Num) ([]byte, error)
-}
+//
 
-type UnmarkedDbRwTx interface {
-	UnmarkedDbTx
-	Prune(ctx context.Context, to RootNum, limit uint64) (uint64, error)
-	Unwind(ctx context.Context, from RootNum) error
-}
-
-type UnmarkedTx interface {
-	Get(num Num) ([]byte, error)
-
-	Debug() ForkableTxCommons
-	RoDbDebug() UnmarkedDbTx
-	BufferedWriter() any
-}
-
-type UnmarkedRwTx interface {
-	UnmarkedTx
-	RwDbDebug() UnmarkedDbRwTx
-	Append(num Num, value []byte) error
-}
-
-// equivalent of TemporalPutDel
-type UnmarkedPutter interface {
-	Put(num Num, value []byte) error
+type BufferedWriter interface {
+	Put(n Num, v []byte) error
+	Flush(ctx context.Context, tx RwTx) error
+	Close()
 }

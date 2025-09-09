@@ -48,7 +48,7 @@ type TemporalMemBatch struct {
 
 	domainWriters   [kv.DomainLen]*DomainBufferedWriter
 	iiWriters       []*InvertedIndexBufferedWriter
-	forkableWriters map[ForkableId]*UnmarkedBufferedWriter
+	forkableWriters map[ForkableId]kv.BufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
@@ -72,9 +72,9 @@ func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
-	sd.forkableWriters = make(map[ForkableId]*UnmarkedBufferedWriter)
+	sd.forkableWriters = make(map[ForkableId]kv.BufferedWriter)
 	for _, id := range tx.Debug().AllForkableIds() {
-		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter().(*UnmarkedBufferedWriter)
+		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter()
 	}
 
 	return sd
