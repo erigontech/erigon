@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"sync/atomic"
@@ -634,12 +635,7 @@ func (g *Getter) nextPattern() []byte {
 var condensedWordDistances = buildCondensedWordDistances()
 
 func checkDistance(power int, d int) bool {
-	for _, dist := range condensedWordDistances[power] {
-		if dist == d {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(condensedWordDistances[power], d)
 }
 
 func buildCondensedWordDistances() [][]int {
