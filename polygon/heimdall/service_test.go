@@ -164,10 +164,11 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupCheckpoints()
 	suite.setupMilestones()
 	suite.service = NewService(ServiceConfig{
-		Store:     store,
-		BorConfig: borConfig,
-		Client:    suite.client,
-		Logger:    logger,
+		Store:       store,
+		ChainConfig: suite.chainConfig,
+		BorConfig:   borConfig,
+		Client:      suite.client,
+		Logger:      logger,
 	})
 
 	err := suite.service.store.Prepare(suite.ctx)

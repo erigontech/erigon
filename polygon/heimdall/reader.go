@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -21,15 +22,16 @@ type Reader struct {
 }
 
 type ReaderConfig struct {
-	Store     Store
-	BorConfig *borcfg.BorConfig
-	DataDir   string
-	Logger    log.Logger
+	Store       Store
+	ChainConfig *chain.Config
+	BorConfig   *borcfg.BorConfig
+	DataDir     string
+	Logger      log.Logger
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
 func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
-	reader := NewReader(config.BorConfig, config.Store, config.Logger)
+	reader := NewReader(config.ChainConfig, config.BorConfig, config.Store, config.Logger)
 
 	err := reader.Prepare(ctx)
 	if err != nil {
@@ -39,11 +41,11 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
+func NewReader(chainConfig *chain.Config, borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
 	return &Reader{
 		logger:                    logger,
 		store:                     store,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, chainConfig, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 

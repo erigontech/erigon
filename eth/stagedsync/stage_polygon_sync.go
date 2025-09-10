@@ -109,10 +109,11 @@ func NewPolygonSyncStageCfg(
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	heimdallService := heimdall.NewService(heimdall.ServiceConfig{
-		Store:     stageHeimdallStore,
-		BorConfig: borConfig,
-		Client:    heimdallClient,
-		Logger:    logger,
+		Store:       stageHeimdallStore,
+		ChainConfig: chainConfig,
+		BorConfig:   borConfig,
+		Client:      heimdallClient,
+		Logger:      logger,
 	})
 	bridgeService := bridge.NewService(bridge.ServiceConfig{
 		Store:        stageBridgeStore,
