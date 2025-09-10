@@ -118,6 +118,8 @@ var Defaults = Config{
 	},
 }
 
+const DefaultChainDBPageSize = 16 * datasize.KB
+
 func init() {
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -246,6 +248,9 @@ type Config struct {
 	InternalCL bool
 
 	OverrideOsakaTime *big.Int `toml:",omitempty"`
+
+	// Whether to avoid overriding chain config already stored in the DB
+	KeepStoredChainConfig bool
 
 	// Embedded Silkworm support
 	SilkwormExecution            bool

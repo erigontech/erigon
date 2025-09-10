@@ -56,7 +56,7 @@ import (
 )
 
 type Aggregator struct {
-	db       kv.RoDB
+	db       kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
 	d        [kv.DomainLen]*Domain
 	iis      []*InvertedIndex
 	dirs     datadir.Dirs
@@ -95,7 +95,7 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -196,15 +196,13 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesDelete = onDel
 }
 
-func (a *Aggregator) StepSize() uint64 { return a.stepSize }
-func (a *Aggregator) DisableFsync() {
-	for _, d := range a.d {
-		d.DisableFsync()
-	}
-	for _, ii := range a.iis {
-		ii.DisableFsync()
-	}
+func (a *Aggregator) StepSize() uint64   { return a.stepSize }
+func (a *Aggregator) Dirs() datadir.Dirs { return a.dirs }
+
+func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
+	a.d[domain].ReplaceKeysInValues = v
 }
+func (a *Aggregator) Cfg(domain kv.Domain) statecfg.DomainCfg { return a.d[domain].DomainCfg }
 
 func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
@@ -956,36 +954,6 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	return false
 }
 
-func (at *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
-	minUnwindale, err := ReadLowestUnwindableBlock(tx)
-	if err != nil {
-		return 0, err
-	}
-	if minUnwindale == math.MaxUint64 { // no unwindable block found
-		stateVal, _, _, err := at.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, tx)
-		if err != nil {
-			return 0, err
-		}
-		if len(stateVal) == 0 {
-			return 0, nil
-		}
-		_, minUnwindale = _decodeTxBlockNums(stateVal)
-	}
-	return minUnwindale, nil
-}
-
-// CanUnwindBeforeBlockNum - returns `true` if can unwind to requested `blockNum`, otherwise returns nearest `unwindableBlockNum`
-func (at *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (unwindableBlockNum uint64, ok bool, err error) {
-	_minUnwindableBlockNum, err := at.CanUnwindToBlockNum(tx)
-	if err != nil {
-		return 0, false, err
-	}
-	if blockNum < _minUnwindableBlockNum {
-		return _minUnwindableBlockNum, false, nil
-	}
-	return blockNum, true, nil
-}
-
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
@@ -1334,7 +1302,7 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	r := &Ranges{invertedIndex: make([]*MergeRange, len(at.a.iis))}
-	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if commitmentUseReferencedBranches {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange()
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange()
@@ -1418,7 +1386,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	}()
 
 	at.a.logger.Info("[snapshots] merge state " + r.String())
-	commitmentUseReferencedBranches := at.a.d[kv.CommitmentDomain].ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1764,9 +1732,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-// func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
-// 	return at.d[name].d.maxTxNumInDB(tx)
-// }
+func (at *AggregatorRoTx) Dirs() datadir.Dirs { return at.a.dirs }
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
@@ -1776,7 +1742,7 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 		// terms of exact txNum
 		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize)
 	}
-	return at.d[name].HistoryProgress(tx)
+	return at.d[name].ht.iit.Progress(tx)
 }
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)

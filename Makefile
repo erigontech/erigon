@@ -248,7 +248,7 @@ hive-local:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
 	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
-	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && \
 	$(if $(filter Darwin,$(UNAME)), \
@@ -270,7 +270,7 @@ eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 	$(if $(filter Darwin,$(UNAME)), \
 		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \

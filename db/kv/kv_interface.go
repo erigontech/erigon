@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
@@ -382,7 +383,6 @@ func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
 type (
 	Domain      uint16
-	Appendable  uint16
 	InvertedIdx uint16
 	ForkableId  uint16
 )
@@ -442,9 +442,7 @@ type TemporalDebugTx interface {
 	DomainProgress(domain Domain) (txNum uint64)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
-
-	CanUnwindToBlockNum() (uint64, error)
-	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
+	Dirs() datadir.Dirs
 }
 
 type TemporalDebugDB interface {
@@ -540,19 +538,6 @@ type PendingMutations interface {
 
 type DBVerbosityLvl int8
 type Label string
-
-const (
-	ChainDB         = "chaindata"
-	TxPoolDB        = "txpool"
-	SentryDB        = "sentry"
-	ConsensusDB     = "consensus"
-	DownloaderDB    = "downloader"
-	HeimdallDB      = "heimdall"
-	DiagnosticsDB   = "diagnostics"
-	PolygonBridgeDB = "polygon-bridge"
-	CaplinDB        = "caplin"
-	TemporaryDB     = "temporary"
-)
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 const dbLabelName = "db"

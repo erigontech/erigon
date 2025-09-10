@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -39,7 +39,7 @@ import (
 func TestPendingBlock(t *testing.T) {
 	m := mock.Mock(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
-	mining := txpool.NewMiningClient(conn)
+	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
@@ -50,7 +50,7 @@ func TestPendingBlock(t *testing.T) {
 	ch, id := ff.SubscribePendingBlock(1)
 	defer ff.UnsubscribePendingBlock(id)
 
-	ff.HandlePendingBlock(&txpool.OnPendingBlockReply{RplBlock: b})
+	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: b})
 	block := api.pendingBlock()
 
 	require.Equal(t, block.NumberU64(), expect)
@@ -65,7 +65,7 @@ func TestPendingBlock(t *testing.T) {
 func TestPendingLogs(t *testing.T) {
 	m := mock.Mock(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	mining := txpool.NewMiningClient(conn)
+	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
 	expect := []byte{211}
 
@@ -74,7 +74,7 @@ func TestPendingLogs(t *testing.T) {
 
 	b, err := rlp.EncodeToBytes([]*types.Log{{Data: expect}})
 	require.NoError(t, err)
-	ff.HandlePendingLogs(&txpool.OnPendingLogsReply{RplLogs: b})
+	ff.HandlePendingLogs(&txpoolproto.OnPendingLogsReply{RplLogs: b})
 	select {
 	case logs := <-ch:
 		require.Equal(t, expect, logs[0].Data)
