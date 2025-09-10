@@ -203,14 +203,15 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		amoySprintsToPatch[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
 	var oldProducers *valset.ValidatorSet
+	isAmoyChain := t.chainConfig.ChainID.Uint64() == params.AmoyChainConfig.ChainID.Uint64()
 	for i := 0; i < increments; i++ {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
-		if t.chainConfig.ChainID.Uint64() == params.AmoyChainConfig.ChainID.Uint64() && slices.Contains(amoySprintsToPatch, sprintNum) { // on the bad sprint (Amoy)
+		if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum) { // on the bad sprint (Amoy)
 			var emptyProducers []*valset.Validator = nil
 			oldProducers = producers.Copy()
 			oldProducers.IncrementProposerPriority(1)
 			producers = valset.GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
-		} else if t.chainConfig.ChainID.Uint64() == params.AmoyChainConfig.ChainID.Uint64() && slices.Contains(amoySprintsToPatch, sprintNum-1) { // sprint after the bad sprint (Amoy)
+		} else if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum-1) { // sprint after the bad sprint (Amoy)
 			producers = valset.GetUpdatedValidatorSet(producers, oldProducers.Validators, t.logger)
 		} else { // the normal case
 			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
@@ -286,14 +287,15 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	for i := 0; i < len(amoyPatchedSprints); i++ {
 		amoyPatchedSprints[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
+	isAmoyChain := t.chainConfig.ChainID.Uint64() == params.AmoyChainConfig.ChainID.Uint64()
 	for i := 0; i < increments; i++ {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
-		if t.chainConfig.ChainID.Uint64() == params.AmoyChainConfig.ChainID.Uint64() && slices.Contains(amoyPatchedSprints, sprintNum) { // on bad sprint
+		if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum) { // on bad sprint
 			var emptyProducers []*valset.Validator = nil
 			oldProducers = producers.Copy()
 			oldProducers.IncrementProposerPriority(1)
 			producers = valset.GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
-		} else if t.chainConfig.ChainID.Uint64() == params.AmoyChainConfig.ChainID.Uint64() && slices.Contains(amoyPatchedSprints, sprintNum-1) { // sprint after the bad sprint
+		} else if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum-1) { // sprint after the bad sprint
 			producers = valset.GetUpdatedValidatorSet(producers, oldProducers.Validators, t.logger)
 		} else { // normal case
 			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
