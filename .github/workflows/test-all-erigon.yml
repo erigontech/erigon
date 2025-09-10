@@ -125,10 +125,7 @@ jobs:
       - name: Checkout code on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          lfs: true
-
+        
       - name: Setup Go environment on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
