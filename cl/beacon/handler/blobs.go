@@ -258,13 +258,13 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	}
 
 	// collect the blobs
-	blobs := []*cltypes.Blob{}
+	blobs := solid.NewStaticListSSZ[*cltypes.Blob](int(a.beaconChainCfg.MaxBlobCommittmentsPerBlock), int(cltypes.BYTES_PER_BLOB))
 	blobSidecars, _, err := a.blobStoage.ReadBlobSidecars(ctx, *slot, blockRoot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	for _, index := range indicies {
-		blobs = append(blobs, &blobSidecars[index].Blob)
+		blobs.Append(&blobSidecars[index].Blob)
 	}
 
 	return beaconhttp.NewBeaconResponse(blobs).
