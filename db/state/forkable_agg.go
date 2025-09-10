@@ -344,7 +344,6 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, err error) {
 	type wrappedFilesItem struct {
 		*FilesItem
-		st kv.CanonicityStrategy
 		id ForkableId
 	}
 	var (
@@ -406,7 +405,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 				return nil
 			}
 			cfilesMu.Lock()
-			cfiles = append(cfiles, &wrappedFilesItem{df, p.strategy, p.id})
+			cfiles = append(cfiles, &wrappedFilesItem{df, p.id})
 			cfilesMu.Unlock()
 			return nil
 		})

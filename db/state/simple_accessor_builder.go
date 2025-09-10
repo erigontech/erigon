@@ -132,11 +132,11 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) (*DecompressorIndexInputDataQuery, error) {
-	sgname := s.parser.DataFile(version.V1_0, from, to)
-	decomp, _ := seg.NewDecompressorWithMetadata(sgname, true)
-	reader := seg.NewPagedReader(decomp.MakeGetter(), s.args.ValuesOnCompressedPage, s.isCompressionUsed(from, to))
-	return NewDecompressorIndexInputDataQuery(decomp, reader)
+func (s *SimpleAccessorBuilder) GetInputDataQuery(decomp *seg.Decompressor, compressionUsed bool) (*DecompressorIndexInputDataQuery, error) {
+	//sgname := s.parser.DataFile(version.V1_0, from, to)
+	//decomp, _ := seg.NewDecompressorWithMetadata(sgname, true)
+	reader := seg.NewPagedReader(decomp.MakeGetter(), s.args.ValuesOnCompressedPage, compressionUsed)
+	return NewDecompressorIndexInputDataQuery(reader)
 }
 
 func (s *SimpleAccessorBuilder) isCompressionUsed(from, to RootNum) bool {
@@ -147,17 +147,14 @@ func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 	s.kf = factory
 }
 
-func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
-	return s.args.Enums
-}
-
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompressor, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.parser.IndexTags()[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
-	iidq, err := s.GetInputDataQuery(from, to)
+
+	iidq, err := s.GetInputDataQuery(decomp, s.isCompressionUsed(from, to))
 	if err != nil {
 		return nil, err
 	}
@@ -239,13 +236,12 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 }
 
 type DecompressorIndexInputDataQuery struct {
-	decomp *seg.Decompressor
 	reader *seg.PagedReader
 	m      NumMetadata
 }
 
-func NewDecompressorIndexInputDataQuery(decomp *seg.Decompressor, reader *seg.PagedReader) (*DecompressorIndexInputDataQuery, error) {
-	d := &DecompressorIndexInputDataQuery{decomp: decomp, reader: reader}
+func NewDecompressorIndexInputDataQuery(reader *seg.PagedReader) (*DecompressorIndexInputDataQuery, error) {
+	d := &DecompressorIndexInputDataQuery{reader: reader}
 	d.m = NumMetadata{}
 	if err := d.m.Unmarshal(reader.GetMetadata()); err != nil {
 		return nil, err
@@ -277,7 +273,6 @@ func (d *DecompressorIndexInputDataQuery) Metadata() NumMetadata {
 
 func (d *DecompressorIndexInputDataQuery) Close() {
 	d.reader = nil
-	d.decomp.Close()
 }
 
 // this can handle case where key is stored (pageSize > 1)

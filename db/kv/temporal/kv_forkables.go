@@ -81,10 +81,6 @@ func (m *unmarkedTx) Id() kv.ForkableId {
 	return m.s.Id()
 }
 
-func (m *unmarkedTx) Type() kv.CanonicityStrategy {
-	return m.s.Type()
-}
-
 func (m *unmarkedTx) Close() {
 	m.s.Close()
 }

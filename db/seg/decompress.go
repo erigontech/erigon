@@ -184,7 +184,6 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 }
 
 func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*Decompressor, error) {
-
 	_, fName := filepath.Split(compressedFilePath)
 	var err error
 	var validationPassed = false

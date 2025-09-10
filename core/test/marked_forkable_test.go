@@ -125,8 +125,6 @@ func TestMarked_PutToDb(t *testing.T) {
 	returnv, err = ma_tx.DebugDb().GetDb(num, []byte{1}, rwtx)
 	require.NoError(t, err)
 	require.True(t, returnv == nil) // Equal fails
-
-	require.Equal(t, ma_tx.Type(), kv.Marked)
 }
 
 func TestPrune(t *testing.T) {

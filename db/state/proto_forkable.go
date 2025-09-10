@@ -33,7 +33,6 @@ type ProtoForkable struct {
 	snaps    *SnapshotRepo
 	metadata []NumMetadata
 
-	strategy  kv.CanonicityStrategy
 	unaligned bool
 
 	logger log.Logger
@@ -155,7 +154,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	df := newFilesItemWithSnapConfig(uint64(calcFrom), uint64(calcTo), cfg)
 	df.decompressor = valuesDecomp
 
-	indexes, err := a.BuildIndexes(ctx, calcFrom, calcTo, ps)
+	indexes, err := a.BuildIndexes(ctx, df.decompressor, calcFrom, calcTo, ps)
 	if err != nil {
 		return nil, false, err
 	}
@@ -177,7 +176,7 @@ func (a *ProtoForkable) PagedDataReader(f *seg.Decompressor, compress bool) *seg
 	return seg.NewPagedReader(a.DataReader(f, compress), a.cfg.ValuesOnCompressedPage, compress)
 }
 
-func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *background.ProgressSet) (indexes []*recsplit.Index, err error) {
+func (a *ProtoForkable) BuildIndexes(ctx context.Context, decomp *seg.Decompressor, from, to RootNum, ps *background.ProgressSet) (indexes []*recsplit.Index, err error) {
 	closeFiles := true
 	defer func() {
 		if closeFiles {
@@ -191,7 +190,7 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *
 		filename := path.Base(a.snaps.schema.AccessorIdxFile(version.V1_0, from, to, uint64(i)))
 		p := ps.AddNew("build_index_"+filename, 1)
 		defer ps.Delete(p)
-		recsplitIdx, err := ib.Build(ctx, from, to, p)
+		recsplitIdx, err := ib.Build(ctx, decomp, from, to, p)
 		if err != nil {
 			return indexes, err
 		}
@@ -201,6 +200,22 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *
 	}
 	closeFiles = false
 	return
+}
+
+func (a *ProtoForkable) BuildIndexes2(ctx context.Context, from, to RootNum, ps *background.ProgressSet) (indexes []*recsplit.Index, err error) {
+	var decomp *seg.Decompressor
+	file, found := a.snaps.dirtyFiles.Get(&FilesItem{startTxNum: from.Uint64(), endTxNum: to.Uint64()})
+	if found && file.decompressor != nil {
+		decomp = file.decompressor
+	} else {
+		decomp, err = seg.NewDecompressorWithMetadata(a.fschema.DataFile(version.V1_0, from, to), a.snapCfg.HasMetadata)
+		if err != nil {
+			return nil, err
+		}
+		defer decomp.Close()
+	}
+
+	return a.BuildIndexes(ctx, decomp, from, to, ps)
 }
 
 func (a *ProtoForkable) isCompressionUsed(from, to RootNum) bool {
@@ -283,7 +298,7 @@ func (a *ProtoForkable) BuildMissedAccessors(ctx context.Context, g *errgroup.Gr
 	for _, file := range missedFilesItems.Get(statecfg.AccessorHashMap) {
 		cfile := file
 		g.Go(func() error {
-			indexes, err := a.BuildIndexes(ctx, RootNum(cfile.startTxNum), RootNum(cfile.endTxNum), ps)
+			indexes, err := a.BuildIndexes2(ctx, RootNum(cfile.startTxNum), RootNum(cfile.endTxNum), ps)
 			if err != nil {
 				return err
 			}
@@ -343,10 +358,6 @@ func (a *ProtoForkableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 	}
 
 	return r
-}
-
-func (a *ProtoForkableTx) Type() kv.CanonicityStrategy {
-	return a.a.strategy
 }
 
 func (a *ProtoForkableTx) Garbage(merged *FilesItem) (outs []*FilesItem) {

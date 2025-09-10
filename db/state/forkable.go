@@ -69,7 +69,7 @@ func App_WithUpdateCanonical() AppOpts {
 
 // func App
 func NewMarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
-	a, err := create[MarkedTxI](id, kv.Marked, schema, canonicalTbl, relation, dirs, logger, options...)
+	a, err := create[MarkedTxI](id, schema, canonicalTbl, relation, dirs, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func NewMarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, canonicalTbl
 }
 
 func NewUnmarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
-	a, err := create[UnmarkedTxI](id, kv.Unmarked, schema, "", relation, dirs, logger, options...)
+	a, err := create[UnmarkedTxI](id, schema, "", relation, dirs, logger, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func NewUnmarkedForkable(id ForkableId, schema *statecfg.ForkableCfg, relation R
 	return a, nil
 }
 
-func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, schema *statecfg.ForkableCfg, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
+func create[T ForkableBaseTxI](id ForkableId, schema *statecfg.ForkableCfg, canonicalTbl string, relation RootRelationI, dirs datadir.Dirs, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
 	a := &Forkable[T]{
 		ProtoForkable: NewProto(id, nil, nil, dirs, logger),
 	}
@@ -118,7 +118,6 @@ func create[T ForkableBaseTxI](id ForkableId, strategy kv.CanonicityStrategy, sc
 	for _, opt := range options {
 		opt(a)
 	}
-	a.strategy = strategy
 	return a, nil
 }
 

@@ -18,7 +18,6 @@ type ForkableTxCommons interface {
 	HasRootNumUpto(ctx context.Context, to RootNum) (bool, error)
 	Progress() (Num, error)
 	StepSize() uint64
-	Type() CanonicityStrategy
 }
 
 // unmarked

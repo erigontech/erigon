@@ -7,6 +7,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 type EncToBytesI = kv.EncToBytesI
@@ -33,8 +34,7 @@ type Collector interface {
 /** index building **/
 
 type AccessorIndexBuilder interface {
-	Build(ctx context.Context, from, to RootNum, p *background.Progress) (*recsplit.Index, error)
-	AllowsOrdinalLookupByNum() bool
+	Build(ctx context.Context, decomp *seg.Decompressor, from, to RootNum, p *background.Progress) (*recsplit.Index, error)
 }
 
 // why we need temporal + db + snapshot txs
@@ -43,11 +43,6 @@ type AccessorIndexBuilder interface {
 // temporal tx is about consistency...if i want to query snapshot first and then db
 // and use separate tx..it can lead to inconsistency (due to db data being pruned)
 // so temporaltx is needed here...
-
-type ForkableTemporalCommonTxI interface {
-	Close()
-	Type() kv.CanonicityStrategy
-}
 
 // no need to take mdbx tx
 // common methods for files api
@@ -76,7 +71,6 @@ type ForkableDbCommonTxI interface {
 // common methods across all forkables
 type ForkableBaseTxI interface {
 	ForkableDbCommonTxI
-	ForkableTemporalCommonTxI
 	Get(num Num, tx kv.Tx) (Bytes, error)
 	Progress(tx kv.Tx) (Num, error)
 }

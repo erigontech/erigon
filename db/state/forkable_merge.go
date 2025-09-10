@@ -149,7 +149,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	if mergedFile.decompressor, err = seg.NewDecompressorWithMetadata(segPath, f.snapCfg.HasMetadata); err != nil {
 		return
 	}
-	indexes, err := f.BuildIndexes(ctx, from, to, ps)
+	indexes, err := f.BuildIndexes(ctx, mergedFile.decompressor, from, to, ps)
 	if err != nil {
 		return
 	}
