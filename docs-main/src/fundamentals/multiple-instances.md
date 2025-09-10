@@ -1,4 +1,4 @@
-# Multiple instances / One machine
+# Multiple instances / One machine [REVIEW]
 
 Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.
 
@@ -135,32 +135,21 @@ vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 ```
 
-
-**File:** README.md (L678-685)
 ```markdown
 vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 ```
 
-# if it failing with "can't allocate memory", try: 
+If it is failing with "can't allocate memory", try: 
+
+```
 sync && sudo sysctl vm.drop_caches=3
 echo 1 > /proc/sys/vm/compact_memory
 ```
-```
 
-**File:** README.md (L769-774)
-```markdown
-**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimizations: "reduce Disk random access".
-"Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
-running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
-same Disk.
+> **Warning:**: Running multiple instances of Erigon on the same machine will cause concurrent disk access, which can negatively impact performance. One of Erigon's main optimizations is to reduce disk random access, but the "Blocks Execution stage" still performs many random reads, making it the slowest stage. Therefore, **we do not recommend running multiple genesis syncs on the same disk**. However, if the genesis sync has already been completed, it is acceptable to run multiple Erigon instances on the same disk.
 
-```
-
-**File:** README.md (L782-791)
-```markdown
-What can do:
+What can be done:
 
 - reduce disk latency (not throughput, not iops)
     - use latency-critical cloud-drives
@@ -170,9 +159,6 @@ What can do:
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
-```
-
-**File:** docker-compose.yml (L9-12)
 ```yaml
 # Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 # Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
@@ -180,20 +166,12 @@ What can do:
 # Connections: erigon -> (sentries, downloader), rpcdaemon -> (erigon, txpool), txpool -> erigon
 ```
 
-**File:** docs/programmers_guide/db_faq.md (L34-42)
-```markdown
-### How RAM used
+### How RAM is used
 
-Erigon will use all available RAM, but this RAM will not belong to Erigon’s process. OS will own all this
-memory. And OS will maintain hot part of DB in RAM. If OS will need RAM for other programs or for second Erigon instance
-OS will manage all the work. This called PageCache. Erigon itself using under 2Gb. So, Erigon will benefit from more
-RAM and will use all RAM without re-configuration. Same PageCache can be used by other processes if they run on same
-machine by just opening same DB file. For example if RPCDaemon started with —datadir option - it will open db of
-Erigon and will use same PageCache (if data A already in RAM because it’s hot and RPCDaemon read it - then it read it
-from RAM not from Disk). Shared memory.
-```
+Erigon will utilize all available RAM, but this memory will not be directly owned by Erigon's process. Instead, the operating system (OS) will manage this memory. The OS will keep the frequently accessed parts of the database (DB) in RAM. If the OS needs to allocate RAM for other programs or for a second instance of Erigon, it will handle the memory management accordingly. This mechanism is known as PageCache.
 
-**File:** cmd/devnet/devnet/node.go (L190-194)
+Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPCDaemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPCDaemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
+
 ```go
 	// These are set to prevent disk and page size churn which can be excessive
 	// when running multiple nodes
@@ -202,7 +180,6 @@ from RAM not from Disk). Shared memory.
 	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 ```
 
-**File:** tests/automated-testing/docker-compose.yml (L9-24)
 ```yaml
       --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
     ports:
@@ -222,7 +199,6 @@ from RAM not from Disk). Shared memory.
       --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --staticpeers=$ENODE --log.dir.path=/logs/node2
 ```
 
-**File:** cmd/prometheus/prometheus.yml (L11-24)
 ```yaml
       - targets:
           - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.

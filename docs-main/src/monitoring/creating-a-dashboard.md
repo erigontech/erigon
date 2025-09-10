@@ -36,7 +36,7 @@ Erigon provides a simple Docker Compose setup for the monitoring stack:
 docker compose up -d prometheus grafana
 ```
 
-Alternatively, you can use the make target [3](#0-2) :
+Alternatively, you can use the make target:
 
 ```bash
 make prometheus
@@ -53,7 +53,7 @@ Once the containers are running, access Grafana at [localhost:3000](http://local
 Erigon comes with comprehensive pre-built dashboards that monitor various aspects of the node:
 
 ### Main Dashboard Features
-The `erigon_internals.json` dashboard [5](#0-4)  includes panels for:
+The `erigon_internals.json` dashboard includes panels for:
 
 - **Storage Monitoring**: Snapshots, chaindata, and temp directory sizes
 - **Block Processing**: Block importing latency and execution times
@@ -62,7 +62,7 @@ The `erigon_internals.json` dashboard [5](#0-4)  includes panels for:
 
 ### Key Metrics to Monitor
 
-1. **Block Execution Speed**
+1. **Block Execution Speed** - Measures how long it takes Erigon to execute individual blocks
 2. **Storage Growth** - Monitor chaindata and snapshot sizes
 3. **Processing Times** - Track validation and execution latencies
 
@@ -89,7 +89,17 @@ To monitor multiple Erigon instances:
 
 ## Step 8: Memory Usage Monitoring
 
-The dashboard includes proper memory usage tracking that accounts for OS page cache. This is important because standard tools like `htop` can be misleading for Erigon memory usage.
+The dashboard includes proper memory usage tracking that accounts for OS page cache. This is important because standard tools like `htop` can be misleading for Erigon memory usage. Erigon's internal database (MDBX) uses `MemoryMap` where the OS manages all read, write, and cache operations instead of the application. The `htop` tool shows "App + OS used to hold page cache for given App" in the `res` column, but this isn't informative because most of that memory is OS page cache that gets automatically freed when needed.
+
+The pre-configured Grafana dashboards include specific memory monitoring panels. The main `erigon.json` dashboard tracks Go memory statistics including:
+
+- `go_memstats_heap_alloc_bytes`: Current heap allocation
+- `go_memstats_sys_bytes`: Total system memory
+- `go_memstats_stack_inuse_bytes`: Stack memory in use
+
+Erigon uses approximately 4GB of RAM during genesis sync and around 1GB during normal operation, while OS page cache can utilize unlimited memory [9](#1-8) . The system is designed so that OS page cache automatically manages memory allocation and can be shared between multiple processes accessing the same database files.
+
+
 
 ## Troubleshooting
 

@@ -7,7 +7,7 @@ multilingual = false
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/erigontech/docs"
+git-repository-url = "https://github.com/erigontech/erigon"
 default-theme = "Ayu"
 preferred-dark-theme = "Ayu"
 

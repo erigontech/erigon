@@ -2,7 +2,7 @@
 
 *Driving Ethereum progress through community-supported research and development*
 
-Erigon Technologies AG is a non-profit project dedicated to advancing Ethereum technology for the public good. Our work is funded entirely by grants from blockchain companies and donations from our community.
+Erigon Technologies AG is a non-profit company dedicated to advancing Ethereum technology for the public good. Our work is funded entirely by grants from blockchain companies and donations from our community.
 
 Your contribution will help us to:
 
