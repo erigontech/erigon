@@ -38,11 +38,6 @@ func handleStateForNewBlockStarting(
 
 	ibs.PreExecuteStateSet(chainConfig, blockNumber, timestamp, stateRoot)
 
-	if chainConfig.DebugDisableZkevmStateChanges {
-		// we don't want to write anything to the GER contract when debugging emulating ethereum
-		return nil
-	}
-
 	// handle writing to the ger manager contract but only if the index is above 0
 	// block 1 is a special case as it's the injected batch, so we always need to check the GER/L1 block hash
 	// as these will be force-fed from the event from L1
@@ -55,13 +50,17 @@ func handleStateForNewBlockStarting(
 			return err
 		}
 
+		if chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+			return nil
+		}
+
 		// in the case of a re-used l1 info tree index we don't want to write the ger to the contract
 		if shouldWriteGerToContract {
 			// first check if this ger has already been written
 			l1BlockHash := ibs.ReadGerManagerL1BlockHash(l1info.GER)
 			if l1BlockHash == (common.Hash{}) {
 				// not in the contract so let's write it!
-				ibs.WriteGerManagerL1BlockHash(l1info.GER, l1info.ParentHash)
+				ibs.WriteGerManagerL1BlockHash(chainConfig, blockNumber, l1info.GER, l1info.ParentHash)
 				if err := hermezDb.WriteLatestUsedGer(blockNumber, l1info.GER); err != nil {
 					return err
 				}

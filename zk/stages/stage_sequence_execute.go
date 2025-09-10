@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/consensus/misc"
 	"time"
+
+	"github.com/erigontech/erigon/consensus/misc"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -159,7 +160,7 @@ func sequencingBatchStep(
 
 	// injected batch
 	if executionAt == 0 {
-		if cfg.chainConfig.DebugDisableZkevmStateChanges {
+		if cfg.chainConfig.IsZkevmStateChangeDisabled(executionAt) {
 			// sealed empty block batch
 			if err = processEmptyInitialBatch(batchContext, batchState); err != nil {
 				return err

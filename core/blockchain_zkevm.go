@@ -129,8 +129,8 @@ func ExecuteBlockEphemerallyZk(
 			return nil, fmt.Errorf("ProcessReceiptForBlockExecution: %w", err)
 		}
 
-		if !chainConfig.IsForkID7Etrog(block.NumberU64()) && !chainConfig.IsNormalcy(block.NumberU64()) {
-			if err := ibs.ScalableSetSmtRootHash(roHermezDb); err != nil {
+		if !chainConfig.IsForkID7Etrog(block.NumberU64()) {
+			if err := ibs.ScalableSetSmtRootHash(chainConfig, block.NumberU64(), roHermezDb); err != nil {
 				return nil, fmt.Errorf("ScalableSetSmtRootHash: %w", err)
 			}
 		}

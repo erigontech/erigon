@@ -371,7 +371,7 @@ func updateGER(v vector, ibs *state.IntraBlockState, chainCfg *chain.Config) err
 	l1BlockHash := ibs.ReadGerManagerL1BlockHash(l1info.GER)
 	if l1BlockHash == (common.Hash{}) {
 		// not in the contract so let's write it!
-		ibs.WriteGerManagerL1BlockHash(l1info.GER, l1info.ParentHash)
+		ibs.WriteGerManagerL1BlockHash(chainCfg, 1, l1info.GER, l1info.ParentHash)
 	}
 
 	return nil
