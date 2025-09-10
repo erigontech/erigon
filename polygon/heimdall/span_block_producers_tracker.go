@@ -309,6 +309,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		} else {
 			producers = valset.GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		}
+		producers.IncrementProposerPriority(1)
 	}
 	return producers, increments, nil
 }
