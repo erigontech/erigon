@@ -290,19 +290,6 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 		if err = tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
-	//default:
-	//	arbParsing = false
-	//}
-	//}
-	//if !arbParsing {
-	//switch b[0] {
-	//case AccessListTxType:
-	//inner = new(AccessListTx)
-	//case DynamicFeeTxType:
-	//inner = new(DynamicFeeTransaction)
-	//case BlobTxType:
-	//inner = new(BlobTx)
-	//default:
 	default:
 		// return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}

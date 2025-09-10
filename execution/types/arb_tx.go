@@ -558,12 +558,14 @@ func (s ArbTxs) Len() int { return len(s) }
 // constructed by decoding or via public API in this package.
 func (s ArbTxs) EncodeIndex(i int, w *bytes.Buffer) {
 	tx := s[i]
-	if tx.Type() == LegacyTxType {
+
+	switch tx.Type() {
+	// case ArbitrumLegacyTxType:
+	// arbData := tx.inner.(*ArbitrumLegacyTxData) //
+	// arbData.EncodeOnlyLegacyInto(w)
+	case ArbitrumLegacyTxType, LegacyTxType:
 		rlp.Encode(w, tx.inner)
-	} else if tx.Type() == ArbitrumLegacyTxType {
-		arbData := tx.inner.(*ArbitrumLegacyTxData)
-		arbData.EncodeOnlyLegacyInto(w)
-	} else {
+	default:
 		tx.encodeTyped(w)
 	}
 }
