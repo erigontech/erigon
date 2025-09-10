@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
-var amoyBadBlocks = []uint64{26160367, 26161087, 26171567, 26173743, 26175647}
+var amoyBadBlocks = []uint64{26160367 + 1, 26161087 + 1, 26171567 + 1, 26173743 + 1, 26175647 + 1}
 
 func newSpanBlockProducersTracker(
 	logger log.Logger,
@@ -198,7 +198,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	printFrom := uint64(1635021 - 10)
 	var oldProducers *valset.ValidatorSet
 	for i := 0; i < increments; i++ {
-		sprintNum := spanStartSprintNum + uint64(i)
+		sprintNum := spanStartSprintNum + uint64(i) + 1
 		if sprintNum >= printFrom {
 			t.logger.Info(fmt.Sprintf("SPRINT_NUM=%d PRODUCERS (BEFORE UPDATE) %+v\n", sprintNum, producers))
 		}
@@ -290,7 +290,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 		amoyPatchedSprints[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
 	for i := 0; i < increments; i++ {
-		sprintNum := spanStartSprintNum + uint64(i)
+		sprintNum := spanStartSprintNum + uint64(i) + 1
 		if slices.Contains(amoyPatchedSprints, sprintNum) {
 			emptyProducers := make([]*valset.Validator, len(producers.Validators))
 			for i := 0; i < len(emptyProducers); i++ {
