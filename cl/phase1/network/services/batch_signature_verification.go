@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/alecthomas/atomic"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/monitor"
@@ -15,10 +14,10 @@ import (
 const (
 	batchSignatureVerificationThreshold = 50
 	reservedSize                        = 512
+	batchCheckInterval                  = 500 * time.Millisecond
 )
 
 var (
-	batchCheckInterval          = atomic.New[time.Duration](500 * time.Millisecond)
 	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 )
 
@@ -101,8 +100,7 @@ func (b *BatchSignatureVerifier) Start() {
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
 func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData) {
-	checkInterval := batchCheckInterval.Load()
-	ticker := time.NewTicker(checkInterval)
+	ticker := time.NewTicker(batchCheckInterval)
 	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, reservedSize)
 	for {
@@ -113,7 +111,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
-				ticker.Reset(checkInterval)
+				ticker.Reset(batchCheckInterval)
 				// clear the slice
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 			}
