@@ -5,7 +5,6 @@ on:
     branches:
         - main
         - 'release/**'
-        - docker_pectra
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
@@ -53,6 +52,12 @@ jobs:
         run: |
           cd hive
           run_suite() {
+            if [ $# -ne 3 ]; then
+              echo "Error: run_suite requires exactly 3 parameters"
+              echo "Usage: run_suite <sim> <sim.limit> <max_allowed_failures>"
+              echo "Provided: $# parameters"
+              exit 1
+            fi
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
@@ -80,18 +85,19 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed*10 > tests )); then
+            max_allowed_failures="${3}"
+            if (( failed > max_allowed_failures )); then
               echo "Too many failures for suite ${1}-${2} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1
             fi
           }
-          run_suite engine exchange-capabilities 
-          run_suite engine withdrawals
-          run_suite engine cancun
-          run_suite engine api
-          # run_suite engine auth
-          # run_suite rpc compat
+          run_suite engine exchange-capabilities 0
+          run_suite engine withdrawals 2
+          run_suite engine cancun 0
+          run_suite engine api 0
+          # run_suite engine auth 0
+          # run_suite rpc compat 0
         continue-on-error: true
 
       - name: Upload output log
