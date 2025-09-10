@@ -66,11 +66,11 @@ type SimpleAccessorBuilder struct {
 	id       ForkableId
 	parser   SnapNameSchema
 	kf       IndexKeyFactory
-	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
+	// customBaseDataIDFunc is an optional function for custom BaseDataID calculation
+	// Used for special cases where BaseDataID cannot be derived from RootNum directly
+	customBaseDataIDFunc func(from, to RootNum) uint64
 }
-
-type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
@@ -88,14 +88,6 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logg
 
 	if b.kf == nil {
 		b.kf = NewSimpleIndexKeyFactory() //&SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
-	}
-
-	if b.fetcher == nil {
-		// assume rootnum and num is same
-		logger.Debug("using default first entity num fetcher for %s", id)
-		b.fetcher = func(from, to RootNum, seg *seg.Decompressor) Num {
-			return Num(from)
-		}
 	}
 
 	return b
@@ -118,19 +110,38 @@ func WithIndexKeyFactory(factory IndexKeyFactory) AccessorBuilderOptions {
 	}
 }
 
+// WithCustomBaseDataIDFunc provides a custom function for BaseDataID calculation
+// This is a temporary solution for special cases during the transition period
+func WithCustomBaseDataIDFunc(fn func(from, to RootNum) uint64) AccessorBuilderOptions {
+	return func(s *SimpleAccessorBuilder) {
+		s.customBaseDataIDFunc = fn
+	}
+}
+
 func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-// TODO: this is supposed to go away once we start storing first entity num in the snapshot
-func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumFetcher) {
-	s.fetcher = fetcher
-}
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
 	sgname := s.parser.DataFile(version.V1_0, from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
-	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
+	
+	// Try to read BaseDataID from existing index file
+	baseDataId := s.getBaseDataIDFromIndex(from, to)
+	if baseDataId == 0 {
+		// Use custom BaseDataID calculation if available
+		if s.customBaseDataIDFunc != nil {
+			baseDataId = s.customBaseDataIDFunc(from, to)
+			s.logger.Debug("using custom base data id calculation for %s", Registry.Name(s.id))
+		} else {
+			// Fallback: assume rootnum and num are the same
+			s.logger.Debug("using fallback base data id calculation for %s", Registry.Name(s.id))
+			baseDataId = uint64(from)
+		}
+	}
+	
+	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: baseDataId}
 }
 
 func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
@@ -139,6 +150,19 @@ func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 
 func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 	return s.args.Enums
+}
+
+// getBaseDataIDFromIndex tries to read BaseDataID from an existing index file
+// Returns 0 if the index file doesn't exist or can't be read
+func (s *SimpleAccessorBuilder) getBaseDataIDFromIndex(from, to RootNum) uint64 {
+	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
+	index, err := recsplit.OpenIndex(idxFile)
+	if err != nil {
+		// Index file doesn't exist or can't be opened, this is normal during initial build
+		return 0
+	}
+	defer index.Close()
+	return index.BaseDataID()
 }
 
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
