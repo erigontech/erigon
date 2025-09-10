@@ -23,7 +23,6 @@ type BlobInput struct {
 	BatchNumber    string         `json:"batchNumber"`
 	Coinbase       common.Address `json:"coinbase"`
 	LimitTimestamp string         `json:"limitTimestamp"`
-	GER            common.Hash    `json:"globalExitRoot"`
 	BatchL2Data    string         `json:"batchL2Data"`
 }
 
