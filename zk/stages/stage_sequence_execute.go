@@ -470,6 +470,9 @@ func sequencingBatchStep(
 
 			select {
 			case <-infoTreeTicker.C:
+				if cfg.chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+					break
+				}
 				processedLogs, err := cfg.infoTreeUpdater.CheckForInfoTreeUpdates(logPrefix, sdb.tx)
 				if err != nil {
 					return err
