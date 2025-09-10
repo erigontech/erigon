@@ -17,7 +17,9 @@ func (f *forkableDirtyFilesRoTx) Close() {
 	}
 	f.p = nil
 	for _, item := range f.files {
-		item.refcount.Add(-1)
+		if !item.frozen {
+			item.refcount.Add(-1)
+		}
 	}
 	f.files = nil
 }

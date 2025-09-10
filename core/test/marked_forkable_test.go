@@ -12,6 +12,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -80,9 +81,7 @@ func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs
 		p.RecalcVisibleFiles(0)
 
 		db.Close()
-		// dir.RemoveAll(dirs.Snap)
-		// dir.RemoveAll(dirs.Chaindata)
-		// dir.RemoveAll(dirs.SnapIdx)
+		dir.RemoveAll(dirs.DataDir)
 	})
 }
 
@@ -134,7 +133,6 @@ func TestPrune(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	// prune
 	for pruneTo := RootNum(0); ; pruneTo++ {
 		var entries_count uint64
@@ -231,7 +229,6 @@ func TestBuildFiles_Marked(t *testing.T) {
 	// then check get
 	// then prune and check get
 	// then unwind and check get
-
 	dir, db, log := setup(t)
 	headerId, ma := setupHeader(t, log, dir, db)
 	ctx := context.Background()

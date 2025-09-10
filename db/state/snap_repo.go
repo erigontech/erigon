@@ -209,6 +209,7 @@ func (f *SnapshotRepo) Close() {
 		return
 	}
 	f.closeWhatNotInList([]string{})
+	f.current = nil
 }
 
 func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {

@@ -107,7 +107,7 @@ func (r *registry) SnapshotConfig(a ForkableId) *SnapshotConfig {
 }
 
 func (r *registry) Salt(a ForkableId) (uint32, error) {
-	// not computing salt an EntityId inception
+	// not computing salt at EntityId inception
 	// since salt file might not be downloaded yet.
 	saltFile := r.entityRegistry[a].saltFile
 	baseDir := path.Dir(saltFile)

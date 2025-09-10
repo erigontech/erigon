@@ -1681,7 +1681,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
-	forkagg, err = forkables.OpenForkableAgg(ctx, cfg.ChainName, agg.StepSize(), dirs, chainDB, logger)
+	forkagg, err = forkables.OpenForkableAgg(ctx, cfg.ChainName, agg.StepSize(), dirs, chainDB, true, logger)
 	if err != nil {
 		return
 	}

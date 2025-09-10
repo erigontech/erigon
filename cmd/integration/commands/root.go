@@ -129,7 +129,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		return nil, err
 	}
 
-	forkableAgg, err := forkables.OpenForkableAgg(context.Background(), chain, agg.StepSize(), dirs, rawDB, logger)
+	forkableAgg, err := forkables.OpenForkableAgg(context.Background(), chain, agg.StepSize(), dirs, rawDB, true, logger)
 	if err != nil {
 		return nil, err
 	}

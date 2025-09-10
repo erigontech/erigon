@@ -1562,7 +1562,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
-	snapCfg, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
+	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
 	if _, err := snaptype.LoadSalt(dirs.Snap, createNewSaltFileIfNeeded, logger); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
@@ -1574,16 +1574,10 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
-	forkableAgg := state.NewForkableAgg(ctx, dirs, db, logger)
-	var items snapcfg.PreverifiedItems
-	if knownSnapCfg {
-		items = snapCfg.Preverified.Items
-	}
-	rcacheForkable, err := forkables.NewRcacheForkable(items, dirs, agg.StepSize(), logger)
+	forkableAgg, err := forkables.OpenForkableAgg(ctx, chainConfig.ChainName, agg.StepSize(), dirs, db, false, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
@@ -1595,6 +1589,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			allBorSnapshots.OptimisticalyOpenFolder()
 		}
 		_ = agg.OpenFolder()
+		_ = forkableAgg.OpenFolder()
 	} else {
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}

@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"math/rand"
+	"runtime"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func TestOpenFolder(t *testing.T) {
 	ch := agg.BuildFilesInBackground(RootNum(amount))
 	select {
 	case <-ch:
-	case <-time.After(time.Second * 1000):
+	case <-time.After(time.Second * 10):
 		t.Fatal("timeout")
 	}
 
@@ -387,7 +388,7 @@ func TestMergedFileGet(t *testing.T) {
 		}
 	}
 
-	//checkGet(headerTx, bodyTx, rwtx)
+	checkGet(headerTx, bodyTx, rwtx)
 
 	// create files
 	aggTx.Close()
@@ -396,7 +397,7 @@ func TestMergedFileGet(t *testing.T) {
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer rwtx.Commit()
-	//checkGet(headerTx, bodyTx, rwtx)
+	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
 	checkBuildFilesFn := func(mergeDisabled bool) {
@@ -405,7 +406,7 @@ func TestMergedFileGet(t *testing.T) {
 			ch := agg.BuildFilesInBackground(RootNum(i + 1))
 			select {
 			case <-ch:
-			case <-time.After(time.Second * 300):
+			case <-time.After(time.Second * 30):
 				t.Fatal("timeout")
 			}
 		}
@@ -470,7 +471,11 @@ func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (F
 	freezer := &SimpleMarkedFreezer{mfork: ma}
 	ma.SetFreezer(freezer)
 	t.Cleanup(func() {
+		ma.Close()
 		db.Close()
+		// cleans up closed/orphaned files on windows;
+		// prevents "cannot access the file because it is being used by another process" error
+		runtime.GC()
 		cleanupFiles(t, ma.snaps, dirs)
 	})
 

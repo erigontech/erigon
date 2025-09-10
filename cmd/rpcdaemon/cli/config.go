@@ -63,7 +63,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
@@ -433,17 +432,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		forkableAgg := dbstate.NewForkableAgg(ctx, cfg.Dirs, db, logger)
-		snapCfg, knownSnapCfg := snapcfg.KnownCfg(cfg.Snap.ChainName)
-		var items snapcfg.PreverifiedItems
-		if knownSnapCfg {
-			items = snapCfg.Preverified.Items
-		}
-		rcacheForkable, err := forkables.NewRcacheForkable(items, cfg.Dirs, agg.StepSize(), logger)
+		forkableAgg, err := forkables.OpenForkableAgg(ctx, cfg.Snap.ChainName, agg.StepSize(), cfg.Dirs, rawDB, false, logger)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection

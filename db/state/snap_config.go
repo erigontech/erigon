@@ -121,7 +121,7 @@ func E3SnapCreationConfig(stepSize uint64) *SnapshotCreationConfig {
 	c := stepSize
 	return &SnapshotCreationConfig{
 		RootNumPerStep: c,
-		SafetyMargin:   7500, // 500 txs/block * 15 blocks
+		SafetyMargin:   50000, // 500 txs/block * 100 blocks
 		MergeStages: []uint64{
 			c, 2 * c, 4 * c, 8 * c, 16 * c, 32 * c, 64 * c, 128 * c, 256 * c, 512 * c, 1024 * c,
 			2048 * c, 4096 * c, 8192 * c, 16384 * c, 32768 * c, 65536 * c, 131072 * c,

@@ -60,13 +60,10 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 		tb.Cleanup(agg.Close)
 	}
 
-	forkableAgg := state.NewForkableAgg(context.Background(), dirs, rawDB, agg.Logger())
-	rcacheForkable, err := forkables.NewRcacheForkable(nil, dirs, agg.StepSize(), agg.Logger())
+	forkableAgg, err := forkables.OpenForkableAgg(ctx, "", agg.StepSize(), dirs, rawDB, true, agg.Logger())
 	if err != nil {
 		panic(err)
 	}
-	forkableAgg.RegisterUnmarkedForkable(rcacheForkable)
-
 	db, err := temporal.New(rawDB, agg, forkableAgg)
 	if err != nil {
 		panic(err)

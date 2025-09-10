@@ -1230,7 +1230,6 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	if err != nil {
 		return nil, false, err
 	}
-
 	if len(v) == 0 {
 		return nil, false, nil
 	}

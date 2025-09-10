@@ -235,6 +235,7 @@ type ProtoForkableTx struct {
 	files            visibleFiles
 	m                []NumMetadata
 	a                *ProtoForkable
+	snaps            *SnapshotRepo
 	noFiles          bool
 	snappyReadBuffer []byte
 
@@ -248,6 +249,7 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 		if !src.frozen {
 			src.refcount.Add(1)
 		}
+		a.logger.Warn("(opening) file refcount", "i", i-1, "refcount", src.refcount.Load())
 	}
 
 	return &ProtoForkableTx{
@@ -255,6 +257,7 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 		files: visibleFiles,
 		m:     a.metadata,
 		a:     a,
+		snaps: a.snaps,
 	}
 }
 
@@ -264,7 +267,9 @@ func (a *ProtoForkable) DebugBeginDirtyFilesRo() *forkableDirtyFilesRoTx {
 	a.snaps.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		files = append(files, items...)
 		for _, item := range items {
-			item.refcount.Add(1)
+			if !item.frozen {
+				item.refcount.Add(1)
+			}
 		}
 		return true
 	})
@@ -345,7 +350,7 @@ func (a *ProtoForkableTx) Type() kv.CanonicityStrategy {
 }
 
 func (a *ProtoForkableTx) Garbage(merged *FilesItem) (outs []*FilesItem) {
-	return a.a.snaps.Garbage(a.files, merged)
+	return a.snaps.Garbage(a.files, merged)
 }
 
 func (a *ProtoForkableTx) VisibleFilesMaxRootNum() RootNum {
@@ -420,14 +425,15 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 	pageSize := uint64(a.a.cfg.ValuesOnCompressedPage)
 	isContinuous := pageSize <= 1
 	file := a.files[idx]
-	stepSize := a.a.snaps.stepSize
+	snaps := a.snaps
+	stepSize := snaps.stepSize
 	compressionUsed := a.a.isCompressionUsed(RootNum(file.startTxNum), RootNum(file.endTxNum))
 
 	indexR := a.StatelessIdxReader(idx)
 	if isContinuous {
 		offset, ok := indexR.Lookup(entityNum.EncToBytes(true))
 		if !ok {
-			return nil, false, fmt.Errorf("entity %d not found in index %s:%d-%d", entityNum, a.a.snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
+			return nil, false, fmt.Errorf("entity %d not found in index %s:%d-%d", entityNum, snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
 		}
 
 		g := file.src.decompressor.MakeGetter()
@@ -451,7 +457,7 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 		pageNum := Num((entityNum.Uint64() / pageSize) * pageSize)
 		offset, ok := indexR.Lookup(pageNum.EncToBytes(true))
 		if !ok {
-			return nil, false, fmt.Errorf("entity %d (page %d) not found in index %s:%d-%d", entityNum, pageNum, a.a.snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
+			return nil, false, fmt.Errorf("entity %d (page %d) not found in index %s:%d-%d", entityNum, pageNum, snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
 		}
 		g := file.src.decompressor.MakeGetter()
 		g.Reset(offset)
@@ -473,5 +479,5 @@ func (a *ProtoForkableTx) NoFilesCheck() {
 }
 
 func (a *ProtoForkableTx) StepSize() uint64 {
-	return a.a.snaps.stepSize
+	return a.snaps.stepSize
 }

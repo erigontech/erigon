@@ -212,6 +212,9 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 func (db *DB) Close() {
 	//db.stateFiles.Close()
 	db.RwDB.Close()
+	for _, forkagg := range db.forkaggs {
+		forkagg.Close()
+	}
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {

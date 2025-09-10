@@ -539,6 +539,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	t.Helper()
 	repo.Close()
 	repo.RecalcVisibleFiles(0)
+
 	filepath.Walk(dirs.DataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
@@ -549,7 +550,10 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 		if info.IsDir() {
 			return nil
 		}
-		dir.RemoveFile(path)
+		err = dir.RemoveFile(path)
+		if err != nil {
+			panic(err)
+		}
 		return nil
 	})
 }

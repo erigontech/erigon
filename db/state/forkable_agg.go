@@ -172,7 +172,7 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 		for built {
 			built, err = r.buildFile(r.ctx, num)
 			if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped)) {
-				r.logger.Debug("[fork_agg] buildFile cancelled/stopped", "err", err)
+				r.logger.Warn("[fork_agg] buildFile cancelled/stopped", "err", err)
 				close(fin)
 				return
 			} else if err != nil {
@@ -181,7 +181,9 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 		}
 
 		go func() {
-			defer close(fin)
+			defer func() {
+				close(fin)
+			}()
 			if err := r.MergeLoop(r.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					r.logger.Debug("[fork_agg] MergeLoop cancelled/stopped", "err", err)
@@ -454,11 +456,12 @@ func (r *ForkableAgg) closeDirtyFiles() {
 	wg := &sync.WaitGroup{}
 	r.loop(func(p *ProtoForkable) error {
 		wg.Add(1)
+		pc := p
 		go func() {
 			// TODO: check if p is not the last value
 			// see aggregator#closeDirtyFiles()
 			defer wg.Done()
-			p.snaps.Close()
+			pc.snaps.Close()
 		}()
 		return nil
 	})
