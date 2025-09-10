@@ -25,6 +25,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -37,10 +38,11 @@ const (
 )
 
 type ServiceConfig struct {
-	Store     Store
-	BorConfig *borcfg.BorConfig
-	Client    Client
-	Logger    log.Logger
+	Store       Store
+	ChainConfig *chain.Config
+	BorConfig   *borcfg.BorConfig
+	Client      Client
+	Logger      log.Logger
 }
 
 type Service struct {
@@ -57,6 +59,7 @@ type Service struct {
 
 func NewService(config ServiceConfig) *Service {
 	logger := config.Logger
+	chainConfig := config.ChainConfig
 	borConfig := config.BorConfig
 	store := config.Store
 	client := config.Client
@@ -100,11 +103,11 @@ func NewService(config ServiceConfig) *Service {
 	return &Service{
 		logger:                    logger,
 		store:                     store,
-		reader:                    NewReader(borConfig, store, logger),
+		reader:                    NewReader(chainConfig, borConfig, store, logger),
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, chainConfig, borConfig, store.SpanBlockProducerSelections()),
 		client:                    client,
 	}
 }
