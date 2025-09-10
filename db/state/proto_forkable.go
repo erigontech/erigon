@@ -264,7 +264,6 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 		if !src.frozen {
 			src.refcount.Add(1)
 		}
-		a.logger.Warn("(opening) file refcount", "i", i-1, "refcount", src.refcount.Load())
 	}
 
 	return &ProtoForkableTx{

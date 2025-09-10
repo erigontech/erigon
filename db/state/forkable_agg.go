@@ -783,7 +783,9 @@ func (r *ForkableAggTemporalTx) Prune(ctx context.Context, toRootNum RootNum, ti
 		r.logger.Warn("[fork_agg] prune timeout")
 		return
 	}
-	r.logger.Info("[fork_agg] prune finished", "toRootNum", toRootNum, "stat", aggStat)
+	if !aggStat.PrunedNothing() {
+		r.logger.Info("[fork_agg] prune finished", "toRootNum", toRootNum, "stat", aggStat)
+	}
 	return
 }
 

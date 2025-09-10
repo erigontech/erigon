@@ -445,16 +445,8 @@ func (ps *ForkablePruneStat) Set(minNum, maxNum Num, pruneCount uint64) {
 	ps.PruneCount = pruneCount
 }
 
-func (ps *ForkablePruneStat) PruneNothing() bool {
-	return ps.PruneCount != 0
-}
-
-func (ps *ForkablePruneStat) String() string {
-	if ps.PruneNothing() {
-		return ""
-	}
-
-	return fmt.Sprintf("pruned %d entries from [%d-%d]", ps.PruneCount, ps.MinNum, ps.MaxNum)
+func (ps *ForkablePruneStat) PrunedNothing() bool {
+	return ps.PruneCount == 0
 }
 
 func (ps *ForkablePruneStat) Accumulate(other *ForkablePruneStat) {
