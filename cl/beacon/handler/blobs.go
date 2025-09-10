@@ -22,6 +22,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -264,6 +265,10 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	for _, index := range indicies {
+		if index >= uint64(len(blobSidecars)) {
+			log.Warn("blob index out of range", "index", index, "len", len(blobSidecars))
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("blob index out of range"))
+		}
 		blobs.Append(&blobSidecars[index].Blob)
 	}
 
