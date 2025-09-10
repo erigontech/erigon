@@ -465,7 +465,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		proposingSync := stagedsync.New(
 			cfg.Sync,
 			stagedsync.MiningStages(mock.Ctx,
-				stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, mock.ChainConfig, mock.Engine, nil, dirs.Tmp, mock.BlockReader),
+				stagedsync.StageMiningCreateBlockCfg(mock.DB, miningStatePos, mock.ChainConfig, mock.Engine, param, dirs.Tmp, mock.BlockReader),
 				stagedsync.StageExecuteBlocksCfg(
 					mock.DB,
 					prune,
@@ -484,8 +484,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					nil,
 				),
 				stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(mock.DB, miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
-				stagedsync.StageMiningFinishCfg(mock.DB, mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
+				stagedsync.StageMiningExecCfg(mock.DB, miningStatePos, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, 0, mock.TxPool, mock.BlockReader),
+				stagedsync.StageMiningFinishCfg(mock.DB, mock.ChainConfig, mock.Engine, miningStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 				false,
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 			logger, stages.ModeBlockProduction)

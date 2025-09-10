@@ -290,7 +290,7 @@ func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 	}
 	header := new(types.Header)
 	if err := rlp.DecodeBytes(data, header); err != nil {
-		log.Error("Invalid block header RLP", "hash", hash, "err", err)
+		log.Error("Invalid block header RLP", "hash", hash, "number", number, "err", err)
 		return nil
 	}
 	return header
