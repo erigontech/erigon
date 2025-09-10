@@ -280,8 +280,7 @@ func ValidateHeaderTime(
 		// early block announcements. Note that this is a loose check and would allow early blocks
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
-		if header.Time-config.CalculatePeriod(header.Number.Uint64()) > uint64(now.Unix()) {
-			fmt.Printf("header.Time = %d , period=%d, now=%d\n", header.Time, config.CalculatePeriod(header.Number.Uint64()), uint64(now.Unix()))
+		if header.Time > uint64(now.Unix())+config.CalculatePeriod(header.Number.Uint64()) {
 			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
 		}
 	} else {
