@@ -224,7 +224,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	}
 
 	// read the blobs
-	block, err := a.blockReader.ReadBlockBySlot(ctx, tx, *slot)
+	block, err := a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
