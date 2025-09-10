@@ -2,10 +2,12 @@ package checkpoint_sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -46,6 +48,27 @@ func TestRemoteCheckpointSync(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, wantRoot, haveRoot)
+}
+
+func TestRemoteCheckpointSyncTimeout(t *testing.T) {
+	// Create a mock HTTP server that never responds and exits gracefully when the context is cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+	mockSlowServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			}
+		}
+	}))
+	defer mockSlowServer.Close()
+	defer cancel()
+
+	clparams.ConfigurableCheckpointsURLs = []string{mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL}
+	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 50 * time.Millisecond}
+	state, err := syncer.GetLatestBeaconState(ctx)
+	require.Nil(t, state)
+	require.True(t, errors.Is(err, context.DeadlineExceeded))
 }
 
 func TestLocalCheckpointSyncFromFile(t *testing.T) {
