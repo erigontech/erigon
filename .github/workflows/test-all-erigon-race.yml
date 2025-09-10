@@ -59,10 +59,8 @@ jobs:
       - name: Checkout code
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v5
-        
-      - name: Update submodules
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: git submodule update --init --recursive --force
+        with:
+          submodules: recursive
         
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'
