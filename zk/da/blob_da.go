@@ -88,7 +88,7 @@ func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInpu
 
 	l1InfoRoot, err := hermezDb.GetL1InfoRootByIndex(uint64(highestIndexUsed))
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("GetL1InfoRootByIndex failed for index %d: %w", highestIndexUsed, err)
 	}
 
 	// coinbase + l1InfoRoot + limitTimestamp + batchData

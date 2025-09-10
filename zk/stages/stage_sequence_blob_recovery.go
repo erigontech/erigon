@@ -132,7 +132,7 @@ LOOP:
 			}
 
 			// increment the offset for the next iteration
-			offset += cfg.zkCfg.BlobRecoveryBlobLimit
+			offset += limit
 		}
 	}
 

@@ -1715,7 +1715,7 @@ func (db *HermezDb) GetL1InfoRootByIndex(index uint64) (common.Hash, error) {
 		}
 	}
 
-	return common.Hash{}, errors.New("index not found")
+	return common.Hash{}, fmt.Errorf("index %d not found", index)
 }
 
 func (db *HermezDbReader) GetL1InfoTreeIndexToRoots() (map[uint64]common.Hash, error) {
