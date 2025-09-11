@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/forkables"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -129,10 +128,5 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		return nil, err
 	}
 
-	forkableAgg, err := forkables.OpenForkableAgg(context.Background(), chain, agg.StepSize(), dirs, rawDB, true, logger)
-	if err != nil {
-		return nil, err
-	}
-
-	return temporal.New(rawDB, agg, forkableAgg)
+	return temporal.New(rawDB, agg)
 }

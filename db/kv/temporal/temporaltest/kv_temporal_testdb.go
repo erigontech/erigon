@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/forkables"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
@@ -60,11 +59,7 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 		tb.Cleanup(agg.Close)
 	}
 
-	forkableAgg, err := forkables.OpenForkableAgg(ctx, "", agg.StepSize(), dirs, rawDB, true, agg.Logger())
-	if err != nil {
-		panic(err)
-	}
-	db, err := temporal.New(rawDB, agg, forkableAgg)
+	db, err := temporal.New(rawDB, agg)
 	if err != nil {
 		panic(err)
 	}

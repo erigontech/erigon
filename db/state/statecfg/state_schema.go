@@ -86,8 +86,6 @@ type SchemaGen struct {
 	LogTopicIdx      InvIdxCfg
 	TracesFromIdx    InvIdxCfg
 	TracesToIdx      InvIdxCfg
-
-	RCacheForkable ForkableCfg
 }
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
@@ -311,13 +309,6 @@ var Schema = SchemaGen{
 		Name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
 	},
-	RCacheForkable: ForkableCfg{
-		Name:                   "rcache",
-		ValsTbl:                kv.TblRCacheFVAls,
-		Accessors:              AccessorHashMap,
-		Compression:            seg.CompressNone,
-		ValuesOnCompressedPage: 16,
-	},
 }
 
 func EnableHistoricalCommitment() {
@@ -402,12 +393,11 @@ var HistoryCompressCfg = seg.Cfg{
 }
 
 func EnableHistoricalRCache() {
-	// cfg := Schema.RCacheDomain
-	// cfg.Hist.IiCfg.Disable = false
-	// cfg.Hist.HistoryDisabled = false
-	// cfg.Hist.SnapshotsDisabled = false
-	// Schema.RCacheDomain = cfg
-	Schema.RCacheForkable.Enabled = true
+	cfg := Schema.RCacheDomain
+	cfg.Hist.IiCfg.Disable = false
+	cfg.Hist.HistoryDisabled = false
+	cfg.Hist.SnapshotsDisabled = false
+	Schema.RCacheDomain = cfg
 }
 
 var SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{}

@@ -253,7 +253,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *db
 		if txTask.TxIndex >= 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
 			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		}
-		if err := rawdb.WriteReceiptCacheV2(domains.AsUnmarkedPutter(kv.RCacheForkable), receipt, txTask.TxNum); err != nil {
+		if err := rawdb.WriteReceiptCacheV2(domains.AsPutDel(rs.tx), receipt, txTask.TxNum); err != nil {
 			return err
 		}
 	}

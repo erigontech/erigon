@@ -66,7 +66,6 @@ func init() {
 
 	withDataDir(compactDomains)
 	withDomain(compactDomains)
-	withChain(compactDomains)
 	compactDomains.Flags().StringVar(&outDatadir, "out", "out-compacted", "")
 	compactDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the compacted domains directly in datadir (will remove .kvei and .bt too)")
 	compactDomains.Flags().BoolVar(&doIndexBuild, "build-idx", false, "build index for compacted domains")

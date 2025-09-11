@@ -1226,13 +1226,17 @@ type RCacheV2Query struct {
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
-	v, err := tx.Unmarked(kv.RCacheForkable).Get(kv.Num(query.TxNum))
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
 	}
 	if len(v) == 0 {
 		return nil, false, nil
 	}
+
 	// Convert the receipts from their storage form to their internal representation
 	receipt := &types.ReceiptForStorage{}
 	if err := rlp.DecodeBytes(v, receipt); err != nil {
@@ -1256,16 +1260,18 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
-	um := tx.Unmarked(kv.RCacheForkable)
-
 	for txnID := _min; txnID < _max+1; txnID++ {
-		v, err := um.Get(kv.Num(txnID))
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			continue
 		}
 		if len(v) == 0 {
 			continue
 		}
+
 		// Convert the receipts from their storage form to their internal representation
 		receipt := &types.ReceiptForStorage{}
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
@@ -1281,7 +1287,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(putter kv.UnmarkedPutter, receipt *types.Receipt, txNum uint64) error {
+func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -1309,9 +1315,13 @@ func WriteReceiptCacheV2(putter kv.UnmarkedPutter, receipt *types.Receipt, txNum
 		toWrite = []byte{}
 	}
 
-	if err := putter.Put(kv.Num(txNum), toWrite); err != nil {
+	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
 
 	return nil
 }
+
+var (
+	receiptCacheKey = []byte{0x0}
+)
