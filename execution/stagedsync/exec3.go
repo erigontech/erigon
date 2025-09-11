@@ -240,15 +240,22 @@ func ExecV3(ctx context.Context,
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, applyTx, blockReader, logger)
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	forkagg := cfg.db.(dbstate.HasAgg).ForkableAgg(kv.RCacheForkable).(*dbstate.ForkableAgg)
 	if !inMemExec && !isMining {
 		if initialCycle {
 			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 			agg.SetMergeWorkers(min(1, estimate.StateV3Collate.Workers()))
 			agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+			forkagg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+			forkagg.SetMergeWorkers(min(1, estimate.StateV3Collate.Workers()))
+			forkagg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		} else {
 			agg.SetCollateAndBuildWorkers(1)
 			agg.SetMergeWorkers(1)
 			agg.SetCompressWorkers(1)
+			forkagg.SetCollateAndBuildWorkers(1)
+			forkagg.SetMergeWorkers(1)
+			forkagg.SetCompressWorkers(1)
 		}
 	}
 
@@ -304,6 +311,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
+	forkagg.BuildFilesInBackground(kv.RootNum(outputTxNum.Load()))
 
 	var count uint64
 
@@ -368,6 +376,7 @@ func ExecV3(ctx context.Context,
 				rs:             rs,
 				doms:           doms,
 				agg:            agg,
+				forkagg:        forkagg,
 				accumulator:    accumulator,
 				isMining:       isMining,
 				inMemExec:      inMemExec,
@@ -402,6 +411,7 @@ func ExecV3(ctx context.Context,
 				rs:             rs,
 				doms:           doms,
 				agg:            agg,
+				forkagg:        forkagg,
 				u:              u,
 				isMining:       isMining,
 				inMemExec:      inMemExec,
@@ -436,6 +446,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
+	forkagg.BuildFilesInBackground(kv.RootNum(outputTxNum.Load()))
 
 	var readAhead chan uint64
 	if !isMining && !inMemExec && execStage.CurrentSyncCycle.IsInitialCycle {
@@ -656,6 +667,7 @@ Loop:
 			}
 
 			agg.BuildFilesInBackground(outputTxNum.Load())
+			forkagg.BuildFilesInBackground(kv.RootNum(outputTxNum.Load()))
 		} else {
 			se := executor.(*serialExecutor)
 
@@ -836,6 +848,7 @@ Loop:
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
+	forkagg.BuildFilesInBackground(kv.RootNum(outputTxNum.Load()))
 
 	if errExhausted != nil && blockNum < maxBlockNum {
 		// special err allows the loop to continue, caller will call us again to continue from where we left off

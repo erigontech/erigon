@@ -85,6 +85,7 @@ type txExecutor struct {
 	cfg            ExecuteBlockCfg
 	execStage      *StageState
 	agg            *dbstate.Aggregator
+	forkagg        *dbstate.ForkableAgg
 	rs             *state.ParallelExecutionState
 	doms           *dbstate.SharedDomains
 	accumulator    *shards.Accumulator
