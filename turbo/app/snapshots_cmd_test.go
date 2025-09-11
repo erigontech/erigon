@@ -33,7 +33,7 @@ type bundle struct {
 
 type RootNum = kv.RootNum
 
-func Test_DeleteStateSnaps(t *testing.T) {
+func Test_DeleteLatestStateSnaps(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	b := bundle{}
 	for _, dc := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain, statecfg.Schema.ReceiptDomain} {
