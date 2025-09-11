@@ -77,12 +77,16 @@ func (u *Updater) GetLatestUpdate() *zkTypes.L1InfoTreeUpdate {
 	return u.latestUpdate
 }
 
+func (u *Updater) StopProcessing() {
+	u.syncer.StopQueryBlocks()
+	u.syncer.ConsumeQueryBlocks()
+	u.syncer.WaitQueryBlocksToFinish()
+}
+
 func (u *Updater) WarmUp(tx kv.RwTx) (err error) {
 	defer func() {
 		if err != nil {
-			u.syncer.StopQueryBlocks()
-			u.syncer.ConsumeQueryBlocks()
-			u.syncer.WaitQueryBlocksToFinish()
+			u.StopProcessing()
 		}
 	}()
 
@@ -375,9 +379,7 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	defer func() {
 		if err != nil {
 			log.Info(fmt.Sprintf("[%s] CheckForInfoTreeUpdates failed", logPrefix), "err", err)
-			u.syncer.StopQueryBlocks()
-			u.syncer.ConsumeQueryBlocks()
-			u.syncer.WaitQueryBlocksToFinish()
+			u.StopProcessing()
 		}
 		u.syncer.ClearHeaderCache()
 	}()
@@ -583,9 +585,7 @@ func (u *Updater) RollbackL1InfoTree(hermezDb *hermez_db.HermezDb, tx kv.RwTx) e
 	}
 
 	// stop the syncer
-	u.syncer.StopQueryBlocks()
-	u.syncer.ConsumeQueryBlocks()
-	u.syncer.WaitQueryBlocksToFinish()
+	u.StopProcessing()
 
 	// reset progress for the next iteration
 	u.progress = confirmedL1BlockNumber - 1
