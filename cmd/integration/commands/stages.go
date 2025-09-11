@@ -78,6 +78,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
@@ -1104,7 +1105,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
 		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
-		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
+		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
 		txNums := blockReader.TxnumReader(ctx)
 
 		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
@@ -1182,11 +1183,11 @@ var _blockWriterSingleton *blockio.BlockWriter
 
 func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
-		sn, borSn, _, _, bridgeStore, heimdallStore, err := allSnapshots(context.Background(), db, logger)
+		sn, borSn, _, _, _, _, err := allSnapshots(context.Background(), db, logger)
 		if err != nil {
 			panic(err)
 		}
-		_blockReaderSingleton = freezeblocks.NewBlockReader(sn, borSn, heimdallStore, bridgeStore)
+		_blockReaderSingleton = freezeblocks.NewBlockReader(sn, borSn)
 		_blockWriterSingleton = blockio.NewBlockWriter()
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
@@ -1242,7 +1243,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	}
 	cfg.Snapshot = allSn.Cfg()
 	borSn.DownloadComplete() // mark as ready
-	engine, heimdallClient := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
+	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1277,19 +1278,15 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	notifications := shards.NewNotifications(nil)
 
 	var (
-		snapDb     kv.RwDB
-		recents    *lru.ARCCache[common.Hash, *bor.Snapshot]
 		signatures *lru.ARCCache[common.Hash, common.Address]
 	)
 	if bor, ok := engine.(*bor.Bor); ok {
-		snapDb = bor.DB
-		recents = bor.Recents
 		signatures = bor.Signatures
 	}
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 
-	stageList := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
-		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, nil)
+	stageList := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
+		signatures, logger, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
@@ -1350,10 +1347,12 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 	return res
 }
 
-func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) (engine consensus.Engine, heimdallClient heimdall.Client) {
+func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) consensus.Engine {
 	config := ethconfig.Defaults
 	var polygonBridge *bridge.Service
 	var heimdallService *heimdall.Service
+	var heimdallClient heimdall.Client
+	var bridgeClient bridge.Client
 	var consensusConfig interface{}
 	if cc.Clique != nil {
 		consensusConfig = chainspec.CliqueSnapshot
@@ -1363,7 +1362,11 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 		consensusConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, heimdall.WithApiVersioner(ctx))
+			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
+			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
+		} else {
+			heimdallClient = heimdall.NewIdleClient(config.Miner)
+			bridgeClient = bridge.NewIdleClient()
 		}
 		borConfig := consensusConfig.(*borcfg.BorConfig)
 
@@ -1371,7 +1374,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 			Store:        bridgeStore,
 			Logger:       logger,
 			BorConfig:    borConfig,
-			EventFetcher: heimdallClient,
+			EventFetcher: bridgeClient,
 		})
 
 		if err := heimdallStore.Prepare(ctx); err != nil {
@@ -1393,7 +1396,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService), heimdallClient
+		config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
 }
 
 func readGenesis(chain string) *types.Genesis {

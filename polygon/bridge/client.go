@@ -14,6 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package flags
+package bridge
 
-var Milestone = true
+import (
+	"context"
+	"time"
+)
+
+//go:generate mockgen -typed=true -destination=./client_mock.go -package=bridge . Client
+type Client interface {
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
+	Close()
+}

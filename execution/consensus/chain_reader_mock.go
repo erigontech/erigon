@@ -15,7 +15,6 @@ import (
 
 	chain "github.com/erigontech/erigon-lib/chain"
 	common "github.com/erigontech/erigon-lib/common"
-	rlp "github.com/erigontech/erigon-lib/rlp"
 	types "github.com/erigontech/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -42,82 +41,6 @@ func NewMockChainReader(ctrl *gomock.Controller) *MockChainReader {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockChainReader) EXPECT() *MockChainReaderMockRecorder {
 	return m.recorder
-}
-
-// BorEventsByBlock mocks base method.
-func (m *MockChainReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BorEventsByBlock", hash, number)
-	ret0, _ := ret[0].([]rlp.RawValue)
-	return ret0
-}
-
-// BorEventsByBlock indicates an expected call of BorEventsByBlock.
-func (mr *MockChainReaderMockRecorder) BorEventsByBlock(hash, number any) *MockChainReaderBorEventsByBlockCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BorEventsByBlock", reflect.TypeOf((*MockChainReader)(nil).BorEventsByBlock), hash, number)
-	return &MockChainReaderBorEventsByBlockCall{Call: call}
-}
-
-// MockChainReaderBorEventsByBlockCall wrap *gomock.Call
-type MockChainReaderBorEventsByBlockCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockChainReaderBorEventsByBlockCall) Return(arg0 []rlp.RawValue) *MockChainReaderBorEventsByBlockCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockChainReaderBorEventsByBlockCall) Do(f func(common.Hash, uint64) []rlp.RawValue) *MockChainReaderBorEventsByBlockCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockChainReaderBorEventsByBlockCall) DoAndReturn(f func(common.Hash, uint64) []rlp.RawValue) *MockChainReaderBorEventsByBlockCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// BorStartEventId mocks base method.
-func (m *MockChainReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BorStartEventId", hash, number)
-	ret0, _ := ret[0].(uint64)
-	return ret0
-}
-
-// BorStartEventId indicates an expected call of BorStartEventId.
-func (mr *MockChainReaderMockRecorder) BorStartEventId(hash, number any) *MockChainReaderBorStartEventIdCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BorStartEventId", reflect.TypeOf((*MockChainReader)(nil).BorStartEventId), hash, number)
-	return &MockChainReaderBorStartEventIdCall{Call: call}
-}
-
-// MockChainReaderBorStartEventIdCall wrap *gomock.Call
-type MockChainReaderBorStartEventIdCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockChainReaderBorStartEventIdCall) Return(arg0 uint64) *MockChainReaderBorStartEventIdCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockChainReaderBorStartEventIdCall) Do(f func(common.Hash, uint64) uint64) *MockChainReaderBorStartEventIdCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockChainReaderBorStartEventIdCall) DoAndReturn(f func(common.Hash, uint64) uint64) *MockChainReaderBorStartEventIdCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
 }
 
 // Config mocks base method.

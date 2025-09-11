@@ -852,7 +852,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	blockReader, _ := blockRetire.IO()
-	heimdallStore, _ := blockRetire.BorStore()
 	for _, chk := range requestedChecks {
 		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
@@ -881,7 +880,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorEvents skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+			snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
+			if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
 				return err
 			}
 		case integrity.BorSpans:
@@ -889,7 +889,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorSpans skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+			if err := heimdall.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
@@ -897,7 +897,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorCheckpoints skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+			if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
@@ -1671,7 +1671,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		}
 	}
 
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore, bridgeStore)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)

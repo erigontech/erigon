@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package poshttp
 
 import "net/http"
 
-//go:generate mockgen -typed=true -source=./http_request_handler.go -destination=./http_request_handler_mock.go -package=heimdall httpRequestHandler
+//go:generate mockgen -typed=true -source=./http_request_handler.go -destination=./http_request_handler_mock.go -package=poshttp httpRequestHandler
 type httpRequestHandler interface {
 	Do(req *http.Request) (*http.Response, error)
 	CloseIdleConnections()

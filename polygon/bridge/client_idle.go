@@ -14,15 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package finality
+package bridge
 
-import "sync/atomic"
+import (
+	"context"
+	"time"
+)
 
-// BorMilestoneRewind is used as a flag/variable
-// Flag: if equals 0, no rewind according to bor whitelisting service
-// Variable: if not equals 0, rewind chain back to BorMilestoneRewind
-var BorMilestoneRewind atomic.Pointer[uint64]
+type IdleClient struct {
+}
 
-func IsMilestoneRewindPending() bool {
-	return BorMilestoneRewind.Load() != nil && *BorMilestoneRewind.Load() != 0
+func NewIdleClient() Client {
+	return &IdleClient{}
+}
+
+func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
+	return nil, nil
+}
+
+func (c *IdleClient) Close() {
 }
