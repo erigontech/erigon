@@ -403,6 +403,13 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:   "countIndex",
+			Action: doCountIndex,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name:        "clearIndexing",
 			Action:      doClearIndexing,
 			Description: "Clear all indexing data",
@@ -799,6 +806,73 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
+	return nil
+}
+
+func doCountIndex(cliCtx *cli.Context) error {
+	_, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+
+	type Data struct {
+		totalSize, ef, keyCount uint64
+		perKey                  float64
+		file                    string
+	}
+
+	datas := make([]Data, 0)
+
+	indexCountFn := func(folder string) {
+		if err := filepath.WalkDir(folder, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			if !strings.HasSuffix(path, "i") && !strings.HasSuffix(path, "idx") {
+				return nil
+			}
+			if strings.HasSuffix(path, "kvei") {
+				return nil
+			}
+
+			idx, err := recsplit.OpenIndex(path)
+			if err != nil {
+				return err
+			}
+			defer idx.Close()
+			total, _, ef, _, _, _ := idx.Sizes()
+			datas = append(datas, Data{
+				totalSize: total.Bytes(),
+				ef:        ef.Bytes(),
+				keyCount:  idx.KeyCount(),
+				file:      filepath.Base(path),
+				perKey:    float64(total-ef) / float64(idx.KeyCount()),
+			})
+
+			//fmt.Printf("total: %d, ef: %d, total-ef: %d, keyCount: %d, perkey: %.2f\n", total, ef, total-ef, idx.KeyCount(), float64(total-ef)/float64(idx.KeyCount()))
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+	indexCountFn(dirs.SnapAccessors)
+	indexCountFn(dirs.SnapCaplin)
+	indexCountFn(dirs.Snap)
+
+	sort.Slice(datas, func(i, j int) bool {
+		d1, d2 := datas[i], datas[j]
+		return d1.totalSize-d1.ef > d2.totalSize-d2.ef
+	})
+
+	for i := 0; i < min(len(datas), 15); i++ {
+		fmt.Printf("file: %s, total: %d, ef: %d, total-ef: %d, keyCount: %d, perkey: %.2f\n", datas[i].file, datas[i].totalSize, datas[i].ef, (datas[i].totalSize - datas[i].ef), datas[i].keyCount, datas[i].perKey)
+	}
+
 	return nil
 }
 
