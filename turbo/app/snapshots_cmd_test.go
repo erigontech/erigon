@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-type builder struct {
+type bundle struct {
 	domain, history, ii *state.E3SnapSchema
 }
 
@@ -35,7 +35,7 @@ type RootNum = kv.RootNum
 
 func Test_DeleteStateSnaps(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	b := builder{}
+	b := bundle{}
 	for _, dc := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain, statecfg.Schema.ReceiptDomain} {
 		b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 		for i := 0; i < 10; i++ {
@@ -68,7 +68,7 @@ func confirmDoesntExist(t *testing.T, filename string) {
 	}
 }
 
-func createFiles(t *testing.T, dirs datadir.Dirs, from, to int, b *builder) {
+func createFiles(t *testing.T, dirs datadir.Dirs, from, to int, b *bundle) {
 	t.Helper()
 
 	rootFrom, rootTo := RootNum(from), RootNum(to)
