@@ -358,6 +358,7 @@ mocks:
 
 ## solc:                              generate all solidity contracts
 solc:
+	@cd txnprovider/shutter && $(MAKE) build/openzeppelin
 	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
 
 ## abigen:                            generate abis using abigen
