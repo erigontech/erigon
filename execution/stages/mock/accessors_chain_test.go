@@ -443,7 +443,6 @@ func TestHeadStorage2(t *testing.T) {
 func TestHeadStorage(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -468,7 +467,6 @@ func TestHeadStorage(t *testing.T) {
 func TestBlockReceiptStorage(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -538,13 +536,14 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		txNum = base
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
+		putter := sd.AsUnmarkedPutter(kv.RCacheForkable)
+		require.NoError(rawdb.WriteReceiptCacheV2(putter, nil, txNum))
 		for i, r := range receipts {
 			txNum = base + 1 + uint64(i)
-			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, txNum))
+			require.NoError(rawdb.WriteReceiptCacheV2(putter, r, txNum))
 		}
 		txNum = base + uint64(len(receipts)) + 1
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
+		require.NoError(rawdb.WriteReceiptCacheV2(putter, nil, txNum))
 
 		// Compute and store the commitment
 		_, err = sd.ComputeCommitment(ctx, true, blockNum, txNum, "flush-commitment")

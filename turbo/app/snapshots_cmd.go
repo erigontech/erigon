@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/forkables"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -1568,7 +1569,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, caplinSnaps, br, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, caplinSnaps, br, agg, forkagg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1581,7 +1582,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	temporalDb, err := temporal.New(chainDB, agg)
+	temporalDb, err := temporal.New(chainDB, agg, forkagg)
 	if err != nil {
 		return err
 	}
@@ -1680,11 +1681,16 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
+	forkagg, err = forkables.OpenForkableAgg(ctx, cfg.ChainName, agg.StepSize(), dirs, chainDB, true, logger)
+	if err != nil {
+		return
+	}
 	clean = func() {
 		defer blockSnaps.Close()
 		defer borSnaps.Close()
 		defer csn.Close()
 		defer agg.Close()
+		defer forkagg.Close()
 	}
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()

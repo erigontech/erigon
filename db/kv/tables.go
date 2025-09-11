@@ -167,6 +167,8 @@ const (
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
 
+	TblRCacheFVAls = "RcacheFVals" // forkable tbl
+
 	TblRCacheVals        = "ReceiptCacheVals"
 	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
 	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
@@ -428,6 +430,8 @@ var ChaindataTables = []string{
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
 	HashedStorageDeprecated,
+
+	TblRCacheFVAls,
 }
 
 const (
@@ -712,6 +716,10 @@ const (
 	TracesToIdx   InvertedIdx = 9
 )
 
+const (
+	RCacheForkable ForkableId = 0
+)
+
 func (idx InvertedIdx) String() string {
 	switch idx {
 	case AccountsHistoryIdx:
@@ -822,6 +830,8 @@ func String2Domain(in string) (Domain, error) {
 
 func String2Forkable(in string) (ForkableId, error) {
 	switch in {
+	case "rcache":
+		return RCacheForkable, nil
 	default:
 		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
 	}
