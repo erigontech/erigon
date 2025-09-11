@@ -11,21 +11,46 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	statecontracts "github.com/erigontech/erigon/core/state/contracts"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	eth1utils "github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/rpc/contracts"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestInvalidNewPayloadReorgDoesNotAffectCanonicalFcu(t *testing.T) {
 	ctx := t.Context()
 	mockSentry := mock.MockWithTxPoolOsaka(t)
+	chainConfig := mockSentry.ChainConfig
+	bankPrivKey := mockSentry.Key // we have 1 eth there
+	logger := mockSentry.Log
 	exec := mockSentry.Eth1ExecutionService
+	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
+	_, grpcCon := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(grpcCon), func() {}, mockSentry.Log)
+	baseJsonRpc := jsonrpc.NewBaseApi(ff, kvcache.NewDummy(), mockSentry.BlockReader, false, rpccfg.DefaultEvmCallTimeout, mockSentry.Engine, mockSentry.Dirs, nil)
+	ethApi := jsonrpc.NewEthAPI(baseJsonRpc, mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
+	cb := contracts.NewDirectBackend(ethApi)
 	genesisHeaderNum := uint64(0)
 	genesisHeaderResp, err := exec.GetHeader(ctx, &executionproto.GetSegmentRequest{BlockNumber: &genesisHeaderNum})
 	require.NoError(t, err)
 	genesis, err := eth1utils.HeaderRpcToHeader(genesisHeaderResp.Header)
+	require.NoError(t, err)
+
+	txnOpts, err := bind.NewKeyedTransactorWithChainID(bankPrivKey, chainConfig.ChainID)
+	require.NoError(t, err)
+	_, _, _, err = statecontracts.DeployPoint3dFactory(txnOpts, cb)
 	require.NoError(t, err)
 
 	canonical1ParentBeaconBlockRoot := common.BigToHash(big.NewInt(999_999_999))
