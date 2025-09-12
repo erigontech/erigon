@@ -154,8 +154,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
 					logIndexAfterTx = uint32(firstIndex) + uint32(len(txTask.Logs))
-					cumGasUsed = lastReceipt.CumulativeGasUsed
+					cumGasUsed = lastReceipt.CumulativeGasUsed + txTask.GasUsed
 				}
+			} else if se.cfg.chainConfig.Bor != nil && txTask.TxIndex == 0 {
+				logIndexAfterTx = uint32(len(txTask.Logs))
+				cumGasUsed = txTask.GasUsed
 			}
 		}
 		if !txTask.HistoryExecution {
