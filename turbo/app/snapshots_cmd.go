@@ -547,6 +547,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
+		_maxFrom = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
