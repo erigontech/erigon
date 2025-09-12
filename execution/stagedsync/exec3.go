@@ -1299,7 +1299,7 @@ func ExecV3(ctx context.Context,
 					}
 					executor.domains().SetChangesetAccumulator(nil)
 
-					if !bytes.Equal(rh, header.Root.Bytes()) {
+					if !isMining && !bytes.Equal(rh, header.Root.Bytes()) {
 						logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 						return fmt.Errorf("%w: %d", ErrWrongTrieRoot, blockNum)
 					}
