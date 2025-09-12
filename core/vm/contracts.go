@@ -57,15 +57,18 @@ type PrecompiledContract interface {
 }
 
 func Precompiles(chainRules *chain.Rules) map[common.Address]PrecompiledContract {
+	if chainRules.IsStylus {
+		return PrecompiledContractsArbOS30
+	}
+	if chainRules.IsArbitrum {
+		return PrecompiledContractsArbitrum
+	}
+
 	switch {
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
 	case chainRules.IsBhilai:
 		return PrecompiledContractsBhilai
-	case chainRules.IsStylus:
-		return PrecompiledContractsArbOS30
-	case chainRules.IsArbitrum:
-		return PrecompiledContractsArbitrum
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
 	case chainRules.IsNapoli:
