@@ -688,17 +688,19 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
-		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
+		if ERIGON_COMMIT_EACH_BLOCK || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
+			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
 
-			//if !bytes.Equal(rh, header.Root.Bytes()) {
-			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-			//	return errors.New("wrong trie root")
-			//}
+			if ERIGON_COMMIT_EACH_BLOCK {
+				if !bytes.Equal(rh, header.Root.Bytes()) {
+					logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+					return errors.New("wrong trie root")
+				}
+			}
 
 			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
@@ -852,6 +854,8 @@ Loop:
 
 	return nil
 }
+
+var ERIGON_COMMIT_EACH_BLOCK = dbg.EnvBool("ERIGON_COMMIT_EACH_BLOCK", false)
 
 // nolint
 func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
