@@ -126,10 +126,10 @@ type Config struct {
 	FreeInjectedBatch     bool   `json:"freeInjectedBatch,omitempty"`
 	ZkDefaultGasPrice     uint64 `json:"zkDefaultGasFee,omitempty"`
 
-	// used for debugging, will turn off IBS interaction for info tree / GER / etc.
-	// this option should only be used in conjunction with normalcy, it is designed for testing
-	// vanilla EVM execution for comparison of state roots only and not to be used in production
-	DebugDisableZkevmStateChanges bool `json:"debugDisableZkevmStateChanges,omitempty"`
+	// block height for disabling cdk state changes that happen outside of the EVM
+	// helps with compatibility with other clients that do not handle these kinds of
+	// interaction
+	DisableZkevmStateChangesBlock *big.Int `json:"disableZkevmStateChangesBlock,omitempty"`
 }
 
 type BlobConfig struct {
@@ -459,6 +459,10 @@ func (c *Config) IsForkID12Banana(num uint64) bool {
 
 func (c *Config) IsForkID13Durian(num uint64) bool {
 	return isForked(c.ForkId13Durian, num)
+}
+
+func (c *Config) IsZkevmStateChangeDisabled(num uint64) bool {
+	return isForked(c.DisableZkevmStateChangesBlock, num)
 }
 
 func (c *Config) SecondsPerSlot() uint64 {

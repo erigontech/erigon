@@ -11,6 +11,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -383,6 +384,11 @@ type APIImpl struct {
 	LogsMaxRange                  uint64
 	DisableStateRootCheck         bool
 	DisableVirtualCounters        bool
+
+	// used to cache recent block headers so under load we don't waste CPU time loading the
+	// same block header repeatedly
+	sendTransactionBlockCache *lru.Cache[uint64, *types.Block]
+	sendTransactionBlockGroup *singleflight.Group
 }
 
 // NewEthAPI returns APIImpl instance
@@ -392,6 +398,11 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 	}
 
 	base.logLevel = ethCfg.LogLevel
+
+	sendTransactionBlockCache, err := lru.New[uint64, *types.Block](100)
+	if err != nil {
+		log.Error("failed to create sendTransactionBlockCache", "err", err)
+	}
 
 	return &APIImpl{
 		BaseAPI:                       base,
@@ -425,6 +436,8 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		LogsMaxRange:                  LogsMaxRange,
 		DisableStateRootCheck:         disableStateRootCheck,
 		DisableVirtualCounters:        ethCfg.DisableVirtualCounters,
+		sendTransactionBlockCache:     sendTransactionBlockCache,
+		sendTransactionBlockGroup:     &singleflight.Group{},
 	}
 }
 

@@ -58,7 +58,7 @@ func (sdb *IntraBlockState) GetTxCount() (uint64, error) {
 }
 
 func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, blockNum uint64, blockInfoRoot *libcommon.Hash) {
-	if chainConfig.IsNormalcy(blockNum) {
+	if chainConfig.IsNormalcy(blockNum) || chainConfig.IsZkevmStateChangeDisabled(blockNum) {
 		return
 	}
 
@@ -69,7 +69,7 @@ func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, block
 }
 
 func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, stateRoot *libcommon.Hash) {
-	if chainConfig.DebugDisableZkevmStateChanges {
+	if chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
 		// in debug we return early here, no out of EVM state changes
 		return
 	}
@@ -104,8 +104,7 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(
 	gerUpdates *[]dstypes.GerUpdate,
 	reUsedL1InfoTreeIndex bool,
 ) {
-	if chainConfig.DebugDisableZkevmStateChanges {
-		// in debug we return early here, no out of EVM state changes
+	if chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
 		return
 	}
 
@@ -135,7 +134,7 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(
 		//save ger with l1blockhash - but only in the case that the l1 info tree index hasn't been
 		// re-used.  If it has been re-used we never write this to the contract storage
 		if !reUsedL1InfoTreeIndex && blockGer != nil && *blockGer != emptyHash {
-			sdb.WriteGerManagerL1BlockHash(*blockGer, *l1BlockHash)
+			sdb.WriteGerManagerL1BlockHash(chainConfig, blockNumber, *blockGer, *l1BlockHash)
 		}
 	} else {
 		if blockGer != nil && *blockGer != emptyHash {
@@ -196,7 +195,11 @@ func (sdb *IntraBlockState) GetBlockStateRoot(blockNum *uint256.Int) *uint256.In
 	return hash
 }
 
-func (sdb *IntraBlockState) ScalableSetSmtRootHash(roHermezDb ReadOnlyHermezDb) error {
+func (sdb *IntraBlockState) ScalableSetSmtRootHash(chainConfig *chain.Config, blockNumber uint64, roHermezDb ReadOnlyHermezDb) error {
+	if chainConfig.IsNormalcy(blockNumber) || chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+		return nil
+	}
+
 	txNum := uint256.NewInt(0)
 	slot0 := libcommon.HexToHash("0x0")
 	sdb.GetState(ADDRESS_SCALABLE_L2, &slot0, txNum)
@@ -221,17 +224,6 @@ func (sdb *IntraBlockState) ScalableSetSmtRootHash(roHermezDb ReadOnlyHermezDb) 
 	return nil
 }
 
-func (sdb *IntraBlockState) ScalableSetBlockNumberToHash(blockNumber uint64, rodb ReadOnlyHermezDb) error {
-	rpcHash, err := rodb.GetStateRoot(blockNumber)
-	if err != nil {
-		return err
-	}
-
-	sdb.scalableSetBlockHash(blockNumber, &rpcHash)
-
-	return nil
-}
-
 func (sdb *IntraBlockState) ReadGerManagerL1BlockHash(ger libcommon.Hash) libcommon.Hash {
 	d1 := common.LeftPadBytes(ger.Bytes(), 32)
 	d2 := common.LeftPadBytes(GLOBAL_EXIT_ROOT_STORAGE_POS.Bytes(), 32)
@@ -245,7 +237,11 @@ func (sdb *IntraBlockState) ReadGerManagerL1BlockHash(ger libcommon.Hash) libcom
 	return libcommon.BytesToHash(key.Bytes())
 }
 
-func (sdb *IntraBlockState) WriteGerManagerL1BlockHash(ger, l1BlockHash libcommon.Hash) {
+func (sdb *IntraBlockState) WriteGerManagerL1BlockHash(chainConfig *chain.Config, blockNumber uint64, ger, l1BlockHash libcommon.Hash) {
+	if chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+		return
+	}
+
 	d1 := common.LeftPadBytes(ger.Bytes(), 32)
 	d2 := common.LeftPadBytes(GLOBAL_EXIT_ROOT_STORAGE_POS.Bytes(), 32)
 	mapKey := keccak256.Hash(d1, d2)

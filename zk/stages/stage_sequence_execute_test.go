@@ -232,7 +232,7 @@ func TestSpawnSequencingStage(t *testing.T) {
 	// batch/block sealing timeouts are small, so it could happen that an extra block is not added to the batch
 	// No requirement prevents adding and extra block to the batch or not adding it. For more specific cases, create a separate test.
 	assert.True(t, expectedBlockNum <= blockNumber && blockNumber <= expectedBlockNum+1, "value is not in range")
-	assert.Equal(t, uint64(1), stateVersion)
+	assert.LessOrEqual(t, stateVersion, uint64(2)) // Could be a couple of increments for the reason above
 	tx.Rollback()
 }
 

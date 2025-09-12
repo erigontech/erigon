@@ -203,6 +203,18 @@ func (mr *MockPoolMockRecorder) PreYield() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PreYield", reflect.TypeOf((*MockPool)(nil).PreYield))
 }
 
+// RequeueBest mocks base method.
+func (m *MockPool) RequeueBest(hash common.Hash) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RequeueBest", hash)
+}
+
+// RequeueBest indicates an expected call of RequeueBest.
+func (mr *MockPoolMockRecorder) RequeueBest(hash any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequeueBest", reflect.TypeOf((*MockPool)(nil).RequeueBest), hash)
+}
+
 // Started mocks base method.
 func (m *MockPool) Started() bool {
 	m.ctrl.T.Helper()

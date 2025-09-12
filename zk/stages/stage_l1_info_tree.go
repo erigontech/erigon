@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -14,16 +15,18 @@ import (
 )
 
 type L1InfoTreeCfg struct {
-	db      kv.RwDB
-	zkCfg   *ethconfig.Zk
-	updater *l1infotree.Updater
+	db          kv.RwDB
+	zkCfg       *ethconfig.Zk
+	updater     *l1infotree.Updater
+	chainConfig *chain.Config
 }
 
-func StageL1InfoTreeCfg(db kv.RwDB, zkCfg *ethconfig.Zk, updater *l1infotree.Updater) L1InfoTreeCfg {
+func StageL1InfoTreeCfg(db kv.RwDB, zkCfg *ethconfig.Zk, chainConfig *chain.Config, updater *l1infotree.Updater) L1InfoTreeCfg {
 	return L1InfoTreeCfg{
-		db:      db,
-		zkCfg:   zkCfg,
-		updater: updater,
+		db:          db,
+		zkCfg:       zkCfg,
+		chainConfig: chainConfig,
+		updater:     updater,
 	}
 }
 
@@ -47,6 +50,20 @@ func SpawnL1InfoTreeStage(
 			return fmt.Errorf("cfg.db.BeginRw: %w", err)
 		}
 		defer tx.Rollback()
+	}
+
+	executionAt, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+
+	if cfg.chainConfig.IsZkevmStateChangeDisabled(executionAt) {
+		log.Info(fmt.Sprintf("[%s] Skipping stage - state changes disabled", logPrefix))
+
+		// we also want to ensure here that the syncer is stopped as we have no need for it running now
+		cfg.updater.StopProcessing()
+
+		return nil
 	}
 
 	progress, err := stages.GetStageProgress(tx, stages.L1InfoTree)

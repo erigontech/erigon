@@ -22,7 +22,7 @@ runs:
       uses: actions/checkout@v4
       with:
         repository: 0xPolygon/kurtosis-cdk
-        ref: v0.4.6
+        ref: v0.4.7
         path: kurtosis-cdk
 
     - name: Install Kurtosis CDK tools
