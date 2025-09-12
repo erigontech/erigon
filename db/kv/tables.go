@@ -837,6 +837,15 @@ func String2Forkable(in string) (ForkableId, error) {
 	}
 }
 
+func (f ForkableId) String() string {
+	switch f {
+	case RCacheForkable:
+		return "rcache"
+	default:
+		return "unknown forkable"
+	}
+}
+
 const MaxUint16 uint16 = 1<<16 - 1
 
 // --- Deprecated
