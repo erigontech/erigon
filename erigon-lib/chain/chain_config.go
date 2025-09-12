@@ -691,18 +691,20 @@ func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 // Rules is syntactic sugar over Config. It can be used for functions
 // that do not have or require information about the block.
 //
-// Rules is a one time interface meaning that it shouldn't be used in between transition
-// phases.
+// Rules is a one time interface meaning that it shouldn't be used in between transition phases.
 type Rules struct {
 	ChainID                                           *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka                                 bool
-	IsAura                                            bool
-	IsArbitrum, IsStylus                              bool
-	ArbOSVersion                                      uint64
+	IsPrague, IsOsaka, IsAura                         bool
+
+	// Arbiturm related chain rules
+	ArbOSVersion uint64 // current ArbOS version. Defined by header.
+	IsArbitrum   bool   // if true, chain is using ArbOS
+	IsStylus     bool   // if true, Arbitrum is running ArbOS version >= ArbosVersion_Stylus
+	ZombieDies   bool   // if false, spurious dragon deletes does not happen for escrow accounts on Arbitrum
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -733,6 +735,7 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		ArbOSVersion:       currentArbosVersion,
 		IsArbitrum:         c.IsArbitrum(),
 		IsStylus:           c.IsArbitrum() && currentArbosVersion >= ArbosVersion_Stylus,
+		ZombieDies:         c.IsArbitrum() && currentArbosVersion < ArbosVersion_Stylus,
 	}
 }
 
@@ -822,16 +825,6 @@ func (c *Config) checkArbitrumCompatible(newcfg *Config, head *big.Int) *ConfigC
 	return nil
 }
 
-func ArbitrumOneParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               true,
-		AllowDebugPrecompiles:     false,
-		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       ArbosVersion_6,
-		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
-	}
-}
-
 func ArbitrumNovaParams() ArbitrumChainParams {
 	return ArbitrumChainParams{
 		EnableArbOS:               true,
@@ -908,6 +901,32 @@ func ArbitrumOneChainConfig() *Config {
 		Clique: &CliqueConfig{
 			Period: 0,
 			Epoch:  0,
+		},
+	}
+}
+func ArbitrumOneParams() ArbitrumChainParams {
+	return ArbitrumChainParams{
+		ParentChainID:             1,
+		ParentChainIsArbitrum:     false,
+		ChainName:                 "arb1",
+		SequencerURL:              "https://arb1-sequencer.arbitrum.io/rpc",
+		FeedURL:                   "wss://arb1-feed.arbitrum.io/feed",
+		EnableArbOS:               true,
+		AllowDebugPrecompiles:     false,
+		DataAvailabilityCommittee: false,
+		InitialArbOSVersion:       6,
+		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
+		GenesisBlockNum:           22207817,
+
+		Rollup: ArbRollupConfig{
+			Bridge:                 "0x8315177ab297ba92a06054ce80a67ed4dbd7ed3a",
+			Inbox:                  "0x4dbd4fc535ac27206064b68ffcf827b0a60bab3f",
+			SequencerInbox:         "0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6",
+			Rollup:                 "0x5ef0d09d1e6204141b4d37530808ed19f60fba35",
+			ValidatorUtils:         "0x9e40625f52829cf04bc4839f186d621ee33b0e67",
+			ValidatorWalletCreator: "0x960953f7c69cd2bc2322db9223a815c680ccc7ea",
+			StakeToken:             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+			DeployedAt:             15411056,
 		},
 	}
 }

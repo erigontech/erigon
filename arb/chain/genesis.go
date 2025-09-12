@@ -4,6 +4,7 @@ import (
 	"embed"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/execution/types"
@@ -46,4 +47,45 @@ func Arb1RollupGenesisBlock() *types.Genesis {
 		BaseFee:    big.NewInt(0x5f5e100),
 		Alloc:      types.GenesisAlloc{},
 	}
+}
+
+func Arb1GenesisBlock() *types.Block {
+	g := Arb1RollupGenesisBlock()
+
+	head := &types.Header{
+		Number:        new(big.Int).SetUint64(g.Number),
+		Nonce:         types.EncodeNonce(g.Nonce),
+		Time:          g.Timestamp,
+		ParentHash:    g.ParentHash,
+		Extra:         g.ExtraData,
+		GasLimit:      g.GasLimit,
+		GasUsed:       g.GasUsed,
+		Difficulty:    g.Difficulty,
+		MixDigest:     g.Mixhash,
+		Coinbase:      g.Coinbase,
+		BaseFee:       g.BaseFee,
+		BlobGasUsed:   g.BlobGasUsed,
+		ExcessBlobGas: g.ExcessBlobGas,
+		RequestsHash:  g.RequestsHash,
+		Root:          common.HexToHash("0x7f2bfc4481d02bfcfc606ebb949384ef78d03a0f30a2dc9cccd652eb80926ae1"),
+	}
+	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
+		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
+		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
+	}
+	// if g.GasLimit == 0 {
+	//      head.GasLimit = params.GenesisGasLimit
+	// }
+	if g.Difficulty == nil {
+		head.Difficulty = params.GenesisDifficulty
+	}
+	if g.Config != nil && g.Config.IsLondon(0) {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
+			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		}
+	}
+	b := types.NewBlock(head, nil, nil, nil, nil)
+	return b
 }

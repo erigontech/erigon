@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -272,6 +273,9 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	}
 	if err := WriteGenesisBesideState(block, tx, gen); err != nil {
 		return err
+	}
+	if genesisBlockNum > 0 {
+		return stages.SaveStageProgress(tx, stages.Execution, genesisBlockNum)
 	}
 	return nil
 }
