@@ -84,10 +84,11 @@ type L1Syncer struct {
 	flagStop           atomic.Bool
 
 	// Channels
-	logsConsumChan   chan []ethTypes.Log
-	logsProduceChan  chan []ethTypes.Log
-	logsSwapMutex    sync.Mutex
-	logsChanProgress chan string
+	logsConsumChan            chan []ethTypes.Log
+	logsProduceChan           chan []ethTypes.Log
+	logsSwapMutex             sync.Mutex
+	logsChanProgress          chan string
+	requestCloseConsumChannel bool
 
 	highestBlockType string   // finalized, latest, safe
 	headersCache     sync.Map // map[uint64]*ethTypes.Header // cache for headers
@@ -160,6 +161,11 @@ func (s *L1Syncer) GetLogsChan() <-chan []ethTypes.Log {
 	defer s.logsSwapMutex.Unlock()
 
 	s.logsConsumChan = s.logsProduceChan
+
+	// If not downloading, grab existing data and close the channel
+	if !s.isDownloading.Load() {
+		s.requestCloseConsumChannel = true
+	}
 	return s.logsConsumChan
 }
 
@@ -189,32 +195,43 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 		log.Info("Starting L1 syncer thread")
 		defer log.Info("Stopping L1 syncer thread")
 
+		ticker := time.NewTicker(time.Duration(s.queryDelay) * time.Millisecond)
+		defer ticker.Stop()
+
 		for {
 			if s.flagStop.Load() {
 				s.resetChannels()
 				return
 			}
 
-			latestL1Block, err := s.getLatestL1Block()
-			if err != nil {
-				log.Error("Error getting latest L1 block", "err", err)
-			} else {
-				if latestL1Block > s.lastCheckedL1Block.Load() {
-					// It should not be checked again in the new cycle, so +1 is added here.
-					// Fixed receiving duplicate log events.
-					// lastCheckedL1Block means that it has already been checked in the previous cycle.
-					startBlock := s.lastCheckedL1Block.Load() + 1
-					endBlock := latestL1Block
-					if _, err = s.queryBlocks(startBlock, endBlock); err != nil {
-						log.Error("Error querying blocks", "err", err)
-					} else {
-						s.lastCheckedL1Block.Store(latestL1Block)
+			select {
+			case <-s.ctx.Done():
+				s.resetChannels()
+				return
+			case <-ticker.C:
+				latestL1Block, err := s.getLatestL1Block()
+				if err != nil {
+					log.Error("Error getting latest L1 block", "err", err)
+				} else {
+					if latestL1Block > s.lastCheckedL1Block.Load() {
+						// It should not be checked again in the new cycle, so +1 is added here.
+						// Fixed receiving duplicate log events.
+						// lastCheckedL1Block means that it has already been checked in the previous cycle.
+						startBlock := s.lastCheckedL1Block.Load() + 1
+						endBlock := latestL1Block
+						if _, err = s.queryBlocks(startBlock, endBlock); err != nil {
+							log.Error("Error querying blocks", "err", err)
+						} else {
+							s.lastCheckedL1Block.Store(latestL1Block)
+						}
 					}
 				}
-
 				s.resetChannels()
+			default:
+				if s.requestCloseConsumChannel {
+					s.resetChannels()
+				}
 			}
-			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
 	}()
 }
@@ -651,9 +668,10 @@ func (s *L1Syncer) SetFetchHeaders(fetchHeaders bool) {
 
 func (s *L1Syncer) resetChannels() {
 	s.logsSwapMutex.Lock()
+	defer s.logsSwapMutex.Unlock()
 	if s.logsConsumChan == s.logsProduceChan {
 		close(s.logsConsumChan)
 		s.logsProduceChan = make(chan []ethTypes.Log, logsChannelSize)
 	}
-	s.logsSwapMutex.Unlock()
+	s.requestCloseConsumChannel = false
 }

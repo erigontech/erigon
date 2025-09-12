@@ -81,7 +81,7 @@ func newStageEnv(t *testing.T) *stageEnv {
 	// Remove default HeaderByNumber here; keep BlockByNumber
 	em.EXPECT().BlockByNumber(gomock.Any(), gomock.Any()).Return(block, nil).AnyTimes()
 
-	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 0, "latest", latest)
+	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 10, "latest", latest)
 	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1}, l1, nil)
 	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, &chain.Config{}, updater)
 
