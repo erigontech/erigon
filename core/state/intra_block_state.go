@@ -1402,11 +1402,16 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		keepZombie := chainRules.IsSpuriousDragon
+		zombieDies := chainRules.IsSpuriousDragon
 		if chainRules.IsArbitrum {
-			keepZombie = chainRules.ArbOSVersion < chain.ArbosVersion_30
+			// TODO (awskii): review this condition, possibly not required at all.
+			// Somewhy this change is required only for arb1 chain.
+			// zombieDies = chainRules.ArbOSVersion < chain.ArbosVersion_30
+			if bi, exists := sdb.balanceInc[addr]; exists && bi.isEscrow {
+				zombieDies = false
+			}
 		}
-		if err := updateAccount(keepZombie, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(zombieDies, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
 
@@ -1507,11 +1512,14 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		keepZombie := chainRules.IsSpuriousDragon
+		zombieDies := chainRules.IsSpuriousDragon
 		if chainRules.IsArbitrum {
-			keepZombie = chainRules.ArbOSVersion < chain.ArbosVersion_30
+			// zombieDies = chainRules.ArbOSVersion < chain.ArbosVersion_30
+			if bi, exists := sdb.balanceInc[addr]; exists && bi.isEscrow {
+				zombieDies = false
+			}
 		}
-		if err := updateAccount(keepZombie, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(zombieDies, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
 	}
