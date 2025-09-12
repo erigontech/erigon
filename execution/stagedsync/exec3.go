@@ -451,7 +451,7 @@ func ExecV3(ctx context.Context,
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 	startBlockNum := blockNum
-	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
+	blockLimit := 0 //uint64(cfg.syncCfg.LoopBlockLimit) // TODO arbiturm: re enable fot other chains than arb1
 	var errExhausted *ErrLoopExhausted
 
 Loop:
