@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/forkables"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -431,6 +432,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+		forkableAgg, err := forkables.OpenForkableAgg(ctx, cfg.Snap.ChainName, agg.StepSize(), cfg.Dirs, rawDB, false, logger)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
@@ -448,6 +453,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.LogStat("remote")
 			allBorSnapshots.LogStat("bor:remote")
 			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+			_ = forkableAgg.OpenFolder()
 
 			rawDB.View(context.Background(), func(tx kv.Tx) error {
 				aggTx := agg.BeginFilesRo()
@@ -498,7 +504,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		onNewSnapshot()
 
-		db, err = temporal.New(rawDB, agg)
+		db, err = temporal.New(rawDB, agg, forkableAgg)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}

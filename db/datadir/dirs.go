@@ -71,7 +71,7 @@ func New(datadir string) Dirs {
 		dirs.SnapDomain,
 		dirs.SnapAccessors,
 		dirs.SnapCaplin,
-		//dirs.SnapForkable,
+		dirs.SnapForkable,
 		dirs.Downloader,
 		dirs.TxPool,
 		dirs.Nodes,

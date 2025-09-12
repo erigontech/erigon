@@ -71,6 +71,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/forkables"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -1573,6 +1574,11 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
+	forkableAgg, err := forkables.OpenForkableAgg(ctx, chainConfig.ChainName, agg.StepSize(), dirs, db, false, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
@@ -1583,11 +1589,12 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			allBorSnapshots.OptimisticalyOpenFolder()
 		}
 		_ = agg.OpenFolder()
+		_ = forkableAgg.OpenFolder()
 	} else {
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
-	temporalDb, err := temporal.New(db, agg)
+	temporalDb, err := temporal.New(db, agg, forkableAgg)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

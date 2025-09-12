@@ -113,7 +113,7 @@ func TestCustomTraceDomainProgressConsistency(t *testing.T) {
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		d := tx.Debug()
 		assert.Greater(int(d.DomainProgress(kv.ReceiptDomain)), 0)
-		assert.Greater(int(d.DomainProgress(kv.RCacheDomain)), 0)
+		assert.Greater(int(forkableProgress(kv.RCacheForkable, tx)), 0)
 		assert.Greater(int(d.IIProgress(kv.LogAddrIdx)), 0)
 		assert.Greater(int(d.IIProgress(kv.LogTopicIdx)), 0)
 		assert.Greater(int(d.IIProgress(kv.TracesFromIdx)), 0)
@@ -122,4 +122,12 @@ func TestCustomTraceDomainProgressConsistency(t *testing.T) {
 		return nil
 	})
 	require.NoError(err)
+}
+
+func forkableProgress(id kv.ForkableId, tx kv.TemporalTx) uint64 {
+	progress, err := tx.Unmarked(kv.RCacheForkable).Debug().Progress()
+	if err != nil {
+		panic(err)
+	}
+	return progress.Uint64()
 }

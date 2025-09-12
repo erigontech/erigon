@@ -194,6 +194,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 
 		t2 = time.Since(tt)
 		se.agg.BuildFilesInBackground(se.outputTxNum.Load())
+		se.forkagg.BuildFilesInBackground(kv.RootNum(se.outputTxNum.Load()))
 
 		se.applyTx, err = se.cfg.db.BeginRw(context.Background()) //nolint
 		if err != nil {

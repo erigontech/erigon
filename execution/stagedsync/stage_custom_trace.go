@@ -71,7 +71,7 @@ func NewProduce(produceList []string) Produce {
 		switch p {
 		case kv.ReceiptDomain.String():
 			produce.ReceiptDomain = true
-		case kv.RCacheDomain.String():
+		case dbstate.Registry.Name(kv.RCacheForkable):
 			produce.RCacheDomain = true
 		case kv.LogAddrIdx.String():
 			produce.LogAddr = true
@@ -168,13 +168,19 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	chkEvery := time.NewTicker(3 * time.Second)
 	defer chkEvery.Stop()
 
+	var aggDone, forkAggDone bool
 Loop:
 	for {
+		if aggDone && forkAggDone {
+			break Loop
+		}
 		select {
 		case <-ctx.Done():
 			logger.Warn("[snapshots] user has interrupted process but anyway waiting for build & merge files")
 		case <-cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForBuildAndMerge(context.Background()):
-			break Loop // Here we don't quit due to ctx because it's not safe for files.
+			aggDone = true
+		case <-cfg.db.(dbstate.HasAgg).ForkableAgg(kv.RCacheForkable).(*dbstate.ForkableAgg).WaitForBuildAndMerge(context.Background()):
+			forkAggDone = true
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
@@ -260,11 +266,15 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if err := tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+	rcacheAgg := db.(dbstate.HasAgg).ForkableAgg(kv.RCacheForkable).(*dbstate.ForkableAgg)
+	if err := rcacheAgg.BuildFiles(kv.RootNum(lastTxNum)); err != nil {
+		return err
+	}
+	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		if err := tx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
-		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+		if _, err := tx.PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil
@@ -289,6 +299,29 @@ func AssertNotBehindAccounts(db kv.TemporalRoDB, domain kv.Domain, txNumsReader 
 		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
 
 		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
+		log.Warn(err.Error())
+		return nil
+	}
+	return nil
+}
+
+func AssertNotBehindAccountsForkable(db kv.TemporalRoDB, forkable kv.ForkableId, txNumsReader rawdbv3.TxNumsReader) (err error) {
+	tx, err := db.BeginTemporalRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	progress, err := tx.Unmarked(forkable).Debug().Progress()
+	if err != nil {
+		return err
+	}
+	accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
+	if accProgress != progress.Uint64() {
+		e1, _, _ := txNumsReader.FindBlockNum(tx, progress.Uint64())
+		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", dbstate.Registry.Name(forkable), progress, e1, accProgress, e2)
 		log.Warn(err.Error())
 		return nil
 	}
@@ -380,7 +413,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(putter, receipt, txTask.TxNum); err != nil {
+				rcachePutter := doms.AsUnmarkedPutter(kv.RCacheForkable)
+				if err := rawdb.WriteReceiptCacheV2(rcachePutter, receipt, txTask.TxNum); err != nil {
 					return err
 				}
 			}
@@ -443,7 +477,11 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 		txNum = min(txNum, dbg.DomainProgress(kv.ReceiptDomain))
 	}
 	if produce.RCacheDomain {
-		txNum = min(txNum, dbg.DomainProgress(kv.RCacheDomain))
+		progress, err := tx.Unmarked(kv.RCacheForkable).Debug().Progress()
+		if err != nil {
+			panic(err)
+		}
+		txNum = min(txNum, progress.Uint64())
 	}
 	if produce.LogAddr {
 		txNum = min(txNum, dbg.IIProgress(kv.LogAddrIdx))
@@ -468,7 +506,11 @@ func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
 		fromStep = min(fromStep, ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles())
 	}
 	if produce.RCacheDomain {
-		fromStep = min(fromStep, ac.DbgDomain(kv.RCacheDomain).FirstStepNotInFiles())
+		rcacheDbg := tx.Unmarked(kv.RCacheForkable).Debug()
+		stepSize := rcacheDbg.StepSize()
+		firstNumNotInFiles := rcacheDbg.VisibleFilesMaxNum()
+		firstStepNotInFiles := firstNumNotInFiles.Uint64() / stepSize
+		fromStep = min(fromStep, kv.Step(firstStepNotInFiles))
 	}
 	if produce.LogAddr {
 		fromStep = min(fromStep, ac.DbgII(kv.LogAddrIdx).FirstStepNotInFiles())
@@ -497,7 +539,7 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
 	}
 	if produce.RCacheDomain {
-		tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
+		tables = append(tables, db.Debug().ForkableTables(kv.RCacheForkable)...)
 	}
 	if produce.LogAddr {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
