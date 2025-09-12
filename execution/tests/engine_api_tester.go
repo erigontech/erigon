@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -76,10 +77,14 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	var withdrawalRequestCode hexutil.Bytes
 	err = withdrawalRequestCode.UnmarshalText([]byte("0x3373fffffffffffffffffffffffffffffffffffffffe1460cb5760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff146101f457600182026001905f5b5f82111560685781019083028483029004916001019190604d565b909390049250505036603814608857366101f457346101f4575f5260205ff35b34106101f457600154600101600155600354806003026004013381556001015f35815560010160203590553360601b5f5260385f601437604c5fa0600101600355005b6003546002548082038060101160df575060105b5f5b8181146101835782810160030260040181604c02815460601b8152601401816001015481526020019060020154807fffffffffffffffffffffffffffffffff00000000000000000000000000000000168252906010019060401c908160381c81600701538160301c81600601538160281c81600501538160201c81600401538160181c81600301538160101c81600201538160081c81600101535360010160e1565b910180921461019557906002556101a0565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff14156101cd57505f5b6001546002828201116101e25750505f6101e8565b01600290035b5f555f600155604c025ff35b5f5ffd"))
 	require.NoError(t, err)
+	var chainConfig chain.Config
+	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
+	require.NoError(t, err)
 	genesis := &types.Genesis{
-		Config:     chain.AllProtocolChanges,
+		Config:     &chainConfig,
 		Coinbase:   coinbaseAddr,
 		Difficulty: merge.ProofOfStakeDifficulty,
+		GasLimit:   1_000_000_000,
 		Alloc: types.GenesisAlloc{
 			coinbaseAddr: {
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1_000 ETH
