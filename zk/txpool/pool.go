@@ -216,6 +216,8 @@ type metaTx struct {
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
 	minedBlockNum             uint64
+	sortKey                   []byte // Pre-computed binary sort key for fast comparison
+	sortKeyValid              bool   // Whether the sort key is up-to-date
 }
 
 func newMetaTx(slot *types.TxSlot, isLocal bool, timestamp uint64) *metaTx {
@@ -2773,7 +2775,8 @@ func (s *bestSlice) Less(i, j int) bool {
 		}
 	}
 
-	return s.ms[i].better(s.ms[j], s.pendingBaseFee)
+	// Use the optimized sort key comparison instead of the complex better() function
+	return s.ms[i].betterUsingSortKey(s.ms[j], s.pendingBaseFee)
 }
 func (s *bestSlice) UnsafeRemove(i *metaTx) {
 	s.Swap(i.bestIndex, len(s.ms)-1)
@@ -3011,6 +3014,97 @@ func (mt *metaTx) better(than *metaTx, pendingBaseFee uint64) bool {
 		}
 	}
 	return mt.timestamp < than.timestamp
+}
+
+// generateSortKey creates a binary sort key that encodes all sorting criteria
+// The key is designed so that lexicographic byte comparison produces the same
+// ordering as the better() function, but much faster.
+//
+// Key structure (43 bytes total):
+// [0]     : subPool with EnoughFeeCapBlock bit (1 byte) - INVERTED for desc order
+// [1-32]  : effectiveTip or minFeeCap (32 bytes) - INVERTED for desc order
+// [33-40] : nonceDistance (8 bytes) - normal order (lower is better)
+// [41-48] : cumulativeBalanceDistance (8 bytes) - normal order (lower is better)
+// [49-56] : timestamp (8 bytes) - normal order (lower is better)
+func (mt *metaTx) generateSortKey(pendingBaseFee uint64) {
+	if mt.sortKeyValid {
+		return
+	}
+
+	key := make([]byte, 57) // Total key size
+
+	// Calculate subPool with EnoughFeeCapBlock bit
+	subPool := mt.subPool
+	difference := &uint256.Int{}
+	difference.SubUint64(&mt.minFeeCap, pendingBaseFee)
+	if difference.Sign() >= 0 {
+		subPool |= EnoughFeeCapBlock
+	}
+
+	// Byte 0: SubPool (inverted for descending order - higher subPool values should come first)
+	key[0] = ^uint8(subPool)
+
+	// Bytes 1-32: Priority value based on pool type (inverted for descending order)
+	var priorityValue uint256.Int
+	switch mt.currentSubPool {
+	case PendingSubPool:
+		// Use effective tip for pending pool
+		if (subPool & EnoughFeeCapBlock) == EnoughFeeCapBlock {
+			if difference.CmpUint64(mt.minTip) <= 0 {
+				priorityValue = *difference
+			} else {
+				priorityValue.SetUint64(mt.minTip)
+			}
+		}
+		// For pending pool, higher effective tip is better, so we invert
+		invertUint256(&priorityValue, key[1:33])
+	case BaseFeeSubPool:
+		// Use minFeeCap for basefee pool
+		priorityValue = mt.minFeeCap
+		// For basefee pool, higher minFeeCap is better, so we invert
+		invertUint256(&priorityValue, key[1:33])
+	default:
+		// For queued pool, we don't use priority value, just set to zero (max when inverted)
+		for i := 1; i < 33; i++ {
+			key[i] = 0xFF
+		}
+	}
+
+	// Bytes 33-40: nonceDistance (normal order - lower is better)
+	binary.BigEndian.PutUint64(key[33:41], mt.nonceDistance)
+
+	// Bytes 41-48: cumulativeBalanceDistance (normal order - lower is better)
+	binary.BigEndian.PutUint64(key[41:49], mt.cumulativeBalanceDistance)
+
+	// Bytes 49-56: timestamp (normal order - lower is better)
+	binary.BigEndian.PutUint64(key[49:57], mt.timestamp)
+
+	mt.sortKey = key
+	mt.sortKeyValid = true
+}
+
+// invertUint256 inverts a uint256 value and stores it in the destination slice
+// This allows higher values to sort first in lexicographic comparison
+func invertUint256(value *uint256.Int, dst []byte) {
+	// Convert uint256 to big-endian bytes
+	valueBytes := value.Bytes32()
+	// Invert each byte
+	for i := 0; i < 32; i++ {
+		dst[i] = ^valueBytes[i]
+	}
+}
+
+// invalidateSortKey marks the sort key as invalid, requiring regeneration
+func (mt *metaTx) invalidateSortKey() {
+	mt.sortKeyValid = false
+}
+
+// betterUsingSortKey compares two metaTx using their sort keys
+// This is much faster than the original better() function
+func (mt *metaTx) betterUsingSortKey(than *metaTx, pendingBaseFee uint64) bool {
+	mt.generateSortKey(pendingBaseFee)
+	than.generateSortKey(pendingBaseFee)
+	return bytes.Compare(mt.sortKey, than.sortKey) < 0
 }
 
 func (mt *metaTx) worse(than *metaTx, pendingBaseFee uint64) bool {
