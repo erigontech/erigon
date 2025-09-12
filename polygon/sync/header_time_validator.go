@@ -30,9 +30,9 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 )
 
-var VeBlopBlockTimeout = 4 * time.Second            // timeout for waiting for a new span
-var VeBlopLongBlockTimeout = 2 * VeBlopBlockTimeout // longer timeout for waiting for a new span
-var DefaultRecentHeadersCapacity uint64 = 4096      // capacity of recent headers TTL cache
+var VeBlopNewSpanTimeout = 8 * time.Second     // timeout for waiting for a new span
+var VeBlopBlockTimeout = 4 * time.Second       // time for a block to be considered late
+var DefaultRecentHeadersCapacity uint64 = 4096 // capacity of recent headers TTL cache
 
 type HeaderTimeValidator struct {
 	borConfig             *borcfg.BorConfig
@@ -57,12 +57,12 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 	if err != nil {
 		return err
 	}
-	htv.logger.Debug("validating header time:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers.ValidatorAddresses())
+	htv.logger.Debug("validating header time:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers)
 
-	// VeBlop checks for new span if block signer is different from producer
-	if htv.borConfig.IsVeBlop(header.Number.Uint64()) {
+	// Rio/VeBlop checks for new span if block signer is different from producer
+	if htv.borConfig.IsRio(header.Number.Uint64()) {
 		if len(producers.Validators) != 1 {
-			return fmt.Errorf("unexpected number of producers post VeBlop (expected 1 producer) , blockNum=%d , numProducers=%d", header.Number.Uint64(), len(producers.Validators))
+			return fmt.Errorf("unexpected number of producers post Rio (expected 1 producer) , blockNum=%d , numProducers=%d", header.Number.Uint64(), len(producers.Validators))
 		}
 		producer := producers.Validators[0]
 		shouldWaitForNewSpans, timeout, err := htv.needToWaitForNewSpan(header, parent, producer.Address)
@@ -115,11 +115,7 @@ func (htv *HeaderTimeValidator) needToWaitForNewSpan(header *types.Header, paren
 	// the current producer has published a block, but it came too late (i.e. the parent has been evicted from the ttl cache)
 	if author == producer && producer == parentAuthor && !htv.recentVerifiedHeaders.Has(header.ParentHash) {
 		htv.logger.Info("[span-rotation] need to wait for span rotation due to longer than expected block time from current producer", "blockNum", headerNum, "parentHeader", header.ParentHash, "author", author)
-		return true, VeBlopLongBlockTimeout, nil
-	} else if author != parentAuthor && author != producer { // new author but not matching the producer for this block
-		htv.logger.Info("[span-rotation] need to wait for span rotation because the new author does not match the producer from current producer selection",
-			"blockNum", headerNum, "author", author, "producer", producer, "parentAuthor", parentAuthor)
-		return true, VeBlopBlockTimeout, nil // this situation has a shorter delay because non-producers could inundate the node with invalid headers signed by them
+		return true, VeBlopNewSpanTimeout, nil
 	}
 	return false, 0, nil
 
