@@ -22,7 +22,7 @@ import (
 )
 
 // newMockHttpServer creates a mock HTTP server that encodes and returns the expected state
-func newMockHttpServer(expectedState *state.CachingBeaconState) *httptest.Server {
+func newMockHttpServer(expectedState *state.CachingBeaconState, sent *bool) *httptest.Server {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		enc, err := expectedState.EncodeSSZ(nil)
 		if err != nil {
@@ -34,6 +34,7 @@ func newMockHttpServer(expectedState *state.CachingBeaconState) *httptest.Server
 			http.Error(w, fmt.Sprintf("could not write encoded state: %s", err), http.StatusInternalServerError)
 			return
 		}
+		*sent = true
 	}))
 	return mockServer
 }
@@ -54,13 +55,15 @@ func newMockSlowHttpServer(ctx context.Context) *httptest.Server {
 func TestRemoteCheckpointSync(t *testing.T) {
 	// Create a mock HTTP server always returning the passed expected state
 	_, expectedState, _ := tests.GetPhase0Random()
-	mockServer := newMockHttpServer(expectedState)
+	rec := false
+	mockServer := newMockHttpServer(expectedState, &rec)
 	defer mockServer.Close()
 
 	// Only 1 OK HTTP server, so we must get the expected state
 	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
 	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
 	actualState, err := syncer.GetLatestBeaconState(context.Background())
+	assert.True(t, rec)
 	require.NoError(t, err)
 	require.NotNil(t, actualState)
 
@@ -88,6 +91,10 @@ func TestRemoteCheckpointSyncTimeout(t *testing.T) {
 }
 
 func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// Create a mock for very slow HTTP server
 	ctx, cancel := context.WithCancel(context.Background())
 	mockSlowServer := newMockSlowHttpServer(ctx)
@@ -96,13 +103,15 @@ func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 
 	// Create a mock HTTP server always returning the passed expected state
 	_, expectedState, _ := tests.GetPhase0Random()
-	mockServer := newMockHttpServer(expectedState)
+	rec := false
+	mockServer := newMockHttpServer(expectedState, &rec)
 	defer mockServer.Close()
 
 	// 3 slow + 1 OK HTTP servers, so we may get some timeout(s) with probability 0.75 but will eventually succeed
 	clparams.ConfigurableCheckpointsURLs = []string{mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL, mockServer.URL}
-	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 50 * time.Millisecond}
+	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 1 * time.Second}
 	actualState, err := syncer.GetLatestBeaconState(ctx)
+	assert.True(t, rec)
 	require.NoError(t, err)
 	require.NotNil(t, actualState)
 
