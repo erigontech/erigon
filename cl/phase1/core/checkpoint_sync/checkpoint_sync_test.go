@@ -99,7 +99,7 @@ func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 	mockServer := newMockHttpServer(expectedState)
 	defer mockServer.Close()
 
-	// 3 slow + 1 OK HTTP servers, so we must get a timeout with probability 0.75
+	// 3 slow + 1 OK HTTP servers, so we may get some timeout(s) with probability 0.75 but will eventually succeed
 	clparams.ConfigurableCheckpointsURLs = []string{mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL, mockServer.URL}
 	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 50 * time.Millisecond}
 	actualState, err := syncer.GetLatestBeaconState(ctx)
