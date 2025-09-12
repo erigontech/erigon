@@ -334,7 +334,7 @@ type TxPool struct {
 	// we cannot be in a flushing state whilst getting transactions from the pool, so we have this mutex which is
 	// exposed publicly so anything wanting to get "best" transactions can ensure a flush isn't happening and
 	// vice versa
-	flushMtx *sync.Mutex
+	flushMtx sync.Mutex
 
 	// limbo specific fields where bad batch transactions identified by the executor go
 	limbo *Limbo
@@ -344,6 +344,9 @@ type TxPool struct {
 	// PoolMetrics contains metrics for tx/s in and out of the pool
 	// and a median wait time of tx/s waiting in the pool
 	metrics *Metrics
+
+	// yielded txs (returned by best) that must be skipped by subsequent best() calls
+	yielded map[[32]byte]struct{}
 }
 
 func CreateTxPoolBuckets(tx kv.RwTx) error {
@@ -423,7 +426,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteTxs:    &types.TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		ethCfg:                  ethCfg,
-		flushMtx:                &sync.Mutex{},
+		flushMtx:                sync.Mutex{},
 		aclDB:                   aclDB,
 		limbo:                   newLimbo(),
 		logLevel:                logLevel,
@@ -437,6 +440,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		normalcyBlock:           normalcyBlock,
 		auths:                   map[common.Address]*metaTx{},
 		priorityList:            priorityList,
+		yielded:                 make(map[[32]byte]struct{}),
 	}
 
 	res.updatePendingPoolPrioritySenders()
@@ -531,9 +535,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if baseFeeChanged {
 		p.pending.best.pendingBaseFee = pendingBaseFee
 		p.pending.worst.pendingBaseFee = pendingBaseFee
-		p.baseFee.best.pendingBastFee = pendingBaseFee
+		p.baseFee.best.pendingBaseFee = pendingBaseFee
 		p.baseFee.worst.pendingBaseFee = pendingBaseFee
-		p.queued.best.pendingBastFee = pendingBaseFee
+		p.queued.best.pendingBaseFee = pendingBaseFee
 		p.queued.worst.pendingBaseFee = pendingBaseFee
 	}
 
@@ -623,6 +627,16 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	p.finalizeLimboOnNewBlock(limboTxs)
 	if p.isDeniedYieldingTransactions() {
 		p.allowYieldingTransactions()
+	}
+
+	// Clear yielded marks for mined and unwound txs
+	if len(p.yielded) > 0 {
+		for _, s := range minedTxs.Txs {
+			delete(p.yielded, s.IDHash)
+		}
+		for _, s := range unwindTxs.Txs {
+			delete(p.yielded, s.IDHash)
+		}
 	}
 
 	//log.Info("[txpool] new block", "number", p.lastSeenBlock.Load(), "pendngBaseFee", pendingBaseFee, "in", time.Since(t))
@@ -769,11 +783,12 @@ func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
 func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, int, error) {
-	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas)
+	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, true /* yield */)
 }
 
+// PeekBest now only peeks (no removal from best slice)
 func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
-	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas)
+	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, false /* yield */)
 	return onTime, err
 }
 
@@ -1582,6 +1597,7 @@ func (p *TxPool) discardLocked(mt *metaTx, reason DiscardReason) {
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt)
 	p.discardReasonsLRU.Add(hashStr, reason)
+	delete(p.yielded, mt.Tx.IDHash)
 
 	if mt.Tx.Type == types.BlobTxType {
 		t := p.totalBlobsInPool.Load()
@@ -1860,7 +1876,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					// drain newTxs for emptying newTx channel
 					// newTx channel will be filled only with local transactions
 					// early return to avoid outbound transaction propagation
-					log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
+					// log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
 					return
 				}
 
@@ -2924,7 +2940,7 @@ func (p *SubPool) DebugPrint(prefix string) {
 
 type BestQueue struct {
 	ms             []*metaTx
-	pendingBastFee uint64
+	pendingBaseFee uint64
 }
 
 // Returns true if the txn "mt" is better than the parameter txn "than"
@@ -3034,7 +3050,7 @@ func (mt *metaTx) worse(than *metaTx, pendingBaseFee uint64) bool {
 
 func (p BestQueue) Len() int { return len(p.ms) }
 func (p BestQueue) Less(i, j int) bool {
-	return p.ms[i].better(p.ms[j], p.pendingBastFee)
+	return p.ms[i].better(p.ms[j], p.pendingBaseFee)
 }
 func (p BestQueue) Swap(i, j int) {
 	p.ms[i], p.ms[j] = p.ms[j], p.ms[i]
