@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-const CheckpointHttpTimeout = 30 * time.Second
+const CheckpointHttpTimeout = 60 * time.Second
 
 // RemoteCheckpointSync is a CheckpointSyncer that fetches the checkpoint state from a remote endpoint.
 type RemoteCheckpointSync struct {
