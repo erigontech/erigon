@@ -421,8 +421,6 @@ func (p *TxPool) MoveFromPendingToQueued(toMove map[common.Address][]uint64) {
 				if mt.Tx.Nonce >= lowestNonce {
 					p.pending.Remove(mt)
 					p.queued.Add(mt)
-
-					delete(p.yielded, mt.Tx.IDHash)
 				}
 			}
 			return true

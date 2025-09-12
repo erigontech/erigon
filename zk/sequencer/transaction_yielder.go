@@ -120,18 +120,23 @@ func (y *PoolTransactionYielder) YieldNextTransaction() (types.Transaction, uint
 	return tx, effectiveGas, yieldedSomething
 }
 
-func (y *PoolTransactionYielder) Requeue(tx types.Transaction) {
+func (y *PoolTransactionYielder) Requeue(txs []types.Transaction) {
 	y.readyMtx.Lock()
 	defer y.readyMtx.Unlock()
 
-	hash := tx.Hash()
-
-	// Add it to the front of the readyTransactions slice
-	if _, found := y.readyTransactionBytes[hash]; !found {
-		log.Warn("Transaction does not exist in readyTransactionBytes", "id", hash.String())
-		return
+	toAdd := make([]common.Hash, 0, len(txs))
+	for _, tx := range txs {
+		hash := tx.Hash()
+		// Add it to the front of the readyTransactions slice
+		if _, found := y.readyTransactionBytes[hash]; !found {
+			log.Warn("Transaction does not exist in readyTransactionBytes", "id", hash.String())
+			continue
+		}
+		toAdd = append(toAdd, hash)
 	}
-	y.readyTransactions = append([]common.Hash{hash}, y.readyTransactions...)
+
+	// Add them to the front of the readyTransactions slice
+	y.readyTransactions = append(toAdd, y.readyTransactions...)
 }
 
 func (y *PoolTransactionYielder) AddMined(hash common.Hash) {
@@ -214,7 +219,7 @@ func (y *PoolTransactionYielder) debugVerifyNoncesOrder(prefix string) {
 			log.Error("Hash/bytes mismatch", "expected", hash.String(), "decoded", h.String(), "prefix", prefix)
 			panic("hash/bytes mismatch")
 		}
-		sender, _ := tx.GetSender()
+		sender, _ := tx.Sender(*types.LatestSignerForChainID(tx.GetChainID().ToBig()))
 		noncesBySender[sender] = append(noncesBySender[sender], tx.GetNonce())
 	}
 
@@ -277,7 +282,9 @@ func (y *PoolTransactionYielder) extractTransactionsFromSlot(slot *types2.TxsRlp
 	for idx, bytes := range slot.Txs {
 		// get the id of the transaction and
 		ids = append(ids, slot.TxIds[idx])
-		txBytes = append(txBytes, bytes)
+		bytesCopy := make([]byte, len(bytes))
+		copy(bytesCopy, bytes)
+		txBytes = append(txBytes, bytesCopy)
 	}
 
 	return ids, txBytes, nil
@@ -319,7 +326,7 @@ func (l *LimboTransactionYielder) SetExecutionDetails(_, _ uint64) {
 	// LimboTransactionYielder does not use executionAt and forkId, so this method can be empty
 }
 
-func (l *LimboTransactionYielder) Requeue(tx types.Transaction) {
+func (l *LimboTransactionYielder) Requeue(txs []types.Transaction) {
 	// do nothing
 }
 
@@ -368,6 +375,6 @@ func (d *RecoveryTransactionYielder) SetExecutionDetails(_, _ uint64) {
 	// RecoveryTransactionYielder does not use executionAt and forkId, so this method can be empty
 }
 
-func (d *RecoveryTransactionYielder) Requeue(tx types.Transaction) {
+func (d *RecoveryTransactionYielder) Requeue(txs []types.Transaction) {
 	// do nothing
 }

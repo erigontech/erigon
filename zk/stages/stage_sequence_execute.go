@@ -31,7 +31,7 @@ type TxYielder interface {
 	AddMined(hash common.Hash)
 	Discard(hash common.Hash)
 	SetExecutionDetails(executionAt uint64, forkId uint64)
-	Requeue(tx types.Transaction)
+	Requeue(txs []types.Transaction)
 }
 
 func SpawnSequencingStage(
@@ -284,6 +284,7 @@ func sequencingBatchStep(
 
 	// default to using the normal transaction yielder
 	var yielder TxYielder = cfg.txYielder
+	txsToRequeue := make([]types.Transaction, 0)
 
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
 		if batchTimedOut {
@@ -536,13 +537,13 @@ func sequencingBatchStep(
 
 				if _, found := sendersToSkip[txSender]; found {
 					// Lets not keep the data for such senders
-					yielder.Discard(txHash)
-					nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
+					txsToRequeue = append(txsToRequeue, transaction)
 					continue
 				}
 
 				if _, found := nonceTooHighSenders[txSender]; found {
 					// tx will be requeued at the end of the batch
+					txsToRequeue = append(txsToRequeue, transaction)
 					continue
 				}
 
@@ -586,9 +587,7 @@ func sequencingBatchStep(
 
 					if errors.Is(err, core.ErrNonceTooHigh) {
 						log.Info(fmt.Sprintf("[%s] nonce too high detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
-						nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
-
-						yielder.Discard(txHash)
+						txsToRequeue = append(txsToRequeue, transaction)
 						continue
 					}
 
@@ -653,7 +652,7 @@ func sequencingBatchStep(
 								if len(batchState.blockState.builtBlockElements.transactions) == 0 {
 									emptyBlockOverflow = true
 								}
-								yielder.Requeue(transaction)
+								txsToRequeue = append(txsToRequeue, transaction)
 								break OuterLoopTransactions
 							}
 							// Here we did not discard the transaction as it may be valid in the next batch
@@ -661,7 +660,7 @@ func sequencingBatchStep(
 							// But if we have another transaction from the same sender, we'll have a NonceTooHigh error
 							// and discard the subsequent transactions.
 							// We need add the nonce to the list to be requeued at the end of the batch
-							nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
+							txsToRequeue = append(txsToRequeue, transaction)
 						}
 
 						// now we have finished with logging the overflow,remove the last attempted counters as we may want to continue processing this batch with other transactions
@@ -680,7 +679,7 @@ func sequencingBatchStep(
 					}
 					log.Info(fmt.Sprintf("[%s] gas overflowed adding transaction to block", logPrefix), "block", blockNumber, "tx-hash", txHash)
 
-					yielder.Requeue(transaction)
+					yielder.Requeue([]types.Transaction{transaction})
 					// Close the batch on gas overflow only if not in normalcy
 					if !cfg.chainConfig.IsNormalcy(blockNumber) {
 						runLoopBlocks = false
@@ -734,6 +733,9 @@ func sequencingBatchStep(
 				break OuterLoopTransactions
 			}
 		}
+
+		yielder.Requeue(txsToRequeue)
+		txsToRequeue = txsToRequeue[:0]
 
 		// nonce too high transactions need moving straight to the queued pool
 		if len(nonceTooHighSenders) > 0 {
