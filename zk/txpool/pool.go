@@ -535,12 +535,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(stateChanges.PendingBlockBaseFee, p.ethCfg.AllowFreeTransactions)
 	// Update pendingBase for all pool queues and slices
 	if baseFeeChanged {
+		oldBaseFee := p.pendingBaseFee.Load()
 		p.pending.best.pendingBaseFee = pendingBaseFee
 		p.pending.worst.pendingBaseFee = pendingBaseFee
 		p.baseFee.best.pendingBaseFee = pendingBaseFee
 		p.baseFee.worst.pendingBaseFee = pendingBaseFee
 		p.queued.best.pendingBaseFee = pendingBaseFee
 		p.queued.worst.pendingBaseFee = pendingBaseFee
+
+		p.invalidateSortKeysForBaseFeeChange(oldBaseFee, pendingBaseFee)
 	}
 
 	pendingBlobFee := stateChanges.PendingBlobFeePerGas
@@ -2775,7 +2778,6 @@ func (s *bestSlice) Less(i, j int) bool {
 		}
 	}
 
-	// Use the optimized sort key comparison instead of the complex better() function
 	return s.ms[i].betterUsingSortKey(s.ms[j], s.pendingBaseFee)
 }
 func (s *bestSlice) UnsafeRemove(i *metaTx) {
@@ -2805,6 +2807,30 @@ func (p *PendingPool) EnforceBestInvariants() {
 			sort.Sort(p.best)
 		}
 		p.sorted = true
+	}
+}
+
+func (p *PendingPool) invalidateAllSortKeys() {
+	for _, tx := range p.best.ms {
+		tx.invalidateSortKey()
+	}
+	for _, tx := range p.worst.ms {
+		tx.invalidateSortKey()
+	}
+}
+
+// invalidateSortKeysForBaseFeeChange selectively invalidates sort keys only for transactions
+// whose EnoughFeeCapBlock bit would change due to the base fee change
+func (p *PendingPool) invalidateSortKeysForBaseFeeChange(oldBaseFee, newBaseFee uint64) {
+	for _, tx := range p.best.ms {
+		if tx.sortKeyValid && wouldEnoughFeeCapBlockChange(tx, oldBaseFee, newBaseFee) {
+			tx.invalidateSortKey()
+		}
+	}
+	for _, tx := range p.worst.ms {
+		if tx.sortKeyValid && wouldEnoughFeeCapBlockChange(tx, oldBaseFee, newBaseFee) {
+			tx.invalidateSortKey()
+		}
 	}
 }
 
@@ -2880,6 +2906,28 @@ type SubPool struct {
 
 func NewSubPool(t SubPoolType, limit int) *SubPool {
 	return &SubPool{limit: limit, t: t, best: &BestQueue{}, worst: &WorstQueue{}}
+}
+
+func (p *SubPool) invalidateAllSortKeys() {
+	for _, tx := range p.best.ms {
+		tx.invalidateSortKey()
+	}
+	for _, tx := range p.worst.ms {
+		tx.invalidateSortKey()
+	}
+}
+
+func (p *SubPool) invalidateSortKeysForBaseFeeChange(oldBaseFee, newBaseFee uint64) {
+	for _, tx := range p.best.ms {
+		if tx.sortKeyValid && wouldEnoughFeeCapBlockChange(tx, oldBaseFee, newBaseFee) {
+			tx.invalidateSortKey()
+		}
+	}
+	for _, tx := range p.worst.ms {
+		if tx.sortKeyValid && wouldEnoughFeeCapBlockChange(tx, oldBaseFee, newBaseFee) {
+			tx.invalidateSortKey()
+		}
+	}
 }
 
 func (p *SubPool) EnforceInvariants() {
@@ -3094,13 +3142,33 @@ func invertUint256(value *uint256.Int, dst []byte) {
 	}
 }
 
-// invalidateSortKey marks the sort key as invalid, requiring regeneration
 func (mt *metaTx) invalidateSortKey() {
 	mt.sortKeyValid = false
 }
 
-// betterUsingSortKey compares two metaTx using their sort keys
-// This is much faster than the original better() function
+// wouldEnoughFeeCapBlockChange determines if a transaction's EnoughFeeCapBlock bit
+// would change due to a base fee change. This is used for selective sort key invalidation.
+func wouldEnoughFeeCapBlockChange(tx *metaTx, oldBaseFee, newBaseFee uint64) bool {
+	// Check if the EnoughFeeCapBlock bit would be different with the new base fee
+	oldHasEnoughFee := tx.minFeeCap.CmpUint64(oldBaseFee) >= 0
+	newHasEnoughFee := tx.minFeeCap.CmpUint64(newBaseFee) >= 0
+
+	// If the bit would change, we need to invalidate the sort key
+	return oldHasEnoughFee != newHasEnoughFee
+}
+
+func (p *TxPool) invalidateAllSortKeys() {
+	p.pending.invalidateAllSortKeys()
+	p.baseFee.invalidateAllSortKeys()
+	p.queued.invalidateAllSortKeys()
+}
+
+func (p *TxPool) invalidateSortKeysForBaseFeeChange(oldBaseFee, newBaseFee uint64) {
+	p.pending.invalidateSortKeysForBaseFeeChange(oldBaseFee, newBaseFee)
+	p.baseFee.invalidateSortKeysForBaseFeeChange(oldBaseFee, newBaseFee)
+	p.queued.invalidateSortKeysForBaseFeeChange(oldBaseFee, newBaseFee)
+}
+
 func (mt *metaTx) betterUsingSortKey(than *metaTx, pendingBaseFee uint64) bool {
 	mt.generateSortKey(pendingBaseFee)
 	than.generateSortKey(pendingBaseFee)
