@@ -1474,14 +1474,7 @@ type BalanceIncreaseEntry struct {
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[common.Address]BalanceIncreaseEntry {
 	s := make(map[common.Address]BalanceIncreaseEntry, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
-		if bi.isEscrow {
-			s[addr] = BalanceIncreaseEntry{
-				Amount:   uint256.Int{},
-				IsEscrow: bi.isEscrow,
-			}
-		}
-
-		if !bi.transferred {
+		if !bi.transferred || bi.isEscrow {
 			s[addr] = BalanceIncreaseEntry{
 				Amount:   bi.increase,
 				IsEscrow: bi.isEscrow,
