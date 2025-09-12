@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/arb"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
@@ -315,7 +314,7 @@ func (c *Config) IsGrayGlacier(num uint64) bool {
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
 func (c *Config) IsShanghai(time uint64, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
-		return currentArbosVersion >= arb.ArbosVersion_11
+		return currentArbosVersion >= ArbosVersion_11
 	}
 	return isForked(c.ShanghaiTime, time)
 }
@@ -341,7 +340,7 @@ func (c *Config) IsBhilai(num uint64) bool {
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
-		return currentArbosVersion >= arb.ArbosVersion_20
+		return currentArbosVersion >= ArbosVersion_20
 	}
 	return isForked(c.CancunTime, time)
 }
@@ -349,7 +348,7 @@ func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
-		return currentArbosVersion >= arb.ArbosVersion_40
+		return currentArbosVersion >= ArbosVersion_40
 	}
 	return isForked(c.PragueTime, time)
 }
@@ -733,7 +732,7 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		IsAura:             c.Aura != nil,
 		ArbOSVersion:       currentArbosVersion,
 		IsArbitrum:         c.IsArbitrum(),
-		IsStylus:           c.IsArbitrum() && currentArbosVersion >= arb.ArbosVersion_Stylus,
+		IsStylus:           c.IsArbitrum() && currentArbosVersion >= ArbosVersion_Stylus,
 	}
 }
 
@@ -828,7 +827,7 @@ func ArbitrumOneParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_6,
+		InitialArbOSVersion:       ArbosVersion_6,
 		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
 	}
 }
@@ -838,7 +837,7 @@ func ArbitrumNovaParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       arb.ArbosVersion_1,
+		InitialArbOSVersion:       ArbosVersion_1,
 		InitialChainOwner:         common.HexToAddress("0x9C040726F2A657226Ed95712245DeE84b650A1b5"),
 	}
 }
@@ -848,7 +847,7 @@ func ArbitrumRollupGoerliTestnetParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_2,
+		InitialArbOSVersion:       ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -858,7 +857,7 @@ func ArbitrumDevTestParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_32,
+		InitialArbOSVersion:       ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -868,7 +867,7 @@ func ArbitrumDevTestDASParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       arb.ArbosVersion_32,
+		InitialArbOSVersion:       ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -878,7 +877,7 @@ func ArbitrumAnytrustGoerliTestnetParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       arb.ArbosVersion_2,
+		InitialArbOSVersion:       ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -888,7 +887,7 @@ func DisableArbitrumParams() ArbitrumChainParams {
 		EnableArbOS:               false,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_0,
+		InitialArbOSVersion:       ArbosVersion_0,
 		InitialChainOwner:         common.Address{},
 	}
 }
