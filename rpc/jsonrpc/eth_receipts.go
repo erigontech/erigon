@@ -494,7 +494,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
-	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true, false), nil
+	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
