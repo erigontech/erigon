@@ -43,6 +43,7 @@ type SnapshotRepo struct {
 	schema    SnapNameSchema
 	accessors statecfg.Accessors
 	stepSize  uint64
+	integrity *DependencyIntegrityChecker
 
 	logger log.Logger
 }
@@ -81,7 +82,7 @@ func (f *SnapshotRepo) OpenFolder() error {
 }
 
 func (f *SnapshotRepo) SetIntegrityChecker(integrity *DependencyIntegrityChecker) {
-	f.cfg.Integrity = integrity
+	f.integrity = integrity
 }
 
 func (f *SnapshotRepo) Schema() SnapNameSchema {
@@ -208,6 +209,7 @@ func (f *SnapshotRepo) Close() {
 		return
 	}
 	f.closeWhatNotInList([]string{})
+	f.current = nil
 }
 
 func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
@@ -241,7 +243,7 @@ func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
 }
 
 func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *FilesItem) (outs []*FilesItem) {
-	checker := f.cfg.Integrity
+	checker := f.integrity
 	var cchecker func(startTxNum, endTxNum uint64) bool
 	if checker != nil {
 		cchecker = func(startTxNum, endTxNum uint64) bool {
@@ -320,6 +322,32 @@ func (f *SnapshotRepo) CleanAfterMerge(merged *FilesItem, vf visibleFiles) {
 	f.DeleteFilesAfterMerge(outs)
 }
 
+func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
+	mf := make(map[statecfg.Accessors][]*FilesItem)
+	if f.accessors.Has(statecfg.AccessorBTree) {
+		mf[statecfg.AccessorBTree] =
+			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+				return []string{f.schema.BtIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))}
+			})
+	}
+
+	if f.accessors.Has(statecfg.AccessorHashMap) {
+		mf[statecfg.AccessorHashMap] =
+			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+				return []string{f.schema.AccessorIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)), 0)}
+			})
+	}
+
+	if f.accessors.Has(statecfg.AccessorExistence) {
+		mf[statecfg.AccessorExistence] =
+			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+				return []string{f.schema.ExistenceFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))}
+			})
+	}
+
+	return (*MissedFilesMap)(&mf)
+}
+
 // private methods
 
 func (f *SnapshotRepo) openDirtyFiles() error {
@@ -344,7 +372,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+				if item.decompressor, err = seg.NewDecompressorWithMetadata(fPath, f.cfg.HasMetadata); err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 					invalidFilesMu.Lock()
@@ -462,7 +490,7 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 }
 
 func (f *SnapshotRepo) calcVisibleFiles(to RootNum) (roItems []visibleFile) {
-	checker := f.cfg.Integrity
+	checker := f.integrity
 	var cchecker func(startTxNum, endTxNum uint64) bool
 	if checker != nil {
 		cchecker = func(startTxNum, endTxNum uint64) bool {

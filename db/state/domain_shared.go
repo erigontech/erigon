@@ -74,6 +74,7 @@ type SharedDomains struct {
 
 type HasAgg interface {
 	Agg() any
+	ForkableAgg(ForkableId) any
 }
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -133,6 +134,24 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
 	return gt.sd.HasPrefix(name, prefix, gt.tx)
+}
+
+type unmarkedPutter struct {
+	sd         *SharedDomains
+	forkableId ForkableId
+}
+
+func (sd *SharedDomains) AsUnmarkedPutter(id ForkableId) kv.UnmarkedPutter {
+	return &unmarkedPutter{sd, id}
+}
+
+func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
+	f, ok := up.sd.mem.forkableWriters[up.forkableId]
+	if !ok {
+		panic(fmt.Sprintf("forkable not found: %s", Registry.Name(up.forkableId)))
+	}
+
+	return f.Put(num, v)
 }
 
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
@@ -357,4 +376,12 @@ func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 		return
 	}
 	sd.mem.DiscardWrites(d)
+}
+
+func ForkAggTx(tx kv.Tx, id kv.ForkableId) *ForkableAggTemporalTx {
+	if withAggTx, ok := tx.(interface{ AggForkablesTx(kv.ForkableId) any }); ok {
+		return withAggTx.AggForkablesTx(id).(*ForkableAggTemporalTx)
+	}
+
+	return nil
 }
