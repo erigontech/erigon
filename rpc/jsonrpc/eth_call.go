@@ -829,6 +829,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
+	// Add 'from', 'to', precompiles to the exclusion list
+	excl[*args.From] = struct{}{}
+	excl[to] = struct{}{}
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}
 	}
