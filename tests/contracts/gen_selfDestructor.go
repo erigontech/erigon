@@ -34,7 +34,7 @@ var (
 const SelfDestructorABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"selfDestruct\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // SelfDestructorBin is the compiled bytecode used for deploying new contracts.
-var SelfDestructorBin = "0x6080604052348015600f57600080fd5b50600160005560708060226000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80639cb8a26a14602d575b600080fd5b60336035565b005b600080fffea2646970667358221220a74afcbd1431019f7f78bcea3f22970f82560adb72829f56b28140de356bf95164736f6c63430007020033"
+var SelfDestructorBin = "0x6080604052348015600e575f5ffd5b5060015f55606880601e5f395ff3fe6080604052348015600e575f5ffd5b50600436106026575f3560e01c80639cb8a26a14602a575b5f5ffd5b60305f80ff5b00fea26469706673582212209df51851769551ab791cf53ab2ed7293cda1b21a2777ed8aa9112fb944083fdc64736f6c634300081e0033"
 
 // DeploySelfDestructor deploys a new Ethereum contract, binding an instance of SelfDestructor to it.
 func DeploySelfDestructor(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *SelfDestructor, error) {

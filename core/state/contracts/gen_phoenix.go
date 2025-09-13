@@ -34,7 +34,7 @@ var (
 const PhoenixABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"die\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"increment\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"stateMutability\":\"payable\",\"type\":\"receive\"}]"
 
 // PhoenixBin is the compiled bytecode used for deploying new contracts.
-var PhoenixBin = "0x6080604052348015600f57600080fd5b5060c48061001e6000396000f3fe60806040526004361060295760003560e01c806335f46994146034578063d09de08a14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605e565b6000ff5b60008054600101905556fea26469706673582212208a7813270390a5ca21790c2447b46da471493e99b652d00cbd4751eb47b7e70164736f6c637827302e372e352d646576656c6f702e323032302e31322e392b636f6d6d69742e65623737656430380058"
+var PhoenixBin = "0x6080604052348015600e575f5ffd5b5060bd80601a5f395ff3fe6080604052600436106028575f3560e01c806335f46994146032578063d09de08a146044575f5ffd5b36602e57005b5f5ffd5b348015603c575f5ffd5b5060425fff5b005b348015604e575f5ffd5b5060425f80549080605d836064565b9190505550565b5f60018201608057634e487b7160e01b5f52601160045260245ffd5b506001019056fea2646970667358221220a98259027d495b3b802db10699ec98fdd46efd1201359223395321f9dfcbe9c164736f6c634300081e0033"
 
 // DeployPhoenix deploys a new Ethereum contract, binding an instance of Phoenix to it.
 func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Phoenix, error) {

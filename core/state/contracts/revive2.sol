@@ -33,6 +33,6 @@ contract Phoenix {
     }
 
     function die() public {
-        selfdestruct(address(0));
+        selfdestruct(payable(address(0)));
     }
 }
