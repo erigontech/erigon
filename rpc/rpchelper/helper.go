@@ -59,7 +59,7 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
+	// Due to the changed semantics of `latest` block in RPC request, it is now distinct
 	// from the block number corresponding to the plain state
 	var plainStateBlockNumber uint64
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
