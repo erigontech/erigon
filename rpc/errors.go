@@ -31,7 +31,12 @@ var (
 	_ Error = new(CustomError)
 )
 
-const defaultErrorCode = -32000
+const (
+	ErrCodeReverted = -32000
+	ErrCodeVMError  = -32015
+)
+
+const defaultErrorCode = ErrCodeReverted
 
 type methodNotFoundError struct{ method string }
 
