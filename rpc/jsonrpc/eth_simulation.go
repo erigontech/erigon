@@ -78,7 +78,7 @@ type CallResult struct {
 	ReturnData string          `json:"returnData"`
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
-	Status     string          `json:"status"`
+	Status     hexutil.Uint64  `json:"status"`
 	Error      interface{}     `json:"error,omitempty"`
 }
 
@@ -128,7 +128,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	simulatedBlockResults := make([]SimulatedBlockResult, 0, len(req.BlockStateCalls))
 
 	// Create a simulator instance to help with sanitization
-	sim := newSimulator(&req, block, chainConfig, api.engine(), api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout)
+	sim := newSimulator(&req, block.Header(), chainConfig, api.engine(), api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout)
 	simulatedBlocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
 	if err != nil {
 		return nil, err
@@ -168,7 +168,7 @@ type simulator struct {
 
 func newSimulator(
 	req *SimulationRequest,
-	block *types.Block,
+	header *types.Header,
 	chainConfig *chain.Config,
 	engine consensus.EngineReader,
 	canonicalReader services.CanonicalReader,
@@ -178,7 +178,7 @@ func newSimulator(
 	evmCallTimeout time.Duration,
 ) *simulator {
 	return &simulator{
-		base:             block.Header(),
+		base:             header,
 		chainConfig:      chainConfig,
 		engine:           engine,
 		canonicalReader:  canonicalReader,
@@ -225,7 +225,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 				b := SimulatedBlock{
 					BlockOverrides: &transactions.BlockOverrides{
 						BlockNumber: (*hexutil.Uint64)(&n),
-						Timestamp:   (*hexutil.Uint64)(&t),
+						Time:        (*hexutil.Uint64)(&t),
 					},
 				}
 				prevTimestamp = t
@@ -235,11 +235,11 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		// Only append block after filling a potential gap.
 		prevNumber = blockNumber
 		var timestamp uint64
-		if block.BlockOverrides.Timestamp == nil {
+		if block.BlockOverrides.Time == nil {
 			timestamp = prevTimestamp + timestampIncrement
-			block.BlockOverrides.Timestamp = (*hexutil.Uint64)(&timestamp)
+			block.BlockOverrides.Time = (*hexutil.Uint64)(&timestamp)
 		} else {
-			timestamp = block.BlockOverrides.Timestamp.Uint64()
+			timestamp = block.BlockOverrides.Time.Uint64()
 			if timestamp <= prevTimestamp {
 				return nil, fmt.Errorf("block timestamps must be in order: %d <= %d", timestamp, prevTimestamp)
 			}
@@ -263,7 +263,7 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsShanghai((uint64)(*overrides.Time)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		header := overrides.OverrideHeader(&types.Header{
@@ -387,12 +387,16 @@ func (s *simulator) simulateBlock(
 	if s.chainConfig.IsCancun(header.Time) {
 		header.BlobGasUsed = &cumulativeBlobGasUsed
 	}
+	var withdrawals types.Withdrawals
+	if s.chainConfig.IsShanghai(header.Time) {
+		withdrawals = types.Withdrawals{}
+	}
 	engine, ok := s.engine.(consensus.Engine)
 	if !ok {
 		return nil, errors.New("consensus engine reader does not support full consensus.Engine")
 	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
-		receiptList, nil, nil, nil, nil, s.logger)
+		receiptList, withdrawals, nil, nil, nil, s.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -505,24 +509,26 @@ func (s *simulator) simulateCall(
 		callResult.Logs = append(callResult.Logs, rpcLog)
 	}
 	if len(result.ReturnData) > s.returnDataLimit {
+		callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)
 		callResult.ReturnData = "0x"
-		callResult.Status = "0x0"
-		callResult.Error = rpc.NewJsonError(
+		callResult.Error = rpc.NewJsonErrorFromErr(
 			fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), s.returnDataLimit))
 	} else {
-		callResult.ReturnData = fmt.Sprintf("0x%x", result.ReturnData)
 		if result.Failed() {
-			callResult.Status = "0x0"
-			if len(result.Revert()) > 0 {
+			callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)
+			callResult.ReturnData = "0x"
+			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				// If the result contains a revert reason, try to unpack and return it.
-				callResult.Error = rpc.NewJsonError(ethapi.NewRevertError(result))
+				revertError := ethapi.NewRevertError(result)
+				callResult.Error = rpc.NewJsonError(rpc.ErrCodeReverted, revertError.Error(), revertError.ErrorData().(string))
 			} else {
 				// Otherwise, we just capture the error message.
-				callResult.Error = rpc.NewJsonError(result.Err)
+				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), "")
 			}
 		} else {
 			// If the call was successful, we capture the return data, the gas used and logs.
-			callResult.Status = "0x1"
+			callResult.Status = hexutil.Uint64(types.ReceiptStatusSuccessful)
+			callResult.ReturnData = fmt.Sprintf("0x%x", result.ReturnData)
 		}
 	}
 	return &callResult, txn, receipt, nil
