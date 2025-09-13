@@ -20,7 +20,6 @@
 package core
 
 import (
-	"github.com/erigontech/erigon/execution/chain/params"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 )
