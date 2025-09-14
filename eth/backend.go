@@ -1080,6 +1080,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.notifications,
 			backend.engineBackendRPC,
 			backend,
+			config.Dirs.Tmp,
 		)
 
 		// we need to initiate download before the heimdall services start rather than

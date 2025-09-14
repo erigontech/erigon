@@ -20,20 +20,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 var ErrChainLengthExceedsLimit = errors.New("chain length exceeds limit")
@@ -43,64 +40,27 @@ type BbdHeaderReader interface {
 }
 
 type BackwardBlockDownloader struct {
-	logger          log.Logger
-	fetcher         Fetcher
-	peerTracker     *PeerTracker
-	peerPenalizer   *PeerPenalizer
-	messageListener *MessageListener
-	headerReader    BbdHeaderReader
-	tmpDir          string
-	stopped         atomic.Bool
+	logger        log.Logger
+	fetcher       Fetcher
+	peerPenalizer *PeerPenalizer
+	peerTracker   *PeerTracker
+	tmpDir        string
 }
 
 func NewBackwardBlockDownloader(
 	logger log.Logger,
-	sentryClient sentryproto.SentryClient,
-	statusDataFactory libsentry.StatusDataFactory,
-	headerReader BbdHeaderReader,
+	fetcher Fetcher,
+	peerPenalizer *PeerPenalizer,
+	peerTracker *PeerTracker,
 	tmpDir string,
 ) *BackwardBlockDownloader {
-	peerPenalizer := NewPeerPenalizer(sentryClient)
-	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-	messageSender := NewMessageSender(sentryClient)
-	peerTracker := NewPeerTracker(logger, messageListener)
-	var fetcher Fetcher
-	fetcher = NewFetcher(logger, messageListener, messageSender)
-	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
-	fetcher = NewTrackingFetcher(fetcher, peerTracker)
 	return &BackwardBlockDownloader{
-		logger:          logger,
-		fetcher:         fetcher,
-		peerTracker:     peerTracker,
-		peerPenalizer:   peerPenalizer,
-		headerReader:    headerReader,
-		tmpDir:          tmpDir,
-		messageListener: messageListener,
+		logger:        logger,
+		fetcher:       fetcher,
+		peerPenalizer: peerPenalizer,
+		peerTracker:   peerTracker,
+		tmpDir:        tmpDir,
 	}
-}
-
-func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
-	bbd.logger.Debug("[backward-block-downloader] running")
-	defer func() {
-		bbd.logger.Debug("[backward-block-downloader] stopped")
-		bbd.stopped.Store(true)
-	}()
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		err := bbd.peerTracker.Run(ctx)
-		if err != nil {
-			return fmt.Errorf("backward block downloader peer tracker failed: %w", err)
-		}
-		return nil
-	})
-	eg.Go(func() error {
-		err := bbd.messageListener.Run(ctx)
-		if err != nil {
-			return fmt.Errorf("backward block downloader message listener failed: %w", err)
-		}
-		return nil
-	})
-	return eg.Wait()
 }
 
 // DownloadBlocksBackwards downloads blocks backwards given a starting block hash. It uses the underlying header reader
@@ -119,14 +79,16 @@ func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 //     validation of chain length limit breach. With this we can terminate early after fetching the initial header from
 //     peers if the fetched header is too far ahead than the current head. This will prevent further batched backward
 //     fetches of headers until such a chain length limit is breached.
-func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...BbdOption) (ResultFeed, error) {
-	if bbd.stopped.Load() {
-		return ResultFeed{}, errors.New("backward block downloader is stopped")
-	}
+func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(
+	ctx context.Context,
+	hash common.Hash,
+	headerReader BbdHeaderReader,
+	opts ...BbdOption,
+) (ResultFeed, error) {
 	feed := ResultFeed{ch: make(chan BatchResult)}
 	go func() {
 		defer feed.close()
-		err := bbd.fetchBlocksBackwardsByHash(ctx, hash, feed, opts...)
+		err := bbd.fetchBlocksBackwardsByHash(ctx, hash, headerReader, feed, opts...)
 		if err != nil {
 			feed.consumeErr(ctx, err)
 		}
@@ -134,7 +96,13 @@ func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context,
 	return feed, nil
 }
 
-func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...BbdOption) error {
+func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(
+	ctx context.Context,
+	hash common.Hash,
+	headerReader BbdHeaderReader,
+	feed ResultFeed,
+	opts ...BbdOption,
+) error {
 	bbd.logger.Debug("[backward-block-downloader] fetching blocks backwards by hash", "hash", hash)
 	// 1. Get all peers
 	config := applyBbdOptions(opts...)
@@ -162,7 +130,7 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Conte
 	etlSortableBuf := etl.NewSortableBuffer(etl.BufferOptimalSize)
 	headerCollector := etl.NewCollector("backward-block-downloader", bbd.tmpDir, etlSortableBuf, bbd.logger)
 	defer headerCollector.Close()
-	connectionPoint, err := bbd.downloadHeaderChainBackwards(ctx, initialHeader, headerCollector, peers, config)
+	connectionPoint, err := bbd.downloadHeaderChainBackwards(ctx, initialHeader, headerReader, headerCollector, peers, config)
 	if err != nil {
 		return err
 	}
@@ -258,6 +226,7 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	ctx context.Context,
 	initialHeader *types.Header,
+	headerReader BbdHeaderReader,
 	headerCollector *etl.Collector,
 	peers peersContext,
 	config bbdRequestConfig,
@@ -298,7 +267,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		amount := min(parentNum, maxHeadersBatchLen)
 		if amount == 0 {
 			// can't fetch 0 blocks, just check if the hash matches our genesis and if it does set the connecting point
-			h, err := bbd.headerReader.HeaderByHash(ctx, parentHash)
+			h, err := headerReader.HeaderByHash(ctx, parentHash)
 			if err != nil {
 				return nil, err
 			}
@@ -364,7 +333,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			}
 			chainLen++
 			lastHeader = header
-			h, err := bbd.headerReader.HeaderByHash(ctx, header.ParentHash)
+			h, err := headerReader.HeaderByHash(ctx, header.ParentHash)
 			if err != nil {
 				return nil, err
 			}

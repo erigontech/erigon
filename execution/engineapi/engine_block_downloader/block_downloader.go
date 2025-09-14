@@ -26,6 +26,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
@@ -88,9 +89,12 @@ type EngineBlockDownloader struct {
 	logger log.Logger
 
 	// V2 downloader
-	v2           bool
-	bbdV2        *p2p.BackwardBlockDownloader
-	badHeadersV2 *lru.Cache[common.Hash, common.Hash]
+	v2              bool
+	bbdV2           *p2p.BackwardBlockDownloader
+	badHeadersV2    *lru.Cache[common.Hash, common.Hash]
+	messageListener *p2p.MessageListener
+	peerTracker     *p2p.PeerTracker
+	stopped         atomic.Bool
 }
 
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient executionproto.ExecutionClient,
@@ -106,9 +110,18 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 	s.Store(Idle)
 	var bbdV2 *p2p.BackwardBlockDownloader
 	var badHeadersV2 *lru.Cache[common.Hash, common.Hash]
+	var messageListener *p2p.MessageListener
+	var peerTracker *p2p.PeerTracker
 	if v2 {
-		hr := headerReader{db: db, blockReader: blockReader}
-		bbdV2 = p2p.NewBackwardBlockDownloader(logger, sentryClient, statusDataProvider.GetStatusData, hr, tmpdir)
+		peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
+		messageListener = p2p.NewMessageListener(logger, sentryClient, statusDataProvider.GetStatusData, peerPenalizer)
+		messageSender := p2p.NewMessageSender(sentryClient)
+		peerTracker = p2p.NewPeerTracker(logger, messageListener)
+		var fetcher p2p.Fetcher
+		fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
+		fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
+		fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
+		bbdV2 = p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpdir)
 		var err error
 		badHeadersV2, err = lru.New[common.Hash, common.Hash](1_000_000) // 64mb
 		if err != nil {
@@ -133,14 +146,34 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		v2:              v2,
 		bbdV2:           bbdV2,
 		badHeadersV2:    badHeadersV2,
+		messageListener: messageListener,
+		peerTracker:     peerTracker,
 	}
 }
 
 func (e *EngineBlockDownloader) Run(ctx context.Context) error {
 	if e.v2 {
 		e.logger.Info("[EngineBlockDownloader] running")
-		defer e.logger.Info("[EngineBlockDownloader] stopped")
-		return e.bbdV2.Run(ctx)
+		defer func() {
+			e.logger.Info("[EngineBlockDownloader] stopped")
+			e.stopped.Store(true)
+		}()
+		eg, ctx := errgroup.WithContext(ctx)
+		eg.Go(func() error {
+			err := e.peerTracker.Run(ctx)
+			if err != nil {
+				return fmt.Errorf("engine block downloader peer tracker failed: %w", err)
+			}
+			return nil
+		})
+		eg.Go(func() error {
+			err := e.messageListener.Run(ctx)
+			if err != nil {
+				return fmt.Errorf("engine block downloader message listener failed: %w", err)
+			}
+			return nil
+		})
+		return eg.Wait()
 	}
 	return nil
 }

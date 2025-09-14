@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -58,6 +59,7 @@ func NewCanonicalChainBuilder(root *types.Header, dc difficultyCalculator, hv he
 }
 
 type CanonicalChainBuilder struct {
+	mu              sync.Mutex
 	root            *forkTreeNode
 	tip             *forkTreeNode
 	difficultyCalc  difficultyCalculator
@@ -65,6 +67,8 @@ type CanonicalChainBuilder struct {
 }
 
 func (ccb *CanonicalChainBuilder) Reset(root *types.Header) {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	ccb.root = &forkTreeNode{
 		children:   make(map[producerSlotIndex]*forkTreeNode),
 		header:     root,
@@ -104,17 +108,26 @@ func (ccb *CanonicalChainBuilder) nodeByHash(hash common.Hash) *forkTreeNode {
 }
 
 func (ccb *CanonicalChainBuilder) ContainsHash(hash common.Hash) bool {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	return ccb.nodeByHash(hash) != nil
 }
 
 func (ccb *CanonicalChainBuilder) Tip() *types.Header {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	return ccb.tip.header
 }
+
 func (ccb *CanonicalChainBuilder) Root() *types.Header {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	return ccb.root.header
 }
 
 func (ccb *CanonicalChainBuilder) Headers() []*types.Header {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	var headers []*types.Header
 	node := ccb.tip
 	for node != nil {
@@ -141,7 +154,13 @@ func (ccb *CanonicalChainBuilder) HeadersInRange(start uint64, count uint64) []*
 	return headers[offset : offset+count]
 }
 
+func (ccb *CanonicalChainBuilder) HeaderReader() CcbHeaderReader {
+	return CcbHeaderReader{ccb: ccb}
+}
+
 func (ccb *CanonicalChainBuilder) PruneRoot(newRootNum uint64) error {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	if (newRootNum < ccb.root.header.Number.Uint64()) || (newRootNum > ccb.Tip().Number.Uint64()) {
 		return errors.New("CanonicalChainBuilder.PruneRoot: newRootNum outside of the canonical chain")
 	}
@@ -156,6 +175,8 @@ func (ccb *CanonicalChainBuilder) PruneRoot(newRootNum uint64) error {
 }
 
 func (ccb *CanonicalChainBuilder) PruneNode(hash common.Hash) error {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	if ccb.root.headerHash == hash {
 		return errors.New("CanonicalChainBuilder.PruneNode: can't prune root node")
 	}
@@ -230,6 +251,8 @@ func (ccb *CanonicalChainBuilder) recalcTip() *forkTreeNode {
 // Returns the list of newly connected headers (filtering out headers that already exist in the tree)
 // or an error in case the header is invalid or the header chain cannot reach any of the nodes in the tree.
 func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.Header) ([]*types.Header, error) {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	if len(headers) == 0 {
 		return nil, nil
 	}
@@ -346,6 +369,8 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 }
 
 func (ccb *CanonicalChainBuilder) LowestCommonAncestor(a, b common.Hash) (*types.Header, bool) {
+	ccb.mu.Lock()
+	defer ccb.mu.Unlock()
 	pathA := ccb.pathToRoot(a)
 	if len(pathA) == 0 {
 		// 'a' doesn't exist in the tree
@@ -399,4 +424,18 @@ func pathToRootRec(node *forkTreeNode, from common.Hash, path *[]*forkTreeNode) 
 	}
 
 	return false
+}
+
+type CcbHeaderReader struct {
+	ccb *CanonicalChainBuilder
+}
+
+func (r CcbHeaderReader) HeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error) {
+	r.ccb.mu.Lock()
+	defer r.ccb.mu.Unlock()
+	node := r.ccb.nodeByHash(hash)
+	if node == nil {
+		return nil, nil
+	}
+	return node.header, nil
 }

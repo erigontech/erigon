@@ -204,7 +204,8 @@ func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req Backwa
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
-	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, opts...)
+	hr := headerReader{db: e.db, blockReader: e.blockReader}
+	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, hr, opts...)
 	if err != nil {
 		return err
 	}
