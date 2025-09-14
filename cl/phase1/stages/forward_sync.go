@@ -314,7 +314,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 
 	// Get the current slot of the chain tip
 	chainTipSlot := cfg.ethClock.GetCurrentSlot()
-	logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
+	logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot, "highestSeen", cfg.forkChoice.HighestSeen(), "finalizedSlot", cfg.forkChoice.FinalizedSlot(), "anchorSlot", cfg.forkChoice.AnchorSlot())
 	prevProgress := currentSlot.Load()
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot
