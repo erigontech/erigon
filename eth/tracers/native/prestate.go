@@ -47,10 +47,11 @@ func init() {
 type state = map[common.Address]*account
 
 type account struct {
-	Balance *big.Int                    `json:"balance,omitempty"`
-	Code    []byte                      `json:"code,omitempty"`
-	Nonce   uint64                      `json:"nonce,omitempty"`
-	Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
+	Balance  *big.Int                    `json:"balance,omitempty"`
+	Code     []byte                      `json:"code,omitempty"`
+	CodeHash *common.Hash                `json:"codeHash,omitempty"`
+	Nonce    uint64                      `json:"nonce,omitempty"`
+	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
 }
 
 func (a *account) exists() bool {
@@ -315,6 +316,12 @@ func (t *prestateTracer) lookupAccount(addr common.Address) {
 
 	if !t.config.DisableCode {
 		t.pre[addr].Code = code
+		if len(code) > 0 {
+			codeHash := crypto.Keccak256Hash(code)
+			t.pre[addr].CodeHash = &codeHash
+		} else {
+			t.pre[addr].CodeHash = nil
+		}
 	}
 	if !t.config.DisableStorage {
 		t.pre[addr].Storage = make(map[common.Hash]common.Hash)
