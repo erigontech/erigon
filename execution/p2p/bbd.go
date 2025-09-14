@@ -66,7 +66,7 @@ func NewBackwardBlockDownloader(
 // DownloadBlocksBackwards downloads blocks backwards given a starting block hash. It uses the underlying header reader
 // to figure out when a header chain connects with a header that we already have. The backward download can handle
 // chain lengths of unlimited size by using an etl for temporarily storing the headers. This is also enabled by a
-// paging-like ResultFeed, which can be used to return pages of blocks as they get fetched in batches.
+// paging-like BbdResultFeed, which can be used to return pages of blocks as they get fetched in batches.
 //
 // There are a number of BbdOption-s that can be passed in to customise the behaviour of the request:
 //   - WithPeerId - in case the backward needs to happen from a specific peer only
@@ -84,8 +84,8 @@ func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(
 	hash common.Hash,
 	headerReader BbdHeaderReader,
 	opts ...BbdOption,
-) (ResultFeed, error) {
-	feed := ResultFeed{ch: make(chan BatchResult)}
+) (BbdResultFeed, error) {
+	feed := BbdResultFeed{ch: make(chan BlockBatchResult)}
 	go func() {
 		defer feed.close()
 		err := bbd.fetchBlocksBackwardsByHash(ctx, hash, headerReader, feed, opts...)
@@ -100,7 +100,7 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(
 	ctx context.Context,
 	hash common.Hash,
 	headerReader BbdHeaderReader,
-	feed ResultFeed,
+	feed BbdResultFeed,
 	opts ...BbdOption,
 ) error {
 	bbd.logger.Debug("[backward-block-downloader] fetching blocks backwards by hash", "hash", hash)
@@ -354,7 +354,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 	headerCollector *etl.Collector,
 	peers peersContext,
 	config bbdRequestConfig,
-	feed ResultFeed,
+	feed BbdResultFeed,
 ) error {
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
@@ -396,7 +396,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	peers peersContext,
 	config bbdRequestConfig,
 	logProgressTicker *time.Ticker,
-	feed ResultFeed,
+	feed BbdResultFeed,
 ) error {
 	// split the headers into batches
 	neededPeers := min(len(headers), config.maxParallelBodyDownloads)
