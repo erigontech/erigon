@@ -281,3 +281,10 @@ func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) 
 func (cc *ExecutionClientRpc) HasGapInSnapshots(ctx context.Context) bool {
 	panic("unimplemented")
 }
+
+func (cc *ExecutionClientRpc) IsInclusionListSatisfied(payload *cltypes.Eth1Block, inclusionListTransactions [][]byte) bool {
+	// For RPC execution client, this would need to call a new RPC method
+	// For now, we'll return true as a placeholder
+	// TODO: Implement actual RPC call when the inclusion list validation RPC method is available
+	return true
+}

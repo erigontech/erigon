@@ -193,3 +193,7 @@ func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
 	_, hasGap := cc.chainRW.FrozenBlocks(ctx)
 	return hasGap
 }
+
+func (cc *ExecutionClientDirect) IsInclusionListSatisfied(payload *cltypes.Eth1Block, inclusionListTransactions [][]byte) bool {
+	return cc.chainRW.IsInclusionListSatisfied(payload, inclusionListTransactions)
+}

@@ -475,3 +475,37 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	block.Withdrawals = withdrawals
 	return block, bundle, resp.Data.Requests, blockValue, nil
 }
+
+func (c ChainReaderWriterEth1) IsInclusionListSatisfied(payload *cltypes.Eth1Block, inclusionListTransactions [][]byte) bool {
+	if payload == nil {
+		return false
+	}
+
+	if len(inclusionListTransactions) == 0 {
+		return false
+	}
+
+	payloadTxHashes := make(map[common.Hash]bool)
+	if payload.Transactions != nil {
+		payload.Transactions.ForEach(func(txBytes []byte, idx int, total int) bool {
+			tx, err := types.DecodeTransaction(txBytes)
+			if err != nil {
+				return true
+			}
+			payloadTxHashes[tx.Hash()] = true
+			return true
+		})
+	}
+
+	txns, err := engine_types.ConvertInclusionListToTransactions(inclusionListTransactions)
+	if err != nil {
+		return false
+	}
+	for _, tx := range txns {
+		if !payloadTxHashes[tx.Hash()] {
+			return false // missing inclusion list transaction
+		}
+	}
+
+	return true
+}

@@ -132,6 +132,9 @@ type ForkChoiceStore struct {
 
 	proposerLookahead *lru.Cache[uint64, solid.Uint64VectorSSZ]
 
+	// spec: blocks that don't satisfy inclusion list constraints
+	unsatisfiedInclusionListBlocks sync.Map // common.Hash -> struct{}
+
 	mu sync.RWMutex
 
 	// EL

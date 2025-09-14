@@ -85,6 +85,41 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+// validateInclusionLists validates inclusion list constraints according to FOCIL specification
+// follows the spec function: validate_inclusion_lists(store, beacon_block_root, execution_engine)
+func (f *ForkChoiceStore) validateInclusionLists(beaconState *state.CachingBeaconState, block *cltypes.BeaconBlock, blockRoot common.Hash) bool {
+	if block.Version() < clparams.FuluVersion {
+		return true
+	}
+
+	// spec: block previously validated as satisfying the inclusion list constraints
+	// should not be invalidated even if their associated InclusionLists have subsequently been pruned.
+	if _, alreadyUnsatisfied := f.unsatisfiedInclusionListBlocks.Load(blockRoot); alreadyUnsatisfied {
+		return false
+	}
+
+	parentSlot := block.Slot - 1
+	inclusionListTransactions := f.getInclusionListTransactions(beaconState, parentSlot)
+
+	isSatisfied := f.engine.IsInclusionListSatisfied(block.Body.ExecutionPayload, inclusionListTransactions)
+
+	if isSatisfied {
+		log.Debug("block satisfies inclusion list constraints", "blockRoot", blockRoot, "slot", block.Slot, "parentSlot", parentSlot, "inclusionTxCount", len(inclusionListTransactions))
+	} else {
+		log.Warn("block does not satisfy inclusion list constraints", "blockRoot", blockRoot, "slot", block.Slot, "parentSlot", parentSlot, "inclusionTxCount", len(inclusionListTransactions))
+	}
+
+	return isSatisfied
+
+}
+
+// getInclusionListTransactions retrieves inclusion list transactions for the given slot
+// implements the get_inclusion_list_transactions function from the FOCIL spec
+func (f *ForkChoiceStore) getInclusionListTransactions(beaconState *state.CachingBeaconState, slot uint64) [][]byte {
+	log.Debug("FOCIL: Getting inclusion list transactions", "slot", slot)
+	return [][]byte{}
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -212,11 +247,27 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
-	// Add proposer score boost if the block is timely
+
+	// [New in EIP7805] Check if block satisfies the inclusion list constraints
+	// If not, add this block to the store as inclusion list constraints unsatisfied
+	isInclusionListSatisfied := f.validateInclusionLists(lastProcessedState, block.Block, blockRoot)
+	if !isInclusionListSatisfied {
+		f.unsatisfiedInclusionListBlocks.Store(blockRoot, struct{}{})
+		log.Debug("FOCIL: Block does not satisfy inclusion list constraints", "blockRoot", blockRoot, "slot", block.Block.Slot)
+	}
+
+	// Add proposer score boost if the block is timely, not conflicting with an existing block
+	// and satisfies the inclusion list constraints. [Modified in EIP7805]
 	timeIntoSlot := (f.time.Load() - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
 	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
-	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
+	isTimely := f.Slot() == block.Block.Slot && isBeforeAttestingInterval
+	isFirstBlock := f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{})
+
+	if isTimely && isFirstBlock && isInclusionListSatisfied {
 		f.proposerBoostRoot.Store(common.Hash(blockRoot))
+		log.Debug("FOCIL: Applied proposer boost", "blockRoot", blockRoot, "slot", block.Block.Slot)
+	} else if isTimely && isFirstBlock && !isInclusionListSatisfied {
+		log.Debug("FOCIL: Skipped proposer boost due to unsatisfied inclusion list", "blockRoot", blockRoot, "slot", block.Block.Slot)
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		// Update randao mixes

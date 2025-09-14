@@ -52,4 +52,5 @@ type ExecutionEngine interface {
 	HasGapInSnapshots(ctx context.Context) bool
 	// Block production
 	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error)
+	IsInclusionListSatisfied(payload *cltypes.Eth1Block, inclusionListTransactions [][]byte) bool
 }
