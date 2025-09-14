@@ -175,7 +175,7 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 	rootHash := ccb.Root().Hash()
 	tipNum := ccb.Tip().Number.Uint64()
 	tipHash := ccb.Tip().Hash()
-
+	distanceToRoot := event.EndBlock().Uint64() - rootNum + 1
 	s.logger.Info(
 		syncLogPrefix("local chain tip does not match the milestone, unwinding to the previous verified root"),
 		"rootNum", rootNum,
@@ -186,7 +186,30 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		"milestoneStart", event.StartBlock(),
 		"milestoneEnd", event.EndBlock(),
 		"milestoneRootHash", event.RootHash(),
+		"distanceToRoot", distanceToRoot,
 	)
+
+	feed, err := s.p2pService.FetchBlocksBackwards(
+		ctx,
+		event.RootHash(),
+		ccb.HeaderReader(),
+		p2p.WithChainLengthLimit(distanceToRoot),
+		p2p.WithBlocksBatchSize(distanceToRoot),
+	)
+	if err != nil {
+		s.logger.Warn(syncLogPrefix("failed to fetch blocks backwards during milestone mismatch"), "err", err)
+		return nil // in case of p2p download err do not terminate the process
+	}
+
+	blocks := make([]*types.Block, 0, distanceToRoot)
+	var batch []*types.Block
+	for batch, err = feed.Next(ctx); err == nil && len(batch) > 0; batch, err = feed.Next(ctx) {
+		blocks = append(blocks, batch...)
+	}
+	if err != nil {
+		s.logger.Warn(syncLogPrefix("failed to get next block batch during milestone mismatch"), "err", err)
+		return nil // in case of p2p download err do not terminate the process
+	}
 
 	// wait for any possibly unprocessed previous block inserts to finish
 	if err := s.store.Flush(ctx); err != nil {
@@ -197,24 +220,20 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		return err
 	}
 
-	var syncTo *uint64
-
 	if s.config.PolygonPosSingleSlotFinality {
-		syncTo = &s.config.PolygonPosSingleSlotFinalityBlockAt
+		for i := range blocks {
+			if blocks[i].Number().Uint64() > s.config.PolygonPosSingleSlotFinalityBlockAt {
+				blocks = blocks[:i]
+				break
+			}
+		}
 	}
 
-	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, rootNum+1, syncTo)
-	if err != nil {
+	if err := s.store.InsertBlocks(ctx, blocks); err != nil {
 		return err
 	}
-	if newTip == nil {
-		err = errors.New("unexpected empty headers from p2p since new milestone")
-		return fmt.Errorf(
-			"%w: rootNum=%d, milestoneId=%d, milestoneStart=%d, milestoneEnd=%d, milestoneRootHash=%s",
-			err, rootNum, event.Id, event.StartBlock(), event.EndBlock(), event.RootHash(),
-		)
-	}
 
+	newTip := blocks[len(blocks)-1].HeaderNoCopy()
 	if err := s.commitExecution(ctx, newTip, newTip); err != nil {
 		// note: if we face a failure during execution of finalized waypoints blocks, it means that
 		// we're wrong and the blocks are not considered as bad blocks, so we should terminate
@@ -588,7 +607,7 @@ func (s *Sync) backwardDownloadBlockBatches(
 		fromHash,
 		ccb.HeaderReader(),
 		p2p.WithChainLengthLimit(amount),
-		p2p.WithBlocksBatchSize(500),
+		p2p.WithBlocksBatchSize(1024),
 		p2p.WithPeerId(fromPeerId),
 	)
 	if err != nil {
