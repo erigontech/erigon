@@ -112,7 +112,7 @@ func (s *Service) FetchBodies(ctx context.Context, headers []*types.Header, peer
 	return s.fetcher.FetchBodies(ctx, headers, peerId, opts...)
 }
 
-func (s *Service) FetchBlocksBackwards(ctx context.Context, hash common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.ResultFeed, error) {
+func (s *Service) FetchBlocksBackwards(ctx context.Context, hash common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.BbdResultFeed, error) {
 	return s.bbd.DownloadBlocksBackwards(ctx, hash, hr, opts...)
 }
 

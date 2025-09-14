@@ -45,14 +45,14 @@ func (m *Mockp2pService) EXPECT() *Mockp2pServiceMockRecorder {
 }
 
 // FetchBlocksBackwards mocks base method.
-func (m *Mockp2pService) FetchBlocksBackwards(ctx context.Context, h common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.ResultFeed, error) {
+func (m *Mockp2pService) FetchBlocksBackwards(ctx context.Context, h common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.BbdResultFeed, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx, h, hr}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "FetchBlocksBackwards", varargs...)
-	ret0, _ := ret[0].(p2p.ResultFeed)
+	ret0, _ := ret[0].(p2p.BbdResultFeed)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -71,19 +71,19 @@ type Mockp2pServiceFetchBlocksBackwardsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *Mockp2pServiceFetchBlocksBackwardsCall) Return(arg0 p2p.ResultFeed, arg1 error) *Mockp2pServiceFetchBlocksBackwardsCall {
+func (c *Mockp2pServiceFetchBlocksBackwardsCall) Return(arg0 p2p.BbdResultFeed, arg1 error) *Mockp2pServiceFetchBlocksBackwardsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *Mockp2pServiceFetchBlocksBackwardsCall) Do(f func(context.Context, common.Hash, p2p.BbdHeaderReader, ...p2p.BbdOption) (p2p.ResultFeed, error)) *Mockp2pServiceFetchBlocksBackwardsCall {
+func (c *Mockp2pServiceFetchBlocksBackwardsCall) Do(f func(context.Context, common.Hash, p2p.BbdHeaderReader, ...p2p.BbdOption) (p2p.BbdResultFeed, error)) *Mockp2pServiceFetchBlocksBackwardsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *Mockp2pServiceFetchBlocksBackwardsCall) DoAndReturn(f func(context.Context, common.Hash, p2p.BbdHeaderReader, ...p2p.BbdOption) (p2p.ResultFeed, error)) *Mockp2pServiceFetchBlocksBackwardsCall {
+func (c *Mockp2pServiceFetchBlocksBackwardsCall) DoAndReturn(f func(context.Context, common.Hash, p2p.BbdHeaderReader, ...p2p.BbdOption) (p2p.BbdResultFeed, error)) *Mockp2pServiceFetchBlocksBackwardsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
