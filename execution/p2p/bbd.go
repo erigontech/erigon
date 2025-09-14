@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bbd
+package p2p
 
 import (
 	"context"
@@ -34,18 +34,21 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
-	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 var ErrChainLengthExceedsLimit = errors.New("chain length exceeds limit")
 
+type BbdHeaderReader interface {
+	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
+}
+
 type BackwardBlockDownloader struct {
 	logger          log.Logger
-	fetcher         p2p.Fetcher
-	peerTracker     *p2p.PeerTracker
-	peerPenalizer   *p2p.PeerPenalizer
-	messageListener *p2p.MessageListener
-	headerReader    HeaderReader
+	fetcher         Fetcher
+	peerTracker     *PeerTracker
+	peerPenalizer   *PeerPenalizer
+	messageListener *MessageListener
+	headerReader    BbdHeaderReader
 	tmpDir          string
 	stopped         atomic.Bool
 }
@@ -54,17 +57,17 @@ func NewBackwardBlockDownloader(
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
 	statusDataFactory libsentry.StatusDataFactory,
-	headerReader HeaderReader,
+	headerReader BbdHeaderReader,
 	tmpDir string,
 ) *BackwardBlockDownloader {
-	peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
-	messageListener := p2p.NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-	messageSender := p2p.NewMessageSender(sentryClient)
-	peerTracker := p2p.NewPeerTracker(logger, messageListener)
-	var fetcher p2p.Fetcher
-	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
-	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
-	fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
+	peerPenalizer := NewPeerPenalizer(sentryClient)
+	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
+	messageSender := NewMessageSender(sentryClient)
+	peerTracker := NewPeerTracker(logger, messageListener)
+	var fetcher Fetcher
+	fetcher = NewFetcher(logger, messageListener, messageSender)
+	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
+	fetcher = NewTrackingFetcher(fetcher, peerTracker)
 	return &BackwardBlockDownloader{
 		logger:          logger,
 		fetcher:         fetcher,
@@ -105,7 +108,7 @@ func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 // chain lengths of unlimited size by using an etl for temporarily storing the headers. This is also enabled by a
 // paging-like ResultFeed, which can be used to return pages of blocks as they get fetched in batches.
 //
-// There are a number of Option-s that can be passed in to customise the behaviour of the request:
+// There are a number of BbdOption-s that can be passed in to customise the behaviour of the request:
 //   - WithPeerId - in case the backward needs to happen from a specific peer only
 //     (default: distributes requests across all that have the initial block hash)
 //   - WithBlocksBatchSize - controls the size of the block batch that we fetch from all and send to the result feed
@@ -116,7 +119,7 @@ func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 //     validation of chain length limit breach. With this we can terminate early after fetching the initial header from
 //     peers if the fetched header is too far ahead than the current head. This will prevent further batched backward
 //     fetches of headers until such a chain length limit is breached.
-func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...Option) (ResultFeed, error) {
+func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...BbdOption) (ResultFeed, error) {
 	if bbd.stopped.Load() {
 		return ResultFeed{}, errors.New("backward block downloader is stopped")
 	}
@@ -131,10 +134,10 @@ func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context,
 	return feed, nil
 }
 
-func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...Option) error {
+func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...BbdOption) error {
 	bbd.logger.Debug("[backward-block-downloader] fetching blocks backwards by hash", "hash", hash)
 	// 1. Get all peers
-	config := applyOptions(opts...)
+	config := applyBbdOptions(opts...)
 	peers, err := bbd.loadPeers(config)
 	if err != nil {
 		return err
@@ -177,9 +180,9 @@ func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Conte
 	return bbd.downloadBlocks(ctx, headerCollector, peers, config, feed)
 }
 
-func (bbd *BackwardBlockDownloader) loadPeers(config requestConfig) (peersContext, error) {
+func (bbd *BackwardBlockDownloader) loadPeers(config bbdRequestConfig) (peersContext, error) {
 	if config.peerId != nil {
-		return newPeersContext([]*p2p.PeerId{config.peerId}), nil
+		return newPeersContext([]*PeerId{config.peerId}), nil
 	}
 
 	peers := bbd.peerTracker.ListPeers()
@@ -194,13 +197,13 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	ctx context.Context,
 	hash common.Hash,
 	peers peersContext,
-	config requestConfig,
+	config bbdRequestConfig,
 ) (*types.Header, error) {
 	peersHeadersResponses := make([][]*types.Header, len(peers.all))
 	eg := errgroup.Group{}
-	fetcherOpts := []p2p.FetcherOption{
-		p2p.WithResponseTimeout(config.initialHeaderFetchTimeout),
-		p2p.WithMaxRetries(config.initialHeaderFetchRetries),
+	fetcherOpts := []FetcherOption{
+		WithResponseTimeout(config.initialHeaderFetchTimeout),
+		WithMaxRetries(config.initialHeaderFetchRetries),
 	}
 	for _, peer := range peers.all {
 		eg.Go(func() error {
@@ -257,7 +260,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	initialHeader *types.Header,
 	headerCollector *etl.Collector,
 	peers peersContext,
-	config requestConfig,
+	config bbdRequestConfig,
 ) (*types.Header, error) {
 	headerBytes, err := rlp.EncodeToBytes(initialHeader)
 	if err != nil {
@@ -268,9 +271,9 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		return nil, err
 	}
 
-	fetcherOpts := []p2p.FetcherOption{
-		p2p.WithResponseTimeout(config.headerChainBatchFetchTimeout),
-		p2p.WithMaxRetries(config.headerChainBatchFetchRetries),
+	fetcherOpts := []FetcherOption{
+		WithResponseTimeout(config.headerChainBatchFetchTimeout),
+		WithMaxRetries(config.headerChainBatchFetchRetries),
 	}
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
@@ -381,7 +384,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 	ctx context.Context,
 	headerCollector *etl.Collector,
 	peers peersContext,
-	config requestConfig,
+	config bbdRequestConfig,
 	feed ResultFeed,
 ) error {
 	logProgressTicker := time.NewTicker(30 * time.Second)
@@ -422,7 +425,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	ctx context.Context,
 	headers []*types.Header,
 	peers peersContext,
-	config requestConfig,
+	config bbdRequestConfig,
 	logProgressTicker *time.Ticker,
 	feed ResultFeed,
 ) error {
@@ -459,12 +462,12 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	// download from available peers until all batches are downloaded
-	fetcherOpts := []p2p.FetcherOption{
-		p2p.WithResponseTimeout(config.bodiesBatchFetchTimeout),
-		p2p.WithMaxRetries(config.bodiesBatchFetchRetries),
+	fetcherOpts := []FetcherOption{
+		WithResponseTimeout(config.bodiesBatchFetchTimeout),
+		WithMaxRetries(config.bodiesBatchFetchRetries),
 	}
 	type batchAssignment struct {
-		peerId     p2p.PeerId
+		peerId     PeerId
 		batchIndex int
 	}
 	batchAssignments := make([]batchAssignment, 0, len(headerBatches))
@@ -590,9 +593,9 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	return nil
 }
 
-func newPeersContext(peers []*p2p.PeerId) peersContext {
-	peerIdToIndex := make(map[p2p.PeerId]int, len(peers))
-	peerIndexToId := make(map[int]p2p.PeerId, len(peers))
+func newPeersContext(peers []*PeerId) peersContext {
+	peerIdToIndex := make(map[PeerId]int, len(peers))
+	peerIndexToId := make(map[int]PeerId, len(peers))
 	for i, peer := range peers {
 		peerIdToIndex[*peer] = i
 		peerIndexToId[i] = *peer
@@ -606,19 +609,19 @@ func newPeersContext(peers []*p2p.PeerId) peersContext {
 }
 
 type peersContext struct {
-	all              []*p2p.PeerId
-	peerIdToIndex    map[p2p.PeerId]int
-	peerIndexToId    map[int]p2p.PeerId
+	all              []*PeerId
+	peerIdToIndex    map[PeerId]int
+	peerIndexToId    map[int]PeerId
 	exhaustedPeers   []bool
 	currentPeerIndex int
 }
 
-func (pc *peersContext) nextAvailablePeer() (p2p.PeerId, error) {
+func (pc *peersContext) nextAvailablePeer() (PeerId, error) {
 	var iterations int
 	for pc.exhaustedPeers[pc.currentPeerIndex] {
 		pc.incrementCurrentPeerIndex()
 		if iterations == len(pc.exhaustedPeers) {
-			return p2p.PeerId{}, errors.New("all peers exhausted")
+			return PeerId{}, errors.New("all peers exhausted")
 		}
 		iterations++
 	}
@@ -627,9 +630,9 @@ func (pc *peersContext) nextAvailablePeer() (p2p.PeerId, error) {
 	return peer, nil
 }
 
-func (pc *peersContext) nextAvailablePeers(n int) ([]p2p.PeerId, error) {
-	peers := make([]p2p.PeerId, 0, n)
-	unique := make(map[p2p.PeerId]struct{}, n)
+func (pc *peersContext) nextAvailablePeers(n int) ([]PeerId, error) {
+	peers := make([]PeerId, 0, n)
+	unique := make(map[PeerId]struct{}, n)
 	for len(peers) < n {
 		pid, err := pc.nextAvailablePeer()
 		if err != nil {

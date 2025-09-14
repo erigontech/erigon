@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/bbd"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
@@ -89,7 +89,7 @@ type EngineBlockDownloader struct {
 
 	// V2 downloader
 	v2           bool
-	bbdV2        *bbd.BackwardBlockDownloader
+	bbdV2        *p2p.BackwardBlockDownloader
 	badHeadersV2 *lru.Cache[common.Hash, common.Hash]
 }
 
@@ -104,11 +104,11 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
 	s.Store(Idle)
-	var bbdV2 *bbd.BackwardBlockDownloader
+	var bbdV2 *p2p.BackwardBlockDownloader
 	var badHeadersV2 *lru.Cache[common.Hash, common.Hash]
 	if v2 {
 		hr := headerReader{db: db, blockReader: blockReader}
-		bbdV2 = bbd.NewBackwardBlockDownloader(logger, sentryClient, statusDataProvider.GetStatusData, hr, tmpdir)
+		bbdV2 = p2p.NewBackwardBlockDownloader(logger, sentryClient, statusDataProvider.GetStatusData, hr, tmpdir)
 		var err error
 		badHeadersV2, err = lru.New[common.Hash, common.Hash](1_000_000) // 64mb
 		if err != nil {
