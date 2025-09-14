@@ -22,11 +22,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type ResultFeed struct {
-	ch chan BatchResult
+type BbdResultFeed struct {
+	ch chan BlockBatchResult
 }
 
-func (rf ResultFeed) Next(ctx context.Context) ([]*types.Block, error) {
+func (rf BbdResultFeed) Next(ctx context.Context) ([]*types.Block, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -38,28 +38,28 @@ func (rf ResultFeed) Next(ctx context.Context) ([]*types.Block, error) {
 	}
 }
 
-func (rf ResultFeed) consumeData(ctx context.Context, blocks []*types.Block) error {
+func (rf BbdResultFeed) consumeData(ctx context.Context, blocks []*types.Block) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case rf.ch <- BatchResult{Blocks: blocks}:
+	case rf.ch <- BlockBatchResult{Blocks: blocks}:
 		return nil
 	}
 }
 
-func (rf ResultFeed) consumeErr(ctx context.Context, err error) {
+func (rf BbdResultFeed) consumeErr(ctx context.Context, err error) {
 	select {
 	case <-ctx.Done():
 		return
-	case rf.ch <- BatchResult{Err: err}:
+	case rf.ch <- BlockBatchResult{Err: err}:
 	}
 }
 
-func (rf ResultFeed) close() {
+func (rf BbdResultFeed) close() {
 	close(rf.ch)
 }
 
-type BatchResult struct {
+type BlockBatchResult struct {
 	Blocks []*types.Block
 	Err    error
 }

@@ -106,7 +106,7 @@ func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 // DownloadBlocksBackwards downloads blocks backwards given a starting block hash. It uses the underlying header reader
 // to figure out when a header chain connects with a header that we already have. The backward download can handle
 // chain lengths of unlimited size by using an etl for temporarily storing the headers. This is also enabled by a
-// paging-like ResultFeed, which can be used to return pages of blocks as they get fetched in batches.
+// paging-like BbdResultFeed, which can be used to return pages of blocks as they get fetched in batches.
 //
 // There are a number of BbdOption-s that can be passed in to customise the behaviour of the request:
 //   - WithPeerId - in case the backward needs to happen from a specific peer only
@@ -119,11 +119,11 @@ func (bbd *BackwardBlockDownloader) Run(ctx context.Context) error {
 //     validation of chain length limit breach. With this we can terminate early after fetching the initial header from
 //     peers if the fetched header is too far ahead than the current head. This will prevent further batched backward
 //     fetches of headers until such a chain length limit is breached.
-func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...BbdOption) (ResultFeed, error) {
+func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context, hash common.Hash, opts ...BbdOption) (BbdResultFeed, error) {
 	if bbd.stopped.Load() {
-		return ResultFeed{}, errors.New("backward block downloader is stopped")
+		return BbdResultFeed{}, errors.New("backward block downloader is stopped")
 	}
-	feed := ResultFeed{ch: make(chan BatchResult)}
+	feed := BbdResultFeed{ch: make(chan BlockBatchResult)}
 	go func() {
 		defer feed.close()
 		err := bbd.fetchBlocksBackwardsByHash(ctx, hash, feed, opts...)
@@ -134,7 +134,7 @@ func (bbd *BackwardBlockDownloader) DownloadBlocksBackwards(ctx context.Context,
 	return feed, nil
 }
 
-func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed ResultFeed, opts ...BbdOption) error {
+func (bbd *BackwardBlockDownloader) fetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, feed BbdResultFeed, opts ...BbdOption) error {
 	bbd.logger.Debug("[backward-block-downloader] fetching blocks backwards by hash", "hash", hash)
 	// 1. Get all peers
 	config := applyBbdOptions(opts...)
@@ -385,7 +385,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 	headerCollector *etl.Collector,
 	peers peersContext,
 	config bbdRequestConfig,
-	feed ResultFeed,
+	feed BbdResultFeed,
 ) error {
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
@@ -427,7 +427,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	peers peersContext,
 	config bbdRequestConfig,
 	logProgressTicker *time.Ticker,
-	feed ResultFeed,
+	feed BbdResultFeed,
 ) error {
 	// split the headers into batches
 	neededPeers := min(len(headers), config.maxParallelBodyDownloads)
