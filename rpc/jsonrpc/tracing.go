@@ -241,11 +241,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 
-	if blockNum == 0 {
-		stream.WriteNil()
-		return fmt.Errorf("genesis is not traceable")
-	}
-
 	if !ok {
 		if chainConfig.Bor == nil {
 			stream.WriteNil()
@@ -268,6 +263,11 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 
 		isBorStateSyncTxn = true
+	}
+
+	if blockNum == 0 {
+		stream.WriteNil()
+		return fmt.Errorf("genesis is not traceable")
 	}
 
 	// check pruning to ensure we have history at this block level
