@@ -101,6 +101,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		BlobBaseFee:      blobBaseFee,
 		BaseFeeInBlock:   baseFee.Clone(),
 		ArbOSVersion:     arbOsVersion,
+		BlockGasUsed:     header.GasUsed,
 	}
 }
 
