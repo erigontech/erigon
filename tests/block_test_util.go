@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
-	"github.com/erigontech/erigon/execution/testutil"
+	executiontests "github.com/erigontech/erigon/execution/tests"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -118,9 +118,9 @@ type btHeaderMarshaling struct {
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
-	config, ok := testutil.Forks[bt.json.Network]
+	config, ok := executiontests.Forks[bt.json.Network]
 	if !ok {
-		return testutil.UnsupportedForkError{Name: bt.json.Network}
+		return executiontests.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)

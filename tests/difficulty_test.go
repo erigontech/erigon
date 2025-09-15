@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/testutil"
+	executiontests "github.com/erigontech/erigon/execution/tests"
 )
 
 func TestDifficulty(t *testing.T) {
@@ -45,9 +45,9 @@ func TestDifficulty(t *testing.T) {
 				continue
 			}
 
-			cfg, ok := testutil.Forks[fork]
+			cfg, ok := executiontests.Forks[fork]
 			if !ok {
-				t.Error(testutil.UnsupportedForkError{Name: fork})
+				t.Error(executiontests.UnsupportedForkError{Name: fork})
 				continue
 			}
 
