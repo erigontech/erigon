@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -15,16 +16,18 @@ import (
 )
 
 type SequencerBlobRecoveryCfg struct {
-	db     kv.RwDB
-	zkCfg  *ethconfig.Zk
-	syncer *syncer.L1Syncer
+	db       kv.RwDB
+	zkCfg    *ethconfig.Zk
+	chainCfg *chain.Config
+	syncer   *syncer.L1Syncer
 }
 
-func StageSequencerBlobRecoveryCfg(db kv.RwDB, zkCfg *ethconfig.Zk, syncer *syncer.L1Syncer) SequencerBlobRecoveryCfg {
+func StageSequencerBlobRecoveryCfg(db kv.RwDB, zkCfg *ethconfig.Zk, chainCfg *chain.Config, syncer *syncer.L1Syncer) SequencerBlobRecoveryCfg {
 	return SequencerBlobRecoveryCfg{
-		db:     db,
-		zkCfg:  zkCfg,
-		syncer: syncer,
+		db:       db,
+		zkCfg:    zkCfg,
+		chainCfg: chainCfg,
+		syncer:   syncer,
 	}
 }
 
@@ -118,7 +121,7 @@ LOOP:
 
 			for _, blob := range ocb {
 				for _, input := range blob.BlobInputs {
-					batchNumber, batchL1Data, err := da.CreateL1BatchDataFromBlobInput(hermezDb, input)
+					batchNumber, batchL1Data, err := da.CreateL1BatchDataFromBlobInput(hermezDb, input, cfg.zkCfg, cfg.chainCfg.IsNormalcy(s.BlockNumber))
 					if err != nil {
 						return err
 					}

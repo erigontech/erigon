@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/zk/hermez_db"
 	"github.com/erigontech/erigon/zk/tx"
 	"github.com/erigontech/erigon/zkevm/jsonrpc/client"
@@ -45,7 +46,7 @@ func GetOffChainBlobs(url string, limit, offset uint64) ([]*OffChainBlob, bool, 
 	return ocb, false, nil
 }
 
-func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInput) (uint64, []byte, error) {
+func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInput, zkCfg *ethconfig.Zk, isNormalcy bool) (uint64, []byte, error) {
 	batchNumber, err := hexutil.DecodeUint64(input.BatchNumber)
 	if err != nil {
 		return 0, nil, err
@@ -67,9 +68,21 @@ func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInpu
 	}
 
 	var forkId uint64
-	for idx, batch := range allBatches {
-		if batchNumber >= batch {
-			forkId = allForks[idx]
+
+	if len(allForks) == 1 && allForks[0] == 0 {
+		// this indicates that the network has never had an FEP rollup type assigned to it, so no fork history.
+		// so instead use from the zkevm.pessimistic-fork-number flag.
+		ppFork := zkCfg.PessimisticForkNumber
+		if ppFork == 0 {
+			return 0, nil, fmt.Errorf("zkevm.pessimistic-fork-number flag must be set when running on a network that has never had an FEP rollup type assigned to it")
+		}
+
+		forkId = ppFork
+	} else {
+		for idx, batch := range allBatches {
+			if batchNumber >= batch {
+				forkId = allForks[idx]
+			}
 		}
 	}
 
@@ -94,7 +107,7 @@ func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInpu
 	size := 20 + 32 + 8 + len(batchData)
 
 	// smart contract size limit
-	if size > 120_000 {
+	if !isNormalcy && size > 120_000 {
 		return 0, nil, fmt.Errorf("l1 batch data is too large: %d", size)
 	}
 
