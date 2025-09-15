@@ -150,9 +150,12 @@ func MakeReceipt(
 	}
 	receipt.TxHash = txn.Hash()
 	receipt.GasUsed = result.GasUsed
+	// In the case of blob transaction, we need to possibly unwrap and store the gas used by blobs
+	if t, ok := txn.(*types.BlobTxWrapper); ok {
+		txn = &t.Tx
+	}
 	if txn.Type() == types.BlobTxType {
-		blobTx := txn.(*types.BlobTx)
-		receipt.BlobGasUsed = uint64(len(blobTx.GetBlobHashes()) * int(params.GasPerBlob))
+		receipt.BlobGasUsed = uint64(len(txn.GetBlobHashes()) * int(params.GasPerBlob))
 	}
 	// If the transaction created a contract, store the creation address in the receipt.
 	if msg.To() == nil {
@@ -161,7 +164,6 @@ func MakeReceipt(
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	// receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(ibs.TxnIndex())
 	return receipt
