@@ -95,7 +95,6 @@ func SpawnL1SequencerSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
-	defer cfg.syncer.ClearHeaderCache()
 
 	idleTicker := time.NewTimer(10 * time.Second)
 	latestActivity := time.Now()

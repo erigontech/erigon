@@ -11,6 +11,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/iden3/go-iden3-crypto/keccak256"
 	"golang.org/x/sync/singleflight"
 
@@ -90,13 +91,14 @@ type L1Syncer struct {
 	logsChanProgress          chan string
 	requestCloseConsumChannel bool
 
-	highestBlockType string   // finalized, latest, safe
-	headersCache     sync.Map // map[uint64]*ethTypes.Header // cache for headers
+	highestBlockType string                                   // finalized, latest, safe
+	headersCache     *expirable.LRU[uint64, *ethTypes.Header] // cache for headers
 	sfGroup          singleflight.Group
 	fetchHeaders     bool
 }
 
 func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string, firstL1Block uint64) *L1Syncer {
+	headersCache := expirable.NewLRU[uint64, *ethTypes.Header](int(blockRange), nil, time.Minute*10)
 	return &L1Syncer{
 		ctx:                 ctx,
 		etherMans:           etherMans,
@@ -110,7 +112,7 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		logsChanProgress:    make(chan string, 1),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
-		headersCache:        sync.Map{},
+		headersCache:        headersCache,
 	}
 }
 
@@ -242,8 +244,8 @@ func (s *L1Syncer) GetHeader(number uint64) (*ethTypes.Header, error) {
 }
 
 func (s *L1Syncer) getHeader(em IEtherman, number uint64) (*ethTypes.Header, error) {
-	if header, ok := s.headersCache.Load(number); ok {
-		return header.(*ethTypes.Header), nil
+	if header, ok := s.headersCache.Get(number); ok {
+		return header, nil
 	}
 
 	// Deduplicate concurrent requests
@@ -252,7 +254,7 @@ func (s *L1Syncer) getHeader(em IEtherman, number uint64) (*ethTypes.Header, err
 		if err != nil {
 			return nil, err
 		}
-		s.headersCache.Store(number, header)
+		s.headersCache.Add(number, header)
 		return header, nil
 	})
 
@@ -260,10 +262,6 @@ func (s *L1Syncer) getHeader(em IEtherman, number uint64) (*ethTypes.Header, err
 		return nil, err
 	}
 	return v.(*ethTypes.Header), nil
-}
-
-func (s *L1Syncer) ClearHeaderCache() {
-	s.headersCache = sync.Map{}
 }
 
 func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
@@ -344,7 +342,7 @@ func (s *L1Syncer) l1QueryHeaders(logs []ethTypes.Log) error {
 				logQueue <- l
 				continue
 			}
-			s.headersCache.Store(header.Number.Uint64(), header)
+			s.headersCache.Add(l.BlockNumber, header)
 			wg.Done()
 		}
 	}

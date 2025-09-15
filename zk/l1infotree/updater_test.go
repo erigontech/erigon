@@ -74,10 +74,6 @@ func (m *MockSyncer) QueryForRootLog(to uint64) (*types.Log, error) {
 	return args.Get(0).(*types.Log), args.Error(1)
 }
 
-func (m *MockSyncer) ClearHeaderCache() {
-	m.Called()
-}
-
 func (m *MockSyncer) GetDoneChan() <-chan uint64 {
 	args := m.Called()
 	return args.Get(0).(<-chan uint64)
@@ -422,7 +418,6 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 			// Set up mock expectations
 			mockSyncer.On("GetLogsChan").Return((<-chan []types.Log)(logsChan))
 			mockSyncer.On("GetProgressMessageChan").Return((<-chan string)(make(chan string)))
-			mockSyncer.On("ClearHeaderCache").Return()
 			mockSyncer.On("StopQueryBlocks").Return().Maybe()
 			mockSyncer.On("ConsumeQueryBlocks").Return().Maybe()
 			mockSyncer.On("WaitQueryBlocksToFinish").Return().Maybe()

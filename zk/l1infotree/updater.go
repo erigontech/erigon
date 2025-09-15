@@ -37,7 +37,6 @@ type Syncer interface {
 	ConsumeQueryBlocks()
 	WaitQueryBlocksToFinish()
 	QueryForRootLog(to uint64) (*types.Log, error)
-	ClearHeaderCache()
 }
 
 type L2InfoReaderRpc interface {
@@ -381,7 +380,6 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 			log.Info(fmt.Sprintf("[%s] CheckForInfoTreeUpdates failed", logPrefix), "err", err)
 			u.StopProcessing()
 		}
-		u.syncer.ClearHeaderCache()
 	}()
 
 	u.latestActivity = time.Now()

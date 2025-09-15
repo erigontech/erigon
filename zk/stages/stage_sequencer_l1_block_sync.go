@@ -125,7 +125,6 @@ func SpawnSequencerL1BlockSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
-	defer cfg.syncer.ClearHeaderCache()
 
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
