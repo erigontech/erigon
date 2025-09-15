@@ -13,8 +13,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
+	chaos_monkey "github.com/erigontech/erigon/execution/tests/chaos-monkey"
 	"github.com/erigontech/erigon/execution/types"
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 
 type serialExecutor struct {
