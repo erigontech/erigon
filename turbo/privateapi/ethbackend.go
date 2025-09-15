@@ -520,6 +520,6 @@ func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *empty
 	}
 	defer tx.Rollback()
 
-	blockNum, err := s.blockReader.EarliestBlockNum(ctx, tx)
+	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
 	return &remoteproto.EarliestBlockAvailableReply{BlockNum: blockNum}, err
 }

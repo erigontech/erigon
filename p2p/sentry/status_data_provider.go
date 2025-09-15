@@ -133,7 +133,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.St
 	var earliestBlock uint64
 	if err := s.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		earliestBlock, err = s.blockReader.EarliestBlockNum(ctx, tx)
+		earliestBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
 		return err
 	}); err != nil {
 		return nil, fmt.Errorf("GetStatusData: earliest block number error: %w", err)

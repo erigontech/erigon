@@ -19,6 +19,7 @@ package freezeblocks
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -67,7 +68,7 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	return block, err
 }
 
-func (r *RemoteBlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
+func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Getter) (uint64, error) {
 	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
 	if err != nil {
 		return 0, err
@@ -430,25 +431,28 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
-func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint64, error) {
-	// Find the earliest block that has complete data across all types (headers, bodies, transactions)
-	snapshotTypes := []snaptype.Enum{
-		snaptype2.Enums.Headers,
-		snaptype2.Enums.Bodies,
-		snaptype2.Enums.Transactions,
-	}
 
-	snapshotMin := uint64(0)
-	for _, snapType := range snapshotTypes {
-		if minBlock, ok := r.sn.SegmentsMinByType(snapType); ok {
-			if minBlock > snapshotMin {
-				snapshotMin = minBlock
+func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Getter) (uint64, error) {
+	if r.FrozenBlocks() > 0 {
+		snapshotTypes := []snaptype.Enum{
+			snaptype2.Enums.Headers,
+			snaptype2.Enums.Bodies,
+			snaptype2.Enums.Transactions,
+		}
+
+		snapshotMin := uint64(0)
+		for _, snapType := range snapshotTypes {
+			if minBlock, ok := r.sn.SegmentsMinByType(snapType); ok {
+				if minBlock > snapshotMin {
+					snapshotMin = minBlock
+				}
 			}
 		}
+		return snapshotMin, nil
 	}
 
 	if tx == nil {
-		return snapshotMin, nil
+		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
 	}
 
 	var dbMinBlock = uint64(math.MaxUint64)
@@ -460,31 +464,16 @@ func (r *BlockReader) EarliestBlockNum(ctx context.Context, tx kv.Getter) (uint6
 		}
 	}
 
-	if dbMinBlock != math.MaxUint64 && dbMinBlock < snapshotMin {
-		return dbMinBlock, nil
-	}
-
-	return snapshotMin, nil
+	return dbMinBlock, nil
 }
 
 // findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
-	bodyCursor, err := tx.Cursor(kv.BlockBody)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create BlockBody cursor: %w", err)
-	}
-	defer bodyCursor.Close()
-
-	_, _, err = bodyCursor.First()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get genesis BlockBody key: %w", err)
-	}
-
-	// Get first key after genesis, otherwise this function always returns 0
-	firstKey, _, err := bodyCursor.Next()
+	firstKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
 	}
+
 	if len(firstKey) < 8 {
 		return math.MaxUint64, nil // no body data found
 	}
