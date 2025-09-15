@@ -89,7 +89,9 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService executionproto.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
-	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool,
+	txPool txpoolproto.TxpoolClient,
+) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
@@ -102,6 +104,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		caplin:            caplin,
 		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 		printPectraBanner: true,
+		txpool:            txPool,
 	}
 
 	srv.consuming.Store(consuming)
@@ -118,7 +121,6 @@ func (e *EngineServer) Start(
 	stateCache kvcache.Cache,
 	engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend,
-	txPool txpoolproto.TxpoolClient,
 	mining txpoolproto.MiningClient,
 ) error {
 	var eg errgroup.Group
@@ -130,8 +132,7 @@ func (e *EngineServer) Start(
 		})
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
-	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
-	e.txpool = txPool
+	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 
 	apiList := []rpc.API{
 		{

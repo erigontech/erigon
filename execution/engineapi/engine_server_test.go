@@ -113,7 +113,7 @@ func TestGetBlobsV1(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true, txPool)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
@@ -122,7 +122,7 @@ func TestGetBlobsV1(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
@@ -163,7 +163,7 @@ func TestGetBlobsV2(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true, txPool)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
@@ -172,7 +172,7 @@ func TestGetBlobsV2(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
