@@ -17,12 +17,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tests
+package executiontests
 
 import (
 	"testing"
 
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestTransaction(t *testing.T) {
@@ -38,7 +39,7 @@ func TestTransaction(t *testing.T) {
 	// because of the gas limit
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 
-	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
+	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *testutil.TransactionTest) {
 		cfg := chainspec.Mainnet.Config
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)

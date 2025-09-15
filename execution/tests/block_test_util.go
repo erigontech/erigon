@@ -17,8 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package tests implements execution of Ethereum JSON tests.
-package tests
+package executiontests
 
 import (
 	"bytes"
@@ -45,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/mock"
-	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -118,9 +117,9 @@ type btHeaderMarshaling struct {
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
-	config, ok := executiontests.Forks[bt.json.Network]
+	config, ok := testutil.Forks[bt.json.Network]
 	if !ok {
-		return executiontests.UnsupportedForkError{Name: bt.json.Network}
+		return testutil.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
