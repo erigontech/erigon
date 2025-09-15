@@ -90,7 +90,7 @@ type ETHBACKENDClient interface {
 	BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error)
 	AAValidation(ctx context.Context, in *AAValidationRequest, opts ...grpc.CallOption) (*AAValidationReply, error)
 	BlockForTxNum(ctx context.Context, in *BlockForTxNumRequest, opts ...grpc.CallOption) (*BlockForTxNumResponse, error)
-	MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EarliestBlockAvailableReply, error)
+	MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MinimumBlockAvailableReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -343,9 +343,9 @@ func (c *eTHBACKENDClient) BlockForTxNum(ctx context.Context, in *BlockForTxNumR
 	return out, nil
 }
 
-func (c *eTHBACKENDClient) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EarliestBlockAvailableReply, error) {
+func (c *eTHBACKENDClient) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MinimumBlockAvailableReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(EarliestBlockAvailableReply)
+	out := new(MinimumBlockAvailableReply)
 	err := c.cc.Invoke(ctx, ETHBACKEND_MinimumBlockAvailable_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -396,7 +396,7 @@ type ETHBACKENDServer interface {
 	BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error)
 	AAValidation(context.Context, *AAValidationRequest) (*AAValidationReply, error)
 	BlockForTxNum(context.Context, *BlockForTxNumRequest) (*BlockForTxNumResponse, error)
-	MinimumBlockAvailable(context.Context, *emptypb.Empty) (*EarliestBlockAvailableReply, error)
+	MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -476,7 +476,7 @@ func (UnimplementedETHBACKENDServer) AAValidation(context.Context, *AAValidation
 func (UnimplementedETHBACKENDServer) BlockForTxNum(context.Context, *BlockForTxNumRequest) (*BlockForTxNumResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BlockForTxNum not implemented")
 }
-func (UnimplementedETHBACKENDServer) MinimumBlockAvailable(context.Context, *emptypb.Empty) (*EarliestBlockAvailableReply, error) {
+func (UnimplementedETHBACKENDServer) MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MinimumBlockAvailable not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}

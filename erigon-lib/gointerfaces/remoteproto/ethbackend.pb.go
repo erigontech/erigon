@@ -1922,27 +1922,27 @@ func (x *BlockForTxNumResponse) GetPresent() bool {
 	return false
 }
 
-type EarliestBlockAvailableReply struct {
+type MinimumBlockAvailableReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	BlockNum      uint64                 `protobuf:"varint,1,opt,name=block_num,json=blockNum,proto3" json:"block_num,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *EarliestBlockAvailableReply) Reset() {
-	*x = EarliestBlockAvailableReply{}
+func (x *MinimumBlockAvailableReply) Reset() {
+	*x = MinimumBlockAvailableReply{}
 	mi := &file_remote_ethbackend_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *EarliestBlockAvailableReply) String() string {
+func (x *MinimumBlockAvailableReply) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*EarliestBlockAvailableReply) ProtoMessage() {}
+func (*MinimumBlockAvailableReply) ProtoMessage() {}
 
-func (x *EarliestBlockAvailableReply) ProtoReflect() protoreflect.Message {
+func (x *MinimumBlockAvailableReply) ProtoReflect() protoreflect.Message {
 	mi := &file_remote_ethbackend_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1954,12 +1954,12 @@ func (x *EarliestBlockAvailableReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use EarliestBlockAvailableReply.ProtoReflect.Descriptor instead.
-func (*EarliestBlockAvailableReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use MinimumBlockAvailableReply.ProtoReflect.Descriptor instead.
+func (*MinimumBlockAvailableReply) Descriptor() ([]byte, []int) {
 	return file_remote_ethbackend_proto_rawDescGZIP(), []int{39}
 }
 
-func (x *EarliestBlockAvailableReply) GetBlockNum() uint64 {
+func (x *MinimumBlockAvailableReply) GetBlockNum() uint64 {
 	if x != nil {
 		return x.BlockNum
 	}
@@ -2127,15 +2127,15 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x05txnum\x18\x01 \x01(\x04R\x05txnum\"T\n" +
 	"\x15BlockForTxNumResponse\x12!\n" +
 	"\fblock_number\x18\x01 \x01(\x04R\vblockNumber\x12\x18\n" +
-	"\apresent\x18\x02 \x01(\bR\apresent\":\n" +
-	"\x1bEarliestBlockAvailableReply\x12\x1b\n" +
+	"\apresent\x18\x02 \x01(\bR\apresent\"9\n" +
+	"\x1aMinimumBlockAvailableReply\x12\x1b\n" +
 	"\tblock_num\x18\x01 \x01(\x04R\bblockNum*J\n" +
 	"\x05Event\x12\n" +
 	"\n" +
 	"\x06HEADER\x10\x00\x12\x10\n" +
 	"\fPENDING_LOGS\x10\x01\x12\x11\n" +
 	"\rPENDING_BLOCK\x10\x02\x12\x10\n" +
-	"\fNEW_SNAPSHOT\x10\x032\x81\r\n" +
+	"\fNEW_SNAPSHOT\x10\x032\x80\r\n" +
 	"\n" +
 	"ETHBACKEND\x12=\n" +
 	"\tEtherbase\x12\x18.remote.EtherbaseRequest\x1a\x16.remote.EtherbaseReply\x12@\n" +
@@ -2162,8 +2162,8 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\fBorTxnLookup\x12\x1b.remote.BorTxnLookupRequest\x1a\x19.remote.BorTxnLookupReply\x12=\n" +
 	"\tBorEvents\x12\x18.remote.BorEventsRequest\x1a\x16.remote.BorEventsReply\x12F\n" +
 	"\fAAValidation\x12\x1b.remote.AAValidationRequest\x1a\x19.remote.AAValidationReply\x12L\n" +
-	"\rBlockForTxNum\x12\x1c.remote.BlockForTxNumRequest\x1a\x1d.remote.BlockForTxNumResponse\x12T\n" +
-	"\x15MinimumBlockAvailable\x12\x16.google.protobuf.Empty\x1a#.remote.EarliestBlockAvailableReplyB\x16Z\x14./remote;remoteprotob\x06proto3"
+	"\rBlockForTxNum\x12\x1c.remote.BlockForTxNumRequest\x1a\x1d.remote.BlockForTxNumResponse\x12S\n" +
+	"\x15MinimumBlockAvailable\x12\x16.google.protobuf.Empty\x1a\".remote.MinimumBlockAvailableReplyB\x16Z\x14./remote;remoteprotob\x06proto3"
 
 var (
 	file_remote_ethbackend_proto_rawDescOnce sync.Once
@@ -2220,7 +2220,7 @@ var file_remote_ethbackend_proto_goTypes = []any{
 	(*AAValidationReply)(nil),                        // 37: remote.AAValidationReply
 	(*BlockForTxNumRequest)(nil),                     // 38: remote.BlockForTxNumRequest
 	(*BlockForTxNumResponse)(nil),                    // 39: remote.BlockForTxNumResponse
-	(*EarliestBlockAvailableReply)(nil),              // 40: remote.EarliestBlockAvailableReply
+	(*MinimumBlockAvailableReply)(nil),               // 40: remote.MinimumBlockAvailableReply
 	(*SyncingReply_StageProgress)(nil),               // 41: remote.SyncingReply.StageProgress
 	(*typesproto.H160)(nil),                          // 42: types.H160
 	(*typesproto.H256)(nil),                          // 43: types.H256
@@ -2300,7 +2300,7 @@ var file_remote_ethbackend_proto_depIdxs = []int32{
 	52, // 62: remote.ETHBACKEND.BorEvents:output_type -> remote.BorEventsReply
 	37, // 63: remote.ETHBACKEND.AAValidation:output_type -> remote.AAValidationReply
 	39, // 64: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
-	40, // 65: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.EarliestBlockAvailableReply
+	40, // 65: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.MinimumBlockAvailableReply
 	42, // [42:66] is the sub-list for method output_type
 	18, // [18:42] is the sub-list for method input_type
 	18, // [18:18] is the sub-list for extension type_name

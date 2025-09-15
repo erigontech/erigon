@@ -265,6 +265,6 @@ func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remotepr
 	return s.server.BlockForTxNum(ctx, in)
 }
 
-func (s *EthBackendClientDirect) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.EarliestBlockAvailableReply, error) {
+func (s *EthBackendClientDirect) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.MinimumBlockAvailableReply, error) {
 	return s.server.MinimumBlockAvailable(ctx, in)
 }
