@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/contracts"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/tests/contracts"
 )
 
 func TestSelfDestructReceive(t *testing.T) {
