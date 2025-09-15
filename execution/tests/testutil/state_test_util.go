@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -143,8 +144,8 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 		ok                    bool
 		baseName, eipsStrings = splitForks[0], splitForks[1:]
 	)
-	if baseConfig, ok = Forks[baseName]; !ok {
-		return nil, nil, UnsupportedForkError{Name: baseName}
+	if baseConfig, ok = testforks.Forks[baseName]; !ok {
+		return nil, nil, testforks.UnsupportedForkError{Name: baseName}
 	}
 	for _, eip := range eipsStrings {
 		if eipNum, err := strconv.Atoi(eip); err != nil {
@@ -192,12 +193,12 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, common.Hash{}, 0, UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := genesiswrite.GenesisToBlock(tb, t.genesis(config), dirs, log.Root())
 	if err != nil {
-		return nil, common.Hash{}, 0, UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	readBlockNr := block.NumberU64()
@@ -205,13 +206,13 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 
 	_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
 	if err != nil {
-		return nil, common.Hash{}, 0, UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	txc := wrap.NewTxContainer(tx, nil)
 	domains, err := dbstate.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
-		return nil, common.Hash{}, 0, UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
