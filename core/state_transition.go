@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/erigontech/erigon-lib/chain/arb"
+	"github.com/erigontech/erigon/arb/os"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -233,7 +233,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 			isCancun := st.evm.ChainRules().IsCancun
 			if st.evm.ChainRules().IsArbitrum {
-				isCancun = isCancun && st.evm.Context.ArbOSVersion >= arb.ArbosVersion_20
+				isCancun = isCancun && st.evm.Context.ArbOSVersion >= os.ArbosVersion_20
 			}
 			if isCancun {
 				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))

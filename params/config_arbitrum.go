@@ -18,8 +18,8 @@ package params
 
 import (
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/arb"
 	"github.com/erigontech/erigon-lib/common"
+	chain2 "github.com/erigontech/erigon/arb/os"
 
 	"math/big"
 )
@@ -29,7 +29,7 @@ func ArbitrumOneParams() chain.ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_6,
+		InitialArbOSVersion:       chain2.ArbosVersion_6,
 		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
 	}
 }
@@ -39,7 +39,7 @@ func ArbitrumNovaParams() chain.ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       arb.ArbosVersion_1,
+		InitialArbOSVersion:       chain2.ArbosVersion_1,
 		InitialChainOwner:         common.HexToAddress("0x9C040726F2A657226Ed95712245DeE84b650A1b5"),
 	}
 }
@@ -49,7 +49,7 @@ func ArbitrumRollupGoerliTestnetParams() chain.ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_2,
+		InitialArbOSVersion:       chain2.ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -59,7 +59,7 @@ func ArbitrumDevTestParams() chain.ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_32,
+		InitialArbOSVersion:       chain2.ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -69,7 +69,7 @@ func ArbitrumDevTestDASParams() chain.ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       arb.ArbosVersion_32,
+		InitialArbOSVersion:       chain2.ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -79,7 +79,7 @@ func ArbitrumAnytrustGoerliTestnetParams() chain.ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       arb.ArbosVersion_2,
+		InitialArbOSVersion:       chain2.ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -89,7 +89,7 @@ func DisableArbitrumParams() chain.ArbitrumChainParams {
 		EnableArbOS:               false,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       arb.ArbosVersion_0,
+		InitialArbOSVersion:       chain2.ArbosVersion_0,
 		InitialChainOwner:         common.Address{},
 	}
 }

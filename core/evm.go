@@ -24,7 +24,7 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/chain/arb"
+	chain2 "github.com/erigontech/erigon/arb/os"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
@@ -83,7 +83,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 	// assert if network is ARB0 to change pervrandao
 	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	if arbOsVersion > arb.ArbosVersion_0 {
+	if arbOsVersion > chain2.ArbosVersion_0 {
 		difficultyHash := common.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
 	}
