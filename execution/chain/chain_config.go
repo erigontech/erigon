@@ -164,6 +164,7 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
+		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
 )
