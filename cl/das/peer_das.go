@@ -82,7 +82,7 @@ func NewPeerDas(
 		blobStorage:       blobStorage,
 		sentinel:          sentinel,
 		ethClock:          ethClock,
-		recoverBlobsQueue: make(chan recoverBlobsRequest, 32),
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
 
 		recoveringMutex: sync.Mutex{},
 		isRecovering:    make(map[common.Hash]bool),
@@ -255,11 +255,13 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			}
 		}
 		numberOfBlobs := uint64(anyColumnSidecar.Column.Len())
+		beginRecoverMatrix := time.Now()
 		blobMatrix, err := peerdasutils.RecoverMatrix(matrixEntries, numberOfBlobs)
 		if err != nil {
 			log.Warn("[blobsRecover] failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 			return
 		}
+		timeRecoverMatrix := time.Since(beginRecoverMatrix)
 		log.Trace("[blobsRecover] recovered matrix", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
 		// Recover blobs from the matrix
@@ -333,12 +335,17 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			return
 		}
 		beginRemove := time.Now()
+		toRemove := []int64{}
 		for _, column := range existingColumns {
 			if _, ok := custodyColumns[column]; !ok {
-				if err := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(column)); err != nil {
+				toRemove = append(toRemove, int64(column))
+				/*if err := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(column)); err != nil {
 					log.Warn("[blobsRecover] failed to remove column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", column)
-				}
+				}*/
 			}
+		}
+		if err := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, toRemove...); err != nil {
+			log.Warn("[blobsRecover] failed to remove column sidecars", "err", err, "slot", slot, "blockRoot", blockRoot, "columns", toRemove)
 		}
 		timeRemove := time.Since(beginRemove)
 		// add custody data column if it doesn't exist
@@ -384,7 +391,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			}
 		}
 		timeAdd := time.Since(beginAdd)
-		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin), "timeRecover", timeRecover, "timeInclusionProof", timeInclusionProof, "timeRemove", timeRemove, "timeAdd", timeAdd)
+		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin), "timeRecoverMatrix", timeRecoverMatrix, "timeRecover", timeRecover, "timeInclusionProof", timeInclusionProof, "timeRemove", timeRemove, "timeAdd", timeAdd)
 	}
 
 	// main loop
