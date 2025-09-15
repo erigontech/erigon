@@ -656,10 +656,9 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 	if engineInfo.EngineSrv != nil {
 		engineInfo.EngineSrv.Stop()
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	if engineInfo.EngineListener != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		shutdownErr := engineInfo.EngineListener.Shutdown(shutdownCtx)
 		logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint, "shutdownErr", shutdownErr)
 	}
