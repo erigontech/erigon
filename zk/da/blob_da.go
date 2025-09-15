@@ -46,7 +46,7 @@ func GetOffChainBlobs(url string, limit, offset uint64) ([]*OffChainBlob, bool, 
 	return ocb, false, nil
 }
 
-func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInput, zkCfg *ethconfig.Zk, isNormalcy bool) (uint64, []byte, error) {
+func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInput, zkCfg *ethconfig.Zk, isNormalcy bool, irt *InfoRootTracker) (uint64, []byte, error) {
 	batchNumber, err := hexutil.DecodeUint64(input.BatchNumber)
 	if err != nil {
 		return 0, nil, err
@@ -98,24 +98,47 @@ func CreateL1BatchDataFromBlobInput(hermezDb *hermez_db.HermezDb, input BlobInpu
 		}
 	}
 
-	l1InfoRoot, err := hermezDb.GetL1InfoRootByIndex(uint64(highestIndexUsed))
-	if err != nil {
-		return 0, nil, fmt.Errorf("GetL1InfoRootByIndex failed for index %d: %w", highestIndexUsed, err)
+	// we have a new root
+	if highestIndexUsed > 0 {
+		newL1InfoRoot, err := hermezDb.GetL1InfoRootByIndex(uint64(highestIndexUsed))
+		if err != nil {
+			return 0, nil, fmt.Errorf("GetL1InfoRootByIndex failed for index %d: %w", highestIndexUsed, err)
+		}
+
+		irt.Set(newL1InfoRoot)
 	}
 
 	// coinbase + l1InfoRoot + limitTimestamp + batchData
 	size := 20 + 32 + 8 + len(batchData)
 
 	// smart contract size limit
-	if !isNormalcy && size > 120_000 {
+	if !isNormalcy && size > tx.LIMIT_120_KB {
 		return 0, nil, fmt.Errorf("l1 batch data is too large: %d", size)
 	}
 
 	data := make([]byte, size)
 	copy(data, input.Coinbase.Bytes())
-	copy(data[20:], l1InfoRoot.Bytes())
+	copy(data[20:], irt.Get().Bytes())
 	copy(data[52:], limitTimestamp)
 	copy(data[60:], batchData)
 
 	return batchNumber, data, nil
+}
+
+type InfoRootTracker struct {
+	infoRoot common.Hash
+}
+
+func NewInfoRootTracker(root common.Hash) *InfoRootTracker {
+	return &InfoRootTracker{
+		infoRoot: root,
+	}
+}
+
+func (i *InfoRootTracker) Get() common.Hash {
+	return i.infoRoot
+}
+
+func (i *InfoRootTracker) Set(h common.Hash) {
+	i.infoRoot = h
 }

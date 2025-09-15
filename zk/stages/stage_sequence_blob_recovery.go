@@ -93,6 +93,7 @@ func SpawnSequencerBlobRecoveryStage(s *stagedsync.StageState, u stagedsync.Unwi
 	if highestBatch > 0 && highestKnownBatch == highestBatch {
 		log.Info(fmt.Sprintf("[%s] Blob recovery has completed!", logPrefix), "batch", highestBatch)
 		time.Sleep(5 * time.Second)
+		return nil
 	}
 
 	logTicker := time.NewTicker(5 * time.Second)
@@ -103,40 +104,48 @@ func SpawnSequencerBlobRecoveryStage(s *stagedsync.StageState, u stagedsync.Unwi
 	offset := uint64(0)
 	limit := cfg.zkCfg.BlobRecoveryBlobLimit
 
-LOOP:
+	// get initial info root
+	l1InfoRoot, err := hermezDb.GetL1InfoRootByIndex(uint64(0))
+	if err != nil {
+		return nil
+	}
+
+	irt := da.NewInfoRootTracker(l1InfoRoot)
+
 	for {
 		select {
 		case <-logTicker.C:
 			log.Info(fmt.Sprintf("[%s] Syncing batches from Blob DA", logPrefix), "elapsed/s", time.Since(start).Seconds())
 		default:
-			ocb, finished, err := da.GetOffChainBlobs(cfg.zkCfg.BlobDAUrl, limit, offset)
-			if err != nil {
-				return err
-			}
+		}
 
-			if finished {
-				log.Info(fmt.Sprintf("[%s] Finished syncing batches from blobs in Blob DA", logPrefix))
-				break LOOP
-			}
+		ocb, finished, err := da.GetOffChainBlobs(cfg.zkCfg.BlobDAUrl, limit, offset)
+		if err != nil {
+			return err
+		}
 
-			for _, blob := range ocb {
-				for _, input := range blob.BlobInputs {
-					batchNumber, batchL1Data, err := da.CreateL1BatchDataFromBlobInput(hermezDb, input, cfg.zkCfg, cfg.chainCfg.IsNormalcy(s.BlockNumber))
-					if err != nil {
-						return err
-					}
+		if finished {
+			log.Info(fmt.Sprintf("[%s] Finished syncing batches from blobs in Blob DA", logPrefix))
+			break
+		}
 
-					if err = hermezDb.WriteL1BatchData(batchNumber, batchL1Data); err != nil {
-						return err
-					}
+		for _, blob := range ocb {
+			for _, input := range blob.BlobInputs {
+				batchNumber, batchL1Data, err := da.CreateL1BatchDataFromBlobInput(hermezDb, input, cfg.zkCfg, cfg.chainCfg.IsNormalcy(s.BlockNumber), irt)
+				if err != nil {
+					return err
 				}
 
-				log.Info(fmt.Sprintf("[%s] Processed batches from blob DA", logPrefix), "startBatch", blob.StartBatch, "endBatch", blob.EndBatch)
+				if err = hermezDb.WriteL1BatchData(batchNumber, batchL1Data); err != nil {
+					return err
+				}
 			}
 
-			// increment the offset for the next iteration
-			offset += limit
+			log.Info(fmt.Sprintf("[%s] Processed batches from blob DA", logPrefix), "startBatch", blob.StartBatch, "endBatch", blob.EndBatch)
 		}
+
+		// increment the offset for the next iteration
+		offset += limit
 	}
 
 	if freshTx {

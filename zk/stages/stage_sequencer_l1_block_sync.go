@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	zktx "github.com/erigontech/erigon/zk/tx"
 	"time"
 
 	"encoding/binary"
@@ -195,7 +196,7 @@ LOOP:
 					b := initBatch + uint64(idx)
 
 					size := 20 + 32 + 8 + len(batch)
-					if size > LIMIT_120_KB {
+					if size > zktx.LIMIT_120_KB {
 						log.Error(fmt.Sprintf("[%s] L1 batch data is too large", logPrefix), "size", size)
 						funcErr = fmt.Errorf("L1 batch data is too large: %d", size)
 						return funcErr

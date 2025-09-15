@@ -44,6 +44,10 @@ const (
 	changeL2BlockTxType = 11
 	changeL2BlockLength = 9
 	fullRlpTxType       = 15
+
+	// hard coded to match in with the smart contract
+	// https://github.com/0xPolygonHermez/zkevm-contracts/blob/73758334f8568b74e9493fcc530b442bd73325dc/contracts/PolygonZkEVM.sol#L119C63-L119C69
+	LIMIT_120_KB = 120_000
 )
 
 var (

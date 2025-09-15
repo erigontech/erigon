@@ -97,6 +97,7 @@ func SequencerZkStages(
 		{
 			ID:          stages2.BlobRecovery,
 			Description: "Sequencer Blob DA Recovery",
+			Disabled:    !sequencerBlobRecoveryCfg.zkCfg.IsBlobRecovery(),
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, unwinder stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnSequencerBlobRecoveryStage(s, unwinder, ctx, txc.Tx, sequencerBlobRecoveryCfg, logger)
 			},
