@@ -136,6 +136,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
 				l1BatchInfo, err := hDB.GetSequenceByBatchNo(1)
 				require.NoError(t, err)
+				require.NotNil(t, l1BatchInfo)
 
 				require.Equal(t, l1BatchInfo.BatchNo, uint64(1))
 				require.Equal(t, l1BatchInfo.L1BlockNo, latestBlockNumber.Uint64())
@@ -162,6 +163,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
 				l1BatchInfo, err := hDB.GetSequenceByBatchNo(2)
 				require.NoError(t, err)
+				require.NotNil(t, l1BatchInfo)
 
 				require.Equal(t, l1BatchInfo.BatchNo, uint64(2))
 				require.Equal(t, l1BatchInfo.L1BlockNo, latestBlockNumber.Uint64())
@@ -188,6 +190,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
 				l1BatchInfo, err := hDB.GetVerificationByBatchNo(3)
 				require.NoError(t, err)
+				require.NotNil(t, l1BatchInfo)
 
 				require.Equal(t, l1BatchInfo.BatchNo, uint64(3))
 				require.Equal(t, l1BatchInfo.L1BlockNo, latestBlockNumber.Uint64())
@@ -214,6 +217,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
 				l1BatchInfo, err := hDB.GetVerificationByBatchNo(4)
 				require.NoError(t, err)
+				require.NotNil(t, l1BatchInfo)
 
 				require.Equal(t, l1BatchInfo.BatchNo, uint64(4))
 				require.Equal(t, l1BatchInfo.L1BlockNo, latestBlockNumber.Uint64())
@@ -242,6 +246,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
 				l1BatchInfo, err := hDB.GetVerificationByBatchNo(5)
 				require.NoError(t, err)
+				require.NotNil(t, l1BatchInfo)
 
 				require.Equal(t, l1BatchInfo.BatchNo, uint64(5))
 				require.Equal(t, l1BatchInfo.L1BlockNo, latestBlockNumber.Uint64())
@@ -297,7 +302,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 	EthermanMock.EXPECT().FilterLogs(gomock.Any(), filterQuery).Return(filteredLogs, nil).AnyTimes()
 	EthermanMock.EXPECT().HeaderByNumber(gomock.Any(), gomock.Any()).Return(genesisHeader, nil).AnyTimes()
 
-	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 10, "latest", 0)
+	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 1, "latest", 0)
 
 	zkCfg := &ethconfig.Zk{
 		L1RollupId:   rollupID,
@@ -307,8 +312,11 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 	quiet := false
 
 	// Act
-	err = SpawnStageL1Syncer(s, u, ctx, tx, cfg, quiet)
-	require.NoError(t, err)
+	require.True(t, WaitFor(5*time.Second, func() bool {
+		err = SpawnStageL1Syncer(s, u, ctx, tx, cfg, quiet)
+		require.NoError(t, err)
+		return l1Syncer.GetLastCheckedL1Block() >= latestBlockNumber.Uint64()
+	}))
 
 	// Assert
 	for _, tc := range testCases {

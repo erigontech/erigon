@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
@@ -81,7 +82,7 @@ func newStageEnv(t *testing.T) *stageEnv {
 	// Remove default HeaderByNumber here; keep BlockByNumber
 	em.EXPECT().BlockByNumber(gomock.Any(), gomock.Any()).Return(block, nil).AnyTimes()
 
-	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 10, "latest", latest)
+	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 1, "latest", latest)
 	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1}, l1, nil)
 	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, &chain.Config{}, updater)
 
@@ -203,13 +204,18 @@ func TestSpawnL1InfoTreeStage_HappyPath(t *testing.T) {
 	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(logs, nil).AnyTimes()
 	expectHeaderOK(env, &types.Header{ParentHash: env.parentHash, Number: env.blockNumber, Time: env.blockTime})
 
-	err := runStageOnce(t, env)
-	require.NoError(t, err)
+	// Run the stage in loop until it processes the logs. Since the syncer return immediately
+	// what is already available, we might need to call it a few times.
+	// Use a deadline to avoid infinite loops.
+	require.True(t, WaitFor(1*time.Second, func() bool {
+		err := runStageOnce(t, env)
+		require.NoError(t, err)
 
-	// Only V1 logs create leaves
-	leaves, err := env.hdb.GetAllL1InfoTreeLeaves()
-	require.NoError(t, err)
-	assert.Len(t, leaves, n)
+		// Only V1 logs create leaves
+		leaves, err := env.hdb.GetAllL1InfoTreeLeaves()
+		require.NoError(t, err)
+		return len(leaves) == n
+	}))
 
 	// Progress advanced to the block containing logs
 	progress, err := stages.GetStageProgress(env.tx, stages.L1InfoTree)
@@ -236,8 +242,14 @@ func TestSpawnL1InfoTreeStage_SkipV1Log(t *testing.T) {
 	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(filtered, nil).AnyTimes()
 	expectHeaderOK(env, &types.Header{ParentHash: env.parentHash, Number: env.blockNumber, Time: env.blockTime})
 
-	// Stage will notice mismatch on V2 and attempt rollback; we accept an early return with no error or an error depending on implementation.
-	_ = runStageOnce(t, env)
+	require.True(t, WaitFor(1*time.Second, func() bool {
+		_ = runStageOnce(t, env)
+		// Stage will notice mismatch on V2 and attempt rollback
+		// we accept an early return with no error or an error depending on implementation.
+		leaves, err := env.hdb.GetAllL1InfoTreeLeaves()
+		require.NoError(t, err)
+		return len(leaves) == skippedTxIndex // we will rollback to last good state
+	}))
 
 	leaves, err := env.hdb.GetAllL1InfoTreeLeaves()
 	require.NoError(t, err)
@@ -256,13 +268,26 @@ func TestSpawnL1InfoTreeStage_GetHeaderFails(t *testing.T) {
 	ok := expectHeaderOK(env, &types.Header{ParentHash: env.parentHash, Number: env.blockNumber, Time: env.blockTime})
 	ok.After(bad)
 
-	err := runStageOnce(t, env)
-	require.Nil(t, err)
+	require.True(t, WaitFor(1*time.Second, func() bool {
+		err := runStageOnce(t, env)
+		require.Nil(t, err)
+
+		// Only V1 logs create leaves
+		leaves, err := env.hdb.GetAllL1InfoTreeLeaves()
+		require.NoError(t, err)
+		return len(leaves) == 1
+	}))
 }
 
 func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
+	retryDelay := syncer.L1FetchHeaderRetryDelay
+	oldTimeout := l1infotree.NoActivityTimeout
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
+	defer t.Cleanup(func() {
+		l1infotree.NoActivityTimeout = oldTimeout
+		syncer.L1FetchHeaderRetryDelay = retryDelay
+	})
 
 	env := newStageEnv(t)
 	env.l1Syncer.SetFetchHeaders(true)
@@ -271,25 +296,41 @@ func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
 	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(logs, nil).AnyTimes()
 	env.em.EXPECT().HeaderByNumber(gomock.Any(), env.blockNumber).Return(nil, fmt.Errorf("header error")).AnyTimes()
 
-	err := runStageOnce(t, env)
-	require.Error(t, err) // will fail on timeout
+	require.True(t, WaitFor(1*time.Second, func() bool {
+		err := runStageOnce(t, env)
+		return err != nil
+	}))
 }
 
 func TestSpawnL1InfoTreeStage_FilterLogsFails(t *testing.T) {
+	retryDelay := syncer.L1FetchHeaderRetryDelay
+	oldTimeout := l1infotree.NoActivityTimeout
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
+	defer t.Cleanup(func() {
+		l1infotree.NoActivityTimeout = oldTimeout
+		syncer.L1FetchHeaderRetryDelay = retryDelay
+	})
 
 	env := newStageEnv(t)
 
 	env.em.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(nil, fmt.Errorf("filter logs error")).AnyTimes()
 
-	err := runStageOnce(t, env)
-	require.ErrorIs(t, err, l1infotree.ErrNoActivity)
+	require.True(t, WaitFor(1*time.Second, func() bool {
+		err := runStageOnce(t, env)
+		return err != nil && errors.Is(err, l1infotree.ErrNoActivity)
+	}))
 }
 
 func TestSpawnL1InfoTreeStage_GetHeadersFailsThenNextIterationOK(t *testing.T) {
+	retryDelay := syncer.L1FetchHeaderRetryDelay
+	oldTimeout := l1infotree.NoActivityTimeout
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
+	defer t.Cleanup(func() {
+		l1infotree.NoActivityTimeout = oldTimeout
+		syncer.L1FetchHeaderRetryDelay = retryDelay
+	})
 
 	env := newStageEnv(t)
 
@@ -306,22 +347,25 @@ func TestSpawnL1InfoTreeStage_GetHeadersFailsThenNextIterationOK(t *testing.T) {
 		return &types.Header{ParentHash: env.parentHash, Number: env.blockNumber, Time: env.blockTime}, nil
 	}).AnyTimes()
 
-	// Expect failure
-	err := runStageOnce(t, env)
-	require.Error(t, err) // Will fail on timeout
+	require.True(t, WaitFor(1*time.Second, func() bool {
+		// Expect failure
+		err := runStageOnce(t, env)
+		return err != nil
+	}))
 
 	// Now run the stage again for success
 	succeed = true
 
 	expectHeaderOK(env, &types.Header{ParentHash: env.parentHash, Number: env.blockNumber, Time: env.blockTime})
 
-	err = runStageOnce(t, env)
-	require.NoError(t, err)
-
-	// Only V1 logs create leaves
-	leaves, err := env.hdb.GetAllL1InfoTreeLeaves()
-	require.NoError(t, err)
-	assert.Len(t, leaves, n)
+	require.True(t, WaitFor(1*time.Second, func() bool {
+		err := runStageOnce(t, env)
+		require.NoError(t, err)
+		// Only V1 logs create leaves
+		leaves, err := env.hdb.GetAllL1InfoTreeLeaves()
+		require.NoError(t, err)
+		return len(leaves) == n
+	}))
 
 	// Progress advanced to the block containing logs
 	progress, err := stages.GetStageProgress(env.tx, stages.L1InfoTree)

@@ -129,6 +129,7 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 
 				l1InjectedBatch, err := hDB.GetL1InjectedBatch(0)
 				require.NoError(t, err)
+				require.NotNil(t, l1InjectedBatch)
 
 				assert.Equal(t, l1InjectedBatch.L1BlockNumber, latestBlock.NumberU64())
 				assert.Equal(t, l1InjectedBatch.Timestamp, latestBlock.Time())
@@ -260,7 +261,7 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 
 	EthermanMock.EXPECT().FilterLogs(gomock.Any(), filterQuery).Return(filteredLogs, nil).AnyTimes()
 
-	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 10, "latest", 0)
+	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 1, "latest", 0)
 	zkCfg := &ethconfig.Zk{
 		L1RollupId:                  uint64(99999),
 		L1FirstBlock:                l1FirstBlock.Uint64(),
@@ -269,8 +270,11 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 	cfg := StageL1SequencerSyncCfg(db1, zkCfg, l1Syncer)
 
 	// act
-	err = SpawnL1SequencerSyncStage(s, u, tx, cfg, ctx, log.New())
-	require.NoError(t, err)
+	require.True(t, WaitFor(5*time.Second, func() bool {
+		err = SpawnL1SequencerSyncStage(s, u, tx, cfg, ctx, log.New())
+		require.NoError(t, err)
+		return l1Syncer.GetLastCheckedL1Block() >= latestBlockNumber.Uint64()
+	}))
 
 	// assert
 	for _, tc := range testCases {
