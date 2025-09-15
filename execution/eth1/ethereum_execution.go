@@ -277,17 +277,16 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, nil
 	}
 
-	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-		return e.unwindToCommonCanonical(tx, header)
-	}); err != nil {
-		return nil, err
-	}
-
 	tx, err := e.db.BeginRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	err = e.unwindToCommonCanonical(tx, header)
+	if err != nil {
+		return nil, err
+	}
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
