@@ -24,7 +24,7 @@ import (
 	"math/big"
 	"sync"
 
-	chain2 "github.com/erigontech/erigon/arb/os"
+	chain2 "github.com/erigontech/erigon/arb/osver"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 

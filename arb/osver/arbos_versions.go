@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package os
+package osver
 
 const ArbosVersion_0 = uint64(0)
 const ArbosVersion_1 = uint64(1)
