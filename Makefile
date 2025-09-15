@@ -451,11 +451,6 @@ user_macos:
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
 
-## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
-.PHONY: automated-tests
-automated-tests:
-	./tests/automated-testing/run.sh
-
 ## help:                              print commands help
 help	:	Makefile
 	@sed -n 's/^##//p' $<
