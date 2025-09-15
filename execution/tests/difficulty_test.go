@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/execution/tests/testforks"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestDifficulty(t *testing.T) {
@@ -39,7 +40,7 @@ func TestDifficulty(t *testing.T) {
 			if fork == "_info" {
 				continue
 			}
-			var tests map[string]DifficultyTest
+			var tests map[string]testutil.DifficultyTest
 			if err := json.Unmarshal(rawTests, &tests); err != nil {
 				t.Error(err)
 				continue

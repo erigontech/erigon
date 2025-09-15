@@ -33,6 +33,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 var (
@@ -278,7 +279,7 @@ func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value
 func TestMatcherWhitelist(t *testing.T) {
 	tm := new(testMatcher)
 	tm.whitelist("invalid*")
-	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {
+	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *testutil.RLPTest) {
 		if name[:len("invalidRLPTest.json")] != "invalidRLPTest.json" {
 			t.Fatalf("invalid test found: %s != invalidRLPTest.json", name)
 		}
