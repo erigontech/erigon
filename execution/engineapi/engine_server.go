@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -118,9 +120,14 @@ func (e *EngineServer) Start(
 	eth rpchelper.ApiBackend,
 	txPool txpoolproto.TxpoolClient,
 	mining txpoolproto.MiningClient,
-) {
+) error {
+	var eg errgroup.Group
 	if !e.caplin {
-		e.engineLogSpamer.Start(ctx)
+		eg.Go(func() error {
+			defer e.logger.Debug("[EngineServer] engine log spammer goroutine terminated")
+			e.engineLogSpamer.Start(ctx)
+			return nil
+		})
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
@@ -139,18 +146,27 @@ func (e *EngineServer) Start(
 			Version:   "1.0",
 		}}
 
-	if err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger); err != nil {
-		e.logger.Error(err.Error())
-	}
+	eg.Go(func() error {
+		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
+		err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			e.logger.Error("[EngineServer] rpc server background goroutine failed", "err", err)
+		}
+		return err
+	})
 
 	if e.blockDownloader != nil {
-		go func() {
+		eg.Go(func() error {
+			defer e.logger.Debug("[EngineServer] engine block downloader goroutine terminated")
 			err := e.blockDownloader.Run(ctx)
-			if err != nil {
-				e.logger.Error("[EngineBlockDownloader] background goroutine failed", "err", err)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				e.logger.Error("[EngineServer] block downloader background goroutine failed", "err", err)
 			}
-		}()
+			return err
+		})
 	}
+
+	return eg.Wait()
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {

@@ -650,8 +650,20 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 	if err != nil {
 		return err
 	}
-	go stopAuthenticatedRpcServer(ctx, engineInfo, logger)
-	return nil
+	<-ctx.Done()
+	logger.Info("Exiting Engine...")
+	engineInfo.Srv.Stop()
+	if engineInfo.EngineSrv != nil {
+		engineInfo.EngineSrv.Stop()
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if engineInfo.EngineListener != nil {
+		shutdownErr := engineInfo.EngineListener.Shutdown(shutdownCtx)
+		logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint, "shutdownErr", shutdownErr)
+	}
+	return ctx.Err()
 }
 
 func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -848,24 +860,6 @@ func startAuthenticatedRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger 
 		return nil, fmt.Errorf("could not start RPC api for engine: %w", err)
 	}
 	return &engineInfo{Srv: srv, EngineSrv: engineSrv, EngineListener: engineListener, EngineHttpEndpoint: engineHttpEndpoint}, nil
-}
-
-func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo, logger log.Logger) {
-	defer func() {
-		engineInfo.Srv.Stop()
-		if engineInfo.EngineSrv != nil {
-			engineInfo.EngineSrv.Stop()
-		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if engineInfo.EngineListener != nil {
-			_ = engineInfo.EngineListener.Shutdown(shutdownCtx)
-			logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint)
-		}
-	}()
-	<-ctx.Done()
-	logger.Info("Exiting Engine...")
 }
 
 // isWebsocket checks the header of a http request for a websocket upgrade request.

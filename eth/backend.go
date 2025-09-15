@@ -1205,7 +1205,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
-		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Debug("[EngineServer] goroutine terminated")
+			err := s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("[EngineServer] background goroutine failed", "err", err)
+			}
+			return err
+		})
 	}
 
 	// Register the backend on the node

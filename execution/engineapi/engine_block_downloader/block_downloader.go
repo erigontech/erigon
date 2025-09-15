@@ -142,7 +142,8 @@ func (e *EngineBlockDownloader) Run(ctx context.Context) error {
 		defer e.logger.Info("[EngineBlockDownloader] stopped")
 		return e.bbdV2.Run(ctx)
 	}
-	return nil
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
