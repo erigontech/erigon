@@ -219,7 +219,7 @@ type recoverBlobsRequest struct {
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 	recover := func(toRecover recoverBlobsRequest) {
 		begin := time.Now()
-		log.Trace("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
+		log.Debug("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
 		ctx := context.Background()
 		slot, blockRoot := toRecover.slot, toRecover.blockRoot
 		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
@@ -265,6 +265,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		// Recover blobs from the matrix
 		blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
 		blobCommitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](int(d.beaconConfig.MaxBlobCommittmentsPerBlock), length.Bytes48)
+		beginRecover := time.Now()
 		for blobIndex, blobEntries := range blobMatrix {
 			var (
 				blob           cltypes.Blob
@@ -304,7 +305,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			commitment := cltypes.KZGCommitment(kzgCommitment)
 			blobCommitments.Append(&commitment)
 		}
+		timeRecover := time.Since(beginRecover)
 		// inclusion proof
+		beginInclusionProof := time.Now()
 		for i := range len(blobSidecars) {
 			branchProof := blobCommitments.ElementProof(i)
 			p := blobSidecars[i].CommitmentInclusionProof
@@ -315,7 +318,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
 			}
 		}
-
+		timeInclusionProof := time.Since(beginInclusionProof)
 		// Save blobs
 		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
 			log.Warn("[blobsRecover] failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
@@ -329,6 +332,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			log.Warn("[blobsRecover] failed to get my custody columns", "err", err, "slot", slot, "blockRoot", blockRoot)
 			return
 		}
+		beginRemove := time.Now()
 		for _, column := range existingColumns {
 			if _, ok := custodyColumns[column]; !ok {
 				if err := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(column)); err != nil {
@@ -336,7 +340,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				}
 			}
 		}
+		timeRemove := time.Since(beginRemove)
 		// add custody data column if it doesn't exist
+		beginAdd := time.Now()
 		for columnIndex := range custodyColumns {
 			exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
@@ -377,8 +383,8 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				log.Debug("[blobsRecover] added a custody data column", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 			}
 		}
-
-		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin))
+		timeAdd := time.Since(beginAdd)
+		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin), "timeRecover", timeRecover, "timeInclusionProof", timeInclusionProof, "timeRemove", timeRemove, "timeAdd", timeAdd)
 	}
 
 	// main loop
@@ -428,7 +434,6 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 	d.recoveringMutex.Unlock()
 
 	// schedule
-	log.Debug("[blobsRecover] scheduling recover", "slot", slot, "blockRoot", blockRoot)
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
 	select {
