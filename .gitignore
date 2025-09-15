@@ -106,7 +106,7 @@ yarn.lock
 node_modules
 
 /config.toml
-/dynamic-kurtosis-config.yaml
+/config.yaml
 /config.yml
 
 vendor
