@@ -68,7 +68,7 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	return block, err
 }
 
-func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Getter) (uint64, error) {
+func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
 	if err != nil {
 		return 0, err
@@ -432,7 +432,7 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
 
-func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Getter) (uint64, error) {
+func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	if r.FrozenBlocks() > 0 {
 		snapshotTypes := []snaptype.Enum{
 			snaptype2.Enums.Headers,
@@ -456,12 +456,10 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Getter) (
 	}
 
 	var dbMinBlock = uint64(math.MaxUint64)
-	if kvTx, ok := tx.(kv.Tx); ok {
-		var err error
-		dbMinBlock, err = r.findFirstCompleteBlock(kvTx)
-		if err != nil {
-			return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
-		}
+	var err error
+	dbMinBlock, err = r.findFirstCompleteBlock(tx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
 	}
 
 	return dbMinBlock, nil

@@ -436,6 +436,6 @@ func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum ui
 	return back.blockReader.BlockForTxNum(ctx, tx, txNum)
 }
 
-func (back *RemoteBackend) MinimumBlockAvailable(ctx context.Context, tx kv.Getter) (uint64, error) {
+func (back *RemoteBackend) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	return back.blockReader.MinimumBlockAvailable(ctx, tx)
 }
