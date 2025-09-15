@@ -1698,26 +1698,6 @@ func (db *HermezDb) GetL1InfoTreeIndexByRoot(hash common.Hash) (uint64, bool, er
 	return BytesToUint64(data), data != nil, nil
 }
 
-func (db *HermezDb) GetL1InfoRootByIndex(index uint64) (common.Hash, error) {
-	c, err := db.tx.Cursor(L1_INFO_ROOTS)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer c.Close()
-
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return common.Hash{}, err
-		}
-		currentIndex := BytesToUint64(v)
-		if currentIndex == index {
-			return common.BytesToHash(k), nil
-		}
-	}
-
-	return common.Hash{}, fmt.Errorf("index %d not found", index)
-}
-
 func (db *HermezDbReader) GetL1InfoTreeIndexToRoots() (map[uint64]common.Hash, error) {
 	c, err := db.tx.Cursor(L1_INFO_ROOTS)
 	if err != nil {

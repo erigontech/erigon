@@ -104,13 +104,12 @@ func SpawnSequencerBlobRecoveryStage(s *stagedsync.StageState, u stagedsync.Unwi
 	offset := uint64(0)
 	limit := cfg.zkCfg.BlobRecoveryBlobLimit
 
-	// get initial info root
-	l1InfoRoot, err := hermezDb.GetL1InfoRootByIndex(uint64(0))
+	indexToRoots, err := hermezDb.GetL1InfoTreeIndexToRoots()
 	if err != nil {
 		return nil
 	}
 
-	irt := da.NewInfoRootTracker(l1InfoRoot)
+	irt := da.NewInfoRootTracker(indexToRoots)
 
 	for {
 		select {
