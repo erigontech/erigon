@@ -22,7 +22,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
-	chaos_monkey "github.com/erigontech/erigon/execution/tests/chaos-monkey"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/shards"
 )

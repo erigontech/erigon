@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
-	chaos_monkey "github.com/erigontech/erigon/execution/tests/chaos-monkey"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
 )
 
