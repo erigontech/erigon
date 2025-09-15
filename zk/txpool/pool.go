@@ -3068,18 +3068,20 @@ func (mt *metaTx) better(than *metaTx, pendingBaseFee uint64) bool {
 // The key is designed so that lexicographic byte comparison produces the same
 // ordering as the better() function, but much faster.
 //
-// Key structure (43 bytes total):
+// Key structure:
 // [0]     : subPool with EnoughFeeCapBlock bit (1 byte) - INVERTED for desc order
 // [1-32]  : effectiveTip or minFeeCap (32 bytes) - INVERTED for desc order
 // [33-40] : nonceDistance (8 bytes) - normal order (lower is better)
 // [41-48] : cumulativeBalanceDistance (8 bytes) - normal order (lower is better)
 // [49-56] : timestamp (8 bytes) - normal order (lower is better)
+const sortKeySize = 57
+
 func (mt *metaTx) generateSortKey(pendingBaseFee uint64) {
 	if mt.sortKeyValid {
 		return
 	}
 
-	key := make([]byte, 57) // Total key size
+	key := make([]byte, sortKeySize) // Total key size
 
 	// Calculate subPool with EnoughFeeCapBlock bit
 	subPool := mt.subPool
@@ -3118,13 +3120,13 @@ func (mt *metaTx) generateSortKey(pendingBaseFee uint64) {
 		}
 	}
 
-	// Bytes 33-40: nonceDistance (normal order - lower is better)
+	// Bytes [33:41]: nonceDistance (normal order - lower is better)
 	binary.BigEndian.PutUint64(key[33:41], mt.nonceDistance)
 
-	// Bytes 41-48: cumulativeBalanceDistance (normal order - lower is better)
+	// Bytes [41:49]: cumulativeBalanceDistance (normal order - lower is better)
 	binary.BigEndian.PutUint64(key[41:49], mt.cumulativeBalanceDistance)
 
-	// Bytes 49-56: timestamp (normal order - lower is better)
+	// Bytes [49:57]: timestamp (normal order - lower is better)
 	binary.BigEndian.PutUint64(key[49:57], mt.timestamp)
 
 	mt.sortKey = key
