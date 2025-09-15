@@ -14,15 +14,52 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bbd
+package p2p
 
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type HeaderReader interface {
-	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
+type BbdResultFeed struct {
+	ch chan BlockBatchResult
+}
+
+func (rf BbdResultFeed) Next(ctx context.Context) ([]*types.Block, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case batch, ok := <-rf.ch:
+		if !ok {
+			return nil, nil
+		}
+		return batch.Blocks, batch.Err
+	}
+}
+
+func (rf BbdResultFeed) consumeData(ctx context.Context, blocks []*types.Block) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case rf.ch <- BlockBatchResult{Blocks: blocks}:
+		return nil
+	}
+}
+
+func (rf BbdResultFeed) consumeErr(ctx context.Context, err error) {
+	select {
+	case <-ctx.Done():
+		return
+	case rf.ch <- BlockBatchResult{Err: err}:
+	}
+}
+
+func (rf BbdResultFeed) close() {
+	close(rf.ch)
+}
+
+type BlockBatchResult struct {
+	Blocks []*types.Block
+	Err    error
 }

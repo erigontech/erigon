@@ -14,55 +14,53 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bbd
+package p2p
 
 import (
 	"math"
 	"time"
-
-	"github.com/erigontech/erigon/polygon/p2p"
 )
 
-type Option func(requestConfig) requestConfig
+type BbdOption func(bbdRequestConfig) bbdRequestConfig
 
-func WithPeerId(peerId *p2p.PeerId) Option {
-	return func(config requestConfig) requestConfig {
+func WithPeerId(peerId *PeerId) BbdOption {
+	return func(config bbdRequestConfig) bbdRequestConfig {
 		config.peerId = peerId
 		return config
 	}
 }
 
-func WithBlocksBatchSize(blocksBatchSize uint64) Option {
-	return func(config requestConfig) requestConfig {
+func WithBlocksBatchSize(blocksBatchSize uint64) BbdOption {
+	return func(config bbdRequestConfig) bbdRequestConfig {
 		config.blocksBatchSize = blocksBatchSize
 		return config
 	}
 }
 
-func WithChainLengthLimit(limit uint64) Option {
-	return func(config requestConfig) requestConfig {
+func WithChainLengthLimit(limit uint64) BbdOption {
+	return func(config bbdRequestConfig) bbdRequestConfig {
 		config.chainLengthLimit = limit
 		return config
 	}
 }
 
-func WithChainLengthCurrentHead(head uint64) Option {
-	return func(config requestConfig) requestConfig {
+func WithChainLengthCurrentHead(head uint64) BbdOption {
+	return func(config bbdRequestConfig) bbdRequestConfig {
 		config.chainLengthCurrentHead = &head
 		return config
 	}
 }
 
-func applyOptions(opts ...Option) requestConfig {
-	config := defaultRequestConfig
+func applyBbdOptions(opts ...BbdOption) bbdRequestConfig {
+	config := defaultBbdRequestConfig
 	for _, opt := range opts {
 		config = opt(config)
 	}
 	return config
 }
 
-type requestConfig struct {
-	peerId                       *p2p.PeerId
+type bbdRequestConfig struct {
+	peerId                       *PeerId
 	blocksBatchSize              uint64
 	chainLengthLimit             uint64
 	chainLengthCurrentHead       *uint64
@@ -75,7 +73,7 @@ type requestConfig struct {
 	bodiesBatchFetchRetries      uint64
 }
 
-var defaultRequestConfig = requestConfig{
+var defaultBbdRequestConfig = bbdRequestConfig{
 	peerId:                       nil,
 	blocksBatchSize:              500,
 	chainLengthLimit:             math.MaxUint64,
