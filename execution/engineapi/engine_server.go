@@ -188,8 +188,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		s.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
 	}
-	s.engineLogSpamer.RecordRequest()
 
+	s.engineLogSpamer.RecordRequest()
+	s.logger.Debug("[NewPayload] processing new request", "blockNum", req.BlockNumber.Uint64(), "blockHash", req.BlockHash, "parentHash", req.ParentHash)
 	if len(req.LogsBloom) != types.BloomByteLength {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid logsBloom length: %d", len(req.LogsBloom))}
 	}
@@ -334,6 +335,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, err
 	}
 	if possibleStatus != nil {
+		s.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
 		return possibleStatus, nil
 	}
 
@@ -580,8 +582,14 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
-	s.engineLogSpamer.RecordRequest()
 
+	s.engineLogSpamer.RecordRequest()
+	newReqLogInfoArgs := []any{"head", forkchoiceState.HeadHash}
+	if payloadAttributes != nil {
+		newReqLogInfoArgs = append(newReqLogInfoArgs, "parentBeaconBlockRoot", payloadAttributes.ParentBeaconBlockRoot)
+	}
+
+	s.logger.Debug("[ForkChoiceUpdated] processing new request", newReqLogInfoArgs...)
 	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
@@ -609,6 +617,8 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
+	} else {
+		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "payloadStatus", status)
 	}
 
 	// No need for payload building
@@ -639,6 +649,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	headHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)
 
 	if headHeader.Time >= timestamp {
+		s.logger.Debug("[ForkChoiceUpdated] payload time lte head time", "head", headHeader.Time, "payload", timestamp)
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
