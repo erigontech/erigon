@@ -21,8 +21,8 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 //go:generate mockgen -typed=true -source=./p2p_service.go -destination=./p2p_service_mock.go -package=sync . p2pservice
