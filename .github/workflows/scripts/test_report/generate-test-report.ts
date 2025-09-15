@@ -383,7 +383,7 @@ export async function run() {
         core.setFailed(err.message);
     }
 }
-
+ 
 // If this script is run directly, execute the run function
 if (import.meta.url === `file://${process.argv[1]}`) {
     run();
