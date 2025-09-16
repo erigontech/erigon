@@ -1079,11 +1079,6 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
-	typeMinBlocks := make(map[snaptype.Enum]uint64)
-	for _, t := range s.enums { // init min tracking for all configured types
-		typeMinBlocks[t] = math.MaxUint64
-	}
-
 	wg := &errgroup.Group{}
 	wg.SetLimit(64)
 	//fmt.Println("RS", s)
@@ -1164,21 +1159,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 			segmentsMax = 0
 		}
 		segmentsMaxSet = true
-
-		if f.From < typeMinBlocks[f.Type.Enum()] {
-			typeMinBlocks[f.Type.Enum()] = f.From
-		}
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
-	}
-
-	for typ, minBlock := range typeMinBlocks {
-		if minBlock != math.MaxUint64 {
-			if u, ok := s.segmentsMinByType[typ]; ok {
-				u.Store(minBlock)
-			}
-		}
 	}
 
 	if err := wg.Wait(); err != nil {
