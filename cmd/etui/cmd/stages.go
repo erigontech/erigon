@@ -27,10 +27,10 @@ var infoCmd = &cobra.Command{
 			return err
 		}
 		app := tview.NewApplication().SetTitle("Erigon TUI")
-		flex := tview.NewFlex().
+		flex := tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(tview.NewBox().SetBorder(false).SetTitle("Erigon TUI"), 0, 1, false).
-			AddItem(tview.NewBox().SetBorder(true).SetTitle("Middle (3 x height of Top)"), 0, 3, false).
-			AddItem(tview.NewTextView().SetText(fmt.Sprintf("%+v", info)), 5, 1, false)
+			AddItem(tview.NewTextView().SetText(fmt.Sprintf("%+v", info)), 0, 3, false).
+			AddItem(tview.NewBox().SetBorder(true).SetTitle("Bottom (5 rows)"), 5, 1, false)
 		//view := tview.NewModal().
 		//	SetText(.
 		//	AddButtons([]string{"Quit", "Cancel"}).
