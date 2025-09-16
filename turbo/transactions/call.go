@@ -42,15 +42,15 @@ import (
 )
 
 type BlockOverrides struct {
-	BlockNumber *hexutil.Uint64
-	Coinbase    *common.Address
-	Time        *hexutil.Uint64
-	GasLimit    *hexutil.Uint
-	Difficulty  *hexutil.Uint
-	BaseFee     *uint256.Int
-	BlockHash   *map[uint64]common.Hash
-	BeaconRoot  *common.Hash
-	Withdrawals *types.Withdrawals
+	BlockNumber *hexutil.Uint64         `json:"blockNumber"`
+	Coinbase    *common.Address         `json:"coinbase"`
+	Timestamp   *hexutil.Uint64         `json:"time"`
+	GasLimit    *hexutil.Uint           `json:"gasLimit"`
+	Difficulty  *hexutil.Uint           `json:"difficulty"`
+	BaseFee     *uint256.Int            `json:"baseFeePerGas"`
+	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
+	BeaconRoot  *common.Hash            `json:"beaconRoot"`
+	Withdrawals *types.Withdrawals      `json:"withdrawals"`
 }
 
 type BlockHashOverrides map[uint64]common.Hash
@@ -63,8 +63,8 @@ func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
 	if o.Difficulty != nil {
 		h.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
 	}
-	if o.Time != nil {
-		h.Time = o.Time.Uint64()
+	if o.Timestamp != nil {
+		h.Time = o.Timestamp.Uint64()
 	}
 	if o.GasLimit != nil {
 		h.GasLimit = uint64(*o.GasLimit)
@@ -91,8 +91,8 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 	if o.Difficulty != nil {
 		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
 	}
-	if o.Time != nil {
-		blockCtx.Time = uint64(*o.Time)
+	if o.Timestamp != nil {
+		blockCtx.Time = uint64(*o.Timestamp)
 	}
 	if o.GasLimit != nil {
 		blockCtx.GasLimit = uint64(*o.GasLimit)

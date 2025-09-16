@@ -225,7 +225,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 				b := SimulatedBlock{
 					BlockOverrides: &transactions.BlockOverrides{
 						BlockNumber: (*hexutil.Uint64)(&n),
-						Time:        (*hexutil.Uint64)(&t),
+						Timestamp:   (*hexutil.Uint64)(&t),
 					},
 				}
 				prevTimestamp = t
@@ -235,11 +235,11 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		// Only append block after filling a potential gap.
 		prevNumber = blockNumber
 		var timestamp uint64
-		if block.BlockOverrides.Time == nil {
+		if block.BlockOverrides.Timestamp == nil {
 			timestamp = prevTimestamp + timestampIncrement
-			block.BlockOverrides.Time = (*hexutil.Uint64)(&timestamp)
+			block.BlockOverrides.Timestamp = (*hexutil.Uint64)(&timestamp)
 		} else {
-			timestamp = block.BlockOverrides.Time.Uint64()
+			timestamp = block.BlockOverrides.Timestamp.Uint64()
 			if timestamp <= prevTimestamp {
 				return nil, fmt.Errorf("block timestamps must be in order: %d <= %d", timestamp, prevTimestamp)
 			}
@@ -263,7 +263,7 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Time)) {
+		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		header := overrides.OverrideHeader(&types.Header{
@@ -482,7 +482,7 @@ func (s *simulator) simulateCall(
 	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	result, err := core.ApplyMessage(evm, msg, gp, true, false, s.engine)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, txValidationError(err)
 	}
 
 	// If the timer caused an abort, return an appropriate error message
@@ -541,5 +541,45 @@ func repairLogs(calls []CallResult, hash common.Hash) {
 		for j := range calls[i].Logs {
 			calls[i].Logs[j].BlockHash = hash
 		}
+	}
+}
+
+type invalidTxError struct {
+	Message string `json:"message"`
+	Code    int    `json:"code"`
+}
+
+func (e *invalidTxError) Error() string  { return e.Message }
+func (e *invalidTxError) ErrorCode() int { return e.Code }
+
+func txValidationError(err error) *invalidTxError {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, core.ErrNonceTooHigh):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeNonceTooHigh}
+	case errors.Is(err, core.ErrNonceTooLow):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeNonceTooLow}
+	case errors.Is(err, core.ErrSenderNoEOA):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeSenderIsNotEOA}
+	case errors.Is(err, core.ErrFeeCapVeryHigh):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+	case errors.Is(err, core.ErrTipVeryHigh):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+	case errors.Is(err, core.ErrTipAboveFeeCap):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+	case errors.Is(err, core.ErrFeeCapTooLow):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+	case errors.Is(err, core.ErrInsufficientFunds):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInsufficientFunds}
+	case errors.Is(err, core.ErrIntrinsicGas):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeIntrinsicGas}
+	case errors.Is(err, core.ErrMaxInitCodeSizeExceeded):
+		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeMaxInitCodeSizeExceeded}
+	}
+	return &invalidTxError{
+		Message: err.Error(),
+		Code:    rpc.ErrCodeInternalError,
 	}
 }

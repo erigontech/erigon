@@ -32,8 +32,16 @@ var (
 )
 
 const (
-	ErrCodeReverted = -32000
-	ErrCodeVMError  = -32015
+	ErrCodeNonceTooHigh            = -38011
+	ErrCodeNonceTooLow             = -38010
+	ErrCodeIntrinsicGas            = -38013
+	ErrCodeInsufficientFunds       = -38014
+	ErrCodeSenderIsNotEOA          = -38024
+	ErrCodeMaxInitCodeSizeExceeded = -38025
+	ErrCodeInternalError           = -32603
+	ErrCodeInvalidParams           = -32602
+	ErrCodeReverted                = -32000
+	ErrCodeVMError                 = -32015
 )
 
 const defaultErrorCode = ErrCodeReverted
