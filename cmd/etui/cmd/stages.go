@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/integration/commands"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +28,6 @@ var infoCmd = &cobra.Command{
 		}
 		app := tview.NewApplication().SetTitle("Erigon TUI")
 		view := tview.NewModal().
-			SetBackgroundColor(tcell.ColorBlack).
 			SetText(fmt.Sprintf("%+v", info)).
 			AddButtons([]string{"Quit", "Cancel"}).
 			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
