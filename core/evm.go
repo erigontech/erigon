@@ -42,7 +42,16 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
-		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
+		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
+			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
+
+			// In case the coinbase is not set post Rio, use the default coinbase
+			if beneficiary == (common.Address{}) {
+				beneficiary, _ = engine.Author(header)
+			}
+		} else {
+			beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
+		}
 	} else {
 		beneficiary = *author
 	}
