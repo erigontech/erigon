@@ -29,17 +29,10 @@ var infoCmd = &cobra.Command{
 		}
 		app := tview.NewApplication()
 		flex := tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(tview.NewTextView().SetText("Erigon TUI").SetTextAlign(tview.AlignCenter), 5, 1, false).
+			AddItem(tview.NewTextView().SetText("Erigon TUI").SetTextAlign(tview.AlignCenter), 1, 1, false).
 			AddItem(tview.NewTextView().SetText(fmt.Sprintf("%+v", info)), 0, 5, false).
 			AddItem(tview.NewBox().SetBorder(true).SetTitle("Bottom (5 rows)"), 5, 1, false)
-		//view := tview.NewModal().
-		//	SetText(.
-		//	AddButtons([]string{"Quit", "Cancel"}).
-		//	SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-		//		if buttonLabel == "Quit" || buttonLabel == "Cancel" {
-		//			app.Stop()
-		//		}
-		//	})
+
 		if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
 			func(event *tcell.EventKey) *tcell.EventKey {
 				if event.Key() == tcell.KeyCtrlC || event.Rune() == 'q' {
