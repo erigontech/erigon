@@ -115,7 +115,7 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	testEarliestBlockHeight := uint64(100)
+	testMinimumBlockHeight := uint64(100)
 	testLatestBlockHeight := uint64(200)
 	testBestHash := common.HexToHash("0xabc")
 
@@ -130,9 +130,9 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 	mockStatus := &mockStatusDataProvider{
 		getStatusDataFunc: func(ctx context.Context) (*proto_sentry.StatusData, error) {
 			return &proto_sentry.StatusData{
-				EarliestBlockHeight: testEarliestBlockHeight,
-				MaxBlockHeight:      testLatestBlockHeight,
-				BestHash:            gointerfaces.ConvertHashToH256(testBestHash),
+				MinimumBlockHeight: testMinimumBlockHeight,
+				MaxBlockHeight:     testLatestBlockHeight,
+				BestHash:           gointerfaces.ConvertHashToH256(testBestHash),
 			}, nil
 		},
 	}
@@ -166,8 +166,8 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if response.Earliest != testEarliestBlockHeight {
-		t.Errorf("Expected earliest block height %d, got %d", testEarliestBlockHeight, response.Earliest)
+	if response.Earliest != testMinimumBlockHeight {
+		t.Errorf("Expected earliest block height %d, got %d", testMinimumBlockHeight, response.Earliest)
 	}
 	if response.Latest != testLatestBlockHeight {
 		t.Errorf("Expected latest block height %d, got %d", testLatestBlockHeight, response.Latest)
