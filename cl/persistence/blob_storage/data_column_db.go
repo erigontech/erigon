@@ -192,9 +192,6 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 }
 
 func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
-	lock := s.acquireLock(s.ethClock.GetCurrentSlot())
-	lock.Lock()
-	defer lock.Unlock()
 	currentSlot := s.ethClock.GetCurrentSlot()
 	currentSlot -= keepSlotDistance
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
@@ -205,7 +202,11 @@ func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
 	}
 	// delete all the folders that are older than slotsKept
 	for i := startPrune; i < currentSlot; i += subdivisionSlot {
+		log.Debug("pruning data column sidecars", "slot", i)
+		lock := s.acquireLock(i)
+		lock.Lock()
 		s.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
+		lock.Unlock()
 	}
 	return nil
 }
