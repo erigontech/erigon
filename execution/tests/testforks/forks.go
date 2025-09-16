@@ -17,17 +17,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package testutil
+package testforks
 
 import (
 	"fmt"
 	"math/big"
 	"sort"
 
+	"github.com/jinzhu/copier"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/jinzhu/copier"
 )
 
 // See https://github.com/ethereum/execution-spec-tests/pull/2050

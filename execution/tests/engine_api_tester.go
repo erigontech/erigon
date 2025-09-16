@@ -46,6 +46,7 @@ import (
 	chainparams "github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
@@ -111,11 +112,11 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	logger := args.Logger
 	dirs := datadir.New(args.DataDir)
 	genesis := args.Genesis
-	sentryPort, err := NextFreePort()
+	sentryPort, err := testutil.NextFreePort()
 	require.NoError(t, err)
-	engineApiPort, err := NextFreePort()
+	engineApiPort, err := testutil.NextFreePort()
 	require.NoError(t, err)
-	jsonRpcPort, err := NextFreePort()
+	jsonRpcPort, err := testutil.NextFreePort()
 	require.NoError(t, err)
 	logger.Debug("[engine-api-tester] selected ports", "sentry", sentryPort, "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 

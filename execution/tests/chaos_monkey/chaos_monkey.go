@@ -1,7 +1,4 @@
-// Copyright 2015 The go-ethereum Authors
-// (original work)
 // Copyright 2024 The Erigon Authors
-// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,21 +14,23 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tests
+package chaos_monkey
 
 import (
-	"testing"
+	"fmt"
+
+	rand2 "golang.org/x/exp/rand"
+
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
-func TestRLP(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+const (
+	consensusFailureRate = 300
+)
 
-	tm := new(testMatcher)
-	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {
-		if err := tm.checkFailure(t, test.Run()); err != nil {
-			t.Error(err)
-		}
-	})
+func ThrowRandomConsensusError(IsInitialCycle bool, txIndex int, badBlockHalt bool, txTaskErr error) error {
+	if !IsInitialCycle && rand2.Int()%consensusFailureRate == 0 && txIndex == 0 && !badBlockHalt {
+		return fmt.Errorf("monkey in the datacenter: %w: %v", consensus.ErrInvalidBlock, txTaskErr)
+	}
+	return nil
 }

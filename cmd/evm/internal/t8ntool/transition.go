@@ -55,9 +55,9 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/tests"
 )
 
 const (
@@ -201,7 +201,7 @@ func Main(ctx *cli.Context) error {
 	}
 	// Construct the chainconfig
 	var chainConfig *chain.Config
-	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
+	if cConf, extraEips, err1 := testutil.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
 		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
 	} else {
 		chainConfig = cConf

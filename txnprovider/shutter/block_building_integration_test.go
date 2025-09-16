@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -233,9 +234,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		CoinbaseKey: coinbasePrivKey,
 	})
 	// prepare shutter config for the next engine api tester
-	shutterPort, err := executiontests.NextFreePort()
+	shutterPort, err := testutil.NextFreePort()
 	require.NoError(t, err)
-	decryptionKeySenderPort, err := executiontests.NextFreePort()
+	decryptionKeySenderPort, err := testutil.NextFreePort()
 	require.NoError(t, err)
 	decryptionKeySenderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
