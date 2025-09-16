@@ -27,7 +27,7 @@ var infoCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		app := tview.NewApplication()
+		app := tview.NewApplication().SetTitle("Erigon TUI")
 		view := tview.NewModal().
 			SetBackgroundColor(tcell.ColorBlack).
 			SetText(fmt.Sprintf("%+v", info)).
