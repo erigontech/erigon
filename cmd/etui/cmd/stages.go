@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/integration/commands"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
 )
@@ -39,7 +40,13 @@ var infoCmd = &cobra.Command{
 		//			app.Stop()
 		//		}
 		//	})
-		if err := app.SetRoot(flex, true).EnableMouse(true).Run(); err != nil {
+		if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
+			func(event *tcell.EventKey) *tcell.EventKey {
+				if event.Key() == tcell.KeyCtrlC || event.Rune() == 'q' {
+					app.Stop()
+				}
+				return event
+			}).Run(); err != nil {
 			panic(err)
 		}
 		return nil
