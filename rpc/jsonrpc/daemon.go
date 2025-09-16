@@ -17,6 +17,9 @@
 package jsonrpc
 
 import (
+	"context"
+	"os"
+
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -36,7 +39,20 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine consensus.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 ) (list []rpc.API) {
+	isArbitrum := false
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader)
+	ctx := context.Background()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		logger.Error("Failed to begin transaction", "err", err)
+		os.Exit(1)
+	} else {
+		chainConfig, err := base.chainConfig(ctx, tx)
+		if err != nil {
+			isArbitrum = chainConfig.IsArbitrum()
+		}
+		tx.Rollback()
+	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.Feecap, cfg.ReturnDataLimit, cfg.AllowUnprotectedTxs, cfg.MaxGetProofRewindBlockCount, cfg.WebsocketSubscribeLogsChannelSize, logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
@@ -95,12 +111,21 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 				Version:   "1.0",
 			})
 		case "net":
-			list = append(list, rpc.API{
-				Namespace: "net",
-				Public:    true,
-				Service:   NetAPI(netImpl),
-				Version:   "1.0",
-			})
+			if !isArbitrum {
+				list = append(list, rpc.API{
+					Namespace: "net",
+					Public:    true,
+					Service:   NetAPI(netImpl),
+					Version:   "1.0",
+				})
+			} else {
+				list = append(list, rpc.API{
+					Namespace: "net",
+					Public:    true,
+					Service:   NetAPIArb(NewNetAPIArbImpl(eth)),
+					Version:   "1.0",
+				})
+			}
 		case "txpool":
 			list = append(list, rpc.API{
 				Namespace: "txpool",
