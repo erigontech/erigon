@@ -26,6 +26,7 @@ func SequencerZkStages(
 	l1SequencerSyncCfg L1SequencerSyncCfg,
 	l1InfoTreeCfg L1InfoTreeCfg,
 	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
+	sequencerBlobRecoveryCfg SequencerBlobRecoveryCfg,
 	exec SequenceBlockCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
 	history stages.HistoryCfg,
@@ -91,6 +92,20 @@ func SequencerZkStages(
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneSequencerL1BlockSyncStage(p, tx, sequencerL1BlockSyncCfg, ctx, logger)
+			},
+		},
+		{
+			ID:          stages2.BlobRecovery,
+			Description: "Sequencer Blob DA Recovery",
+			Disabled:    !sequencerBlobRecoveryCfg.zkCfg.IsBlobRecovery(),
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, unwinder stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				return SpawnSequencerBlobRecoveryStage(s, unwinder, ctx, txc.Tx, sequencerBlobRecoveryCfg, logger)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
+				return UnwindSequencerBlobRecoveryStage(u, txc.Tx, sequencerBlobRecoveryCfg, ctx, logger)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneSequencerBlobRecoveryStage(p, tx, sequencerBlobRecoveryCfg, ctx, logger)
 			},
 		},
 		{

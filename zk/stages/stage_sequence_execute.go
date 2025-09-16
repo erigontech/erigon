@@ -144,7 +144,9 @@ func sequencingBatchStep(
 		return nil
 	}
 
-	batchNumberForStateInitialization, err := prepareBatchNumber(sdb, forkId, lastBatch, cfg.zk.IsL1Recovery())
+	inRecovery := cfg.zk.IsL1Recovery() || cfg.zk.IsBlobRecovery()
+
+	batchNumberForStateInitialization, err := prepareBatchNumber(sdb, forkId, lastBatch, inRecovery)
 	if err != nil {
 		return err
 	}
@@ -152,7 +154,7 @@ func sequencingBatchStep(
 	var block *types.Block
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
-	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.UseExecutors(), cfg.zk.IsL1Recovery(), cfg.txPool, resequenceBatchJob)
+	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.UseExecutors(), inRecovery, cfg.txPool, resequenceBatchJob)
 	shouldCountersBeInfinite := cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()) || cfg.chainConfig.IsNormalcy(executionAt)
 	blockDataSizeChecker := NewBlockDataChecker(shouldCountersBeInfinite)
 	streamWriter := newSequencerBatchStreamWriter(batchContext, batchState)
@@ -223,7 +225,7 @@ func sequencingBatchStep(
 	batchCounters := prepareBatchCounters(batchContext, batchState, shouldCountersBeInfinite)
 
 	if batchState.isL1Recovery() {
-		if cfg.zk.L1SyncStopBatch > 0 && batchState.batchNumber > cfg.zk.L1SyncStopBatch {
+		if cfg.zk.RecoveryStopBatch > 0 && batchState.batchNumber > cfg.zk.RecoveryStopBatch {
 			log.Info(fmt.Sprintf("[%s] L1 recovery has completed!", logPrefix), "batch", batchState.batchNumber)
 			time.Sleep(1 * time.Second)
 			return nil
