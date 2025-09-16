@@ -31,7 +31,6 @@ import (
 	"slices"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -192,39 +191,38 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 }
 
 func (pi *PeerInfo) Height() uint64 {
-	return atomic.LoadUint64(&pi.height)
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.height
 }
 
-// SetIncreasedHeight atomically updates PeerInfo.height only if newHeight is higher
+// SetIncreasedHeight updates PeerInfo.height only if newHeight is higher (threadsafe)
 func (pi *PeerInfo) SetIncreasedHeight(newHeight uint64) {
-	for {
-		oldHeight := atomic.LoadUint64(&pi.height)
-		if oldHeight >= newHeight || atomic.CompareAndSwapUint64(&pi.height, oldHeight, newHeight) {
-			break
-		}
+	pi.lock.Lock()
+	if pi.height < newHeight {
+		pi.height = newHeight
 	}
+	pi.lock.Unlock()
 }
 
 // MinBlock gets earliest block for eth/69 peers, falls back to height if not available
 // We use this to select a peer, fallback behaviour is valid since it will give us potentially
 // fewer peers but the peers will still be valid.
 func (pi *PeerInfo) MinBlock() uint64 {
-	minBlock := atomic.LoadUint64(&pi.minBlock)
-	if minBlock != 0 {
-		return minBlock
-	}
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
 
-	return atomic.LoadUint64(&pi.height)
+	if pi.minBlock != 0 {
+		return pi.minBlock
+	}
+	return pi.height
 }
 
-// SetNewMinBlock updates PeerInfo.minBlock from BlockRangeUpdate message
-func (pi *PeerInfo) SetNewMinBlock(newMinBlock uint64) {
-	for {
-		oldMinBlock := atomic.LoadUint64(&pi.minBlock)
-		if atomic.CompareAndSwapUint64(&pi.minBlock, oldMinBlock, newMinBlock) {
-			break
-		}
-	}
+// SetMinimumBlock updates PeerInfo.minBlock from BlockRangeUpdate message
+func (pi *PeerInfo) SetMinimumBlock(newMinBlock uint64) {
+	pi.lock.Lock()
+	pi.minBlock = newMinBlock
+	pi.lock.Unlock()
 }
 
 // ClearDeadlines goes through the deadlines of
@@ -1092,7 +1090,7 @@ func (ss *GrpcServer) SetPeerLatestBlock(_ context.Context, req *sentryproto.Set
 func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		peerInfo.SetNewMinBlock(req.MinBlockHeight)
+		peerInfo.SetMinimumBlock(req.MinBlockHeight)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -1100,7 +1098,7 @@ func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *sentryproto.Se
 func (ss *GrpcServer) SetPeerBlockRange(_ context.Context, req *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		peerInfo.SetNewMinBlock(req.MinBlockHeight)
+		peerInfo.SetMinimumBlock(req.MinBlockHeight)
 		peerInfo.SetIncreasedHeight(req.LatestBlockHeight)
 	}
 	return &emptypb.Empty{}, nil
