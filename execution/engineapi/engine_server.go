@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -87,7 +89,9 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 func NewEngineServer(logger log.Logger, config *chain.Config, executionService executionproto.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
-	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool) *EngineServer {
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, caplin, test, proposing, consuming bool,
+	txPool txpoolproto.TxpoolClient,
+) *EngineServer {
 	chainRW := eth1_chain_reader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
@@ -100,6 +104,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		caplin:            caplin,
 		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 		printPectraBanner: true,
+		txpool:            txPool,
 	}
 
 	srv.consuming.Store(consuming)
@@ -116,15 +121,18 @@ func (e *EngineServer) Start(
 	stateCache kvcache.Cache,
 	engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend,
-	txPool txpoolproto.TxpoolClient,
 	mining txpoolproto.MiningClient,
-) {
+) error {
+	var eg errgroup.Group
 	if !e.caplin {
-		e.engineLogSpamer.Start(ctx)
+		eg.Go(func() error {
+			defer e.logger.Debug("[EngineServer] engine log spammer goroutine terminated")
+			e.engineLogSpamer.Start(ctx)
+			return nil
+		})
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
-	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
-	e.txpool = txPool
+	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 
 	apiList := []rpc.API{
 		{
@@ -139,18 +147,27 @@ func (e *EngineServer) Start(
 			Version:   "1.0",
 		}}
 
-	if err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger); err != nil {
-		e.logger.Error(err.Error())
-	}
+	eg.Go(func() error {
+		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
+		err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			e.logger.Error("[EngineServer] rpc server background goroutine failed", "err", err)
+		}
+		return err
+	})
 
 	if e.blockDownloader != nil {
-		go func() {
+		eg.Go(func() error {
+			defer e.logger.Debug("[EngineServer] engine block downloader goroutine terminated")
 			err := e.blockDownloader.Run(ctx)
-			if err != nil {
-				e.logger.Error("[EngineBlockDownloader] background goroutine failed", "err", err)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				e.logger.Error("[EngineServer] block downloader background goroutine failed", "err", err)
 			}
-		}()
+			return err
+		})
 	}
+
+	return eg.Wait()
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {

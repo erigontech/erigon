@@ -18,11 +18,13 @@ package engineapi
 
 import (
 	"bytes"
+	"context"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -111,8 +113,17 @@ func TestGetBlobsV1(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
-	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true, txPool)
+	ctx, cancel := context.WithCancel(ctx)
+	var eg errgroup.Group
+	t.Cleanup(func() {
+		err := eg.Wait() // wait for clean exit
+		require.ErrorIs(err, context.Canceled)
+	})
+	t.Cleanup(cancel)
+	eg.Go(func() error {
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)
@@ -152,8 +163,17 @@ func TestGetBlobsV2(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
-	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true, txPool)
+	ctx, cancel := context.WithCancel(ctx)
+	var eg errgroup.Group
+	t.Cleanup(func() {
+		err := eg.Wait() // wait for clean exit
+		require.ErrorIs(err, context.Canceled)
+	})
+	t.Cleanup(cancel)
+	eg.Go(func() error {
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)
