@@ -42,15 +42,11 @@ func TestLegacyBlockchain(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	// Skip random failures due to selfish mining test
-	bt.skipLoad(`.*bcForgedTest/bcForkUncle\.json`)
-
 	// Slow tests
 	bt.slow(`.*bcExploitTest/DelegateCallSpam.json`)
 	bt.slow(`.*bcExploitTest/ShanghaiLove.json`)
 	bt.slow(`.*bcExploitTest/SuicideIssue.json`)
 	bt.slow(`.*/bcForkStressTest/`)
-	bt.slow(`.*/bcGasPricerTest/RPC_API_Test.json`)
 	bt.slow(`.*/bcWalletTest/`)
 
 	// Very slow test
@@ -59,36 +55,8 @@ func TestLegacyBlockchain(t *testing.T) {
 	// using 4.6 TGas
 	bt.skipLoad(`.*randomStatetest94.json.*`)
 
-	// After the merge we would accept side chains as canonical even if they have lower td
-	bt.skipLoad(`.*bcMultiChainTest/ChainAtoChainB_difficultyB.json`)
-	bt.skipLoad(`.*bcMultiChainTest/CallContractFromNotBestBlock.json`)
-	bt.skipLoad(`.*bcTotalDifficultyTest/uncleBlockAtBlock3afterBlock4.json`)
-	bt.skipLoad(`.*bcTotalDifficultyTest/lotsOfBranchesOverrideAtTheMiddle.json`)
-	bt.skipLoad(`.*bcTotalDifficultyTest/sideChainWithMoreTransactions.json`)
-	bt.skipLoad(`.*bcForkStressTest/ForkStressTest.json`)
-	bt.skipLoad(`.*bcMultiChainTest/lotsOfLeafs.json`)
-	bt.skipLoad(`.*bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain.json`)
-	bt.skipLoad(`.*bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain2.json`)
-
-	// With chain history removal, TDs become unavailable, this transition tests based on TTD are unrunnable
-	bt.skipLoad(`.*bcArrowGlacierToParis/powToPosBlockRejection.json`)
-
 	// This directory contains no test.
 	bt.skipLoad(`.*\.meta/.*`)
-
-	// General state tests are 'exported' as blockchain tests, but we can run them natively.
-	// For speedier CI-runs those are skipped.
-	bt.skipLoad(`^GeneralStateTests/`)
-
-	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
-	// TODO(yperbasis): make it work
-	bt.skipLoad(`^TransitionTests/bcArrowGlacierToParis/powToPosBlockRejection\.json`)
-	bt.skipLoad(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain\.json`)
-
-	// TODO: HistoryV3: doesn't produce receipts on execution by design. But maybe we can Generate them on-the fly (on history) and enable this tests
-	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/log1_wrongBloom\.json`)
-	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie\.json`)
-	bt.skipLoad(`^InvalidBlocks/bcInvalidHeaderTest/wrongGasUsed\.json`)
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
