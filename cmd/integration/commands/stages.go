@@ -1192,6 +1192,7 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 
 func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string) (info *StagesInfo, err error) {
 	chaindata = filepath.Join(dataDir, "chaindata")
+	datadirCli = dataDir
 	sn, borSn, _, db, err := allDBStaff(dbCfg(dbcfg.ChainDB, chaindata), false, logger, dataDir)
 	if err != nil {
 		logger.Error("Opening DB", "error", err)
