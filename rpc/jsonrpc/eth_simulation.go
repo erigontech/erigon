@@ -372,10 +372,15 @@ func (s *simulator) simulateBlock(
 		}
 	}
 
+	vmConfig := vm.Config{NoBaseFee: !s.validation}
+	if s.traceTransfers {
+		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
+		vmConfig.Tracer = tracer.Hooks()
+	}
 	var callResults []CallResult
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, tx, intraBlockState, callIndex, &call, bsc.BlockOverrides,
-			blockHashOverrides, header, &cumulativeGasUsed, &cumulativeBlobGasUsed, tracer)
+			blockHashOverrides, header, &cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -395,8 +400,11 @@ func (s *simulator) simulateBlock(
 	if !ok {
 		return nil, errors.New("consensus engine reader does not support full consensus.Engine")
 	}
+	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, s.chainConfig, intraBlockState, header, engine, false /* constCall */, vmConfig)
+	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
-		receiptList, withdrawals, nil, nil, nil, s.logger)
+		receiptList, withdrawals, nil, systemCall, nil, s.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -422,13 +430,8 @@ func (s *simulator) simulateCall(
 	cumulativeGasUsed *uint64,
 	cumulativeBlobGasUsed *uint64,
 	logTracer *rpchelper.LogTracer,
+	vmConfig vm.Config,
 ) (*CallResult, types.Transaction, *types.Receipt, error) {
-	vmConfig := vm.Config{NoBaseFee: !s.validation}
-	if s.traceTransfers {
-		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
-		vmConfig.Tracer = logTracer.Hooks()
-	}
-
 	// Setup context, so it may be cancelled after the call has completed or in case of unmetered gas use a timeout.
 	var cancel context.CancelFunc
 	if s.evmCallTimeout > 0 {
