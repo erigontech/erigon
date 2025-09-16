@@ -7,8 +7,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *RoSnapshots, failFast bool) error {
-	baseStore := NewMdbxStore(logger, dirs.DataDir, true, 32)
+func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs, baseStore Store, snaps *RoSnapshots, failFast bool) error {
+	//baseStore := NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := NewSpanSnapshotStore(baseStore.Spans(), snaps)
 	err := snapshotStore.Prepare(ctx)
 	if err != nil {
@@ -20,8 +20,8 @@ func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs,
 	return err
 }
 
-func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *RoSnapshots, failFast bool) error {
-	baseStore := NewMdbxStore(logger, dirs.DataDir, true, 32)
+func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir.Dirs, baseStore Store, snaps *RoSnapshots, failFast bool) error {
+	//baseStore := NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := NewCheckpointSnapshotStore(baseStore.Checkpoints(), snaps)
 	err := snapshotStore.Prepare(ctx)
 	if err != nil {
