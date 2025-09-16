@@ -217,8 +217,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if bundle.BlockOverride.Difficulty != nil {
 			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))
 		}
-		if bundle.BlockOverride.Time != nil {
-			blockCtx.Time = uint64(*bundle.BlockOverride.Time)
+		if bundle.BlockOverride.Timestamp != nil {
+			blockCtx.Time = uint64(*bundle.BlockOverride.Timestamp)
 		}
 		if bundle.BlockOverride.GasLimit != nil {
 			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
