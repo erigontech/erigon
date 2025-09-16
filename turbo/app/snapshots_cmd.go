@@ -889,7 +889,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorSpans skipped because not bor chain")
 				continue
 			}
-			if err := heimdall.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
+			heimdallStore, _ := blockRetire.BorStore()
+			if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
@@ -897,7 +898,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorCheckpoints skipped because not bor chain")
 				continue
 			}
-			if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
+			heimdallStore, _ := blockRetire.BorStore()
+			if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
