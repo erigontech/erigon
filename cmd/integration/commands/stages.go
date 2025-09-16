@@ -1254,6 +1254,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		}
 
 		dirs := datadir.New(datadirCli)
+		println(dirs.Snap)
 
 		chainConfig := fromdb.ChainConfig(db)
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
