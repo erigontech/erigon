@@ -299,7 +299,7 @@ var cmdPrintStages = &cobra.Command{
 			return
 		}
 		defer db.Close()
-
+		log.New()
 		if err := printAllStages(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -1188,6 +1188,28 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	defer sn.Close()
 	defer borSn.Close()
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
+}
+
+func InfoAllStages(ctx context.Context, logger log.Logger) (info *StagesInfo, err error) {
+	sn, borSn, _, db, err := allDBStaff(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+	if err != nil {
+		logger.Error("Opening DB", "error", err)
+		return nil, err
+	}
+	defer db.Close()
+	defer sn.Close()
+	defer borSn.Close()
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		info, err = InfoStages(tx, sn, borSn)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return info, nil
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {

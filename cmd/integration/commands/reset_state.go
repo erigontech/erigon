@@ -116,7 +116,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func infoStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) (info *StagesInfo, err error) {
+func InfoStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) (info *StagesInfo, err error) {
 	var progress uint64
 	info = &StagesInfo{}
 	info.StagesProgress = make([]StageProgress, 0, len(stages.AllStages))
