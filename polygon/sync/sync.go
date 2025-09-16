@@ -1006,6 +1006,14 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 		latestTip: latestTipOnStart,
 	}
 
+	// we need to synchronize spans because syncing from checkpoints and milestones below has a dependency on spans
+	// during pruning, and if the span store is not up to date then this can result in an error
+	if err := s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64); err != nil {
+		return syncToTipResult{}, err
+	}
+
+	s.logger.Info(syncLogPrefix("spans synchronized"))
+
 	startTime := time.Now()
 	result, ok, err := s.syncToTipUsingCheckpoints(ctx, finalisedTip.latestTip)
 	if err != nil {
