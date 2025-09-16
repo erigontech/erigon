@@ -166,7 +166,6 @@ func allDBStaff(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger, data
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return nil, nil, nil, nil, err
 	}
-	println("salt is here")
 
 	sn, borSn, agg, _, _, _, err = allSnapshots(context.Background(), rawDB, logger)
 	if err != nil {

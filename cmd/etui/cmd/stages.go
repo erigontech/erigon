@@ -31,7 +31,7 @@ var infoCmd = &cobra.Command{
 			SetText(fmt.Sprintf("%+v", info)).
 			AddButtons([]string{"Quit", "Cancel"}).
 			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				if buttonLabel == "Quit" {
+				if buttonLabel == "Quit" || buttonLabel == "Cancel" {
 					app.Stop()
 				}
 			})
