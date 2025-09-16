@@ -306,6 +306,10 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if headState == nil {
 		return nil
 	}
+	// First emit events that depend on the head state.
+	emitHeadEvent(cfg, headSlot, headRoot, headState)
+	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)
 	}
@@ -332,10 +336,6 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
 			return fmt.Errorf("failed to save head state on disk: %w", err)
 		}
-
-		// Lastly, emit the head event
-		emitHeadEvent(cfg, headSlot, headRoot, headState)
-		emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
 
 		// Shuffle validator set for the next epoch
 		preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
