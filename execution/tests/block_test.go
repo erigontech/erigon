@@ -93,3 +93,26 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 		}
 	})
 }
+
+// Only runs EEST tests for current devnet - can "skip" on off-seasons
+func TestExecutionSpecBlockchainDevnet(t *testing.T) {
+	t.Skip("Osaka is already covered by TestExecutionSpecBlockchain")
+
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
+
+	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+		// import pre accounts & construct test genesis block & state root
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
+			t.Error(err)
+		}
+	})
+}
