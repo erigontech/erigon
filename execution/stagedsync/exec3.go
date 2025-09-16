@@ -1561,6 +1561,10 @@ func ExecV3(ctx context.Context,
 								dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 								return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 							}
+
+							if !isMining && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
+								cfg.notifications.RecentLogs.Add(applyResult.Receipts)
+							}
 						}
 
 						if applyResult.BlockNum > lastBlockResult.BlockNum {

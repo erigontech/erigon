@@ -164,10 +164,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
-				if !se.isMining && !se.inMemExec && startTxIndex == 0 && !isInitialCycle {
-					// note this assumes the bloach reciepts is a fixed array shared by
-					// all tasks - if that changes this will need to change - robably need to
-					// add this to the executor
+				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentLogs.Add(blockReceipts)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
