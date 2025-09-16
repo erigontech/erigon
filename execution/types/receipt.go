@@ -569,13 +569,7 @@ func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transaction
 }
 
 func (rs *Receipts) EncodeRLP69(w io.Writer) error {
-	for _, receipt := range *rs {
-		if err := receipt.EncodeRLP69(w); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return rlp.Encode(w, *rs)
 }
 
 // DeriveFieldsV3ForSingleReceipt fills the receipts with their computed fields based on consensus
