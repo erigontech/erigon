@@ -1190,8 +1190,9 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
 }
 
-func InfoAllStages(ctx context.Context, logger log.Logger) (info *StagesInfo, err error) {
-	sn, borSn, _, db, err := allDBStaff(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string) (info *StagesInfo, err error) {
+	chaindata = filepath.Join(dataDir, "chaindata")
+	sn, borSn, _, db, err := allDBStaff(dbCfg(dbcfg.ChainDB, chaindata), false, logger, dataDir)
 	if err != nil {
 		logger.Error("Opening DB", "error", err)
 		return nil, err

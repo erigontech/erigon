@@ -133,7 +133,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	return temporal.New(rawDB, agg)
 }
 
-func allDBStaff(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (sn *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots, agg *state.Aggregator, tdb kv.TemporalRwDB, err error) {
+func allDBStaff(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger, dataDir string) (sn *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots, agg *state.Aggregator, tdb kv.TemporalRwDB, err error) {
 	migrationDBs := map[kv.Label]bool{
 		dbcfg.ChainDB:         true,
 		dbcfg.ConsensusDB:     true,
@@ -162,7 +162,7 @@ func allDBStaff(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (sn 
 		}
 	}
 
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(dataDir)
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return nil, nil, nil, nil, err
 	}

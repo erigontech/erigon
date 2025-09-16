@@ -22,7 +22,7 @@ var infoCmd = &cobra.Command{
 			return fmt.Errorf("--datadir flag is required")
 		}
 		logger := log.New(context.Background())
-		info, err := commands.InfoAllStages(cmd.Context(), logger)
+		info, err := commands.InfoAllStages(cmd.Context(), logger, datadirCli)
 		if err != nil {
 			return err
 		}
