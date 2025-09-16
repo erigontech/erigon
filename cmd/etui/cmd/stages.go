@@ -35,7 +35,7 @@ var infoCmd = &cobra.Command{
 					app.Stop()
 				}
 			})
-		if err := app.SetRoot(view, true).Run(); err != nil {
+		if err := app.SetRoot(view, false).Run(); err != nil {
 			panic(err)
 		}
 		return nil
