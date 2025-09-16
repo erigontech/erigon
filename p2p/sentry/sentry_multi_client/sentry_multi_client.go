@@ -200,6 +200,15 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 }
 
 // waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
+//
+// Parameters:
+//   - ctx: context for cancellation
+//   - pollFrequency: the time interval between checking if a header is available
+//   - isHeaderAvailable: function that checks if a header is available in the database
+//
+// Returns:
+//   - nil when both blockReader is ready and a header is available
+//   - error if blockReader fails to become ready or context is cancelled
 func (cs *MultiClient) waitForPrerequisites(ctx context.Context, pollFrequency time.Duration, isHeaderAvailable func() bool) error {
 	cs.logger.Info("Waiting for blockreader to be ready")
 	if err := <-cs.blockReader.Ready(ctx); err != nil {
