@@ -41,6 +41,7 @@ func TestLegacyBlockchain(t *testing.T) {
 	}
 
 	bt := new(testMatcher)
+	dir := filepath.Join(legacyDir, "BlockchainTests")
 
 	// Slow tests
 	bt.slow(`.*bcExploitTest/DelegateCallSpam.json`)
@@ -55,10 +56,10 @@ func TestLegacyBlockchain(t *testing.T) {
 	// using 4.6 TGas
 	bt.skipLoad(`.*randomStatetest94.json.*`)
 
-	// This directory contains no test.
+	// This directory contains no tests
 	bt.skipLoad(`.*\.meta/.*`)
 
-	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
@@ -79,9 +80,17 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testMatcher)
+	dir := filepath.Join(eestDir, "blockchain_tests")
 
-	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
-	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
+	// Long tests:
+	bt.slow(`^static/state_tests/stAttackTest/ContractCreationSpam`)
+	bt.slow(`^static/state_tests/stBadOpcode/badOpcodes`)
+	bt.slow(`^static/state_tests/stPreCompiledContracts/modexp`)
+	bt.slow(`^static/state_tests/stStaticCall/static_Call50000`)
+	bt.slow(`^static/state_tests/stStaticCall/static_Return50000`)
+	bt.slow(`^static/state_tests/stSystemOperationsTest/CallRecursiveBomb`)
+	// Very time consuming
+	bt.skipLoad(`^static/state_tests/stTimeConsuming/`)
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
@@ -89,7 +98,6 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
-
 }
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
@@ -103,8 +111,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testMatcher)
-
-	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests_devnet")
+	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

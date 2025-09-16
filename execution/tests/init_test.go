@@ -37,13 +37,9 @@ import (
 )
 
 var (
-	baseDir            = filepath.Join(".", "legacy-tests")
-	blockTestDir       = filepath.Join(baseDir, "BlockchainTests")
-	stateTestDir       = filepath.Join(baseDir, "GeneralStateTests") // TODO(yperbasis) FIXME
-	transactionTestDir = filepath.Join(baseDir, "TransactionTests")
-	rlpTestDir         = filepath.Join(baseDir, "RLPTests")
-	difficultyTestDir  = filepath.Join(baseDir, "DifficultyTests")
-
+	legacyDir  = filepath.Join(".", "legacy-tests")
+	eestDir    = filepath.Join(".", "execution-spec-tests")
+	rlpTestDir = filepath.Join(legacyDir, "RLPTests")
 	cornersDir = filepath.Join(".", "test-corners")
 )
 
