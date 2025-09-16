@@ -236,6 +236,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 	}
 
+	if evm.Cancelled() {
+		return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
+	}
+
 	receipt.BlockHash = blockHash
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
