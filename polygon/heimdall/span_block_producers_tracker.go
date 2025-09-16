@@ -20,17 +20,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"time"
 
+	polygonchain "github.com/erigontech/erigon/polygon/chain"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
+// blocks at sprint starts that had invalid validator set transitions on Amoy (need to be patched)
+var amoyBadBlocks = []uint64{26160367 + 1, 26161087 + 1, 26171567 + 1, 26173743 + 1, 26175647 + 1}
+
 func newSpanBlockProducersTracker(
 	logger log.Logger,
+	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
 	store EntityStore[*SpanBlockProducerSelection],
 ) *spanBlockProducersTracker {
@@ -41,6 +48,7 @@ func newSpanBlockProducersTracker(
 
 	return &spanBlockProducersTracker{
 		logger:              logger,
+		chainConfig:         chainConfig,
 		borConfig:           borConfig,
 		store:               store,
 		recentSelections:    recentSelectionsLru,
@@ -52,6 +60,7 @@ func newSpanBlockProducersTracker(
 
 type spanBlockProducersTracker struct {
 	logger              log.Logger
+	chainConfig         *chain.Config
 	borConfig           *borcfg.BorConfig
 	store               EntityStore[*SpanBlockProducerSelection]
 	recentSelections    *lru.Cache[uint64, SpanBlockProducerSelection] // sprint number -> SpanBlockProducerSelection
@@ -187,11 +196,27 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	spanStartSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
 	spanEndSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
 	increments := int(spanEndSprintNum - spanStartSprintNum)
+	// sprints to patch in Amoy
+	amoySprintsToPatch := make([]uint64, len(amoyBadBlocks))
+	for i := 0; i < len(amoySprintsToPatch); i++ {
+		amoySprintsToPatch[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
+	}
+	var oldProducers *ValidatorSet
+	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
 	for i := 0; i < increments; i++ {
-		producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		sprintNum := spanStartSprintNum + uint64(i) + 1
+		if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum) { // on the bad sprint (Amoy)
+			var emptyProducers []*Validator = nil
+			oldProducers = producers.Copy()
+			oldProducers.IncrementProposerPriority(1)
+			producers = GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
+		} else if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum-1) { // sprint after the bad sprint (Amoy)
+			producers = GetUpdatedValidatorSet(producers, oldProducers.Validators, t.logger)
+		} else { // the normal case
+			producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		}
 		producers.IncrementProposerPriority(1)
 	}
-
 	newProducers := GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducers.IncrementProposerPriority(1)
 	newProducerSelection := &SpanBlockProducerSelection{
@@ -256,8 +281,24 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 
 	spanStartSprintNum := t.borConfig.CalculateSprintNumber(producerSelection.StartBlock)
 	increments := int(currentSprintNum - spanStartSprintNum)
+	amoyPatchedSprints := make([]uint64, len(amoyBadBlocks))
+	var oldProducers *ValidatorSet
+	for i := 0; i < len(amoyPatchedSprints); i++ {
+		amoyPatchedSprints[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
+	}
+	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
 	for i := 0; i < increments; i++ {
-		producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		sprintNum := spanStartSprintNum + uint64(i) + 1
+		if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum) { // on bad sprint
+			var emptyProducers []*Validator = nil
+			oldProducers = producers.Copy()
+			oldProducers.IncrementProposerPriority(1)
+			producers = GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
+		} else if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum-1) { // sprint after the bad sprint
+			producers = GetUpdatedValidatorSet(producers, oldProducers.Validators, t.logger)
+		} else { // normal case
+			producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
+		}
 		producers.IncrementProposerPriority(1)
 	}
 	return producers, increments, nil

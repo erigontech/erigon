@@ -18,8 +18,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 
 type serialExecutor struct {
