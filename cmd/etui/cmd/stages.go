@@ -27,15 +27,19 @@ var infoCmd = &cobra.Command{
 			return err
 		}
 		app := tview.NewApplication().SetTitle("Erigon TUI")
-		view := tview.NewModal().
-			SetText(fmt.Sprintf("%+v", info)).
-			AddButtons([]string{"Quit", "Cancel"}).
-			SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				if buttonLabel == "Quit" || buttonLabel == "Cancel" {
-					app.Stop()
-				}
-			})
-		if err := app.SetRoot(view, true).EnableMouse(true).Run(); err != nil {
+		flex := tview.NewFlex().
+			AddItem(tview.NewBox().SetBorder(false).SetTitle("Erigon TUI"), 0, 1, false).
+			AddItem(tview.NewBox().SetBorder(true).SetTitle("Middle (3 x height of Top)"), 0, 3, false).
+			AddItem(tview.NewTextView().SetText(fmt.Sprintf("%+v", info)), 5, 1, false)
+		//view := tview.NewModal().
+		//	SetText(.
+		//	AddButtons([]string{"Quit", "Cancel"}).
+		//	SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+		//		if buttonLabel == "Quit" || buttonLabel == "Cancel" {
+		//			app.Stop()
+		//		}
+		//	})
+		if err := app.SetRoot(flex, true).EnableMouse(true).Run(); err != nil {
 			panic(err)
 		}
 		return nil
