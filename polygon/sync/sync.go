@@ -1008,7 +1008,7 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 
 	// we need to synchronize spans because syncing from checkpoints and milestones below has a dependency on spans
 	// during pruning, and if the span store is not up to date then this can result in an error
-	if err := s.heimdallSync.SynchronizeSpans(ctx, finalisedTip.latestTip.Number.Uint64()); err != nil {
+	if err := s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64); err != nil {
 		return syncToTipResult{}, err
 	}
 
