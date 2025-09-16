@@ -43,6 +43,11 @@ const (
 
 	changeL2BlockTxType = 11
 	changeL2BlockLength = 9
+	fullRlpTxType       = 15
+
+	// hard coded to match in with the smart contract
+	// https://github.com/0xPolygonHermez/zkevm-contracts/blob/73758334f8568b74e9493fcc530b442bd73325dc/contracts/PolygonZkEVM.sol#L119C63-L119C69
+	LIMIT_120_KB = 120_000
 )
 
 var (
@@ -101,6 +106,33 @@ func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, e
 			continue
 		}
 
+		if num == fullRlpTxType {
+			// move past [0x0f] which is the full rlp tx identifier
+			start := pos + 1
+
+			fullTypedTx, rest, err := rlp.SplitString(txsData[start:])
+			if err != nil {
+				return result, err
+			}
+
+			typedTx, err := types.UnmarshalTransactionFromBinary(fullTypedTx, false)
+			if err != nil {
+				return result, err
+			}
+
+			currentData.Transactions = append(currentData.Transactions, typedTx)
+
+			typedTxEndPos := start + uint64(len(txsData[start:])-len(rest))
+			if forkID >= uint64(constants.ForkID5Dragonfruit) {
+				ep := rest[0]
+				currentData.EffectiveGasPricePercentages = append(currentData.EffectiveGasPricePercentages, ep)
+				typedTxEndPos += 1
+			}
+
+			pos = typedTxEndPos
+			continue
+		}
+
 		// First byte is the length and must be ignored
 		if num < c0 {
 			log.Debug("error num < c0 : %d, %d", num, c0)
@@ -133,12 +165,6 @@ func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, e
 
 		if endPos > txDataLength {
 			err := fmt.Errorf("endPos %d is bigger than txDataLength %d", endPos, txDataLength)
-			log.Debug("error parsing header: ", err)
-			return result, ErrInvalidData
-		}
-
-		if endPos < pos {
-			err := fmt.Errorf("endPos %d is smaller than pos %d", endPos, pos)
 			log.Debug("error parsing header: ", err)
 			return result, ErrInvalidData
 		}
@@ -303,6 +329,32 @@ Copy of TransactionToL2Data with modifications:
 Tne encoding is based on zkemv-commonjs/src/process-utils as of eb1ed1a1c05e2666cd32e3900beff5121bdeb4db
 */
 func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercentage uint8) ([]byte, error) {
+	// if the tx is not a legacy type then that means we are in type 1 mode.
+	// in type 2 mode we do not rlp encode the full tx data, this is to save input space on the L1
+	// but now in type 1 we must encode the full transaction so we know what type it is.
+	if tx.Type() != types.LegacyTxType {
+		// txData = [f][full tx rlp][effective gas]
+
+		// add prefix for identifying the tx as a non-legacy tx
+		buf := make([]byte, 0)
+		buf = append(buf, fullRlpTxType)
+
+		// rlp encode the full transaction
+		buffer := bytes.NewBuffer(buf)
+		if err := tx.EncodeRLP(buffer); err != nil {
+			return nil, err
+		}
+		txBytes := buffer.Bytes()
+
+		// effective gas
+		if forkId >= uint16(constants.ForkID5Dragonfruit) {
+			ep := hermez_db.Uint8ToBytes(efficiencyPercentage)
+			txBytes = append(txBytes, ep...)
+		}
+
+		return txBytes, nil
+	}
+
 	nonceBytes := hermez_db.Uint64ToBytes(tx.GetNonce())
 	gasPriceBytes := tx.GetPrice().Bytes()
 	gas := hermez_db.Uint64ToBytes(tx.GetGas())
@@ -373,17 +425,24 @@ func removeLeadingZeroesFromBytes(source []byte) []byte {
 }
 
 func GetDecodedV(tx types.Transaction, v *uint256.Int) *uint256.Int {
-	if !tx.Protected() {
-		return v
+	// decoding the v value like this only applies to legacy transactions
+	// for other transaction types the v value is always 0 or 1
+	// and does not need to be decoded back to 0 or 1
+	if tx.Type() == types.LegacyTxType {
+		if !tx.Protected() {
+			return v
+		}
+
+		multiChain := new(big.Int).Mul(tx.GetChainID().ToBig(), big.NewInt(double))
+		plus155V := new(big.Int).Add(new(big.Int).SetBytes(v.Bytes()), big.NewInt(ether155V))
+		txV := new(big.Int).Sub(plus155V, multiChain)
+		txV = txV.Sub(txV, big.NewInt(etherPre155V))
+
+		result, _ := uint256.FromBig(txV)
+		return result
 	}
 
-	multiChain := new(big.Int).Mul(tx.GetChainID().ToBig(), big.NewInt(double))
-	plus155V := new(big.Int).Add(new(big.Int).SetBytes(v.Bytes()), big.NewInt(ether155V))
-	txV := new(big.Int).Sub(plus155V, multiChain)
-	txV = txV.Sub(txV, big.NewInt(etherPre155V))
-
-	result, _ := uint256.FromBig(txV)
-	return result
+	return v
 }
 
 type BatchTxData struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	zktx "github.com/erigontech/erigon/zk/tx"
 	"time"
 
 	"encoding/binary"
@@ -77,22 +78,22 @@ func SpawnSequencerL1BlockSyncStage(
 	}
 
 	// check if the highest batch from the L1 is higher than the config value if it is set
-	if cfg.zkCfg.L1SyncStopBatch > 0 {
+	if cfg.zkCfg.RecoveryStopBatch > 0 {
 		// stop completely if we have executed past the stop batch
-		if highestKnownBatch > cfg.zkCfg.L1SyncStopBatch {
-			log.Info("Stopping L1 sync stage based on configured stop batch", "config", cfg.zkCfg.L1SyncStopBatch, "highest-known", highestKnownBatch)
+		if highestKnownBatch > cfg.zkCfg.RecoveryStopBatch {
+			log.Info("Stopping L1 sync stage based on configured stop batch", "config", cfg.zkCfg.RecoveryStopBatch, "highest-known", highestKnownBatch)
 			time.Sleep(1 * time.Second)
 			return nil
 		}
 
 		// if not we might have already started execution and just need to see if we have all the batches we care about in the db, and we can exit
 		// early as well
-		hasEverything, err := haveAllBatchesInDb(highestBatch, cfg, hermezDb)
+		hasEverything, err := haveAllBatchesInDb(highestBatch, cfg.zkCfg, hermezDb)
 		if err != nil {
 			return err
 		}
 		if hasEverything {
-			log.Info("Stopping L1 sync stage based on configured stop batch", "config", cfg.zkCfg.L1SyncStopBatch, "highest-known", highestKnownBatch)
+			log.Info("Stopping L1 sync stage based on configured stop batch", "config", cfg.zkCfg.RecoveryStopBatch, "highest-known", highestKnownBatch)
 			time.Sleep(1 * time.Second)
 			return nil
 		}
@@ -195,7 +196,7 @@ LOOP:
 					b := initBatch + uint64(idx)
 
 					size := 20 + 32 + 8 + len(batch)
-					if size > LIMIT_120_KB {
+					if size > zktx.LIMIT_120_KB {
 						log.Error(fmt.Sprintf("[%s] L1 batch data is too large", logPrefix), "size", size)
 						funcErr = fmt.Errorf("L1 batch data is too large: %d", size)
 						return funcErr
@@ -212,12 +213,12 @@ LOOP:
 					}
 
 					// check if we need to stop here based on config
-					if cfg.zkCfg.L1SyncStopBatch > 0 {
+					if cfg.zkCfg.RecoveryStopBatch > 0 {
 						stopBlockMap[b] = struct{}{}
 						if b > highestBatch {
 							highestBatch = b
 						}
-						if checkStopBlockMap(highestBatch, cfg.zkCfg.L1SyncStopBatch, stopBlockMap) {
+						if checkStopBlockMap(highestBatch, cfg.zkCfg.RecoveryStopBatch, stopBlockMap) {
 							log.Info("Stopping L1 sync based on stop batch config")
 							break LOOP
 						}
@@ -251,9 +252,9 @@ LOOP:
 	return nil
 }
 
-func haveAllBatchesInDb(highestBatch uint64, cfg SequencerL1BlockSyncCfg, hermezDb *hermez_db.HermezDb) (bool, error) {
+func haveAllBatchesInDb(highestBatch uint64, zkCfg *ethconfig.Zk, hermezDb *hermez_db.HermezDb) (bool, error) {
 	hasEverything := true
-	for i := highestBatch; i <= cfg.zkCfg.L1SyncStopBatch; i++ {
+	for i := highestBatch; i <= zkCfg.RecoveryStopBatch; i++ {
 		data, err := hermezDb.GetL1BatchData(i)
 		if err != nil {
 			return false, err
