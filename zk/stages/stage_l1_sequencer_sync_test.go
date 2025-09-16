@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -271,9 +272,13 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 
 	// act
 	require.True(t, WaitFor(5*time.Second, func() bool {
+		fmt.Printf("Calling SpawnL1SequencerSyncStage with progress %d\n", l1Syncer.GetLastCheckedL1Block())
 		err = SpawnL1SequencerSyncStage(s, u, tx, cfg, ctx, log.New())
 		require.NoError(t, err)
-		return l1Syncer.GetLastCheckedL1Block() >= latestBlockNumber.Uint64()
+		progress, err := stages.GetStageProgress(tx, stages.L1SequencerSync)
+		require.NoError(t, err)
+		fmt.Printf("Calling SpawnL1SequencerSyncStage with checked block %d, progress %d\n", l1Syncer.GetLastCheckedL1Block(), progress)
+		return progress >= latestBlockNumber.Uint64()
 	}))
 
 	// assert

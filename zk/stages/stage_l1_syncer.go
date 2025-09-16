@@ -116,18 +116,25 @@ func SpawnStageL1Syncer(
 
 	idleTicker := time.NewTimer(10 * time.Second)
 	latestActivity := time.Now()
+	var progress uint64
 
 Loop:
 	for {
 		select {
-		case logs, ok := <-logsChan:
+		case logEvent, ok := <-logsChan:
 			if !ok {
+				logsChan = nil
 				break Loop
+			}
+
+			if logEvent.Done {
+				log.Info(fmt.Sprintf("[%s] L1 Syncer stage: received done signal", logPrefix))
+				progress = logEvent.Progress
 			}
 
 			latestActivity = time.Now()
 
-			for _, l := range logs {
+			for _, l := range logEvent.Logs {
 				l := l
 				info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
 				switch batchLogType {
@@ -191,12 +198,11 @@ Loop:
 		}
 	}
 
-	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
-
-	lastCheckedL1BlockCounter.Set(float64(latestCheckedBlock))
+	// Last checked l1 block could be greater than progress because syncer runs concurrently
+	lastCheckedL1BlockCounter.Set(float64(progress))
 
 	if highestWrittenL1BlockNo > l1BlockProgress {
-		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount, "highestWrittenL1BlockNo", highestWrittenL1BlockNo)
+		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", progress, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount, "highestWrittenL1BlockNo", highestWrittenL1BlockNo)
 
 		if err := stages.SaveStageProgress(tx, stages.L1Syncer, highestWrittenL1BlockNo); err != nil {
 			return fmt.Errorf("SaveStageProgress: %w", err)

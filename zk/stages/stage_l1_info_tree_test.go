@@ -208,6 +208,7 @@ func TestSpawnL1InfoTreeStage_HappyPath(t *testing.T) {
 	// what is already available, we might need to call it a few times.
 	// Use a deadline to avoid infinite loops.
 	require.True(t, WaitFor(1*time.Second, func() bool {
+		fmt.Printf("Running L1 Info Tree stage...\n")
 		err := runStageOnce(t, env)
 		require.NoError(t, err)
 
@@ -280,14 +281,8 @@ func TestSpawnL1InfoTreeStage_GetHeaderFails(t *testing.T) {
 }
 
 func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
-	retryDelay := syncer.L1FetchHeaderRetryDelay
-	oldTimeout := l1infotree.NoActivityTimeout
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
-	defer t.Cleanup(func() {
-		l1infotree.NoActivityTimeout = oldTimeout
-		syncer.L1FetchHeaderRetryDelay = retryDelay
-	})
 
 	env := newStageEnv(t)
 	env.l1Syncer.SetFetchHeaders(true)
@@ -303,14 +298,8 @@ func TestSpawnL1InfoTreeStage_GetHeaderAlwaysFailsTimeout(t *testing.T) {
 }
 
 func TestSpawnL1InfoTreeStage_FilterLogsFails(t *testing.T) {
-	retryDelay := syncer.L1FetchHeaderRetryDelay
-	oldTimeout := l1infotree.NoActivityTimeout
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
-	defer t.Cleanup(func() {
-		l1infotree.NoActivityTimeout = oldTimeout
-		syncer.L1FetchHeaderRetryDelay = retryDelay
-	})
 
 	env := newStageEnv(t)
 
@@ -323,14 +312,8 @@ func TestSpawnL1InfoTreeStage_FilterLogsFails(t *testing.T) {
 }
 
 func TestSpawnL1InfoTreeStage_GetHeadersFailsThenNextIterationOK(t *testing.T) {
-	retryDelay := syncer.L1FetchHeaderRetryDelay
-	oldTimeout := l1infotree.NoActivityTimeout
 	l1infotree.NoActivityTimeout = 100 * time.Millisecond
 	syncer.L1FetchHeaderRetryDelay = 50 * time.Millisecond
-	defer t.Cleanup(func() {
-		l1infotree.NoActivityTimeout = oldTimeout
-		syncer.L1FetchHeaderRetryDelay = retryDelay
-	})
 
 	env := newStageEnv(t)
 

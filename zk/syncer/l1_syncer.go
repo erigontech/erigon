@@ -64,6 +64,12 @@ type jobResult struct {
 	Logs  []ethTypes.Log
 }
 
+type LogEvent struct {
+	Logs     []ethTypes.Log
+	Progress uint64 // set only on Done
+	Done     bool
+}
+
 type L1Syncer struct {
 	ctx                 context.Context
 	etherMans           []IEtherman
@@ -85,11 +91,11 @@ type L1Syncer struct {
 	flagStop           atomic.Bool
 
 	// Channels
-	logsConsumChan            chan []ethTypes.Log
-	logsProduceChan           chan []ethTypes.Log
-	logsSwapMutex             sync.Mutex
-	logsChanProgress          chan string
-	requestCloseConsumChannel bool
+	logsConsumChan   chan LogEvent
+	logsProduceChan  chan LogEvent
+	logsSwapMutex    sync.Mutex
+	logsChanProgress chan string
+	closeLogsChannel atomic.Bool
 
 	highestBlockType string                                   // finalized, latest, safe
 	headersCache     *expirable.LRU[uint64, *ethTypes.Header] // cache for headers
@@ -108,8 +114,8 @@ func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses
 		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
-		logsProduceChan:     make(chan []ethTypes.Log, logsChannelSize),
-		logsChanProgress:    make(chan string, 1),
+		logsProduceChan:     make(chan LogEvent, logsChannelSize),
+		logsChanProgress:    make(chan string, logsChannelSize),
 		highestBlockType:    highestBlockType,
 		firstL1Block:        firstL1Block,
 		headersCache:        headersCache,
@@ -158,7 +164,7 @@ func (s *L1Syncer) WaitQueryBlocksToFinish() {
 }
 
 // Channels
-func (s *L1Syncer) GetLogsChan() <-chan []ethTypes.Log {
+func (s *L1Syncer) GetLogsChan() <-chan LogEvent {
 	s.logsSwapMutex.Lock()
 	defer s.logsSwapMutex.Unlock()
 
@@ -166,7 +172,7 @@ func (s *L1Syncer) GetLogsChan() <-chan []ethTypes.Log {
 
 	// If not downloading, grab existing data and close the channel
 	if !s.isDownloading.Load() {
-		s.requestCloseConsumChannel = true
+		s.closeLogsChannel.Store(true)
 	}
 	return s.logsConsumChan
 }
@@ -177,11 +183,9 @@ func (s *L1Syncer) GetProgressMessageChan() <-chan string {
 
 func (s *L1Syncer) RunQueryBlocks(from uint64) {
 	//if already started, don't start another thread
-	if s.isSyncStarted.Load() {
+	if !s.isSyncStarted.CompareAndSwap(false, true) {
 		return
 	}
-
-	s.isSyncStarted.Store(true)
 
 	// set it to true to catch the first cycle run case where the check can pass before the latest block is checked
 	s.lastCheckedL1Block.Store(from)
@@ -199,6 +203,9 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 
 		ticker := time.NewTicker(time.Duration(s.queryDelay) * time.Millisecond)
 		defer ticker.Stop()
+
+		sleepTicker := time.NewTicker(10 * time.Millisecond)
+		defer sleepTicker.Stop()
 
 		for {
 			if s.flagStop.Load() {
@@ -229,8 +236,8 @@ func (s *L1Syncer) RunQueryBlocks(from uint64) {
 					}
 				}
 				s.resetChannels()
-			default:
-				if s.requestCloseConsumChannel {
+			case <-sleepTicker.C:
+				if s.closeLogsChannel.Load() && !s.isDownloading.Load() {
 					s.resetChannels()
 				}
 			}
@@ -455,15 +462,16 @@ loop:
 				numLogs += uint64(len(res.Logs))
 
 				wg.Add(1)
-				go func() {
+				logs := res.Logs
+				go func(logs []ethTypes.Log) {
 					defer wg.Done()
 
 					if s.fetchHeaders {
-						s.l1QueryHeaders(res.Logs)
+						s.l1QueryHeaders(logs)
 					}
 
-					s.logsProduceChan <- res.Logs
-				}()
+					s.logsProduceChan <- LogEvent{Logs: logs}
+				}(logs)
 			}
 
 			if complete == len(fetches) {
@@ -477,7 +485,7 @@ loop:
 			s.logsChanProgress <- fmt.Sprintf("L1 Blocks processed progress (amounts): %d/%d (%d%%)", progress, aimingFor, (progress*100)/aimingFor)
 			if progress > prevProgress {
 				prevProgress = progress
-				s.logsProduceChan <- nil // send a nil log to indicate activity in case no logs for long in big range
+				s.logsProduceChan <- LogEvent{Logs: nil} // send a nil log to indicate activity in case no logs for long in big range
 			}
 		}
 	}
@@ -668,8 +676,9 @@ func (s *L1Syncer) resetChannels() {
 	s.logsSwapMutex.Lock()
 	defer s.logsSwapMutex.Unlock()
 	if s.logsConsumChan == s.logsProduceChan {
+		s.logsConsumChan <- LogEvent{Logs: nil, Done: true, Progress: s.lastCheckedL1Block.Load()} // send a nil log to indicate activity in case no logs for long in big range
 		close(s.logsConsumChan)
-		s.logsProduceChan = make(chan []ethTypes.Log, logsChannelSize)
+		s.logsProduceChan = make(chan LogEvent, logsChannelSize)
 	}
-	s.requestCloseConsumChannel = false
+	s.closeLogsChannel.Store(false)
 }

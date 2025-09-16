@@ -102,14 +102,19 @@ func SpawnL1SequencerSyncStage(
 Loop:
 	for {
 		select {
-		case logs, ok := <-logChan:
+		case logEvent, ok := <-logChan:
 			if !ok {
+				logChan = nil
 				break Loop
+			}
+
+			if logEvent.Done {
+				progress = logEvent.Progress
 			}
 
 			latestActivity = time.Now()
 
-			for _, l := range logs {
+			for _, l := range logEvent.Logs {
 				switch l.Topics[0] {
 				case contracts.InitialSequenceBatchesTopic:
 					if funcErr = HandleInitialSequenceBatches(cfg.syncer, hermezDb, l); funcErr != nil {
@@ -201,7 +206,6 @@ Loop:
 		}
 	}
 
-	progress = cfg.syncer.GetLastCheckedL1Block()
 	if progress >= cfg.zkCfg.L1FirstBlock {
 		// do not save progress if progress less than L1FirstBlock
 		if funcErr = stages.SaveStageProgress(tx, stages.L1SequencerSync, progress); funcErr != nil {

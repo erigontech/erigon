@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/zk/contracts"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/syncer"
 	zkTypes "github.com/erigontech/erigon/zk/types"
 	"github.com/iden3/go-iden3-crypto/keccak256"
 )
@@ -30,7 +31,7 @@ type Syncer interface {
 	GetLastCheckedL1Block() uint64
 	CheckL1BlockFinalized(blockNo uint64) (finalized bool, finalizedBn uint64, err error)
 	RunQueryBlocks(lastCheckedBlock uint64)
-	GetLogsChan() <-chan []types.Log
+	GetLogsChan() (logs <-chan syncer.LogEvent)
 	GetProgressMessageChan() <-chan string
 	GetHeader(blockNumber uint64) (*types.Header, error)
 	StopQueryBlocks()
@@ -89,26 +90,26 @@ func (u *Updater) WarmUp(tx kv.RwTx) (err error) {
 		}
 	}()
 
-	hermezDb := hermez_db.NewHermezDb(tx)
-
-	progress, err := stages.GetStageProgress(tx, stages.L1InfoTree)
-	if err != nil {
-		return err
-	}
-	if progress == 0 {
-		progress = u.cfg.L1FirstBlock - 1
-	}
-
-	u.progress = progress
-
-	latestUpdate, err := hermezDb.GetLatestL1InfoTreeUpdate()
-	if err != nil {
-		return err
-	}
-
-	u.latestUpdate = latestUpdate
-
 	if !u.syncer.IsSyncStarted() {
+		hermezDb := hermez_db.NewHermezDb(tx)
+
+		progress, err := stages.GetStageProgress(tx, stages.L1InfoTree)
+		if err != nil {
+			return err
+		}
+		if progress == 0 {
+			progress = u.cfg.L1FirstBlock - 1
+		}
+
+		u.progress = progress
+
+		latestUpdate, err := hermezDb.GetLatestL1InfoTreeUpdate()
+		if err != nil {
+			return err
+		}
+
+		u.latestUpdate = latestUpdate
+
 		u.syncer.RunQueryBlocks(u.progress)
 	}
 
@@ -274,31 +275,37 @@ func (t *L1InfoTask) Run() *L1InfoTaskResult {
 	return &L1InfoTaskResult{l1InfoTreeUpdate: update, logKey: NewLogKey(t.Log), err: nil}
 }
 
-func (u *Updater) startLogProcessing(logPrefix string, workerPool *L1InfoWorkerPool, allLogs *[]types.Log, logChan <-chan []types.Log, progressChan <-chan string, logsInputDone chan<- uint64) {
+func (u *Updater) startLogProcessing(logPrefix string, workerPool *L1InfoWorkerPool, allLogs *[]types.Log, logChan <-chan syncer.LogEvent, progressChan <-chan string, logsInputDone chan<- uint64) (doneProgress chan uint64) {
+	doneProgress = make(chan uint64, 1)
 	go func() {
 		defer func() {
 			// ensure the input-done signal is closed if the function returns
 			logsInputDone <- uint64(len(*allLogs))
 			close(logsInputDone)
+			close(doneProgress)
 		}()
 
 		for {
 			select {
-			case logs, ok := <-logChan:
+			case logEvent, ok := <-logChan:
 				if !ok {
 					log.Debug(fmt.Sprintf("[%s] Log channel closed", logPrefix))
 					return
 				}
 
+				if logEvent.Done {
+					doneProgress <- logEvent.Progress
+				}
+
 				u.latestActivity = time.Now()
 
-				if len(logs) == 0 {
+				if len(logEvent.Logs) == 0 {
 					continue
 				}
 
-				*allLogs = append(*allLogs, logs...)
+				*allLogs = append(*allLogs, logEvent.Logs...)
 
-				for _, lg := range logs {
+				for _, lg := range logEvent.Logs {
 					workerPool.AddTask(NewL1InfoTask(lg, u.syncer))
 				}
 
@@ -311,6 +318,8 @@ func (u *Updater) startLogProcessing(logPrefix string, workerPool *L1InfoWorkerP
 			}
 		}
 	}()
+
+	return doneProgress
 }
 
 func (u *Updater) createInfoTreeUpdates(logPrefix string, workerPool *L1InfoWorkerPool, logsInputDone <-chan uint64) (map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash, error) {
@@ -385,7 +394,7 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 	u.latestActivity = time.Now()
 
 	hermezDb := hermez_db.NewHermezDb(tx)
-	allLogs, indexUpdateMap, err := u.getLogs(logPrefix)
+	allLogs, indexUpdateMap, progress, err := u.getLogs(logPrefix)
 	if err != nil {
 		return 0, fmt.Errorf("getLogs: %w", err)
 	}
@@ -478,12 +487,14 @@ func (u *Updater) CheckForInfoTreeUpdates(logPrefix string, tx kv.RwTx) (process
 		}
 	}
 
-	// save the progress - we add one here so that we don't cause overlap on the next run.  We don't want to duplicate an info tree update in the db
-	if len(allLogs) > 0 {
-		// here we save progress at the exact block number of the last log.  The syncer will automatically add 1 to this value
-		// when the node / syncing process is restarted.
-		u.progress = allLogs[len(allLogs)-1].BlockNumber
+	// if the check was successfull, progress is equal to the end of the range
+	// in case of some error or timeout, progress will be 0
+	// here we save progress at the exact block number of the last log.  The syncer will automatically add 1 to this value
+	// when the node / syncing process is restarted.
+	if progress == 0 && len(allLogs) > 0 {
+		progress = allLogs[len(allLogs)-1].BlockNumber
 	}
+	u.progress = progress
 
 	if err = stages.SaveStageProgress(tx, stages.L1InfoTree, u.progress); err != nil {
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
@@ -813,7 +824,7 @@ func truncateL1InfoTreeData(hermezDb *hermez_db.HermezDb, fromIndex uint64) erro
 	return nil
 }
 
-func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash, error) {
+func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash, uint64, error) {
 	allLogs := make([]types.Log, 0)
 
 	logChan := u.syncer.GetLogsChan()
@@ -825,7 +836,7 @@ func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1
 	workerPool.Start()
 
 	// Will be stopped once syncer is done
-	u.startLogProcessing(logPrefix, workerPool, &allLogs, logChan, progressChan, logsInputDone)
+	doneProgress := u.startLogProcessing(logPrefix, workerPool, &allLogs, logChan, progressChan, logsInputDone)
 
 	indexUpdates, err := u.createInfoTreeUpdates(logPrefix, workerPool, logsInputDone)
 
@@ -833,10 +844,16 @@ func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1
 	workerPool.Stop()
 	workerPool.Wait()
 
-	if err != nil {
-		log.Error(fmt.Sprintf("[%s] L1 Updater error", logPrefix), "err", err)
-		return nil, nil, err
+	var progress uint64
+	select {
+	case progress = <-doneProgress:
+	default:
 	}
 
-	return allLogs, indexUpdates, nil
+	if err != nil {
+		log.Error(fmt.Sprintf("[%s] L1 Updater error", logPrefix), "err", err)
+		return nil, nil, progress, err
+	}
+
+	return allLogs, indexUpdates, progress, nil
 }

@@ -125,6 +125,7 @@ func SpawnSequencerL1BlockSyncStage(
 
 	logChan := cfg.syncer.GetLogsChan()
 	progressChan := cfg.syncer.GetProgressMessageChan()
+	var progress uint64
 
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
@@ -134,11 +135,17 @@ func SpawnSequencerL1BlockSyncStage(
 LOOP:
 	for {
 		select {
-		case logs, ok := <-logChan:
+		case logEvent, ok := <-logChan:
 			if !ok {
+				logChan = nil
 				break LOOP
 			}
-			for _, l := range logs {
+
+			if logEvent.Done {
+				progress = logEvent.Progress
+			}
+
+			for _, l := range logEvent.Logs {
 				// for some reason some endpoints seem to not have certain transactions available to
 				// them even they are perfectly valid and other RPC nodes return them fine.  So, leaning
 				// on the internals of the syncer which will round-robin through available RPC nodes, we
@@ -222,7 +229,6 @@ LOOP:
 						}
 					}
 				}
-
 			}
 		case msg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
@@ -233,10 +239,9 @@ LOOP:
 		}
 	}
 
-	lastCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
-	if lastCheckedBlock > l1BlockHeight {
-		log.Info(fmt.Sprintf("[%s] Saving L1 block sync progress", logPrefix), "lastChecked", lastCheckedBlock)
-		if funcErr = stages.SaveStageProgress(tx, stages.L1BlockSync, lastCheckedBlock); funcErr != nil {
+	if progress > l1BlockHeight {
+		log.Info(fmt.Sprintf("[%s] Saving L1 block sync progress", logPrefix), "lastChecked", progress)
+		if funcErr = stages.SaveStageProgress(tx, stages.L1BlockSync, progress); funcErr != nil {
 			return funcErr
 		}
 	}
