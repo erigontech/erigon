@@ -120,6 +120,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db k
 // and existing indices have salt in metadata.
 func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (salt *uint32, err error) {
 	baseDir := dirs.Snap
+	println("dirs", dirs.Snap)
 	saltExists, err := dir.FileExist(filepath.Join(baseDir, "salt.txt"))
 	if err != nil {
 		return nil, err
