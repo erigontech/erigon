@@ -167,7 +167,7 @@ func (m *MockPeer) Disconnect(reason *p2p.PeerError) {
 	// No-op for mock
 }
 
-func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficulty *big.Int, genesisHash common.Hash, earliestBlockHeight uint64, maxBlockHeight uint64) *sentryproto.StatusData {
+func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficulty *big.Int, genesisHash common.Hash, minimumBlockHeight uint64, maxBlockHeight uint64) *sentryproto.StatusData {
 	return &sentryproto.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromBig(totalDifficulty)),
@@ -177,9 +177,9 @@ func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficul
 			HeightForks: []uint64{},
 			TimeForks:   []uint64{},
 		},
-		MaxBlockHeight:      maxBlockHeight,
-		MaxBlockTime:        0,
-		EarliestBlockHeight: earliestBlockHeight,
+		MaxBlockHeight:     maxBlockHeight,
+		MaxBlockTime:       0,
+		MinimumBlockHeight: minimumBlockHeight,
 	}
 }
 
@@ -209,7 +209,7 @@ func TestHandShake69_ETH69ToETH69(t *testing.T) {
 		NetworkID:       sentry2Status.NetworkId,
 		Genesis:         gointerfaces.ConvertH256ToHash(sentry2Status.ForkData.Genesis),
 		ForkID:          forkid.NewIDFromForks(sentry2Status.ForkData.HeightForks, sentry2Status.ForkData.TimeForks, gointerfaces.ConvertH256ToHash(sentry2Status.ForkData.Genesis), sentry2Status.MaxBlockHeight, sentry2Status.MaxBlockTime),
-		EarliestBlock:   sentry2Status.EarliestBlockHeight,
+		MinimumBlock:    sentry2Status.MinimumBlockHeight,
 		LatestBlock:     sentry2Status.MaxBlockHeight,
 		LatestBlockHash: gointerfaces.ConvertH256ToHash(sentry2Status.BestHash),
 	}
@@ -225,7 +225,7 @@ func TestHandShake69_ETH69ToETH69(t *testing.T) {
 		NetworkID:       sentry1Status.NetworkId,
 		Genesis:         gointerfaces.ConvertH256ToHash(sentry1Status.ForkData.Genesis),
 		ForkID:          forkid.NewIDFromForks(sentry1Status.ForkData.HeightForks, sentry1Status.ForkData.TimeForks, gointerfaces.ConvertH256ToHash(sentry1Status.ForkData.Genesis), sentry1Status.MaxBlockHeight, sentry1Status.MaxBlockTime),
-		EarliestBlock:   sentry1Status.EarliestBlockHeight,
+		MinimumBlock:    sentry1Status.MinimumBlockHeight,
 		LatestBlock:     sentry1Status.MaxBlockHeight,
 		LatestBlockHash: gointerfaces.ConvertH256ToHash(sentry1Status.BestHash),
 	}
@@ -235,34 +235,36 @@ func TestHandShake69_ETH69ToETH69(t *testing.T) {
 	require.NoError(err)
 	sentry2RW.WriteToReadBuffer(sentry1RW.ReadAllWritten())
 
-	// Run handShake69 for Sentry 1 in a goroutine
-	var peerBestHash1 *common.Hash
+	// Run ETH69 handshake for Sentry 1 in a goroutine
+	var reply69_1 *eth.StatusPacket69
 	var peerErr1 *p2p.PeerError
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		peerBestHash1, peerErr1 = handShake69(ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH69)
+		reply69_1, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 	}()
 
-	// Run handShake69 for Sentry 2 in a goroutine
-	var peerBestHash2 *common.Hash
+	// Run ETH69 handshake for Sentry 2 in a goroutine
+	var reply69_2 *eth.StatusPacket69
 	var peerErr2 *p2p.PeerError
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		peerBestHash2, peerErr2 = handShake69(ctx, sentry2Status, sentry2RW, direct.ETH69, direct.ETH69)
+		reply69_2, peerErr2 = handShake[eth.StatusPacket69](ctx, sentry2Status, sentry2RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 	}()
 
 	wg.Wait()
 
 	assert.Nil(peerErr1)
-	assert.NotNil(peerBestHash1)
-	assert.Equal(sentry2Status.BestHash, gointerfaces.ConvertHashToH256(*peerBestHash1))
+	if assert.NotNil(reply69_1) {
+		assert.Equal(sentry2Status.BestHash, gointerfaces.ConvertHashToH256(reply69_1.LatestBlockHash))
+	}
 
 	assert.Nil(peerErr2)
-	assert.NotNil(peerBestHash2)
-	assert.Equal(sentry1Status.BestHash, gointerfaces.ConvertHashToH256(*peerBestHash2))
+	if assert.NotNil(reply69_2) {
+		assert.Equal(sentry1Status.BestHash, gointerfaces.ConvertHashToH256(reply69_2.LatestBlockHash))
+	}
 
 	// Verify that Sentry 1 sent its status
 	sentBytes1 := sentry1RW.ReadAllWritten()
@@ -313,7 +315,7 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 		NetworkID:       sentry1Status.NetworkId,
 		Genesis:         gointerfaces.ConvertH256ToHash(sentry1Status.ForkData.Genesis),
 		ForkID:          forkid.NewIDFromForks(sentry1Status.ForkData.HeightForks, sentry1Status.ForkData.TimeForks, gointerfaces.ConvertH256ToHash(sentry1Status.ForkData.Genesis), sentry1Status.MaxBlockHeight, sentry1Status.MaxBlockTime),
-		EarliestBlock:   sentry1Status.EarliestBlockHeight,
+		MinimumBlock:    sentry1Status.MinimumBlockHeight,
 		LatestBlock:     sentry1Status.MaxBlockHeight,
 		LatestBlockHash: gointerfaces.ConvertH256ToHash(sentry1Status.BestHash),
 	}
@@ -323,7 +325,7 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 	require.NoError(err)
 	sentry2RW.WriteToReadBuffer(sentry1RW.ReadAllWritten())
 
-	// Run handShake69 for Sentry 1 (ETH69)
+	// Run ETH69/ETH68 handshakes on both sides
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	var peerErr1 *p2p.PeerError
@@ -331,12 +333,12 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		_, peerErr1 = handShake69(ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH68)
+		_, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH68, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 	}()
 
 	go func() {
 		defer wg.Done()
-		_, peerErr2 = handShake(ctx, sentry2Status, sentry2RW, direct.ETH68, direct.ETH68)
+		_, peerErr2 = handShake[eth.StatusPacket](ctx, sentry2Status, sentry2RW, direct.ETH68, direct.ETH68, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 	}()
 
 	wg.Wait()
@@ -406,55 +408,6 @@ func (rw *RLPReadWriter) ReadAllWritten() []byte {
 	return b
 }
 
-// SimulatePeer simulates a peer's behavior in a handshake.
-// It sends its status and then waits to receive the other peer's status.
-func SimulatePeer(ctx context.Context, rw *RLPReadWriter, ownStatus *sentryproto.StatusData, ownProtocol uint, expectedMinProtocol uint, isETH69 bool) (*common.Hash, *p2p.PeerError) {
-	// Send own status
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				fmt.Printf("Recovered in SimulatePeer send: %v\n", r)
-			}
-		}()
-		var statusMsg interface{}
-		if isETH69 {
-			statusMsg = &eth.StatusPacket69{
-				ProtocolVersion: uint32(ownProtocol),
-				NetworkID:       ownStatus.NetworkId,
-				Genesis:         gointerfaces.ConvertH256ToHash(ownStatus.ForkData.Genesis),
-				ForkID:          forkid.NewIDFromForks(ownStatus.ForkData.HeightForks, ownStatus.ForkData.TimeForks, gointerfaces.ConvertH256ToHash(ownStatus.ForkData.Genesis), ownStatus.MaxBlockHeight, ownStatus.MaxBlockTime),
-				EarliestBlock:   ownStatus.EarliestBlockHeight,
-				LatestBlock:     ownStatus.MaxBlockHeight,
-				LatestBlockHash: gointerfaces.ConvertH256ToHash(ownStatus.BestHash),
-			}
-		} else {
-			statusMsg = &eth.StatusPacket{
-				ProtocolVersion: uint32(ownProtocol),
-				NetworkID:       ownStatus.NetworkId,
-				TD:              gointerfaces.ConvertH256ToUint256Int(ownStatus.TotalDifficulty).ToBig(),
-				Head:            gointerfaces.ConvertH256ToHash(ownStatus.BestHash),
-				Genesis:         gointerfaces.ConvertH256ToHash(ownStatus.ForkData.Genesis),
-				ForkID:          forkid.NewIDFromForks(ownStatus.ForkData.HeightForks, ownStatus.ForkData.TimeForks, gointerfaces.ConvertH256ToHash(ownStatus.ForkData.Genesis), ownStatus.MaxBlockHeight, ownStatus.MaxBlockTime),
-			}
-		}
-		b, err := rlp.EncodeToBytes(statusMsg)
-		if err != nil {
-			fmt.Printf("SimulatePeer: failed to encode status: %v\n", err)
-			return
-		}
-		err = rw.WriteMsg(p2p.Msg{Code: eth.StatusMsg, Size: uint32(len(b)), Payload: bytes.NewReader(b)})
-		if err != nil {
-			fmt.Printf("SimulatePeer: failed to write status msg: %v\n", err)
-		}
-	}()
-
-	// Receive other peer's status
-	if isETH69 {
-		return handShake69(ctx, ownStatus, rw, ownProtocol, expectedMinProtocol)
-	}
-	return handShake(ctx, ownStatus, rw, ownProtocol, expectedMinProtocol)
-}
-
 func TestHandShake69_ETH69ToETH69_WithRLP(t *testing.T) {
 	t.Parallel()
 	assert := assert.New(t)
@@ -478,18 +431,18 @@ func TestHandShake69_ETH69ToETH69_WithRLP(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	var peerBestHash1 *common.Hash
+	var reply1 *eth.StatusPacket69
 	var peerErr1 *p2p.PeerError
 	go func() {
 		defer wg.Done()
-		peerBestHash1, peerErr1 = SimulatePeer(ctx, sentry1RW, sentry1Status, direct.ETH69, direct.ETH69, true)
+		reply1, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 	}()
 
-	var peerBestHash2 *common.Hash
+	var reply2 *eth.StatusPacket69
 	var peerErr2 *p2p.PeerError
 	go func() {
 		defer wg.Done()
-		peerBestHash2, peerErr2 = SimulatePeer(ctx, sentry2RW, sentry2Status, direct.ETH69, direct.ETH69, true)
+		reply2, peerErr2 = handShake[eth.StatusPacket69](ctx, sentry2Status, sentry2RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 	}()
 
 	// Exchange messages between the two RLPReadWriters
@@ -510,12 +463,14 @@ func TestHandShake69_ETH69ToETH69_WithRLP(t *testing.T) {
 	wg.Wait()
 
 	assert.Nil(peerErr1)
-	assert.NotNil(peerBestHash1)
-	assert.Equal(sentry2Status.BestHash, gointerfaces.ConvertHashToH256(*peerBestHash1))
+	if assert.NotNil(reply1) {
+		assert.Equal(sentry2Status.BestHash, gointerfaces.ConvertHashToH256(reply1.LatestBlockHash))
+	}
 
 	assert.Nil(peerErr2)
-	assert.NotNil(peerBestHash2)
-	assert.Equal(sentry1Status.BestHash, gointerfaces.ConvertHashToH256(*peerBestHash2))
+	if assert.NotNil(reply2) {
+		assert.Equal(sentry1Status.BestHash, gointerfaces.ConvertHashToH256(reply2.LatestBlockHash))
+	}
 
 	// Verify that Sentry 1 sent its status
 	sentBytes1 := sentry1RW.ReadAllWritten()
@@ -551,12 +506,12 @@ func TestHandShake_ETH69ToETH68_WithRLP(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		_, peerErr1 = SimulatePeer(ctx, sentry1RW, sentry1Status, direct.ETH69, direct.ETH68, true)
+		_, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH68, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 	}()
 
 	go func() {
 		defer wg.Done()
-		_, peerErr2 = SimulatePeer(ctx, sentry2RW, sentry2Status, direct.ETH68, direct.ETH68, false)
+		_, peerErr2 = handShake[eth.StatusPacket](ctx, sentry2Status, sentry2RW, direct.ETH68, direct.ETH68, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 	}()
 
 	// Exchange messages between the two RLPReadWriters
@@ -617,7 +572,7 @@ func startHandshake(
 	errChan chan *p2p.PeerError,
 ) {
 	go func() {
-		_, err := handShake(ctx, status, pipe, protocolVersion, protocolVersion)
+		_, err := handShake[eth.StatusPacket](ctx, status, pipe, protocolVersion, protocolVersion, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 		errChan <- err
 	}()
 }
