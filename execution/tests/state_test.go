@@ -74,20 +74,6 @@ func TestStateCornerCases(t *testing.T) {
 	})
 }
 
-func initMatcher(st *testMatcher) {
-	// Long tests:
-	st.slow(`^stAttackTest/ContractCreationSpam`)
-	st.slow(`^stPreCompiledContracts/modexp`)
-	st.slow(`^stStaticCall/static_Call50000`)
-	st.slow(`^stStaticCall/static_Return50000`)
-	st.slow(`^stSystemOperationsTest/CallRecursiveBomb`)
-	st.slow(`^stTransactionTest/Opcodes_TransactionInit`)
-	// Very time consuming
-	st.skipLoad(`^stTimeConsuming/`)
-	// Uses 1GB RAM per tested fork
-	st.skipLoad(`^stStaticCall/static_Call1MB`)
-}
-
 func TestState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -104,7 +90,12 @@ func TestState(t *testing.T) {
 	// Corresponds to GeneralStateTests from ethereum/tests:
 	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
 	dir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
-	initMatcher(st)
+
+	// Slow tests
+	st.slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
+
+	// Very slow tests
+	st.skipLoad(`^stTimeConsuming/`)
 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)

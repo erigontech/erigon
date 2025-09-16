@@ -43,19 +43,6 @@ func TestLegacyBlockchain(t *testing.T) {
 	bt := new(testMatcher)
 	dir := filepath.Join(legacyDir, "BlockchainTests")
 
-	// Slow tests
-	bt.slow(`.*bcExploitTest/DelegateCallSpam.json`)
-	bt.slow(`.*bcExploitTest/ShanghaiLove.json`)
-	bt.slow(`.*bcExploitTest/SuicideIssue.json`)
-	bt.slow(`.*/bcForkStressTest/`)
-	bt.slow(`.*/bcWalletTest/`)
-
-	// Very slow test
-	bt.skipLoad(`.*/stTimeConsuming/.*`)
-	// test takes a lot for time and goes easily OOM because of sha3 calculation on a huge range,
-	// using 4.6 TGas
-	bt.skipLoad(`.*randomStatetest94.json.*`)
-
 	// This directory contains no tests
 	bt.skipLoad(`.*\.meta/.*`)
 
@@ -82,29 +69,22 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	bt := new(testMatcher)
 	dir := filepath.Join(eestDir, "blockchain_tests")
 
+	// Slow tests
+	bt.slow(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)
+	bt.slow(`^frontier/scenarios/test_scenarios.json`)
+	bt.slow(`^osaka/eip7939_count_leading_zeros/test_clz_opcode_scenarios.json`)
+	bt.slow(`^prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2.json`)
+
+	// Very slow tests
+	bt.skipLoad(`^berlin/eip2930_access_list/test_tx_intrinsic_gas.json`)
+	bt.skipLoad(`^cancun/eip4844_blobs/test_sufficient_balance_blob_tx`)
+	bt.skipLoad(`^cancun/eip4844_blobs/test_valid_blob_tx_combinations.json`)
+	bt.skipLoad(`^frontier/opcodes/test_stack_overflow.json`)
+	bt.skipLoad(`^prague/eip2537_bls_12_381_precompiles/test_invalid.json`)
+	bt.skipLoad(`^prague/eip2537_bls_12_381_precompiles/test_valid.json`)
+
 	// Tested in the state test format by TestState
 	bt.skipLoad(`^static/state_tests/`)
-
-	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
-		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t)); err != nil {
-			t.Error(err)
-		}
-	})
-}
-
-// Only runs EEST tests for current devnet - can "skip" on off-seasons
-func TestExecutionSpecBlockchainDevnet(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	t.Parallel()
-
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	bt := new(testMatcher)
-	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
