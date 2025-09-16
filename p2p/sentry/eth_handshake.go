@@ -94,7 +94,7 @@ type StatusPacket interface {
 	eth.StatusPacket | eth.StatusPacket69
 }
 
-func handShakeGeneric[T StatusPacket](
+func handShake[T StatusPacket](
 	ctx context.Context,
 	status *sentryproto.StatusData,
 	rw p2p.MsgReadWriter,
@@ -102,9 +102,8 @@ func handShakeGeneric[T StatusPacket](
 	minVersion uint,
 	encode func(*sentryproto.StatusData, uint) T,
 	compat func(T, *sentryproto.StatusData, uint, uint) error,
-	head func(T) common.Hash,
 	timeout time.Duration,
-) (*common.Hash, *p2p.PeerError) {
+) (*T, *p2p.PeerError) {
 	errChan := make(chan *p2p.PeerError, 2)
 	resultChan := make(chan T, 1)
 
@@ -150,8 +149,7 @@ func handShakeGeneric[T StatusPacket](
 	defer t2.Stop()
 	select {
 	case reply := <-resultChan:
-		h := head(reply)
-		return &h, nil
+		return &reply, nil
 	case <-t2.C:
 		return nil, p2p.NewPeerError(p2p.PeerErrorStatusHandshakeTimeout, p2p.DiscReadTimeout, nil, "sentry.handShake timeout (awaiting result)")
 	case <-ctx.Done():
@@ -180,7 +178,7 @@ func encodeStatusPacket69(status *sentryproto.StatusData, version uint) eth.Stat
 		NetworkID:       status.NetworkId,
 		Genesis:         genesisHash,
 		ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),
-		EarliestBlock:   status.EarliestBlockHeight,
+		MinimumBlock:    status.MinimumBlockHeight,
 		LatestBlock:     status.MaxBlockHeight,
 		LatestBlockHash: gointerfaces.ConvertH256ToHash(status.BestHash),
 	}

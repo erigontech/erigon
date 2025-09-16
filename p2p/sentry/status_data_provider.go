@@ -42,11 +42,11 @@ var (
 )
 
 type ChainHead struct {
-	HeadHeight     uint64
-	HeadTime       uint64
-	HeadHash       common.Hash
-	EarliestHeight uint64 // need to set EarliestHeight
-	HeadTd         *uint256.Int
+	HeadHeight    uint64
+	HeadTime      uint64
+	HeadHash      common.Hash
+	MinimumHeight uint64
+	HeadTd        *uint256.Int
 }
 
 type StatusDataProvider struct {
@@ -103,22 +103,22 @@ func makeGenesisChainHead(genesis *types.Block) ChainHead {
 	}
 
 	return ChainHead{
-		HeadHeight:     genesis.NumberU64(),
-		HeadTime:       genesis.Time(),
-		HeadHash:       genesis.Hash(),
-		EarliestHeight: genesis.NumberU64(),
-		HeadTd:         genesisDifficulty,
+		HeadHeight:    genesis.NumberU64(),
+		HeadTime:      genesis.Time(),
+		HeadHash:      genesis.Hash(),
+		MinimumHeight: genesis.NumberU64(),
+		HeadTd:        genesisDifficulty,
 	}
 }
 
 func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusData {
 	return &sentryproto.StatusData{
-		NetworkId:           s.networkId,
-		TotalDifficulty:     gointerfaces.ConvertUint256IntToH256(head.HeadTd),
-		BestHash:            gointerfaces.ConvertHashToH256(head.HeadHash),
-		MaxBlockHeight:      head.HeadHeight,
-		MaxBlockTime:        head.HeadTime,
-		EarliestBlockHeight: head.EarliestHeight,
+		NetworkId:          s.networkId,
+		TotalDifficulty:    gointerfaces.ConvertUint256IntToH256(head.HeadTd),
+		BestHash:           gointerfaces.ConvertHashToH256(head.HeadHash),
+		MaxBlockHeight:     head.HeadHeight,
+		MaxBlockTime:       head.HeadTime,
+		MinimumBlockHeight: head.MinimumHeight,
 		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
 			HeightForks: s.heightForks,
@@ -130,16 +130,16 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 // GetStatusData returns the current StatusData.
 // Uses DB head, falls back to snapshot data when unavailable
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
-	var earliestBlock uint64
+	var minimumBlock uint64
 	if err := s.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		earliestBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
+		minimumBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
 		return err
 	}); err != nil {
-		return nil, fmt.Errorf("GetStatusData: earliest block number error: %w", err)
+		return nil, fmt.Errorf("GetStatusData: minimumBlock error: %w", err)
 	}
 
-	chainHead, err := ReadChainHead(ctx, s.db, earliestBlock)
+	chainHead, err := ReadChainHead(ctx, s.db, minimumBlock)
 	if err == nil {
 		return s.makeStatusData(chainHead), nil
 	}
@@ -149,7 +149,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.St
 
 	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
 
-	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, earliestBlock)
+	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
 	}
@@ -157,7 +157,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.St
 }
 
 // ReadChainHeadWithTx reads chain head in DB
-func ReadChainHeadWithTx(tx kv.Tx, earliestBlock uint64) (ChainHead, error) {
+func ReadChainHeadWithTx(tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeaderHavingBody(tx)
 	if header == nil {
 		return ChainHead{}, ErrNoHead
@@ -176,21 +176,21 @@ func ReadChainHeadWithTx(tx kv.Tx, earliestBlock uint64) (ChainHead, error) {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
 	}
 
-	return ChainHead{height, time, hash, earliestBlock, td256}, nil
+	return ChainHead{height, time, hash, minimumBlock, td256}, nil
 }
 
-func ReadChainHead(ctx context.Context, db kv.RoDB, earliestBlock uint64) (ChainHead, error) {
+func ReadChainHead(ctx context.Context, db kv.RoDB, minimumBlock uint64) (ChainHead, error) {
 	var head ChainHead
 	var err error
 	err = db.View(ctx, func(tx kv.Tx) error {
-		head, err = ReadChainHeadWithTx(tx, earliestBlock)
+		head, err = ReadChainHeadWithTx(tx, minimumBlock)
 		return err
 	})
 	return head, err
 }
 
 // ReadChainHeadFromSnapshots attempts to construct a ChainHead from snapshot data.
-func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, earliestBlock uint64) (ChainHead, error) {
+func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, minimumBlock uint64) (ChainHead, error) {
 	latest := s.blockReader.FrozenBlocks()
 	if latest == 0 {
 		return ChainHead{}, ErrNoSnapshots
@@ -207,10 +207,10 @@ func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, ear
 	}
 
 	return ChainHead{
-		HeadHeight:     header.Number.Uint64(),
-		HeadTime:       header.Time,
-		HeadHash:       header.Hash(),
-		EarliestHeight: earliestBlock,
-		HeadTd:         td256,
+		HeadHeight:    header.Number.Uint64(),
+		HeadTime:      header.Time,
+		HeadHash:      header.Hash(),
+		MinimumHeight: minimumBlock,
+		HeadTd:        td256,
 	}, nil
 }

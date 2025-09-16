@@ -173,10 +173,10 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 	}
 
 	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
-	cs.logger.Debug("sending status data", "start", status.EarliestBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
+	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
 
 	request := eth.BlockRangeUpdatePacket{
-		Earliest:   status.EarliestBlockHeight,
+		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
 		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
 	}

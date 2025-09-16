@@ -329,30 +329,6 @@ func makeP2PServer(
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
-func handShake(
-	ctx context.Context,
-	status *sentryproto.StatusData,
-	rw p2p.MsgReadWriter,
-	version uint,
-	minVersion uint,
-) (*common.Hash, *p2p.PeerError) {
-	head := func(pkt eth.StatusPacket) common.Hash { return pkt.Head }
-	h, e := handShakeGeneric[eth.StatusPacket](ctx, status, rw, version, minVersion, encodeStatusPacket, compatStatusPacket, head, handshakeTimeout)
-	return h, e
-}
-
-func handShake69(
-	ctx context.Context,
-	status *sentryproto.StatusData,
-	rw p2p.MsgReadWriter,
-	version uint,
-	minVersion uint,
-) (*common.Hash, *p2p.PeerError) {
-	head := func(pkt eth.StatusPacket69) common.Hash { return pkt.LatestBlockHash }
-	h, e := handShakeGeneric[eth.StatusPacket69](ctx, status, rw, version, minVersion, encodeStatusPacket69, compatStatusPacket69, head, handshakeTimeout)
-	return h, e
-}
-
 func runPeer(
 	ctx context.Context,
 	peerID [64]byte,
@@ -748,33 +724,36 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
 			}
 
-			var peerBestHash *common.Hash
-			var err *p2p.PeerError
+			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			if err != nil {
+				return err
+			}
+			peerInfo.protocol = protocol
+
 			if protocol >= direct.ETH69 {
-				peerBestHash, err = handShake69(ctx, status, rw, protocol, protocol)
+				statusPacket69, err := handShake[eth.StatusPacket69](ctx, status, rw, protocol, protocol, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 				if err != nil {
 					return err
 				}
+
+				peerInfo.SetMinimumBlock(statusPacket69.MinimumBlock)
+				peerInfo.SetIncreasedHeight(statusPacket69.LatestBlock)
 			} else {
-				peerBestHash, err = handShake(ctx, status, rw, protocol, protocol)
+				statusPacket, err := handShake[eth.StatusPacket](ctx, status, rw, protocol, protocol, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 				if err != nil {
 					return err
+				}
+
+				peerBestHash := statusPacket.Head
+				getBlockHeadersErr := ss.getBlockHeaders(ctx, peerBestHash, peerID)
+				if getBlockHeadersErr != nil {
+					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 				}
 			}
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
-			getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
-			if getBlockHeadersErr != nil {
-				return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
-			}
 
-			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
-			if err != nil {
-				return err
-			}
-
-			peerInfo.protocol = protocol
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer peerInfo.Close()

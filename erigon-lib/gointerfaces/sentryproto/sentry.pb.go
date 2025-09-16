@@ -1019,16 +1019,16 @@ func (x *Forks) GetTimeForks() []uint64 {
 }
 
 type StatusData struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	NetworkId           uint64                 `protobuf:"varint,1,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
-	TotalDifficulty     *typesproto.H256       `protobuf:"bytes,2,opt,name=total_difficulty,json=totalDifficulty,proto3" json:"total_difficulty,omitempty"`
-	BestHash            *typesproto.H256       `protobuf:"bytes,3,opt,name=best_hash,json=bestHash,proto3" json:"best_hash,omitempty"`
-	ForkData            *Forks                 `protobuf:"bytes,4,opt,name=fork_data,json=forkData,proto3" json:"fork_data,omitempty"`
-	MaxBlockHeight      uint64                 `protobuf:"varint,5,opt,name=max_block_height,json=maxBlockHeight,proto3" json:"max_block_height,omitempty"`
-	MaxBlockTime        uint64                 `protobuf:"varint,6,opt,name=max_block_time,json=maxBlockTime,proto3" json:"max_block_time,omitempty"`
-	EarliestBlockHeight uint64                 `protobuf:"varint,7,opt,name=earliest_block_height,json=earliestBlockHeight,proto3" json:"earliest_block_height,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	NetworkId          uint64                 `protobuf:"varint,1,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	TotalDifficulty    *typesproto.H256       `protobuf:"bytes,2,opt,name=total_difficulty,json=totalDifficulty,proto3" json:"total_difficulty,omitempty"`
+	BestHash           *typesproto.H256       `protobuf:"bytes,3,opt,name=best_hash,json=bestHash,proto3" json:"best_hash,omitempty"`
+	ForkData           *Forks                 `protobuf:"bytes,4,opt,name=fork_data,json=forkData,proto3" json:"fork_data,omitempty"`
+	MaxBlockHeight     uint64                 `protobuf:"varint,5,opt,name=max_block_height,json=maxBlockHeight,proto3" json:"max_block_height,omitempty"`
+	MaxBlockTime       uint64                 `protobuf:"varint,6,opt,name=max_block_time,json=maxBlockTime,proto3" json:"max_block_time,omitempty"`
+	MinimumBlockHeight uint64                 `protobuf:"varint,7,opt,name=minimum_block_height,json=minimumBlockHeight,proto3" json:"minimum_block_height,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *StatusData) Reset() {
@@ -1103,9 +1103,9 @@ func (x *StatusData) GetMaxBlockTime() uint64 {
 	return 0
 }
 
-func (x *StatusData) GetEarliestBlockHeight() uint64 {
+func (x *StatusData) GetMinimumBlockHeight() uint64 {
 	if x != nil {
-		return x.EarliestBlockHeight
+		return x.MinimumBlockHeight
 	}
 	return 0
 }
@@ -1727,7 +1727,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\agenesis\x18\x01 \x01(\v2\v.types.H256R\agenesis\x12!\n" +
 	"\fheight_forks\x18\x02 \x03(\x04R\vheightForks\x12\x1d\n" +
 	"\n" +
-	"time_forks\x18\x03 \x03(\x04R\ttimeForks\"\xbd\x02\n" +
+	"time_forks\x18\x03 \x03(\x04R\ttimeForks\"\xbb\x02\n" +
 	"\n" +
 	"StatusData\x12\x1d\n" +
 	"\n" +
@@ -1736,8 +1736,8 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\tbest_hash\x18\x03 \x01(\v2\v.types.H256R\bbestHash\x12*\n" +
 	"\tfork_data\x18\x04 \x01(\v2\r.sentry.ForksR\bforkData\x12(\n" +
 	"\x10max_block_height\x18\x05 \x01(\x04R\x0emaxBlockHeight\x12$\n" +
-	"\x0emax_block_time\x18\x06 \x01(\x04R\fmaxBlockTime\x122\n" +
-	"\x15earliest_block_height\x18\a \x01(\x04R\x13earliestBlockHeight\"\x10\n" +
+	"\x0emax_block_time\x18\x06 \x01(\x04R\fmaxBlockTime\x120\n" +
+	"\x14minimum_block_height\x18\a \x01(\x04R\x12minimumBlockHeight\"\x10\n" +
 	"\x0eSetStatusReply\">\n" +
 	"\x0eHandShakeReply\x12,\n" +
 	"\bprotocol\x18\x01 \x01(\x0e2\x10.sentry.ProtocolR\bprotocol\"6\n" +
