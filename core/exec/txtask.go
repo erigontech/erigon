@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
-	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/state"
