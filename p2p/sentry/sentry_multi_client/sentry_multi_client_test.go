@@ -36,6 +36,13 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			TxHash:            testHash,
 			GasUsed:           21000,
 		},
+		{
+			Status:            types.ReceiptStatusSuccessful,
+			CumulativeGasUsed: 42000,
+			Logs:              []*types.Log{},
+			TxHash:            testHash,
+			GasUsed:           21000,
+		},
 	}
 
 	var sentMessage *proto_sentry.SendMessageByIdRequest
@@ -100,14 +107,23 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	if response.RequestId != request.RequestId {
 		t.Errorf("Expected request ID %d, got %d", request.RequestId, response.RequestId)
 	}
-	if len(response.ReceiptsRLPPacket) != 1 {
-		t.Errorf("Expected 1 receipt, got %d", len(response.ReceiptsRLPPacket))
-	}
 
 	// Decode the receipt to verify Bloom field is not populated
-	var receipt receiptRLP69
-	if err := rlp.DecodeBytes(response.ReceiptsRLPPacket[0], &receipt); err != nil {
-		t.Fatalf("Failed to decode receipt: %v", err)
+	// The ReceiptsRLPPacket contains an RLP-encoded list of receipts
+	var receiptsList []*receiptRLP69
+	if err := rlp.DecodeBytes(response.ReceiptsRLPPacket[0], &receiptsList); err != nil {
+		t.Fatalf("Failed to decode receipts list: %v", err)
+	}
+
+	if len(receiptsList) != 2 {
+		t.Fatalf("Expected 2 receipt in list, got %d", len(receiptsList))
+	}
+
+	receipt := receiptsList[0]
+
+	// Verify the receipt was decoded correctly
+	if receipt.CumulativeGasUsed != 21000 {
+		t.Errorf("Expected CumulativeGasUsed 21000, got %d", receipt.CumulativeGasUsed)
 	}
 }
 
