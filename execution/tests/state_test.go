@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tests
+package executiontests
 
 import (
 	"bufio"
@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestStateCornerCases(t *testing.T) {
@@ -51,7 +52,7 @@ func TestStateCornerCases(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, cornersDir, func(t *testing.T, name string, test *StateTest) {
+	st.walk(t, cornersDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
@@ -64,7 +65,7 @@ func TestStateCornerCases(t *testing.T) {
 					defer tx.Rollback()
 					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
-					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
 						return nil
 					}
@@ -114,7 +115,7 @@ func TestState(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
+	st.walk(t, stateTestDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
@@ -127,7 +128,7 @@ func TestState(t *testing.T) {
 					defer tx.Rollback()
 					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
-					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
 						return nil
 					}

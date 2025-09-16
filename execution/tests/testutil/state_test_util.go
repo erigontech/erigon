@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tests
+package testutil
 
 import (
 	"context"
@@ -54,7 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/testutil"
+	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -62,7 +62,7 @@ import (
 // StateTest checks transaction processing without block context.
 // See https://github.com/ethereum/EIPs/issues/176 for the test format specification.
 type StateTest struct {
-	json stJSON
+	Json stJSON
 }
 
 // StateSubtest selects a specific configuration of a General State Test.
@@ -72,7 +72,7 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &t.json)
+	return json.Unmarshal(in, &t.Json)
 }
 
 type stJSON struct {
@@ -144,8 +144,8 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 		ok                    bool
 		baseName, eipsStrings = splitForks[0], splitForks[1:]
 	)
-	if baseConfig, ok = testutil.Forks[baseName]; !ok {
-		return nil, nil, testutil.UnsupportedForkError{Name: baseName}
+	if baseConfig, ok = testforks.Forks[baseName]; !ok {
+		return nil, nil, testforks.UnsupportedForkError{Name: baseName}
 	}
 	for _, eip := range eipsStrings {
 		if eipNum, err := strconv.Atoi(eip); err != nil {
@@ -163,7 +163,7 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 // Subtests returns all valid subtests of the test.
 func (t *StateTest) Subtests() []StateSubtest {
 	var sub []StateSubtest
-	for fork, pss := range t.json.Post {
+	for fork, pss := range t.Json.Post {
 		for i := range pss {
 			sub = append(sub, StateSubtest{fork, i})
 		}
@@ -177,7 +177,7 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 	if err != nil {
 		return state, empty.RootHash, err
 	}
-	post := t.json.Post[subtest.Fork][subtest.Index]
+	post := t.Json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != common.Hash(post.Root) {
@@ -193,26 +193,26 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, common.Hash{}, 0, testutil.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := genesiswrite.GenesisToBlock(tb, t.genesis(config), dirs, log.Root())
 	if err != nil {
-		return nil, common.Hash{}, 0, testutil.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
 	if err != nil {
-		return nil, common.Hash{}, 0, testutil.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	txc := wrap.NewTxContainer(tx, nil)
 	domains, err := dbstate.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
-		return nil, common.Hash{}, 0, testutil.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
@@ -223,15 +223,15 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
-		baseFee = t.json.Env.BaseFee
+		baseFee = t.Json.Env.BaseFee
 		if baseFee == nil {
 			// Retesteth uses `0x10` for genesis baseFee. Therefore, it defaults to
 			// parent - 2 : 0xa as the basefee for 'this' context.
 			baseFee = big.NewInt(0x0a)
 		}
 	}
-	post := t.json.Post[subtest.Fork][subtest.Index]
-	msg, err := toMessage(t.json.Tx, post, baseFee)
+	post := t.Json.Post[subtest.Fork][subtest.Index]
+	msg, err := toMessage(t.Json.Tx, post, baseFee)
 	if err != nil {
 		return nil, common.Hash{}, 0, err
 	}
@@ -251,22 +251,22 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	header := block.HeaderNoCopy()
 	//blockNum, txNum := header.Number.Uint64(), 1
 
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, config)
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.Json.Env.Coinbase, config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
 		context.BaseFee.SetFromBig(baseFee)
 	}
-	if t.json.Env.Difficulty != nil {
-		context.Difficulty = new(big.Int).Set(t.json.Env.Difficulty)
+	if t.Json.Env.Difficulty != nil {
+		context.Difficulty = new(big.Int).Set(t.Json.Env.Difficulty)
 	}
-	if config.IsLondon(0) && t.json.Env.Random != nil {
-		rnd := common.BigToHash(t.json.Env.Random)
+	if config.IsLondon(0) && t.Json.Env.Random != nil {
+		rnd := common.BigToHash(t.Json.Env.Random)
 		context.PrevRanDao = &rnd
 		context.Difficulty = big.NewInt(0)
 	}
-	if config.IsCancun(block.Time()) && t.json.Env.ExcessBlobGas != nil {
-		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.json.Env.ExcessBlobGas, header.Time)
+	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
+		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, common.Hash{}, 0, err
 		}
@@ -360,12 +360,12 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	return &types.Genesis{
 		Config:     config,
-		Coinbase:   t.json.Env.Coinbase,
-		Difficulty: t.json.Env.Difficulty,
-		GasLimit:   t.json.Env.GasLimit,
-		Number:     t.json.Env.Number,
-		Timestamp:  t.json.Env.Timestamp,
-		Alloc:      t.json.Pre,
+		Coinbase:   t.Json.Env.Coinbase,
+		Difficulty: t.Json.Env.Difficulty,
+		GasLimit:   t.Json.Env.GasLimit,
+		Number:     t.Json.Env.Number,
+		Timestamp:  t.Json.Env.Timestamp,
+		Alloc:      t.Json.Pre,
 	}
 }
 

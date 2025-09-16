@@ -17,14 +17,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tests
+package executiontests
 
 import (
 	"encoding/json"
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/testutil"
+	"github.com/erigontech/erigon/execution/tests/testforks"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestDifficulty(t *testing.T) {
@@ -39,15 +40,15 @@ func TestDifficulty(t *testing.T) {
 			if fork == "_info" {
 				continue
 			}
-			var tests map[string]DifficultyTest
+			var tests map[string]testutil.DifficultyTest
 			if err := json.Unmarshal(rawTests, &tests); err != nil {
 				t.Error(err)
 				continue
 			}
 
-			cfg, ok := testutil.Forks[fork]
+			cfg, ok := testforks.Forks[fork]
 			if !ok {
-				t.Error(testutil.UnsupportedForkError{Name: fork})
+				t.Error(testforks.UnsupportedForkError{Name: fork})
 				continue
 			}
 
