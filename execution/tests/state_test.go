@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -71,7 +72,64 @@ func TestStateCornerCases(t *testing.T) {
 			})
 		}
 	})
+}
 
+func initMatcher(st *testMatcher) {
+	// Long tests:
+	st.slow(`^stAttackTest/ContractCreationSpam`)
+	st.slow(`^stPreCompiledContracts/modexp`)
+	st.slow(`^stStaticCall/static_Call50000`)
+	st.slow(`^stStaticCall/static_Return50000`)
+	st.slow(`^stSystemOperationsTest/CallRecursiveBomb`)
+	st.slow(`^stTransactionTest/Opcodes_TransactionInit`)
+	// Very time consuming
+	st.skipLoad(`^stTimeConsuming/`)
+	// Uses 1GB RAM per tested fork
+	st.skipLoad(`^stStaticCall/static_Call1MB`)
+}
+
+func TestState(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
+	}
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	st := new(testMatcher)
+	// Corresponds to GeneralStateTests from ethereum/tests:
+	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
+	dir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
+	initMatcher(st)
+
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	st.walk(t, dir, func(t *testing.T, name string, test *testutil.StateTest) {
+		for _, subtest := range test.Subtests() {
+			subtest := subtest
+			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
+			t.Run(key, func(t *testing.T) {
+				withTrace(t, func(vmconfig vm.Config) error {
+					tx, err := db.BeginTemporalRw(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					tx.Rollback()
+					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+						// Ignore expected errors
+						return nil
+					}
+					return st.checkFailure(t, err)
+				})
+			})
+		}
+	})
 }
 
 func withTrace(t *testing.T, test func(vm.Config) error) {

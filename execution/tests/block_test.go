@@ -82,15 +82,8 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	bt := new(testMatcher)
 	dir := filepath.Join(eestDir, "blockchain_tests")
 
-	// Long tests:
-	bt.slow(`^static/state_tests/stAttackTest/ContractCreationSpam`)
-	bt.slow(`^static/state_tests/stBadOpcode/badOpcodes`)
-	bt.slow(`^static/state_tests/stPreCompiledContracts/modexp`)
-	bt.slow(`^static/state_tests/stStaticCall/static_Call50000`)
-	bt.slow(`^static/state_tests/stStaticCall/static_Return50000`)
-	bt.slow(`^static/state_tests/stSystemOperationsTest/CallRecursiveBomb`)
-	// Very time consuming
-	bt.skipLoad(`^static/state_tests/stTimeConsuming/`)
+	// Tested in the state test format by TestState
+	bt.skipLoad(`^static/state_tests/`)
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
