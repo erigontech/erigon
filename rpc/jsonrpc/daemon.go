@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"os"
 
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -34,21 +33,19 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+func APIList(ctx context.Context, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine consensus.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 ) (list []rpc.API) {
 	isArbitrum := false
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader)
-	ctx := context.Background()
+
+	// try to check if the chain is Arbitrum
 	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		logger.Error("Failed to begin transaction", "err", err)
-		os.Exit(1)
-	} else {
+	if err == nil {
 		chainConfig, err := base.chainConfig(ctx, tx)
-		if err != nil {
+		if err == nil && chainConfig != nil {
 			isArbitrum = chainConfig.IsArbitrum()
 		}
 		tx.Rollback()
