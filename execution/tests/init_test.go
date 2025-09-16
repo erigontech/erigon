@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package tests
+package executiontests
 
 import (
 	"encoding/json"
@@ -33,13 +33,13 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 var (
-	baseDir            = filepath.Join(".", "testdata")
+	baseDir            = filepath.Join(".", "legacy-tests")
 	blockTestDir       = filepath.Join(baseDir, "BlockchainTests")
 	stateTestDir       = filepath.Join(baseDir, "GeneralStateTests")
-	legacyStateTestDir = filepath.Join(baseDir, "LegacyTests")
 	transactionTestDir = filepath.Join(baseDir, "TransactionTests")
 	rlpTestDir         = filepath.Join(baseDir, "RLPTests")
 	difficultyTestDir  = filepath.Join(baseDir, "DifficultyTests")
@@ -279,7 +279,7 @@ func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value
 func TestMatcherWhitelist(t *testing.T) {
 	tm := new(testMatcher)
 	tm.whitelist("invalid*")
-	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {
+	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *testutil.RLPTest) {
 		if name[:len("invalidRLPTest.json")] != "invalidRLPTest.json" {
 			t.Fatalf("invalid test found: %s != invalidRLPTest.json", name)
 		}
