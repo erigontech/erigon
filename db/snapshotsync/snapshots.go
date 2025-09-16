@@ -585,6 +585,12 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
 
+	for _, t := range s.enums {
+		u := &atomic.Uint64{}
+		u.Store(math.MaxUint64)
+		s.segmentsMinByType[t] = u
+	}
+
 	s.recalcVisibleFiles(s.alignMin)
 	return s
 }
@@ -876,6 +882,16 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		}
 	}
 
+	for _, t := range s.enums {
+		minBlock := uint64(math.MaxUint64)
+		if len(visible[t]) > 0 {
+			minBlock = visible[t][0].from
+		}
+		if u, ok := s.segmentsMinByType[t]; ok {
+			u.Store(minBlock)
+		}
+	}
+
 	s.visible = visible
 }
 
@@ -1158,10 +1174,11 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	}
 
 	for typ, minBlock := range typeMinBlocks {
-		if s.segmentsMinByType[typ] == nil {
-			s.segmentsMinByType[typ] = &atomic.Uint64{}
+		if minBlock != math.MaxUint64 {
+			if u, ok := s.segmentsMinByType[typ]; ok {
+				u.Store(minBlock)
+			}
 		}
-		s.segmentsMinByType[typ].Store(minBlock)
 	}
 
 	if err := wg.Wait(); err != nil {
