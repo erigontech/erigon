@@ -103,6 +103,10 @@ func SpawnSequencerBlobRecoveryStage(s *stagedsync.StageState, u stagedsync.Unwi
 	// starting limit and offset for pagination
 	offset := uint64(0)
 	limit := cfg.zkCfg.BlobRecoveryBlobLimit
+	if limit <= 0 {
+		log.Error(fmt.Sprintf("[%s] blob recovery blob limit must be greater than 0", logPrefix), "zkevm.blob-recovery-blob-limit", cfg.zkCfg.BlobRecoveryBlobLimit)
+		return nil
+	}
 
 	indexToRoots, err := hermezDb.GetL1InfoTreeIndexToRoots()
 	if err != nil {
