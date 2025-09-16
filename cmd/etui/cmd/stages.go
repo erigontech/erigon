@@ -34,8 +34,8 @@ var infoCmd = &cobra.Command{
 				if buttonLabel == "Quit" || buttonLabel == "Cancel" {
 					app.Stop()
 				}
-			})
-		if err := app.SetRoot(view, false).Run(); err != nil {
+			}).SetTitle("Erigon TUI")
+		if err := app.SetRoot(view, true).Run(); err != nil {
 			panic(err)
 		}
 		return nil
