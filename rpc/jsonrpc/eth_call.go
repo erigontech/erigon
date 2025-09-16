@@ -24,6 +24,9 @@ import (
 	"math/big"
 	"unsafe"
 
+	"github.com/erigontech/nitro-erigon/arbos"
+	"github.com/erigontech/nitro-erigon/arbos/arbosState"
+	"github.com/erigontech/nitro-erigon/arbos/l1pricing"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
@@ -197,21 +200,42 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if args.From == nil {
 		args.From = new(common.Address)
 	}
-	// Run the gas estimation andwrap any revertals into a custom return
-	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
-	// call, err := args.ToMessage(gasCap, header, state, core.MessageGasEstimationMode)
-	// if err != nil {
-	// 	return 0, err
-	// }
+	stateDb := state.New(stateReader)
 
-	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
-	//{
-	//	gasCap, err = args.L2OnlyGasCap(gasCap, header)
-	//	if err != nil {
-	//		return 0, err
-	//	}
-	// hi = gasCap
-	//}
+	if chainConfig.IsArbitrum() {
+		arbState := state.NewArbitrum(stateDb)
+		arbosVersion := arbosState.ArbOSVersion(arbState)
+		if arbosVersion == 0 {
+			// ArbOS hasn't been installed, so use the vanilla gas cap
+			return 0, nil
+		}
+		state, err := arbosState.OpenSystemArbosState(arbState, nil, true)
+		if err != nil {
+			return 0, err
+		}
+		if header.BaseFee.Sign() == 0 {
+			// if gas is free or there's no reimbursable poster, the user won't pay for L1 data costs
+			return 0, nil
+		}
+
+		brotliCompressionLevel, err := state.BrotliCompressionLevel()
+		if err != nil {
+			return 0, err
+		}
+
+		var baseFee *uint256.Int = nil
+		if header.BaseFee != nil {
+			baseFee, _ = uint256.FromBig(header.BaseFee)
+		}
+		msg, err := args.ToMessage(api.GasCap, baseFee)
+		if err != nil {
+			return 0, err
+		}
+		posterCost, _ := state.L1PricingState().PosterDataCost(msg, l1pricing.BatchPosterAddress, brotliCompressionLevel)
+		// Use estimate mode because this is used to raise the gas cap, so we don't want to underestimate.
+		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.MessageGasEstimationMode, posterCost)
+		api.GasCap += postingGas
+	}
 
 	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
@@ -238,12 +262,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		state := state.New(stateReader)
-		if state == nil {
+		if stateDb == nil {
 			return 0, errors.New("can't get the current state")
 		}
 
-		balance, err := state.GetBalance(*args.From) // from can't be nil
+		balance, err := stateDb.GetBalance(*args.From) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
@@ -355,51 +378,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 	}
 	return hexutil.Uint64(hi), nil
-	// ====== arbitrum estimation code
-
-	// // Retrieve the base state and mutate it with any overrides
-	// state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-	// if state == nil || err != nil {
-	// 	return 0, err
-	// }
-	// if err = overrides.Apply(state); err != nil {
-	// 	return 0, err
-	// }
-	// header = updateHeaderForPendingBlocks(blockNrOrHash, header)
-
-	// // Construct the gas estimator option from the user input
-	// opts := &gasestimator.Options{
-	// 	Config:           b.ChainConfig(),
-	// 	Chain:            NewChainContext(ctx, b),
-	// 	Header:           header,
-	// 	State:            state,
-	// 	Backend:          b,
-	// 	ErrorRatio:       gasestimator.EstimateGasErrorRatio,
-	// 	RunScheduledTxes: runScheduledTxes,
-	// }
-	// // Run the gas estimation andwrap any revertals into a custom return
-	// // Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
-	// call, err := args.ToMessage(gasCap, header, state, core.MessageGasEstimationMode)
-	// if err != nil {
-	// 	return 0, err
-	// }
-
-	// // Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
-	// {
-	// 	gasCap, err = args.L2OnlyGasCap(gasCap, header, state, core.MessageGasEstimationMode)
-	// 	if err != nil {
-	// 		return 0, err
-	// 	}
-	// }
-
-	// estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
-	// if err != nil {
-	// 	if len(revert) > 0 {
-	// 		return 0, newRevertError(revert)
-	// 	}
-	// 	return 0, err
-	// }
-	// return hexutil.Uint64(estimate), nil
 }
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
