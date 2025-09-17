@@ -18,10 +18,10 @@ func Footer() tview.Primitive {
 
 func Body() (*tview.Flex, *BodyView) {
 	view := &BodyView{
-		Overview: tview.NewTextView().SetText("starting..."),
-		Stages:   tview.NewTextView().SetText("starting1..."),
-		DomainII: tview.NewTextView().SetText("starting2..."),
-		Clock:    tview.NewTextView().SetText("starting3...").SetTextAlign(tview.AlignRight),
+		Overview: tview.NewTextView().SetText("waiting for fetch data from erigon..."),
+		Stages:   tview.NewTextView(),
+		DomainII: tview.NewTextView(),
+		Clock:    tview.NewTextView().SetTextAlign(tview.AlignRight),
 	}
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewFlex().
