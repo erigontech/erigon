@@ -67,12 +67,12 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -298,7 +298,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Assemble the Ethereum object
-	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
+	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +383,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -412,7 +412,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, temporalDb, err := setUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config(), logger, segmentsBuildLimiter)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config().Http.DBReadConcurrency, logger, segmentsBuildLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +580,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
 	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
-	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, kv.ChainDB, logger)
+	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, dbcfg.ChainDB, logger)
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
@@ -642,10 +642,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		heimdallService = heimdall.NewService(heimdall.ServiceConfig{
-			Store:     heimdallStore,
-			BorConfig: borConfig,
-			Client:    heimdallClient,
-			Logger:    logger,
+			Store:       heimdallStore,
+			ChainConfig: chainConfig,
+			BorConfig:   borConfig,
+			Client:      heimdallClient,
+			Logger:      logger,
 		})
 
 		bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
@@ -657,7 +658,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
-	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+	inMemoryExecution := func(txc wrap.TxContainer, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
@@ -666,17 +667,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger)
 		chainReader := consensuschain.NewReader(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, config.ImportMode); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, unwindPoint, headersChain, bodiesChain, config.ImportMode); err != nil {
 			logger.Warn("Could not validate block", "err", err)
-			return errors.Join(consensus.ErrInvalidBlock, err)
+			return err
 		}
 		var progress uint64
 		progress, err = stages.GetStageProgress(txc.Tx, stages.Execution)
 		if err != nil {
 			return err
 		}
-		if progress < header.Number.Uint64() {
-			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, header.Number.Uint64())
+		lastNum := headersChain[len(headersChain)-1].Number.Uint64()
+		if progress < lastNum {
+			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, lastNum)
 		}
 		return nil
 	}
@@ -1039,6 +1041,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		false,
 		config.Miner.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
+		backend.txPoolRpcClient,
 	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
@@ -1207,7 +1210,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
-		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Debug("[EngineServer] goroutine terminated")
+			err := s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.miningRpcClient)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("[EngineServer] background goroutine failed", "err", err)
+			}
+			return err
+		})
 	}
 
 	// Register the backend on the node
@@ -1513,6 +1523,10 @@ func (s *Ethereum) setUpSnapDownloader(
 		return nil
 	}
 
+	if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
+		return err
+	}
+
 	if s.config.Snapshot.DownloaderAddr != "" {
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
@@ -1546,7 +1560,7 @@ func (s *Ethereum) setUpSnapDownloader(
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, nodeConfig *nodecfg.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
@@ -1555,24 +1569,17 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 	if chainConfig.Bor != nil {
 		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots, chainConfig.Bor)
-		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(nodeConfig.Http.DBReadConcurrency)), allBorSnapshots)
+		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(dbReadConcurrency)), allBorSnapshots, chainConfig.Bor)
+		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(dbReadConcurrency)), allBorSnapshots)
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
-	salt, err := state.GetStateIndicesSalt(dirs, createNewSaltFileIfNeeded, logger)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
-	}
 	if _, err := snaptype.LoadSalt(dirs.Snap, createNewSaltFileIfNeeded, logger); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	if err := state.CheckSnapshotsCompatibility(dirs); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
-	}
-	agg, err := state.NewAggregator2(ctx, dirs, config3.DefaultStepSize, salt, db, logger)
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

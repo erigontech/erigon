@@ -178,6 +178,8 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+
 	// First call should succeed
 	sidecar := createMockDataColumnSidecar(testSlot, 0)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -398,6 +400,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecar_StoresS
 	}).Return(nil).Times(1)
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	// Execute
 	sidecar := createMockDataColumnSidecar(testSlot, 0)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)

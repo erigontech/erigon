@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/erigontech/erigon/db/version"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -17,8 +16,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // search key in all files of all domains and print file names
@@ -111,7 +110,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 				}
 				if exists {
 					var err error
-					accessor, err = recsplit.OpenIndex(fPath)
+					accessor, err = dt.d.openHashMapAccessor(fPath)
 					if err != nil {
 						_, fName := filepath.Split(fPath)
 						dt.d.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)

@@ -59,7 +59,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, datadir.New(t.TempDir()), logger)
+		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
 
 		expect, err := chainspec.ChainSpecByName(network)
@@ -76,7 +76,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	block, _, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, _, err := genesiswrite.GenesisToBlock(t, chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Hash() != chainspec.Mainnet.GenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), chainspec.Mainnet.GenesisHash)
@@ -90,7 +90,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		require.NoError(err)
 		require.False(spec.IsEmpty())
 
-		block, _, err = genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		block, _, err = genesiswrite.GenesisToBlock(t, spec.Genesis, datadir.New(t.TempDir()), log.Root())
 		require.NoError(err)
 
 		if block.Root() != spec.GenesisStateRoot {
@@ -112,13 +112,13 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	defer tx.Rollback()
 
 	spec := chainspec.Mainnet
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)

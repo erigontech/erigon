@@ -47,7 +47,7 @@ var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 //   - track which txNums state-changes was applied
 type ParallelExecutionState struct {
 	domains      *dbstate.SharedDomains
-	tx           kv.Tx
+	tx           kv.TemporalTx
 	triggerLock  sync.Mutex
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
@@ -63,7 +63,7 @@ type ParallelExecutionState struct {
 func NewParallelExecutionState(domains *dbstate.SharedDomains, tx kv.Tx, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
 		domains:      domains,
-		tx:           tx,
+		tx:           tx.(kv.TemporalTx),
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
@@ -273,7 +273,7 @@ func (rs *ParallelExecutionState) SizeEstimate() (r uint64) {
 }
 
 func (rs *ParallelExecutionState) ReadsValid(readLists map[string]*dbstate.KvList) bool {
-	return rs.domains.ReadsValid(readLists)
+	return false
 }
 
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
@@ -330,7 +330,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 			return err
 		}
 
-		if err := w.rs.domains.IterateStoragePrefix(address[:], w.rs.tx, func(k, v []byte, step kv.Step) (bool, error) {
+		if err := w.rs.domains.IteratePrefix(kv.StorageDomain, address[:], w.rs.tx, func(k, v []byte, step kv.Step) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
 			return true, nil
 		}); err != nil {
@@ -399,7 +399,7 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	}
 
 	//seems don't need delete code here - tests starting fail
-	//err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+	//err := w.rs.domains.IteratePrefix(kv.StorageDomain, address[:], func(k, v []byte) error {
 	//	w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
 	//	return nil
 	//})
@@ -634,7 +634,7 @@ type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
 	sd        *dbstate.SharedDomains
-	tx        kv.Tx
+	tx        kv.TemporalTx
 	composite []byte
 
 	discardReadList bool

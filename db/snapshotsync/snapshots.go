@@ -521,7 +521,6 @@ type BlockSnapshots interface {
 	Delete(fileName string) error
 	Types() []snaptype.Type
 	Close()
-
 	DownloadComplete()
 	RemoveOverlaps(onDelete func(l []string) error) error
 	DownloadReady() bool
@@ -584,11 +583,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.recalcVisibleFiles(s.alignMin)
-
-	if cfg.NoDownloader {
-		s.DownloadComplete()
-	}
-
 	return s
 }
 
@@ -666,13 +660,6 @@ func (s *RoSnapshots) LogStat(label string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
 		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-}
-
-func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
-	if s.BlocksAvailable() < cfg.ExpectBlocks {
-		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
-	}
-	return nil
 }
 
 func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
@@ -1147,10 +1134,10 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	return nil
 }
 
-func (s *RoSnapshots) Ranges() []Range {
+func (s *RoSnapshots) Ranges(align bool) []Range {
 	view := s.View()
 	defer view.Close()
-	return view.Ranges()
+	return view.Ranges(align)
 }
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
@@ -1584,8 +1571,41 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool)
 	return nil, false
 }
 
-func (v *View) Ranges() (ranges []Range) {
+func (v *View) Ranges(align bool) (ranges []Range) {
+	if !align {
+		for _, sn := range v.Segments(v.baseSegType) {
+			ranges = append(ranges, sn.Range)
+		}
+
+		return ranges
+	}
+
+	var alignedRangeTo *uint64
+
+	for _, t := range v.s.types {
+		maxRangeTo := uint64(0)
+
+		for _, sn := range v.Segments(t) {
+			if sn.Range.to > maxRangeTo {
+				maxRangeTo = sn.Range.to
+			}
+		}
+
+		if alignedRangeTo == nil {
+			alignedRangeTo = &maxRangeTo
+			continue
+		}
+
+		if maxRangeTo < *alignedRangeTo {
+			alignedRangeTo = &maxRangeTo
+		}
+	}
+
 	for _, sn := range v.Segments(v.baseSegType) {
+		if alignedRangeTo != nil && sn.Range.to > *alignedRangeTo {
+			continue
+		}
+
 		ranges = append(ranges, sn.Range)
 	}
 

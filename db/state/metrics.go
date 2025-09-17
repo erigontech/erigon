@@ -56,8 +56,6 @@ var (
 	mxBuildTook            = metrics.GetOrCreateSummary("domain_build_files_took")
 	mxStepTook             = metrics.GetOrCreateSummary("domain_step_took")
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
-	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
-	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 )
 
 var (

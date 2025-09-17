@@ -166,7 +166,7 @@ func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
 	return state.NewReaderV3(getter)
 }
 
-func NewLatestStateWriter(tx kv.Tx, domains *dbstate.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+func NewLatestStateWriter(tx kv.TemporalTx, domains *dbstate.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	minTxNum, err := blockReader.TxnumReader(context.Background()).Min(tx, blockNum)
 	if err != nil {
 		panic(err)

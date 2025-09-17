@@ -53,9 +53,9 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/remotedb"
@@ -392,7 +392,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(roTxLimit)
-		rawDB, err := kv2.New(kv.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
+		rawDB, err := kv2.New(dbcfg.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
@@ -414,12 +414,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 
-		// this assumed the rpc deamon never runs with a downloader - if this is
-		// not the case we'll need to adjust the defaults of the --no-downlaoder
-		// flag to the faulse by default
-		cfg.Snap.NoDownloader = true
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allSnapshots.DownloadComplete()
+		allBorSnapshots.DownloadComplete()
 
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
@@ -429,7 +427,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		agg, err := dbstate.NewAggregator(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
@@ -573,7 +571,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 			engine = bor.NewRo(cc, blockReader, logger)
 		} else if cc != nil && cc.Aura != nil {
-			consensusDB, err := kv2.New(kv.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
+			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 			}
@@ -652,8 +650,19 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 	if err != nil {
 		return err
 	}
-	go stopAuthenticatedRpcServer(ctx, engineInfo, logger)
-	return nil
+	<-ctx.Done()
+	logger.Info("Exiting Engine...")
+	engineInfo.Srv.Stop()
+	if engineInfo.EngineSrv != nil {
+		engineInfo.EngineSrv.Stop()
+	}
+	if engineInfo.EngineListener != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownErr := engineInfo.EngineListener.Shutdown(shutdownCtx)
+		logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint, "shutdownErr", shutdownErr)
+	}
+	return ctx.Err()
 }
 
 func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -850,24 +859,6 @@ func startAuthenticatedRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger 
 		return nil, fmt.Errorf("could not start RPC api for engine: %w", err)
 	}
 	return &engineInfo{Srv: srv, EngineSrv: engineSrv, EngineListener: engineListener, EngineHttpEndpoint: engineHttpEndpoint}, nil
-}
-
-func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo, logger log.Logger) {
-	defer func() {
-		engineInfo.Srv.Stop()
-		if engineInfo.EngineSrv != nil {
-			engineInfo.EngineSrv.Stop()
-		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if engineInfo.EngineListener != nil {
-			_ = engineInfo.EngineListener.Shutdown(shutdownCtx)
-			logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint)
-		}
-	}()
-	<-ctx.Done()
-	logger.Info("Exiting Engine...")
 }
 
 // isWebsocket checks the header of a http request for a websocket upgrade request.
