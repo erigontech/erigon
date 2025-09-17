@@ -21,12 +21,13 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"math/big"
 	"path"
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"

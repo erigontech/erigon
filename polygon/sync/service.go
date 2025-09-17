@@ -77,7 +77,7 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache, logger)
 	events := NewTipEvents(logger, p2pService, heimdallService, minedBlockReg)
 	sync := NewSync(
 		config,
@@ -91,7 +91,7 @@ func NewService(
 		ccBuilderFactory,
 		heimdallService,
 		bridgeService,
-		events.Events(),
+		events,
 		notifications,
 		NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 		engineAPISwitcher,

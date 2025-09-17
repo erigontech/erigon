@@ -92,19 +92,38 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 	return res
 }
 
+// This needs to run *after* subcommand arguments are parsed, in case they alter root flags like data dir.
+func commonBeforeSnapshotCommand(cliCtx *cli.Context) error {
+	go mem.LogMemStats(cliCtx.Context, log.New())
+	go disk.UpdateDiskStats(cliCtx.Context, log.New())
+	_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func init() {
+	// Inject commonBeforeSnapshotCommand into all snapshot subcommands Before handlers.
+	for _, cmd := range snapshotCommand.Subcommands {
+		oldBefore := cmd.Before
+		cmd.Before = func(cliCtx *cli.Context) error {
+			err := commonBeforeSnapshotCommand(cliCtx)
+			if err != nil {
+				return fmt.Errorf("common before snapshot subcommand: %w", err)
+			}
+			if oldBefore == nil {
+				return nil
+			}
+			return oldBefore(cliCtx)
+		}
+	}
+}
+
 var snapshotCommand = cli.Command{
 	Name:    "snapshots",
 	Aliases: []string{"seg", "snapshot", "segments", "segment"},
 	Usage:   `Managing historical data segments (partitions)`,
-	Before: func(cliCtx *cli.Context) error {
-		go mem.LogMemStats(cliCtx.Context, log.New())
-		go disk.UpdateDiskStats(cliCtx.Context, log.New())
-		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
-		if err != nil {
-			return err
-		}
-		return nil
-	},
 	Subcommands: []*cli.Command{
 		{
 			Name: "ls",
@@ -278,14 +297,15 @@ var snapshotCommand = cli.Command{
 			Name:   "reset",
 			Usage:  "Reset state to resumable initial sync",
 			Action: resetCliAction,
-			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
-			Flags: append(
-				slices.Clone(logging.Flags),
+			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the
+			// environment variable? Followup: It would not go here, as it could modify behaviour in
+			// parent commands.
+			Flags: []cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ChainFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-			),
+			},
 		},
 		{
 			Name:    "rm-state-snapshots",
@@ -534,12 +554,13 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	// Step 2: Process each candidate file (already parsed)
+	doesRmCommitment := !cliCtx.IsSet("domain") || slices.Contains(cliCtx.StringSlice("domain"), "commitment")
 	for _, candidate := range candidateFiles {
 		res := candidate.fileInfo
 
 		// check that commitment file has state in it
 		// When domains are "compacted", we want to keep latest commitment file with state key in it
-		if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+		if doesRmCommitment && strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
 			hasState, broken, err := checkCommitmentFileHasRoot(res.Path)
 			if err != nil {
 				return err
@@ -788,7 +809,24 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	requestedCheck := integrity.Check(cliCtx.String("check"))
+	checkStr := cliCtx.String("check")
+	var requestedChecks []integrity.Check
+	if len(checkStr) > 0 {
+		for _, split := range strings.Split(checkStr, ",") {
+			requestedChecks = append(requestedChecks, integrity.Check(split))
+		}
+
+		for _, check := range requestedChecks {
+			if slices.Contains(integrity.AllChecks, check) || slices.Contains(integrity.NonDefaultChecks, check) {
+				continue
+			}
+
+			return fmt.Errorf("requested check %s not found", check)
+		}
+	} else {
+		requestedChecks = integrity.AllChecks
+	}
+
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -813,22 +851,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 
-	checks := append([]integrity.Check{}, integrity.AllChecks...)
-	nonDefaultCheck := requestedCheck != "" &&
-		!slices.Contains(integrity.AllChecks, requestedCheck) &&
-		slices.Contains(integrity.NonDefaultChecks, requestedCheck)
-	if nonDefaultCheck {
-		checks = append(checks, integrity.NonDefaultChecks...)
-	}
-
 	blockReader, _ := blockRetire.IO()
-	heimdallStore, _ := blockRetire.BorStore()
-	found := false
-	for _, chk := range checks {
-		if requestedCheck != "" && requestedCheck != chk {
-			continue
-		}
-		found = true
+	for _, chk := range requestedChecks {
 		logger.Info("[integrity] starting", "check", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
@@ -856,7 +880,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorEvents skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorEvents(ctx, db, blockReader, 0, 0, failFast); err != nil {
+			snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
+			if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
 				return err
 			}
 		case integrity.BorSpans:
@@ -864,7 +889,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorSpans skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+			heimdallStore, _ := blockRetire.BorStore()
+			if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
@@ -872,7 +898,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("BorCheckpoints skipped because not bor chain")
 				continue
 			}
-			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+			heimdallStore, _ := blockRetire.BorStore()
+			if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
@@ -890,10 +917,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
-	}
-
-	if !found {
-		return fmt.Errorf("not a valid check: %s", requestedCheck)
 	}
 
 	return nil
@@ -1050,7 +1073,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
-		for _, snapType := range kv.StateDomains {
+		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
 			schemaVersionMinSup := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
@@ -1144,14 +1167,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
+	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
 	for _, res := range accFiles {
-		viTypes := []string{"accounts", "storage", "code"}
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			versioned, err := libstate.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
@@ -1650,7 +1673,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		}
 	}
 
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, heimdallStore, bridgeStore)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)

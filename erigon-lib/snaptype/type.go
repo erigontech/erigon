@@ -174,6 +174,7 @@ type Type interface {
 	Name() string
 	FileName(version Version, from uint64, to uint64) string
 	FileInfo(dir string, from uint64, to uint64) FileInfo
+	FileInfoByMask(dir string, from uint64, to uint64) FileInfo
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(version Version, from uint64, to uint64) []string
 	Indexes() []Index
@@ -244,8 +245,26 @@ func (s snapType) FileName(version Version, from uint64, to uint64) string {
 	return SegmentFileName(version, from, to, s.enum)
 }
 
+func (s snapType) FileMask(from uint64, to uint64) string {
+	return SegmentFileMask(from, to, s.enum)
+}
+
 func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	f, _, _ := ParseFileName(dir, s.FileName(s.versions.Current, from, to))
+	return f
+}
+
+func (s snapType) FileInfoByMask(dir string, from uint64, to uint64) FileInfo {
+	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, s.FileName(s.versions.Current, from, to)))
+	if err != nil {
+		log.Debug("[snaptype] file mask error", "err", err, "fName", s.FileName(s.versions.Current, from, to))
+		return FileInfo{}
+	}
+	if !ok {
+		return FileInfo{}
+	}
+
+	f, _, _ := ParseFileName("", fName)
 	return f
 }
 
@@ -419,6 +438,22 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 		}
 	}()
 
+	fPathMask, err := version.ReplaceVersionWithMask(info.Path)
+	if err != nil {
+		return fmt.Errorf("[build index] can't replace with mask in file %s: %w", info.Name(), err)
+	}
+	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+	if err != nil {
+		_, fName := filepath.Split(fPath)
+		return fmt.Errorf("build index err %w fname %s", err, fName)
+	}
+	if !ok {
+		_, fName := filepath.Split(fPath)
+		return fmt.Errorf("build index err %w fname %s", os.ErrNotExist, fName)
+	}
+	info.Version = fileVer
+	info.Path = fPath
+
 	d, err := seg.NewDecompressor(info.Path)
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
@@ -431,7 +466,7 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To))
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(fileVer, info.From, info.To))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err

@@ -47,10 +47,16 @@ var (
 	AmoyGenesisHash       = common.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697")
 	BorMainnetGenesisHash = common.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
 	BorDevnetGenesisHash  = common.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
+	MumbaiGenesisHash     = common.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
 
 	AmoyChainConfig       = readChainSpec("chainspecs/amoy.json")
 	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
 	BorDevnetChainConfig  = readChainSpec("chainspecs/bor-devnet.json")
+	MumbaiChainConfig     = readChainSpec("chainspecs/mumbai.json")
+)
+
+var (
+	BorKurtosisDevnetChainId uint64 = 4927
 )
 
 func init() {
@@ -59,5 +65,6 @@ func init() {
 		"enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io")
 
 	chainspec.RegisterChain(networkname.BorDevnet, BorDevnetChainConfig, BorDevnetGenesisBlock(), BorDevnetGenesisHash, nil, "")
+	chainspec.RegisterChain(networkname.Mumbai, MumbaiChainConfig, MumbaiGenesisBlock(), MumbaiGenesisHash, MumbaiBootnodes, "")
 	delete(chainspec.NetworkNameByID, BorDevnetChainConfig.ChainID.Uint64()) // chain ID 1337 is used in non-Bor testing (e.g. Hive)
 }

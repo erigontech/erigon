@@ -21,10 +21,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
 	"github.com/erigontech/erigon/cmd/utils"

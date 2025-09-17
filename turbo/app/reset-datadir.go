@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,12 +14,12 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/urfave/cli/v2"
 )
 
@@ -41,33 +40,47 @@ var (
 	}
 )
 
-func resetCliAction(cliCtx *cli.Context) (err error) {
-	// Set logging verbosity. Oof that function signature.
-	logger, _, _, _, err := debug.Setup(cliCtx, true)
-	if err != nil {
-		err = fmt.Errorf("setting up logging: %w", err)
-		return
+// Checks if a value was explicitly set in the given CLI command context or any of its parents. In
+// urfave/cli@v2, you must check the lineage to see if a flag was set in any context. It may be
+// different in v3.
+func isSetLineage(cliCtx *cli.Context, flagName string) bool {
+	for _, ctx := range cliCtx.Lineage() {
+		if ctx.IsSet(flagName) {
+			return true
+		}
 	}
+	return false
+}
+
+func resetCliAction(cliCtx *cli.Context) (err error) {
+	// This is set up in snapshots cli.Command.Before.
+	logger := log.Root()
 	removeLocal := removeLocalFlag.Get(cliCtx)
 	dryRun := dryRunFlag.Get(cliCtx)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
+	logger.Info("resetting datadir", "path", dataDirPath)
 
 	dirs := datadir.Open(dataDirPath)
 
 	configChainName, chainNameErr := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
 
 	chainName := utils.ChainFlag.Get(cliCtx)
-	if cliCtx.IsSet(utils.ChainFlag.Name) {
+	// Check the lineage, we don't want to use the mainnet default, but due to how urfave/cli@v2
+	// works we shouldn't randomly re-add the chain flag in the current command context.
+	if isSetLineage(cliCtx, utils.ChainFlag.Name) {
 		if configChainName.Ok && configChainName.Value != chainName {
 			// Pedantic but interesting.
 			logger.Warn("chain name flag and chain config do not match", "flag", chainName, "config", configChainName.Value)
 		}
 		logger.Info("using chain name from flag", "chain", chainName)
-	} else if chainNameErr != nil {
-		return fmt.Errorf("getting chain name from chaindata: %w", chainNameErr)
-	} else if !configChainName.Ok {
-		return errors.New("chain flag not set and chain name not found in chaindata (reset already occurred or invalid data dir?)")
 	} else {
+		if chainNameErr != nil {
+			logger.Warn("error getting chain name from chaindata", "err", chainNameErr)
+		}
+		if !configChainName.Ok {
+			return errors.New(
+				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset")
+		}
 		chainName = configChainName.Unwrap()
 		logger.Info("read chain name from config", "chain", chainName)
 	}
@@ -152,6 +165,10 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 }
 
 func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
+	_, err = os.Stat(chainDataDir)
+	if err != nil {
+		return
+	}
 	ctx := cliCtx.Context
 	var db kv.RoDB
 	db, err = mdbx.New(kv.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)

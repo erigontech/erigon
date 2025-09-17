@@ -68,3 +68,17 @@ func BorDevnetGenesisBlock() *types.Genesis {
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
 	}
 }
+
+// MumbaiGenesisBlock returns the Mumbai network genesis block.
+func MumbaiGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     MumbaiChainConfig,
+		Nonce:      0,
+		Timestamp:  1558348305,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/mumbai.json"),
+	}
+}

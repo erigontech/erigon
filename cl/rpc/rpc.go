@@ -120,18 +120,18 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, error) {
-	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
-	if err != nil {
-		return nil, pid, err
-	}
+	// filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	// if err != nil {
+	// 	return nil, pid, err
+	// }
 
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, data)
 	if err != nil {
 		return nil, pid, err
 	}
