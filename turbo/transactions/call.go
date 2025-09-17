@@ -42,7 +42,7 @@ import (
 )
 
 type BlockOverrides struct {
-	BlockNumber *hexutil.Uint64         `json:"blockNumber"`
+	BlockNumber *hexutil.Uint64         `json:"number"`
 	Coinbase    *common.Address         `json:"feeRecipient"`
 	Timestamp   *hexutil.Uint64         `json:"time"`
 	GasLimit    *hexutil.Uint           `json:"gasLimit"`
