@@ -134,13 +134,16 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 
 	// Iterate over each given SimulatedBlock
 	intraBlockState := state.New(stateReader)
+	parent := sim.base
 	for index, bsc := range simulatedBlocks {
 		header := headers[index]
-		blockResult, err := sim.simulateBlock(ctx, tx, intraBlockState, &bsc, header)
+		header.ParentHash = parent.Hash()
+		blockResult, current, err := sim.simulateBlock(ctx, tx, intraBlockState, &bsc, header)
 		if err != nil {
 			return nil, err
 		}
 		simulatedBlockResults = append(simulatedBlockResults, blockResult)
+		parent = current.Header()
 	}
 
 	return simulatedBlockResults, nil
@@ -367,7 +370,7 @@ func (s *simulator) simulateBlock(
 	intraBlockState *state.IntraBlockState,
 	bsc *SimulatedBlock,
 	header *types.Header,
-) (SimulatedBlockResult, error) {
+) (SimulatedBlockResult, *types.Block, error) {
 	blockHashOverrides := transactions.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
@@ -379,7 +382,7 @@ func (s *simulator) simulateBlock(
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
 		if err := stateOverrides.Override(intraBlockState); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -393,7 +396,7 @@ func (s *simulator) simulateBlock(
 		callResult, txn, receipt, err := s.simulateCall(ctx, tx, intraBlockState, callIndex, &call, bsc.BlockOverrides,
 			blockHashOverrides, header, &cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
@@ -409,7 +412,7 @@ func (s *simulator) simulateBlock(
 	}
 	engine, ok := s.engine.(consensus.Engine)
 	if !ok {
-		return nil, errors.New("consensus engine reader does not support full consensus.Engine")
+		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
 	}
 	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
 		return core.SysCallContract(contract, data, s.chainConfig, intraBlockState, header, engine, false /* constCall */, vmConfig)
@@ -417,16 +420,16 @@ func (s *simulator) simulateBlock(
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
 		receiptList, withdrawals, nil, systemCall, nil, s.logger)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	additionalFields := make(map[string]interface{})
 	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	repairLogs(callResults, block.Hash())
 	blockResult["calls"] = callResults
-	return blockResult, nil
+	return blockResult, block, nil
 }
 
 func (s *simulator) simulateCall(
