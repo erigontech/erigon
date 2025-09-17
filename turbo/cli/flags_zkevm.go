@@ -24,6 +24,8 @@ var DeprecatedFlags = map[string]string{
 	"zkevm.gasless":            "zkevm.allow-free-transactions",
 	"zkevm.rpc-ratelimit":      "",
 	"zkevm.datastream-version": "",
+	"zkevm.l1-cache-port":      "",
+	"zkevm.l1-cache-enabled":   "",
 }
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -231,11 +233,12 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L2DataStreamerTimeout:                  l2DataStreamTimeout,
 		L2ShortCircuitToVerifiedBatch:          l2ShortCircuitToVerifiedBatchVal,
 		L1SyncStartBlock:                       ctx.Uint64(utils.L1SyncStartBlock.Name),
-		L1SyncStopBatch:                        ctx.Uint64(utils.L1SyncStopBatch.Name),
+		BlobRecovery:                           ctx.Bool(utils.BlobRecovery.Name),
+		BlobDAUrl:                              ctx.String(utils.BlobDAUrl.Name),
+		BlobRecoveryBlobLimit:                  ctx.Uint64(utils.BlobRecoveryBlobLimit.Name),
+		RecoveryStopBatch:                      ctx.Uint64(utils.RecoveryStopBatch.Name),
 		L1ChainId:                              ctx.Uint64(utils.L1ChainIdFlag.Name),
 		L1RpcUrl:                               ctx.String(utils.L1RpcUrlFlag.Name),
-		L1CacheEnabled:                         ctx.Bool(utils.L1CacheEnabledFlag.Name),
-		L1CachePort:                            ctx.Uint(utils.L1CachePortFlag.Name),
 		AddressSequencer:                       libcommon.HexToAddress(ctx.String(utils.AddressSequencerFlag.Name)),
 		AddressAdmin:                           libcommon.HexToAddress(ctx.String(utils.AddressAdminFlag.Name)),
 		AddressRollup:                          libcommon.HexToAddress(ctx.String(utils.AddressRollupFlag.Name)),

@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Mock transaction for testing
@@ -62,10 +63,9 @@ func TestNewPoolTransactionYielder(t *testing.T) {
 	assert.Equal(t, uint16(10), yielder.yieldSize)
 	assert.Equal(t, mockDB, yielder.db)
 	assert.Equal(t, cache, yielder.decodedTxCache)
-	assert.False(t, yielder.startedYielding)
+	assert.False(t, yielder.refreshing.Load())
 	assert.Empty(t, yielder.readyTransactions)
 	assert.Empty(t, yielder.readyTransactionBytes)
-	assert.Empty(t, yielder.toSkip)
 }
 
 func TestPoolTransactionYielder_YieldNextTransaction_EmptyPool(t *testing.T) {
@@ -75,8 +75,7 @@ func TestPoolTransactionYielder_YieldNextTransaction_EmptyPool(t *testing.T) {
 	mockDB := memdb.NewTestDB(t)
 	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
 
-	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
+	pool := &txpool.TxPool{}
 
 	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
 
@@ -100,9 +99,10 @@ func TestPoolTransactionYielder_YieldNextTransaction_WithValidTransactions(t *te
 	mockDB := memdb.NewTestDB(t)
 	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
 
-	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
-
+	pool := txpool.NewMockPool(gomock.NewController(t))
+	pool.EXPECT().YieldBest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, 0, nil).AnyTimes()
+	pool.EXPECT().PreYield().AnyTimes()
+	pool.EXPECT().PostYield().AnyTimes()
 	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
 
 	// Create test transactions
@@ -157,8 +157,7 @@ func TestPoolTransactionYielder_YieldNextTransaction_WithCachedTransactions(t *t
 	mockDB := memdb.NewTestDB(t)
 	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
 
-	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
+	pool := &txpool.TxPool{}
 
 	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
 
@@ -185,45 +184,6 @@ func TestPoolTransactionYielder_YieldNextTransaction_WithCachedTransactions(t *t
 	assert.True(t, hasMore)
 }
 
-func TestPoolTransactionYielder_YieldNextTransaction_WithSkippedTransactions(t *testing.T) {
-	ctx := context.Background()
-	cfg := ethconfig.Zk{
-		EffectiveGasPriceForEthTransfer: 10,
-	}
-
-	mockDB := memdb.NewTestDB(t)
-	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
-
-	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
-
-	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
-
-	// Create test transactions
-	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	tx1 := createMockTransaction(1, &to, []byte{})
-	tx2 := createMockTransaction(2, &to, []byte{})
-
-	tx1Bytes := createMockTransactionBytes(tx1)
-	tx2Bytes := createMockTransactionBytes(tx2)
-
-	// Manually populate the ready transactions
-	yielder.readyMtx.Lock()
-	yielder.readyTransactions = []common.Hash{tx1.Hash(), tx2.Hash()}
-	yielder.readyTransactionBytes[tx1.Hash()] = tx1Bytes
-	yielder.readyTransactionBytes[tx2.Hash()] = tx2Bytes
-	yielder.toSkip[tx1.Hash()] = struct{}{} // Mark first transaction as skipped
-	yielder.readyMtx.Unlock()
-
-	// Test yielding - should skip tx1 and return tx2
-	tx, effectiveGas, hasMore := yielder.YieldNextTransaction()
-
-	assert.NotNil(t, tx)
-	assert.Equal(t, tx2.Hash(), tx.Hash()) // Should return second transaction
-	assert.Equal(t, uint8(10), effectiveGas)
-	assert.True(t, hasMore)
-}
-
 func TestPoolTransactionYielder_AddMined(t *testing.T) {
 	ctx := context.Background()
 	cfg := ethconfig.Zk{}
@@ -232,8 +192,10 @@ func TestPoolTransactionYielder_AddMined(t *testing.T) {
 	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
 
 	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
-
+	pool := txpool.NewMockPool(gomock.NewController(t))
+	pool.EXPECT().YieldBest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, 0, nil).AnyTimes()
+	pool.EXPECT().PreYield().AnyTimes()
+	pool.EXPECT().PostYield().AnyTimes()
 	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
 
 	// Create test transaction
@@ -247,29 +209,23 @@ func TestPoolTransactionYielder_AddMined(t *testing.T) {
 	yielder.readyTransactionBytes[txHash] = createMockTransactionBytes(tx)
 	yielder.readyMtx.Unlock()
 
-	// Add transaction as mined
-	yielder.AddMined(txHash)
-
-	// Verify transaction was removed from ready transactions
+	// Verify transaction was removed from ready transactions after Yield
+	tx, _, yielded := yielder.YieldNextTransaction()
+	require.True(t, yielded)
+	assert.Equal(t, tx.Hash(), txHash)
 	yielder.readyMtx.Lock()
 	assert.Len(t, yielder.readyTransactions, 1)
 	assert.Equal(t, common.HexToHash("0x1234"), yielder.readyTransactions[0])
-	_, isSkipped := yielder.toSkip[txHash]
 	yielder.readyMtx.Unlock()
 
-	assert.True(t, isSkipped)
-
+	// Add transaction as mined
+	yielder.AddMined(txHash)
+	yielder.readyMtx.Lock()
+	assert.Empty(t, yielder.readyTransactionBytes)
 	// Verify transaction was removed from cache
 	_, found := cache.Get(txHash)
 	assert.False(t, found)
-
-	// Verify skip map was cleared
-	yielder.readyMtx.Lock()
-	assert.Len(t, yielder.toSkip, 1)
 	yielder.readyMtx.Unlock()
-
-	yielder.Cleanup() // Cleanup to reset state
-	assert.Empty(t, yielder.toSkip)
 }
 
 func TestPoolTransactionYielder_SetExecutionDetails(t *testing.T) {
@@ -291,35 +247,6 @@ func TestPoolTransactionYielder_SetExecutionDetails(t *testing.T) {
 
 	assert.Equal(t, executionAt, yielder.executionAt)
 	assert.Equal(t, forkId, yielder.forkId)
-}
-
-func TestPoolTransactionYielder_BeginYielding(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	cfg := ethconfig.Zk{}
-
-	mockDB := memdb.NewTestDB(t)
-	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
-
-	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
-
-	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
-
-	// Test BeginYielding when not started
-	assert.False(t, yielder.startedYielding)
-
-	yielder.BeginYielding()
-
-	// Give some time for the goroutine to start
-	time.Sleep(10 * time.Millisecond)
-
-	assert.True(t, yielder.startedYielding)
-
-	// Test BeginYielding when already started
-	yielder.BeginYielding()
-	assert.True(t, yielder.startedYielding)
 }
 
 func TestPoolTransactionYielder_ExtractTransactionsFromSlot(t *testing.T) {
@@ -458,35 +385,6 @@ func TestRecoveryTransactionYielder(t *testing.T) {
 	assert.False(t, hasMore)
 }
 
-func TestPoolTransactionYielder_ContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cfg := ethconfig.Zk{}
-
-	mockDB := memdb.NewTestDB(t)
-	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
-
-	// Use nil TxPool for testing - we're not testing pool functionality
-	var pool *txpool.TxPool = nil
-
-	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
-
-	// Start yielding
-	yielder.BeginYielding()
-
-	// Give some time for the goroutine to start
-	time.Sleep(10 * time.Millisecond)
-
-	// Cancel context
-	cancel()
-
-	// Give some time for the goroutine to stop
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify the yielder stopped
-	assert.False(t, yielder.startedYielding)
-}
-
 func TestPoolTransactionYielder_DecodeFailure(t *testing.T) {
 	ctx := context.Background()
 	cfg := ethconfig.Zk{}
@@ -497,6 +395,9 @@ func TestPoolTransactionYielder_DecodeFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	pool := txpool.NewMockPool(ctrl)
 	pool.EXPECT().MarkForDiscardFromPendingBest(gomock.Any()).AnyTimes()
+	pool.EXPECT().YieldBest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, 0, nil).AnyTimes()
+	pool.EXPECT().PreYield().AnyTimes()
+	pool.EXPECT().PostYield().AnyTimes()
 
 	yielder := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
 
@@ -512,6 +413,19 @@ func TestPoolTransactionYielder_DecodeFailure(t *testing.T) {
 	assert.Nil(t, tx) // Should return nil since decoding will fail
 	assert.Equal(t, uint8(0), effectiveGas)
 	assert.False(t, yielded)
+
+	// Now add a good transaction
+	tx2 := createMockTransaction(2, &to, []byte{})
+	yielder.readyMtx.Lock()
+	yielder.readyTransactions = []common.Hash{tx2.Hash()}
+	yielder.readyTransactionBytes[tx2.Hash()] = createMockTransactionBytes(tx2)
+	yielder.readyMtx.Unlock()
+
+	// Test yielding transaction with successful decoding
+	tx, _, yielded = yielder.YieldNextTransaction()
+	assert.NotNil(t, tx)
+	assert.Equal(t, tx2.Hash(), tx.Hash())
+	assert.True(t, yielded)
 }
 
 // benchSink prevents the compiler from eliding our call.
@@ -524,7 +438,10 @@ func BenchmarkPoolTransactionYielder_YieldNextTransaction(b *testing.B) {
 
 	mockDB := memdb.NewTestDB(b)
 	cache := expirable.NewLRU[common.Hash, *types.Transaction](100, nil, time.Hour)
-	var pool *txpool.TxPool // nil for this benchmark
+	pool := txpool.NewMockPool(gomock.NewController(b))
+	pool.EXPECT().YieldBest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, 0, nil).AnyTimes()
+	pool.EXPECT().PreYield().AnyTimes()
+	pool.EXPECT().PostYield().AnyTimes()
 
 	y := NewPoolTransactionYielder(ctx, cfg, pool, 10, mockDB, cache)
 

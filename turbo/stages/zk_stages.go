@@ -129,6 +129,7 @@ func NewSequencerZkStages(ctx context.Context,
 		zkStages.StageL1SequencerSyncCfg(db, cfg.Zk, sequencerStageSyncer),
 		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, controlServer.ChainConfig, infoTreeUpdater),
 		zkStages.StageSequencerL1BlockSyncCfg(db, cfg.Zk, l1BlockSyncer),
+		zkStages.StageSequencerBlobRecoveryCfg(db, cfg.Zk, controlServer.ChainConfig, l1BlockSyncer),
 		zkStages.StageSequenceBlocksCfg(
 			db,
 			cfg.Prune,

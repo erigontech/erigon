@@ -31,8 +31,7 @@ type TxYielder interface {
 	AddMined(hash common.Hash)
 	Discard(hash common.Hash)
 	SetExecutionDetails(executionAt uint64, forkId uint64)
-	BeginYielding()
-	Cleanup()
+	Requeue(txs []types.Transaction)
 }
 
 func SpawnSequencingStage(
@@ -145,7 +144,9 @@ func sequencingBatchStep(
 		return nil
 	}
 
-	batchNumberForStateInitialization, err := prepareBatchNumber(sdb, forkId, lastBatch, cfg.zk.IsL1Recovery())
+	inRecovery := cfg.zk.IsL1Recovery() || cfg.zk.IsBlobRecovery()
+
+	batchNumberForStateInitialization, err := prepareBatchNumber(sdb, forkId, lastBatch, inRecovery)
 	if err != nil {
 		return err
 	}
@@ -153,7 +154,7 @@ func sequencingBatchStep(
 	var block *types.Block
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
-	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.UseExecutors(), cfg.zk.IsL1Recovery(), cfg.txPool, resequenceBatchJob)
+	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.UseExecutors(), inRecovery, cfg.txPool, resequenceBatchJob)
 	shouldCountersBeInfinite := cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()) || cfg.chainConfig.IsNormalcy(executionAt)
 	blockDataSizeChecker := NewBlockDataChecker(shouldCountersBeInfinite)
 	streamWriter := newSequencerBatchStreamWriter(batchContext, batchState)
@@ -224,7 +225,7 @@ func sequencingBatchStep(
 	batchCounters := prepareBatchCounters(batchContext, batchState, shouldCountersBeInfinite)
 
 	if batchState.isL1Recovery() {
-		if cfg.zk.L1SyncStopBatch > 0 && batchState.batchNumber > cfg.zk.L1SyncStopBatch {
+		if cfg.zk.RecoveryStopBatch > 0 && batchState.batchNumber > cfg.zk.RecoveryStopBatch {
 			log.Info(fmt.Sprintf("[%s] L1 recovery has completed!", logPrefix), "batch", batchState.batchNumber)
 			time.Sleep(1 * time.Second)
 			return nil
@@ -285,6 +286,7 @@ func sequencingBatchStep(
 
 	// default to using the normal transaction yielder
 	var yielder TxYielder = cfg.txYielder
+	txsToRequeue := make([]types.Transaction, 0)
 
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
 		if batchTimedOut {
@@ -331,8 +333,7 @@ func sequencingBatchStep(
 			}
 		}
 
-		yielder.SetExecutionDetails(executionAt, batchState.forkId)
-		yielder.BeginYielding()
+		yielder.SetExecutionDetails(blockNumber-1, batchState.forkId)
 
 		if batchState.isL1Recovery() {
 			blockNumbersInBatchSoFar, err := batchContext.sdb.hermezDb.GetL2BlockNosByBatch(batchState.batchNumber)
@@ -443,6 +444,7 @@ func sequencingBatchStep(
 
 			select {
 			case <-blockTimer.C:
+				log.Debug(fmt.Sprintf("[%s] Outer Block timer expired", logPrefix))
 				if !batchState.isAnyRecovery() {
 					// no transactions or the block seal time is equal to the empty block seal time
 					// break here to avoid log noise
@@ -450,7 +452,7 @@ func sequencingBatchStep(
 						cfg.zk.SequencerBlockSealTime == cfg.zk.SequencerEmptyBlockSealTime {
 						break OuterLoopTransactions
 					} else {
-						log.Info(fmt.Sprintf("[%s] Block timeout reached with no transactions processed", logPrefix))
+						log.Debug(fmt.Sprintf("[%s] [elastic] Block timeout reached with no transactions processed — not closing block", logPrefix))
 						blockTimer.Stop()
 						blockTimer.Reset(cfg.zk.SequencerBlockSealTime)
 					}
@@ -488,19 +490,10 @@ func sequencingBatchStep(
 
 		InnerLoopTransactions:
 			for {
-				transaction, effectiveGas, ok := yielder.YieldNextTransaction()
-				if !ok {
-					if !batchState.isAnyRecovery() {
-						time.Sleep(cfg.zk.SequencerTimeoutOnEmptyTxPool)
-					}
-					break InnerLoopTransactions
-				}
-
-				yieldedSomething = true
-
 				// quick check if we should stop handling transactions
 				select {
 				case <-blockTimer.C:
+					log.Debug(fmt.Sprintf("[%s] Inner Block timer expired", logPrefix))
 					if !batchState.isAnyRecovery() {
 						innerBreak = true
 						break InnerLoopTransactions
@@ -514,6 +507,16 @@ func sequencingBatchStep(
 					break InnerLoopTransactions
 				}
 
+				transaction, effectiveGas, ok := yielder.YieldNextTransaction()
+				if !ok {
+					if !batchState.isAnyRecovery() {
+						time.Sleep(cfg.zk.SequencerTimeoutOnEmptyTxPool)
+					}
+					break InnerLoopTransactions
+				}
+
+				yieldedSomething = true
+
 				txHash := transaction.Hash()
 
 				txSender, ok := transaction.GetSender()
@@ -525,6 +528,8 @@ func sequencingBatchStep(
 							"error", err,
 							"hash", transaction.Hash())
 						batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
+						yielder.Discard(txHash)
+						cfg.txPool.MarkForDiscardFromPendingBest(txHash)
 						continue
 					}
 
@@ -533,10 +538,14 @@ func sequencingBatchStep(
 				}
 
 				if _, found := sendersToSkip[txSender]; found {
+					// Lets not keep the data for such senders
+					txsToRequeue = append(txsToRequeue, transaction)
 					continue
 				}
 
 				if _, found := nonceTooHighSenders[txSender]; found {
+					// tx will be requeued at the end of the batch
+					txsToRequeue = append(txsToRequeue, transaction)
 					continue
 				}
 
@@ -580,8 +589,7 @@ func sequencingBatchStep(
 
 					if errors.Is(err, core.ErrNonceTooHigh) {
 						log.Info(fmt.Sprintf("[%s] nonce too high detected for sender, skipping transactions for now", logPrefix), "sender", txSender.Hex(), "nonceIssue", err)
-						nonceTooHighSenders[txSender] = append(nonceTooHighSenders[txSender], transaction.GetNonce())
-						yielder.Discard(txHash)
+						txsToRequeue = append(txsToRequeue, transaction)
 						continue
 					}
 
@@ -629,6 +637,7 @@ func sequencingBatchStep(
 							ocs, _ := tempCounters.CounterStats(l1TreeUpdateIndex != 0)
 							// mark the transaction to be removed from the pool
 							cfg.txPool.MarkForDiscardFromPendingBest(txHash)
+							yielder.Discard(txHash)
 							counter, err := handleBadTxHashCounter(sdb.hermezDb, txHash)
 							if err != nil {
 								return err
@@ -645,8 +654,15 @@ func sequencingBatchStep(
 								if len(batchState.blockState.builtBlockElements.transactions) == 0 {
 									emptyBlockOverflow = true
 								}
+								txsToRequeue = append(txsToRequeue, transaction)
 								break OuterLoopTransactions
 							}
+							// Here we did not discard the transaction as it may be valid in the next batch
+							// We did not requeue it either because it would overflow this batch again
+							// But if we have another transaction from the same sender, we'll have a NonceTooHigh error
+							// and discard the subsequent transactions.
+							// We need add the nonce to the list to be requeued at the end of the batch
+							txsToRequeue = append(txsToRequeue, transaction)
 						}
 
 						// now we have finished with logging the overflow,remove the last attempted counters as we may want to continue processing this batch with other transactions
@@ -664,7 +680,12 @@ func sequencingBatchStep(
 						panic(fmt.Sprintf("block gas limit overflow in recovery block: %d", blockNumber))
 					}
 					log.Info(fmt.Sprintf("[%s] gas overflowed adding transaction to block", logPrefix), "block", blockNumber, "tx-hash", txHash)
-					runLoopBlocks = false
+
+					yielder.Requeue([]types.Transaction{transaction})
+					// Close the batch on gas overflow only if not in normalcy
+					if !cfg.chainConfig.IsNormalcy(blockNumber) {
+						runLoopBlocks = false
+					}
 					break OuterLoopTransactions
 				case overflowNone:
 				}
@@ -714,6 +735,9 @@ func sequencingBatchStep(
 				break OuterLoopTransactions
 			}
 		}
+
+		yielder.Requeue(txsToRequeue)
+		txsToRequeue = txsToRequeue[:0]
 
 		// nonce too high transactions need moving straight to the queued pool
 		if len(nonceTooHighSenders) > 0 {
@@ -812,8 +836,6 @@ func sequencingBatchStep(
 			return err
 		}
 	}
-
-	yielder.Cleanup()
 
 	/*
 		if adding something below that line we must ensure

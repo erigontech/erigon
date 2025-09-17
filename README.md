@@ -1,17 +1,11 @@
 # cdk-erigon
 
-cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with the Polygon Hermez zkEVM network.
+cdk-erigon is a fork of Erigon, optimized for syncing with the Polygon Hermez zkEVM network.
 
 
 ## Gateway Documentation
 
 Please visit https://docs.gateway.fm/cdk-erigon/what-is-cdk-erigon/ for comprehensive documentation of the cdk-erigon stack.
-
-***
-## Release Roadmap
-- **v1.1.x**: RPC (full support)
-- **v2.x.x**: Sequencer (full support)
-- **v3.x.x**: Erigon 3 based (snapshot support)
 
 ***
 
@@ -31,12 +25,7 @@ Current status of cdk-erigon's support for running various chains and fork ids:
 ## Dynamic Chain Configuration
 To use chains other than the defaults above, a set of configuration files can be supplied to run any chain. There are 2 ways to do this:
 
-### Method 1 **(recommended)**:
-1. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
-2. Create 1 files for dynamic configs (examples for Cardona in `zk/examples/dynamic-configs/unon-dynamic-config.json`, edit as required)
-3. Use `zkevm.genesis-config-path` to set the path to the config file e.g. `--zkevm.genesis-config-path="/dynamic-mynetwork/dynamic-mynetwork.json"`
-
-### Method 2:
+### Method 1:
 1. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
 2. Create 3 files for dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`, edit as required)
    - `dynamic-{network}-allocs.json` - the allocs file
@@ -44,6 +33,11 @@ To use chains other than the defaults above, a set of configuration files can be
    - `dynamic-{network}-conf.json` - an additional configuration file
    - `dynamic-{network}.yaml` - the run config file for erigon.  You can use any of the example yaml files at the root of the repo as a base and edit as required, but ensure the `chain` field is in the format `dynamic-{network}` and matches the names of the config files above.
 3. Place the erigon config file along with the other files in the directory of your choice, for example `dynamic-mynetwork`.
+
+### Method 2:
+1. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
+2. Create 1 dynamic config file (example file in `zk/examples/dynamic-configs/union-dynamic-config.json`, edit as required)
+3. Use `zkevm.genesis-config-path` to set the path to the config file e.g. `--zkevm.genesis-config-path="/dynamic-mynetwork/dynamic-mynetwork.json"`
 
 **Tip**: if you have allocs in the format from Polygon when originally launching the network you can save this file to the root of the cdk-erigon code
 base and run `go run cmd/hack/allocs/main.go [your-file-name]` to convert it to the format needed by erigon, this will form the `dynamic-{network}-allocs.json` file.
@@ -116,18 +110,30 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 - `zkevm_batchNumber`
 - `zkevm_batchNumberByBlockNumber`
 - `zkevm_consolidatedBlockNumber`
-- `zkevm_isBlockConsolidated`
-- `zkevm_verifiedBatchNumber`
-- `zkevm_isBlockVirtualized`
-- `zkevm_virtualBatchNumber`
+- `zkevm_estimateCounters`
+- `zkevm_getBatchByNumber`
+- `zkevm_getBatchCountersByNumber`
+- `zkevm_getBlockRangeWitness`
+- `zkevm_getExitRootTable`
+- `zkevm_getExitRootsByGER`
+- `zkevm_getForkById`
+- `zkevm_getForkId`
+- `zkevm_getForkIdByBatchNumber`
+- `zkevm_getForks`
 - `zkevm_getFullBlockByHash`
 - `zkevm_getFullBlockByNumber`
-- `zkevm_virtualCounters`
-- `zkevm_traceTransactionCounters`
-- `zkevm_getVersionHistory` - returns cdk-erigon versions and timestamps of their deployment (stored in datadir)
-
-### Supported (remote)
-- `zkevm_getBatchByNumber`
+- `zkevm_getL2BlockInfoTree`
+- `zkevm_getLatestDataStreamBlock`
+- `zkevm_getLatestGlobalExitRoot`
+- `zkevm_getProverInput`
+- `zkevm_getRollupAddress`
+- `zkevm_getRollupManagerAddress`
+- `zkevm_getVersionHistory`
+- `zkevm_getWitness`
+- `zkevm_isBlockConsolidated`
+- `zkevm_isBlockVirtualized`
+- `zkevm_verifiedBatchNumber`
+- `zkevm_virtualBatchNumber`
 
 ### Configurable
 - `zkevm_getBatchWitness` - concurrency can be limited with `zkevm.rpc-get-batch-witness-concurrency-limit` flag which defaults to 1. Use 0 for no limit.
@@ -137,6 +143,13 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 
 ### Deprecated
 - `zkevm_getBroadcastURI` - it was removed by zkEvm
+- `zkevm.l1-cache-enabled` - the l1 cache is removed from erigon
+- `zkevm.l1-cache-port` - removed as the cache is no longer supported
+- `zkevm_virtualCounters`
+- `zkevm_traceTransactionCounters`
+
+For a more information on available API methods and how to configure them see [docs.gateway.fm](https://docs.gateway.fm/cdk-erigon/json-rpc/zkevm/polygon-zkevm-node-api/).
+
 ***
 
 ## Limitations/Warnings/Performance
@@ -211,9 +224,7 @@ For a full explanation of the config options, see below:
 - `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
 - `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
 - `http.api`: List of enabled HTTP API modules.
-- `zkevm.hardfork`: `[hermez | ethereum]` `hermez` is the default behavior. `ethereum` enables the Ethereum traditional hardfork system.
-- `zkevm.commitment`: `[smt | pmt]` Choose what type of commitment to use in `stage_interhashes.go`. `smt` is the default behavior. `pmt` uses the standard Ethereum PMT.
-- `zkevm.inject-gers`: `[true | false]` Should or should not inject L1 information into the scalable contract and GER manager. Default is `true`.
+- `zkevm.initial-commitment`: The initial commitment method for hashing the state. Either `smt` (Sparse Merkle Tree) or `pmt` (Patricia Merkle Trie). Default is `smt`. This must be enabled from genesis and modifying the value after will not change the commitment method.
 
 Sequencer specific config:
 - `zkevm.executor-urls`: A csv list of the executor URLs.  These will be used in a round robbin fashion by the sequencer

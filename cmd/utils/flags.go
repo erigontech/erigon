@@ -466,9 +466,24 @@ var (
 		Usage: "Designed for recovery of the network from the L1 batch data, slower mode of operation than the datastream.  If set the datastream will not be used",
 		Value: 0,
 	}
-	L1SyncStopBatch = cli.Uint64Flag{
-		Name:  "zkevm.l1-sync-stop-batch",
-		Usage: "Designed mainly for debugging, this will stop the L1 sync going on for too long when you only want to pull a handful of batches from the L1 during recovery",
+	BlobRecovery = cli.BoolFlag{
+		Name:  "zkevm.blob-recovery",
+		Usage: "Enable recovery of batches from blobs stored in the blob data availability service",
+		Value: false,
+	}
+	BlobDAUrl = cli.StringFlag{
+		Name:  "zkevm.blob-da-url",
+		Usage: "The url endpoint of the blob data availability service",
+		Value: "",
+	}
+	BlobRecoveryBlobLimit = cli.Uint64Flag{
+		Name:  "zkevm.blob-recovery-blob-limit",
+		Usage: "The maximum number of blobs to request from the blob data availability service in a single request",
+		Value: 10,
+	}
+	RecoveryStopBatch = cli.Uint64Flag{
+		Name:  "zkevm.recovery-stop-batch",
+		Usage: "Designed mainly for debugging, this will stop the L1 sync or blob recovery go on for too long when you only want to pull a handful of batches",
 		Value: 0,
 	}
 	L1ChainIdFlag = cli.Uint64Flag{
@@ -480,16 +495,6 @@ var (
 		Name:  "zkevm.l1-rpc-url",
 		Usage: "Ethereum L1 RPC endpoint",
 		Value: "",
-	}
-	L1CacheEnabledFlag = cli.BoolFlag{
-		Name:  "zkevm.l1-cache-enabled",
-		Usage: "Enable the L1 cache",
-		Value: false,
-	}
-	L1CachePortFlag = cli.UintFlag{
-		Name:  "zkevm.l1-cache-port",
-		Usage: "The port used for the L1 cache",
-		Value: 6969,
 	}
 	AddressSequencerFlag = cli.StringFlag{
 		Name:  "zkevm.address-sequencer",
