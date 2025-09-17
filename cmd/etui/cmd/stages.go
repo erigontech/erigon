@@ -23,11 +23,13 @@ var infoCmd = &cobra.Command{
 		}
 		logger := log.New(context.Background())
 		infoCh := make(chan *commands.StagesInfo)
-		err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
-		if err != nil {
-			return err
-		}
-		err = tui.MakeTUI(infoCh)
+		go func() {
+			err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
+			if err != nil {
+				panic(err)
+			}
+		}()
+		err := tui.MakeTUI(infoCh)
 		if err != nil {
 			return err
 		}
