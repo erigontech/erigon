@@ -1208,7 +1208,6 @@ func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string, out c
 		if err != nil {
 			return err
 		}
-		info.StagesProgress[0].Progress = 1337
 		out <- info
 		for range ticker.C {
 			info, err = InfoStages(tx, sn, borSn)
