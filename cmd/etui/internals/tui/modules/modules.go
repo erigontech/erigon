@@ -26,6 +26,7 @@ func TextToBody(app *tview.Application, body *tview.TextView) {
 
 		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
+			body.Clear()
 			fmt.Fprintf(body, "text %s", text)
 		})
 		time.Sleep(time.Millisecond * 200)
