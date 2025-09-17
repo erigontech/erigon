@@ -455,9 +455,8 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
 	}
 
-	var dbMinBlock = uint64(math.MaxUint64)
 	var err error
-	dbMinBlock, err = r.findFirstCompleteBlock(tx)
+	dbMinBlock, err := r.findFirstCompleteBlock(tx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
 	}
