@@ -568,51 +568,17 @@ func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transaction
 	return nil
 }
 
+// receiptEncoder69 wraps a receipt to delegate to EncodeRLP69 during list encoding.
+type receiptEncoder69 struct{ r *Receipt }
+
+func (e receiptEncoder69) EncodeRLP(w io.Writer) error { return e.r.EncodeRLP69(w) }
+
 func (rs Receipts) EncodeRLP69(w io.Writer) error {
-	// Encode each receipt individually to get actual sizes
-	var encodedReceipts [][]byte
-	for _, receipt := range rs {
-		receiptBuf := encodeBufferPool.Get().(*bytes.Buffer)
-		receiptBuf.Reset()
-		if err := receipt.EncodeRLP69(receiptBuf); err != nil {
-			encodeBufferPool.Put(receiptBuf)
-			return err
-		}
-
-		// Copy the bytes since we're returning the buffer to the pool
-		encoded := make([]byte, receiptBuf.Len())
-		copy(encoded, receiptBuf.Bytes())
-		encodedReceipts = append(encodedReceipts, encoded)
-		encodeBufferPool.Put(receiptBuf)
+	encs := make([]receiptEncoder69, len(rs))
+	for i := range rs {
+		encs[i] = receiptEncoder69{r: rs[i]}
 	}
-
-	// Calculate total size
-	totalSize := 0
-	for _, encoded := range encodedReceipts {
-		totalSize += len(encoded)
-	}
-
-	// Create the output buffer
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
-
-	// Write RLP list prefix
-	b := make([]byte, 32) // Use a larger buffer for RLP encoding
-	if err := rlp.EncodeStructSizePrefix(totalSize, buf, b); err != nil {
-		return err
-	}
-
-	// Write each encoded receipt
-	for _, encoded := range encodedReceipts {
-		if _, err := buf.Write(encoded); err != nil {
-			return err
-		}
-	}
-
-	// Write the complete buffer to the writer
-	_, err := w.Write(buf.Bytes())
-	return err
+	return rlp.Encode(w, encs)
 }
 
 // DeriveFieldsV3ForSingleReceipt fills the receipts with their computed fields based on consensus
