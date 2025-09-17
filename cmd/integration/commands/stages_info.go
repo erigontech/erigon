@@ -41,9 +41,7 @@ type StagesInfo struct {
 
 func (info *StagesInfo) Overview() string {
 	return fmt.Sprintf(
-		`Prune mode: %s\nblocks: seg: %d ind: %d\nbor blocks: seg: %d ind: %d\n
-				info about last & state.history: txnum: %d, blocknum: %d, steps: %.2f\n
-				EthTxSequence: %d\nIn DB: first header %d, last header %d, first body %d, last body %d`,
+		"Prune mode: %s\nblocks: seg: %d ind: %d\nbor blocks: seg: %d ind: %d\ninfo about last & state.history: txnum: %d, blocknum: %d, steps: %.2f\nEthTxSequence: %d\nIn DB: first header %d, last header %d, first body %d, last body %d",
 		info.PruneDistance.String(), info.SnapshotInfo.SegMax, info.SnapshotInfo.IndMax,
 		info.BorSnapshotInfo.SegMax, info.BorSnapshotInfo.IndMax,
 		info.LastInfo.TxNum, info.LastInfo.BlockNum, info.LastInfo.IdxSteps,
