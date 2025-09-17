@@ -20,6 +20,7 @@
 package executiontests
 
 import (
+	"path/filepath"
 	"testing"
 
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -33,13 +34,14 @@ func TestTransaction(t *testing.T) {
 	t.Parallel()
 
 	txt := new(testMatcher)
+	dir := filepath.Join(legacyDir, "TransactionTests")
 
 	// We don't allow more than uint64 in gas amount
 	// This is a pseudo-consensus vulnerability, but not in practice
 	// because of the gas limit
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 
-	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *testutil.TransactionTest) {
+	txt.walk(t, dir, func(t *testing.T, name string, test *testutil.TransactionTest) {
 		cfg := chainspec.Mainnet.Config
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)
