@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
-	"github.com/holiman/uint256"
 )
 
 const (
@@ -66,11 +65,6 @@ type SimulatedBlock struct {
 	BlockOverrides *transactions.BlockOverrides `json:"blockOverrides,omitempty"`
 	StateOverrides *ethapi.StateOverrides       `json:"stateOverrides,omitempty"`
 	Calls          []ethapi.CallArgs            `json:"calls"`
-}
-
-// SimulationResult represents the result of an eth_simulateV1 call.
-type SimulationResult struct {
-	Results []CallResult
 }
 
 // CallResult represents the result of a single call in the simulation.
@@ -295,9 +289,9 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 			}
 			header.ExcessBlobGas = &excess
 			parentBeaconRoot := &common.Hash{}
-			/*if overrides.BeaconRoot != nil {
+			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
-			}*/
+			}
 			header.ParentBeaconBlockRoot = parentBeaconRoot
 		}
 		headers[bi] = header
@@ -346,6 +340,23 @@ func (s *simulator) sanitizeCall(
 			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
 			args.Gas = (*hexutil.Uint64)(&globalGasCap)
 		}
+	}
+	if blockContext.BaseFee == nil {
+		// If there's no base fee, then it must be a non-1559 execution
+		if args.GasPrice == nil {
+			args.GasPrice = new(hexutil.Big)
+		}
+	} else {
+		// A base fee is provided, requiring 1559-type execution
+		if args.MaxFeePerGas == nil {
+			args.MaxFeePerGas = new(hexutil.Big)
+		}
+		if args.MaxPriorityFeePerGas == nil {
+			args.MaxPriorityFeePerGas = new(hexutil.Big)
+		}
+	}
+	if args.MaxFeePerBlobGas == nil && args.BlobVersionedHashes != nil {
+		args.MaxFeePerBlobGas = new(hexutil.Big)
 	}
 	return nil
 }
@@ -451,22 +462,12 @@ func (s *simulator) simulateCall(
 	}
 
 	// Prepare the transaction message
-	var baseFee *uint256.Int
-	if blockCtx.BaseFee != nil {
-		baseFee = blockCtx.BaseFee
-	} else if header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return nil, nil, nil, errors.New("header.BaseFee uint256 overflow")
-		}
-	}
-	msg, err := call.ToMessage(s.gasCap, baseFee)
+	msg, err := call.ToMessage(s.gasCap, blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	txCtx := core.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasCap, baseFee)
+	txn, err := call.ToTransaction(s.gasCap, blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -533,6 +534,10 @@ func (s *simulator) simulateCall(
 			callResult.Status = hexutil.Uint64(types.ReceiptStatusSuccessful)
 			callResult.ReturnData = fmt.Sprintf("0x%x", result.ReturnData)
 		}
+	}
+	// Set the sender just to make it appear in the result in case it was provided in the request.
+	if call.From != nil {
+		txn.SetSender(*call.From)
 	}
 	return &callResult, txn, receipt, nil
 }

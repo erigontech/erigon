@@ -55,9 +55,10 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	} else {
 		beneficiary = *author
 	}
-	var baseFee uint256.Int
+	var baseFee *uint256.Int
 	if header.BaseFee != nil {
-		overflow := baseFee.SetFromBig(header.BaseFee)
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
 			panic("header.BaseFee higher than 2^256-1")
 		}
@@ -96,7 +97,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
-		BaseFee:          &baseFee,
+		BaseFee:          baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
