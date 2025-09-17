@@ -15,7 +15,7 @@ func MakeTUI(infoCh <-chan *commands.StagesInfo) error {
 		AddItem(body, 0, 5, false).
 		AddItem(modules.Footer(), 5, 1, false)
 
-	go modules.TextToBody(app, body.(*tview.TextView))
+	go modules.TextToBody(app, body.(*tview.TextView), infoCh)
 
 	if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
 		func(event *tcell.EventKey) *tcell.EventKey {
