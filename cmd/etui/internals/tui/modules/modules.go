@@ -20,7 +20,7 @@ func Footer() tview.Primitive {
 func Body() tview.Primitive {
 	return tview.NewFlex().
 		AddItem(tview.NewTextView().SetText("starting..."), 0, 1, false).
-		AddItem(tview.NewFlex().
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(tview.NewTextView().SetText("starting1..."), 0, 1, false).
 			AddItem(tview.NewTextView().SetText("starting2..."), 0, 1, false),
 			0, 5, false)
