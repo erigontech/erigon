@@ -21,10 +21,13 @@ func Body(info *commands.StagesInfo) tview.Primitive {
 	return tview.NewTextView().SetText(fmt.Sprintf("%+v", info))
 }
 
-func TextToBody(body *tview.TextView) {
+func TextToBody(app *tview.Application, body *tview.TextView) {
 	for {
+
 		text := strconv.Itoa(rand.Int())
-		body.SetText(text)
+		app.QueueUpdateDraw(func() {
+			fmt.Fprintf(body, "text %s", text)
+		})
 		time.Sleep(time.Millisecond * 200)
 	}
 }

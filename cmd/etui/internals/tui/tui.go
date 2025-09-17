@@ -15,7 +15,7 @@ func MakeTUI(info *commands.StagesInfo) error {
 		AddItem(body, 0, 5, false).
 		AddItem(modules.Footer(), 5, 1, false)
 
-	go modules.TextToBody(body.(*tview.TextView))
+	go modules.TextToBody(app, body.(*tview.TextView))
 
 	if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
 		func(event *tcell.EventKey) *tcell.EventKey {
@@ -23,9 +23,7 @@ func MakeTUI(info *commands.StagesInfo) error {
 				app.Stop()
 			}
 			return event
-		}).QueueUpdateDraw(func() {
-		flex.GetItem(1).(*tview.TextView).SetText("sdsd")
-	}).Run(); err != nil {
+		}).Run(); err != nil {
 		return err
 	}
 	return nil
