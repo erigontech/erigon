@@ -42,11 +42,11 @@ func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.St
 		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
 			body.Overview.Clear()
-			body.Overview.SetText(info.Overview())
+			body.Overview.SetText(info.Overview() + text)
 			body.Stages.Clear()
 			fmt.Fprint(body.Stages, info.Stages())
 			body.DomainII.Clear()
-			fmt.Fprintf(body.DomainII, "info %+v, text %s", info, text)
+			fmt.Fprintf(body.DomainII, info.DomainII())
 		})
 		time.Sleep(time.Second * 5)
 	}
