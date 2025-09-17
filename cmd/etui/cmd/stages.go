@@ -26,7 +26,10 @@ var infoCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		tui.MakeTUI(info)
+		err = tui.MakeTUI(info)
+		if err != nil {
+			return err
+		}
 		return nil
 	},
 }

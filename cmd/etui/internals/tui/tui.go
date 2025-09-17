@@ -7,12 +7,15 @@ import (
 	"github.com/rivo/tview"
 )
 
-func MakeTUI(info *commands.StagesInfo) {
+func MakeTUI(info *commands.StagesInfo) error {
 	app := tview.NewApplication()
+	body := modules.Body(info)
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(modules.Header(), 1, 1, false).
-		AddItem(modules.Body(info), 0, 5, false).
+		AddItem(body, 0, 5, false).
 		AddItem(modules.Footer(), 5, 1, false)
+
+	go modules.TextToBody(body.(*tview.TextView))
 
 	if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
 		func(event *tcell.EventKey) *tcell.EventKey {
@@ -21,6 +24,7 @@ func MakeTUI(info *commands.StagesInfo) {
 			}
 			return event
 		}).Run(); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
