@@ -17,6 +17,7 @@
 package dir
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,4 +218,15 @@ func RemoveAll(path string) error {
 		log.Debug("[removing] removing dir", "path", path, "stack", dbg.Stack())
 	}
 	return os.RemoveAll(path)
+}
+
+// CreateTemp creates a temporary file using `file` as base
+func CreateTemp(file string) (*os.File, error) {
+	return CreateTempWithExtension(file, "tmp")
+}
+
+func CreateTempWithExtension(file string, extension string) (*os.File, error) {
+	directory := filepath.Dir(file)
+	filename := filepath.Base(file)
+	return os.CreateTemp(directory, fmt.Sprintf("%s.*.%s", filename, extension))
 }

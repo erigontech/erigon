@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io"
 	"os"
 	"slices"
@@ -31,6 +30,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
@@ -294,12 +295,13 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	t := time.Now()
 
 	var err error
-	intermediatePath := segmentFilePath + ".tmp"
-	defer dir.RemoveFile(intermediatePath)
+
 	var intermediateFile *os.File
-	if intermediateFile, err = os.Create(intermediatePath); err != nil {
+	if intermediateFile, err = dir.CreateTemp(segmentFilePath); err != nil {
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
+	intermediatePath := intermediateFile.Name()
+	defer dir.RemoveFile(intermediatePath)
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
 
