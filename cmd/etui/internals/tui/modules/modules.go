@@ -3,8 +3,6 @@ package modules
 import (
 	"github.com/erigontech/erigon/cmd/integration/commands"
 	"github.com/rivo/tview"
-	"math/rand"
-	"strconv"
 	"time"
 )
 
@@ -42,10 +40,9 @@ type BodyView struct {
 
 func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.StagesInfo) {
 	for info := range infoCh {
-		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
 			body.Overview.Clear()
-			body.Overview.SetText(info.Overview() + text)
+			body.Overview.SetText(info.Overview())
 			body.Stages.Clear()
 			body.Stages.SetText(info.Stages())
 			body.DomainII.Clear()
