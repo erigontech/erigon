@@ -23,7 +23,9 @@ func MakeTUI(info *commands.StagesInfo) error {
 				app.Stop()
 			}
 			return event
-		}).Run(); err != nil {
+		}).QueueUpdateDraw(func() {
+		flex.GetItem(1).(*tview.TextView).SetText("sdsd")
+	}).Run(); err != nil {
 		return err
 	}
 	return nil
