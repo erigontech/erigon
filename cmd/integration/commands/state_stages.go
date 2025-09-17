@@ -151,7 +151,6 @@ func init() {
 	withWorkers(loopExecCmd)
 	withChaosMonkey(loopExecCmd)
 	withL2RPCaddress(loopExecCmd)
-	withArbInitJson(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 
