@@ -59,7 +59,6 @@ func Clock(app *tview.Application, clock *tview.TextView) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for t := range ticker.C {
-		// обновление строго через QueueUpdateDraw
 		now := t.Format("15:04:05")
 		app.QueueUpdateDraw(func() {
 			clock.SetText(now)
