@@ -1,7 +1,6 @@
 package modules
 
 import (
-	"fmt"
 	"github.com/erigontech/erigon/cmd/integration/commands"
 	"github.com/rivo/tview"
 	"math/rand"
@@ -44,9 +43,9 @@ func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.St
 			body.Overview.Clear()
 			body.Overview.SetText(info.Overview() + text)
 			body.Stages.Clear()
-			fmt.Fprint(body.Stages, info.Stages())
+			body.Stages.SetText(info.Stages())
 			body.DomainII.Clear()
-			fmt.Fprintf(body.DomainII, info.DomainII())
+			body.DomainII.SetText(info.DomainII())
 		})
 		time.Sleep(time.Second * 5)
 	}
