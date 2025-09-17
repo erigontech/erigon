@@ -7,7 +7,7 @@ import (
 )
 
 func Header() tview.Primitive {
-	return tview.NewTextView().SetText("Erigon TUI").SetTextAlign(tview.AlignCenter)
+	return tview.NewTextView().SetText("Erigon TUI v0.0.1 print_stages").SetTextAlign(tview.AlignCenter)
 }
 
 func Footer() tview.Primitive {
@@ -32,7 +32,6 @@ func Body() (*tview.Flex, *BodyView) {
 			AddItem(view.DomainII, 0, 1, false),
 			0, 5, false)
 	flex.Box.SetBorder(true)
-	view.Clock.Box.SetBorder(true).SetTitle("Clock")
 	return flex, view
 }
 
