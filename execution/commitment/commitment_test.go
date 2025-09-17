@@ -25,19 +25,11 @@ import (
 	"math/rand"
 	"sort"
 	"testing"
-	"unsafe"
-
-	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
-)
 
-func TestName(t *testing.T) {
-	fmt.Println(unsafe.Sizeof(Update{}))
-	fmt.Println(unsafe.Alignof(Update{}))
-	fmt.Println(unsafe.Sizeof(cell{}))
-	fmt.Println(unsafe.Alignof(cell{}))
-}
+	"github.com/erigontech/erigon-lib/common"
+)
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
