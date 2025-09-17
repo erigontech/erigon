@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -44,7 +43,6 @@ import (
 var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
-	computeSigningRoot           = fork.ComputeSigningRoot
 )
 
 type attestationService struct {
