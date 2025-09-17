@@ -190,3 +190,41 @@ func (c *MockPeerDasStateReaderGetRealCgcCall) DoAndReturn(f func() uint64) *Moc
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// IsSupernode mocks base method.
+func (m *MockPeerDasStateReader) IsSupernode() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsSupernode")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsSupernode indicates an expected call of IsSupernode.
+func (mr *MockPeerDasStateReaderMockRecorder) IsSupernode() *MockPeerDasStateReaderIsSupernodeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsSupernode", reflect.TypeOf((*MockPeerDasStateReader)(nil).IsSupernode))
+	return &MockPeerDasStateReaderIsSupernodeCall{Call: call}
+}
+
+// MockPeerDasStateReaderIsSupernodeCall wrap *gomock.Call
+type MockPeerDasStateReaderIsSupernodeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasStateReaderIsSupernodeCall) Return(arg0 bool) *MockPeerDasStateReaderIsSupernodeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasStateReaderIsSupernodeCall) Do(f func() bool) *MockPeerDasStateReaderIsSupernodeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasStateReaderIsSupernodeCall) DoAndReturn(f func() bool) *MockPeerDasStateReaderIsSupernodeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
