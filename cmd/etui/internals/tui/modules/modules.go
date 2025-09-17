@@ -41,9 +41,10 @@ func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.St
 	for info := range infoCh {
 		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
-			infoView := body.Stages
-			infoView.Clear()
-			fmt.Fprintf(infoView, "info %+v, text %s", info, text)
+			body.Overview.Clear()
+			body.Overview.SetText(info.Overview())
+			body.Stages.Clear()
+			fmt.Fprintf(body.Stages, "info %+v, text %s", info, text)
 		})
 		time.Sleep(time.Second * 5)
 	}
