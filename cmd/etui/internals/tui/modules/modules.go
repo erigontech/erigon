@@ -11,7 +11,9 @@ func Header() tview.Primitive {
 }
 
 func Footer() tview.Primitive {
-	return tview.NewBox().SetBorder(true).SetTitle("Bottom (5 rows)")
+	return tview.NewTextView().SetDynamicColors(true).
+		SetTextAlign(tview.AlignCenter).
+		SetText("[yellow]Press [red]q [yellow]or [red]Ctrl+C [yellow]to quit")
 }
 
 func Body() (*tview.Flex, *BodyView) {
