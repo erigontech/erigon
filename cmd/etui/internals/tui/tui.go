@@ -10,7 +10,7 @@ import (
 func MakeTUI(infoCh <-chan *commands.StagesInfo) error {
 	app := tview.NewApplication()
 	body, view := modules.Body()
-	body.Box.SetBorder(true)
+
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(modules.Header(), 1, 1, false).
 		AddItem(body, 0, 5, false).

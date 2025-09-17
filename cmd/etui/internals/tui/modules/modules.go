@@ -19,16 +19,19 @@ func Body() (*tview.Flex, *BodyView) {
 		Overview: tview.NewTextView().SetText("starting..."),
 		Stages:   tview.NewTextView().SetText("starting1..."),
 		DomainII: tview.NewTextView().SetText("starting2..."),
-		Clock:    tview.NewTextView().SetText("starting3..."),
+		Clock:    tview.NewTextView().SetText("starting3...").SetTextAlign(tview.AlignRight),
 	}
-	return tview.NewFlex().SetDirection(tview.FlexRow).
+	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewFlex().
 			AddItem(view.Overview, 0, 1, false).
 			AddItem(view.Clock, 0, 1, false), 0, 1, false).
 		AddItem(tview.NewFlex().
 			AddItem(view.Stages, 0, 1, false).
 			AddItem(view.DomainII, 0, 1, false),
-			0, 5, false), view
+			0, 5, false)
+	flex.Box.SetBorder(true)
+	view.Clock.Box.SetBorder(true).SetTitle("Clock")
+	return flex, view
 }
 
 type BodyView struct {
