@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"strings"
 )
 
 type StageProgress struct {
@@ -46,6 +47,15 @@ func (info *StagesInfo) Overview() string {
 		info.BorSnapshotInfo.SegMax, info.BorSnapshotInfo.IndMax,
 		info.LastInfo.TxNum, info.LastInfo.BlockNum, info.LastInfo.IdxSteps,
 		info.EthTxSequence, info.DB.FirstHeader, info.DB.LastHeader, info.DB.FirstBody, info.DB.LastBody)
+}
+
+func (info *StagesInfo) Stages() string {
+	res := "Stages:\n" + fmt.Sprintf("%-15s %12s %12s\n", "stage_at", "progress", "prune_at")
+	res += strings.Repeat("-", 43) + "\n"
+	for _, s := range info.StagesProgress {
+		res += fmt.Sprintf("%-15s %12d %12d\n", s.Stage, s.Progress, s.PrunedTo)
+	}
+	return res
 }
 
 type DomainIIProgress struct {

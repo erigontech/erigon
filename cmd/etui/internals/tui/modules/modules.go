@@ -44,7 +44,9 @@ func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.St
 			body.Overview.Clear()
 			body.Overview.SetText(info.Overview())
 			body.Stages.Clear()
-			fmt.Fprintf(body.Stages, "info %+v, text %s", info, text)
+			fmt.Fprint(body.Stages, info.Stages())
+			body.DomainII.Clear()
+			fmt.Fprintf(body.DomainII, "info %+v, text %s", info, text)
 		})
 		time.Sleep(time.Second * 5)
 	}
