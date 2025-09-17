@@ -25,7 +25,7 @@ func TextToBody(app *tview.Application, body *tview.Flex, infoCh <-chan *command
 	for info := range infoCh {
 		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
-			body.Clear()
+			//body.Clear()
 			if body.GetItemCount() > 0 {
 				fmt.Fprintf(body.GetItem(1).(*tview.TextView), "info %+v, text %s", info, text)
 			} else {
