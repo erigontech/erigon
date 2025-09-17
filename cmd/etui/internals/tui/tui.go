@@ -14,7 +14,7 @@ func MakeTUI(infoCh <-chan *commands.StagesInfo) error {
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(modules.Header(), 1, 1, false).
 		AddItem(body, 0, 5, false).
-		AddItem(modules.Footer(), 5, 1, false)
+		AddItem(modules.Footer(), 2, 1, false)
 
 	go modules.FillInfo(app, view, infoCh)
 	go modules.Clock(app, view.Clock)
