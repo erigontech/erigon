@@ -136,6 +136,10 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 	if err != nil {
 		return false, err
 	}
+	if len(expectedCustodies) == 0 {
+		// this case is not reasonable due to empty node ID
+		return len(existingColumns) == int(d.beaconConfig.NumberOfColumns), nil
+	}
 	nowCustodies := map[cltypes.CustodyIndex]bool{}
 	for _, column := range existingColumns {
 		if _, ok := expectedCustodies[column]; ok {
@@ -406,8 +410,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
-	if !d.IsArchivedMode() {
-		// only recover blobs in archived mode
+	if !d.IsArchivedMode() && !d.StateReader().IsSupernode() {
 		return nil
 	}
 
