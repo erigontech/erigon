@@ -1114,7 +1114,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 		versionOfRs = 1
 	}
 	cfg := recsplit.RecSplitArgs{
-		Version: versionOfRs,
+		Version:            versionOfRs,
 		Enums:              false,
 		LessFalsePositives: true,
 

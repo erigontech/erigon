@@ -1019,8 +1019,8 @@ type fetcherTest struct {
 	sentryClient         *direct.MockSentryClient
 	messageListener      *MessageListener
 	requestResponseMocks map[uint64]requestResponseMock
-	peerEventsSubsMu sync.Mutex
-	peerEventsSubs   []chan *delayedMessage[*sentryproto.PeerEvent]
+	peerEventsSubsMu     sync.Mutex
+	peerEventsSubs       []chan *delayedMessage[*sentryproto.PeerEvent]
 }
 
 func (ft *fetcherTest) run(f func(ctx context.Context, t *testing.T)) {

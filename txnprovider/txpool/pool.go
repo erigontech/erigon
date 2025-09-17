@@ -150,7 +150,7 @@ type TxPool struct {
 	p2pFetcher              *Fetch
 	p2pSender               *Send
 	newSlotsStreams         *NewSlotsStreams
-	ethBackend remoteproto.ETHBACKENDClient
+	ethBackend              remoteproto.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization

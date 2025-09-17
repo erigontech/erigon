@@ -38,7 +38,7 @@ func createLog() *remoteproto.SubscribeLogsReply {
 		BlockNumber:      0,
 		Data:             []byte{},
 		LogIndex:         0,
-		Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
+		Topics:           []*typesproto.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
 		TransactionHash:  gointerfaces.ConvertHashToH256([32]byte{}),
 		TransactionIndex: 0,
 		Removed:          false,

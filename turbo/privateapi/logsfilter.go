@@ -46,7 +46,7 @@ type LogsFilter struct {
 	addrs     map[common.Address]int
 	allTopics int
 	topics    map[common.Hash]int
-	sender remoteproto.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
+	sender    remoteproto.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 func NewLogsFilterAggregator(events *shards.Events) *LogsFilterAggregator {

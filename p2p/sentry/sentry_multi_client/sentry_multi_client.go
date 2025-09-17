@@ -150,7 +150,7 @@ type MultiClient struct {
 	Hd                                *headerdownload.HeaderDownload
 	Bd                                *bodydownload.BodyDownload
 	IsMock                            bool
-	sentries []sentryproto.SentryClient
+	sentries                          []sentryproto.SentryClient
 	ChainConfig                       *chain.Config
 	db                                kv.TemporalRoDB
 	WitnessBuffer                     *stagedsync.WitnessBuffer
@@ -284,7 +284,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.In
 		outreq := sentryproto.SendMessageByIdRequest{
 			PeerId: req.PeerId,
 			Data: &sentryproto.OutboundMessageData{
-				Id: sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+				Id:   sentryproto.MessageId_GET_BLOCK_HEADERS_66,
 				Data: b,
 			},
 		}
@@ -532,7 +532,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 	outreq := sentryproto.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &sentryproto.OutboundMessageData{
-			Id: sentryproto.MessageId_BLOCK_HEADERS_66,
+			Id:   sentryproto.MessageId_BLOCK_HEADERS_66,
 			Data: b,
 		},
 	}
@@ -569,7 +569,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 	outreq := sentryproto.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &sentryproto.OutboundMessageData{
-			Id: sentryproto.MessageId_BLOCK_BODIES_66,
+			Id:   sentryproto.MessageId_BLOCK_BODIES_66,
 			Data: b,
 		},
 	}
@@ -625,7 +625,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.Inb
 	outreq := sentryproto.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &sentryproto.OutboundMessageData{
-			Id: sentryproto.MessageId_RECEIPTS_66,
+			Id:   sentryproto.MessageId_RECEIPTS_66,
 			Data: b,
 		},
 	}
@@ -748,7 +748,7 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto
 	outreq := sentryproto.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &sentryproto.OutboundMessageData{
-			Id: sentryproto.MessageId_BLOCK_WITNESS_W0,
+			Id:   sentryproto.MessageId_BLOCK_WITNESS_W0,
 			Data: b,
 		},
 	}
@@ -828,7 +828,7 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 				request := &sentryproto.SendMessageByIdRequest{
 					PeerId: inreq.PeerId,
 					Data: &sentryproto.OutboundMessageData{
-						Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+						Id:   sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 						Data: data,
 					},
 				}
@@ -840,7 +840,7 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 
 					fallbackRequest := &sentryproto.SendMessageToRandomPeersRequest{
 						Data: &sentryproto.OutboundMessageData{
-							Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+							Id:   sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 							Data: data,
 						},
 						MaxPeers: 1,

@@ -28,8 +28,8 @@ import (
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
 type Accumulator struct {
 	plainStateID       uint64
-	changes      []*remoteproto.StateChange
-	latestChange *remoteproto.StateChange
+	changes            []*remoteproto.StateChange
+	latestChange       *remoteproto.StateChange
 	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }

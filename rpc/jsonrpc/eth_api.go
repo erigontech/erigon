@@ -393,8 +393,8 @@ type bridgeReader interface {
 type APIImpl struct {
 	*BaseAPI
 	ethBackend                  rpchelper.ApiBackend
-	txPool txpoolproto.TxpoolClient
-	mining txpoolproto.MiningClient
+	txPool                      txpoolproto.TxpoolClient
+	mining                      txpoolproto.MiningClient
 	gasCache                    *GasPriceCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64

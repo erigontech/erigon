@@ -48,7 +48,7 @@ type Fetch struct {
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesParseCtx     *TxnParseContext
 	pooledTxnsParseCtx       *TxnParseContext
-	sentryClients []sentryproto.SentryClient // sentry clients that will be used for accessing the network
+	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
 	logger                   log.Logger
@@ -251,7 +251,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 			}
 			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
-				Data: &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
+				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 				PeerId: req.PeerId,
 			}, &grpc.EmptyCallOption{}); err != nil {
 				return err
@@ -275,7 +275,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 			}
 			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
-				Data: &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
+				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 				PeerId: req.PeerId,
 			}, &grpc.EmptyCallOption{}); err != nil {
 				return err
@@ -325,7 +325,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 		}
 
 		if _, err := sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
-			Data: &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
+			Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 			PeerId: req.PeerId,
 		}, &grpc.EmptyCallOption{}); err != nil {
 			return err

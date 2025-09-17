@@ -43,7 +43,7 @@ var (
 
 	trustedSetupFile string
 
-	gokzgCtx *goethkzg.Context
+	gokzgCtx      *goethkzg.Context
 	initCryptoCtx sync.Once
 )
 

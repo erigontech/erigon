@@ -41,15 +41,15 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		NetworkID:       networkID,
 		TD:              big.NewInt(0),
 		Head:            common.Hash{},
-		Genesis: chainspec.Mainnet.GenesisHash,
-		ForkID:  forkid.NewIDFromForks(heightForks, timeForks, chainspec.Mainnet.GenesisHash, 0, 0),
+		Genesis:         chainspec.Mainnet.GenesisHash,
+		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.Mainnet.GenesisHash, 0, 0),
 	}
 	status := sentryproto.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(new(uint256.Int)),
 		BestHash:        nil,
 		ForkData: &sentryproto.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(chainspec.Mainnet.GenesisHash),
+			Genesis:     gointerfaces.ConvertHashToH256(chainspec.Mainnet.GenesisHash),
 			HeightForks: heightForks,
 			TimeForks:   timeForks,
 		},

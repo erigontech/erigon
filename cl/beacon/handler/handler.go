@@ -75,7 +75,7 @@ type ApiHandler struct {
 	operationsPool       pool.OperationsPool
 	syncedData           synced_data.SyncedData
 	stateReader          *historical_states_reader.HistoricalStatesReader
-	sentinel sentinelproto.SentinelClient
+	sentinel             sentinelproto.SentinelClient
 	blobStoage           blob_storage.BlobStorage
 	columnStorage        blob_storage.DataColumnStorage
 	caplinSnapshots      *freezeblocks.CaplinSnapshots

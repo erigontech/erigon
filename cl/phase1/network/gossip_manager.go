@@ -46,7 +46,7 @@ import (
 // Gossip manager is sending all messages to fork choice or others
 type GossipManager struct {
 	forkChoice *forkchoice.ForkChoiceStore
-	sentinel sentinelproto.SentinelClient
+	sentinel   sentinelproto.SentinelClient
 	// configs
 	beaconConfig  *clparams.BeaconChainConfig
 	networkConfig *clparams.NetworkConfig

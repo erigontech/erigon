@@ -139,7 +139,7 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
 			return &executionproto.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				Status: executionproto.ExecutionStatus_Busy,
+				Status:          executionproto.ExecutionStatus_Busy,
 			}, nil
 		case outcome := <-outcomeCh:
 			return outcome.receipt, outcome.err
@@ -178,7 +178,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Status: executionproto.ExecutionStatus_Busy,
+			Status:          executionproto.ExecutionStatus_Busy,
 		}, false)
 		return
 	}
@@ -274,13 +274,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			if !valid {
 				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-					Status: executionproto.ExecutionStatus_InvalidForkchoice,
+					Status:          executionproto.ExecutionStatus_InvalidForkchoice,
 				}, false)
 				return
 			}
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-				Status: executionproto.ExecutionStatus_Success,
+				Status:          executionproto.ExecutionStatus_Success,
 			}, false)
 			return
 		}
@@ -311,7 +311,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			if currentHeader == nil {
 				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-					Status: executionproto.ExecutionStatus_MissingSegment,
+					Status:          executionproto.ExecutionStatus_MissingSegment,
 				}, false)
 				return
 			}
@@ -405,7 +405,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Status: executionproto.ExecutionStatus_TooFarAway,
+			Status:          executionproto.ExecutionStatus_TooFarAway,
 			ValidationError: "domain ahead of blocks",
 		}, false)
 		return
@@ -437,7 +437,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			// Send forkchoice early (We already know the fork is valid)
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-				Status: executionproto.ExecutionStatus_Success,
+				Status:          executionproto.ExecutionStatus_Success,
 				ValidationError: validationError,
 			}, false)
 		}
@@ -523,7 +523,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		if !valid {
 			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-				Status: executionproto.ExecutionStatus_InvalidForkchoice,
+				Status:          executionproto.ExecutionStatus_InvalidForkchoice,
 				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 			}, stateFlushingInParallel)
 			return

@@ -45,18 +45,18 @@ func init() {
 }
 
 type testServer struct {
-	received chan *remoteproto.LogsFilterRequest
+	received         chan *remoteproto.LogsFilterRequest
 	receiveCompleted chan struct{}
-	sent     []*remoteproto.SubscribeLogsReply
+	sent             []*remoteproto.SubscribeLogsReply
 	ctx              context.Context
 	grpc.ServerStream
 }
 
 func newTestServer(ctx context.Context) *testServer {
 	ts := &testServer{
-		received: make(chan *remoteproto.LogsFilterRequest, 256),
+		received:         make(chan *remoteproto.LogsFilterRequest, 256),
 		receiveCompleted: make(chan struct{}, 1),
-		sent:     make([]*remoteproto.SubscribeLogsReply, 0),
+		sent:             make([]*remoteproto.SubscribeLogsReply, 0),
 		ctx:              ctx,
 		ServerStream:     nil,
 	}
@@ -92,7 +92,7 @@ func createLog() *remoteproto.SubscribeLogsReply {
 		BlockNumber:      0,
 		Data:             []byte{},
 		LogIndex:         0,
-		Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
+		Topics:           []*typesproto.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
 		TransactionHash:  gointerfaces.ConvertHashToH256([32]byte{}),
 		TransactionIndex: 0,
 		Removed:          false,
@@ -189,7 +189,7 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 		AllAddresses: true, // need to allow all addresses on the request else it will filter on them
 		Addresses:    nil,
 		AllTopics:    false,
-		Topics: []*typesproto.H256{topic1H256},
+		Topics:       []*typesproto.H256{topic1H256},
 	}
 	srv.received <- req1
 
@@ -226,9 +226,9 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 
 	req1 := &remoteproto.LogsFilterRequest{
 		AllAddresses: false,
-		Addresses: []*typesproto.H160{address160},
+		Addresses:    []*typesproto.H160{address160},
 		AllTopics:    true,
-		Topics:    []*typesproto.H256{},
+		Topics:       []*typesproto.H256{},
 	}
 	srv.received <- req1
 

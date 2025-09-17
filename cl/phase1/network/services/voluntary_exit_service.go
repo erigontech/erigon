@@ -46,7 +46,7 @@ type voluntaryExitService struct {
 // SignedVoluntaryExitForGossip type represents SignedVoluntaryExit with the gossip data where it's coming from.
 type SignedVoluntaryExitForGossip struct {
 	SignedVoluntaryExit   *cltypes.SignedVoluntaryExit
-	Receiver *sentinelproto.Peer
+	Receiver              *sentinelproto.Peer
 	ImmediateVerification bool
 }
 

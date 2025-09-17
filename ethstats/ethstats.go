@@ -79,7 +79,7 @@ type Service struct {
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
 	blockReader services.FullBlockReader
-	txPool txpoolproto.TxpoolClient
+	txPool      txpoolproto.TxpoolClient
 }
 
 // connWrapper is a wrapper to prevent concurrent-write or concurrent-read on the

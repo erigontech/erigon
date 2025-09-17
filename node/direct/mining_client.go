@@ -54,7 +54,7 @@ func (s *MiningClient) OnPendingBlock(ctx context.Context, in *txpoolproto.OnPen
 }
 
 type onPendigBlockReply struct {
-	r *txpoolproto.OnPendingBlockReply
+	r   *txpoolproto.OnPendingBlockReply
 	err error
 }
 
@@ -105,7 +105,7 @@ func (s *MiningClient) OnMinedBlock(ctx context.Context, in *txpoolproto.OnMined
 }
 
 type onMinedBlockReply struct {
-	r *txpoolproto.OnMinedBlockReply
+	r   *txpoolproto.OnMinedBlockReply
 	err error
 }
 
@@ -156,7 +156,7 @@ func (s *MiningClient) OnPendingLogs(ctx context.Context, in *txpoolproto.OnPend
 }
 
 type onPendingLogsReply struct {
-	r *txpoolproto.OnPendingLogsReply
+	r   *txpoolproto.OnPendingLogsReply
 	err error
 }
 type MiningOnPendingLogsS struct {

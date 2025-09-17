@@ -76,7 +76,7 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 		outreq := sentryproto.SendMessageByMinBlockRequest{
 			MinBlock: req.BlockNums[len(req.BlockNums)-1],
 			Data: &sentryproto.OutboundMessageData{
-				Id: sentryproto.MessageId_GET_BLOCK_BODIES_66,
+				Id:   sentryproto.MessageId_GET_BLOCK_BODIES_66,
 				Data: bytes,
 			},
 			MaxPeers: 1,
@@ -150,7 +150,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		outreq := sentryproto.SendMessageByMinBlockRequest{
 			MinBlock: minBlock,
 			Data: &sentryproto.OutboundMessageData{
-				Id: sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+				Id:   sentryproto.MessageId_GET_BLOCK_HEADERS_66,
 				Data: bytes,
 			},
 			MaxPeers: 5,

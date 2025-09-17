@@ -109,7 +109,7 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 
 	t.Run("Invalid RLP", func(t *testing.T) {
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   []byte{0xFF, 0xFF, 0xFF}, // Invalid RLP
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -140,7 +140,7 @@ func TestGetBlockWitnessesFunction(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -178,7 +178,7 @@ func TestNewWitnessFunction(t *testing.T) {
 
 	t.Run("Invalid RLP", func(t *testing.T) {
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_NEW_WITNESS_W0,
+			Id:     sentryproto.MessageId_NEW_WITNESS_W0,
 			Data:   []byte{0xFF, 0xFF, 0xFF}, // Invalid RLP
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -205,7 +205,7 @@ func TestNewWitnessFunction(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_NEW_WITNESS_W0,
+			Id:     sentryproto.MessageId_NEW_WITNESS_W0,
 			Data:   packetData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -259,7 +259,7 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -287,7 +287,7 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_NEW_WITNESS_W0,
+			Id:     sentryproto.MessageId_NEW_WITNESS_W0,
 			Data:   packetData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x01, 0x02, 0x03}),
 		}
@@ -346,7 +346,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -392,7 +392,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -435,7 +435,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -482,7 +482,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -533,7 +533,7 @@ func TestWitnessPagination(t *testing.T) {
 		require.NoError(t, err)
 
 		inboundMsg := &sentryproto.InboundMessage{
-			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 			Data:   reqData,
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{0x04, 0x05, 0x06}),
 		}
@@ -592,7 +592,7 @@ func TestWitnessExactPageSize(t *testing.T) {
 	require.NoError(t, err)
 
 	inboundMsg := &sentryproto.InboundMessage{
-		Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+		Id:     sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
 		Data:   reqData,
 		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x99, 0x99, 0x99}),
 	}

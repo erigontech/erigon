@@ -40,7 +40,7 @@ type TxPoolService struct {
 func NewTxPoolService(client txpoolproto.TxpoolClient) *TxPoolService {
 	return &TxPoolService{
 		TxpoolClient: client,
-		version: gointerfaces.VersionFromProto(txpool.TxPoolAPIVersion),
+		version:      gointerfaces.VersionFromProto(txpool.TxPoolAPIVersion),
 		log:          log.New("remote_service", "tx_pool"),
 	}
 }

@@ -74,7 +74,7 @@ func (s *TxPoolClient) OnAdd(ctx context.Context, in *txpoolproto.OnAddRequest, 
 }
 
 type onAddReply struct {
-	r *txpoolproto.OnAddReply
+	r   *txpoolproto.OnAddReply
 	err error
 }
 

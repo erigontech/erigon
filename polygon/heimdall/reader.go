@@ -71,7 +71,7 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client remoteproto.HeimdallBackendClient
+	client  remoteproto.HeimdallBackendClient
 	logger  log.Logger
 	version gointerfaces.Version
 }

@@ -112,7 +112,7 @@ type SentinelSubscribeGossipS struct {
 }
 
 type gossipReply struct {
-	r *sentinelproto.GossipData
+	r   *sentinelproto.GossipData
 	err error
 }
 

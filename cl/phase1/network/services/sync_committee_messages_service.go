@@ -53,7 +53,7 @@ type syncCommitteeMessagesService struct {
 
 type SyncCommitteeMessageForGossip struct {
 	SyncCommitteeMessage  *cltypes.SyncCommitteeMessage
-	Receiver *sentinelproto.Peer
+	Receiver              *sentinelproto.Peer
 	ImmediateVerification bool
 }
 

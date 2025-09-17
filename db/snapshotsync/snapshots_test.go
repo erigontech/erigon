@@ -599,7 +599,7 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1.0-022695-022696-transactions-to-block.idx.tmp.tmp.torrent.tmp": &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent":                                   &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent.tmp.tmp.tmp":                       &fstest.MapFile{},
-		"v1.0-070200-070300-bodies.seg.torrent4014494284": &fstest.MapFile{},
+		"v1.0-070200-070300-bodies.seg.torrent4014494284":                  &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)

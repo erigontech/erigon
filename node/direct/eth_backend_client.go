@@ -76,7 +76,7 @@ func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remoteproto.
 }
 
 type subscribeReply struct {
-	r *remoteproto.SubscribeReply
+	r   *remoteproto.SubscribeReply
 	err error
 }
 type SubscribeStreamS struct {
@@ -150,12 +150,12 @@ type SubscribeLogsStreamS struct {
 }
 
 type subscribeLogsReply struct {
-	r *remoteproto.SubscribeLogsReply
+	r   *remoteproto.SubscribeLogsReply
 	err error
 }
 
 type subscribeLogsRequest struct {
-	r *remoteproto.LogsFilterRequest
+	r   *remoteproto.LogsFilterRequest
 	err error
 }
 

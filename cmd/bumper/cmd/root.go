@@ -8,7 +8,7 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use: "bumper",
+	Use:   "bumper",
 	Short: "Manage schema versions and file renaming",
 	Long: `bumper is a CLI to:
  1) Rename files with version mismatches 

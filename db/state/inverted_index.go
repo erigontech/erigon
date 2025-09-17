@@ -1165,7 +1165,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 
-		Version: versionOfRs,
+		Version:            versionOfRs,
 		Enums:              true,
 		LessFalsePositives: true,
 	}

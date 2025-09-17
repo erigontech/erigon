@@ -59,7 +59,7 @@ func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remoteprot
 }
 
 type stateDiffReply struct {
-	r *remoteproto.StateChangeBatch
+	r   *remoteproto.StateChangeBatch
 	err error
 }
 

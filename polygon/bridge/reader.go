@@ -153,7 +153,7 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client remoteproto.BridgeBackendClient
+	client  remoteproto.BridgeBackendClient
 	logger  log.Logger
 	version gointerfaces.Version
 }

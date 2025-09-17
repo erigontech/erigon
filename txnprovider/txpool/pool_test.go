@@ -85,7 +85,7 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -339,12 +339,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrA),
 		Data:    v,
 	})
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrB),
 		Data:    v,
 	})
@@ -464,7 +464,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -587,7 +587,7 @@ func TestReverseNonces(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -717,7 +717,7 @@ func TestTxnPoke(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1001,7 +1001,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1122,7 +1122,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	v := accounts3.SerialiseV3(&acc)
 
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1306,7 +1306,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1417,7 +1417,7 @@ func TestBlobSlots(t *testing.T) {
 	for i := 0; i < 11; i++ {
 		addr[0] = uint8(i + 1)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-			Action: remoteproto.Action_UPSERT,
+			Action:  remoteproto.Action_UPSERT,
 			Address: gointerfaces.ConvertAddressToH160(addr),
 			Data:    v,
 		})
@@ -1501,7 +1501,7 @@ func TestGetBlobsV1(t *testing.T) {
 	for i := 0; i < 11; i++ {
 		addr[0] = uint8(i + 1)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-			Action: remoteproto.Action_UPSERT,
+			Action:  remoteproto.Action_UPSERT,
 			Address: gointerfaces.ConvertAddressToH160(addr),
 			Data:    v,
 		})
@@ -1585,7 +1585,7 @@ func TestGasLimitChanged(t *testing.T) {
 		},
 	}
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action: remoteproto.Action_UPSERT,
+		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
@@ -1673,7 +1673,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 		}
 		v := accounts3.SerialiseV3(&acc)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-			Action: remoteproto.Action_UPSERT,
+			Action:  remoteproto.Action_UPSERT,
 			Address: gointerfaces.ConvertAddressToH160(addr),
 			Data:    v,
 		})

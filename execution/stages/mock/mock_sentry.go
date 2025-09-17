@@ -113,9 +113,9 @@ type MockSentry struct {
 	Key                  *ecdsa.PrivateKey
 	Genesis              *types.Block
 	SentryClient         direct.SentryClient
-	PeerId       *typesproto.H512
-	streams      map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
-	sentMessages []*sentryproto.OutboundMessageData
+	PeerId               *typesproto.H512
+	streams              map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessages         []*sentryproto.OutboundMessageData
 	StreamWg             sync.WaitGroup
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
