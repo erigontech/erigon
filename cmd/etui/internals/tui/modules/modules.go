@@ -7,7 +7,7 @@ import (
 )
 
 func Header() tview.Primitive {
-	return tview.NewTextView().SetText("Erigon TUI").SetTextAlign(tview.AlignCenter)
+	return tview.NewTextView().SetText("Erigon TUI").SetTextAlign(tview.AlignCenter).SetBorder(true)
 }
 
 func Footer() tview.Primitive {
