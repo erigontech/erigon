@@ -21,9 +21,12 @@ func Body() (tview.Primitive, *BodyView) {
 		Overview: tview.NewTextView().SetText("starting..."),
 		Stages:   tview.NewTextView().SetText("starting1..."),
 		DomainII: tview.NewTextView().SetText("starting2..."),
+		Clock:    tview.NewTextView().SetText("starting3..."),
 	}
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(view.Overview, 0, 1, false).
+		AddItem(tview.NewFlex().
+			AddItem(view.Overview, 0, 1, false).
+			AddItem(view.Clock, 0, 1, false), 0, 1, false).
 		AddItem(tview.NewFlex().
 			AddItem(view.Stages, 0, 1, false).
 			AddItem(view.DomainII, 0, 1, false),
@@ -34,6 +37,7 @@ type BodyView struct {
 	Overview *tview.TextView
 	Stages   *tview.TextView
 	DomainII *tview.TextView
+	Clock    *tview.TextView
 }
 
 func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.StagesInfo) {
@@ -47,6 +51,17 @@ func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.St
 			body.DomainII.Clear()
 			body.DomainII.SetText(info.DomainII())
 		})
-		time.Sleep(time.Second * 5)
+	}
+}
+
+func Clock(app *tview.Application, clock *tview.TextView) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for t := range ticker.C {
+		// обновление строго через QueueUpdateDraw
+		now := t.Format("15:04:05")
+		app.QueueUpdateDraw(func() {
+			clock.SetText(now)
+		})
 	}
 }

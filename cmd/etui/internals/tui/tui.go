@@ -16,6 +16,7 @@ func MakeTUI(infoCh <-chan *commands.StagesInfo) error {
 		AddItem(modules.Footer(), 5, 1, false)
 
 	go modules.FillInfo(app, view, infoCh)
+	go modules.Clock(app, view.Clock)
 
 	if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
 		func(event *tcell.EventKey) *tcell.EventKey {
