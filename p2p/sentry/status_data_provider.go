@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -102,14 +102,14 @@ func makeGenesisChainHead(genesis *types.Block) ChainHead {
 	}
 }
 
-func (s *StatusDataProvider) makeStatusData(head ChainHead) *proto_sentry.StatusData {
-	return &proto_sentry.StatusData{
+func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusData {
+	return &sentryproto.StatusData{
 		NetworkId:       s.networkId,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(head.HeadTd),
 		BestHash:        gointerfaces.ConvertHashToH256(head.HeadHash),
 		MaxBlockHeight:  head.HeadHeight,
 		MaxBlockTime:    head.HeadTime,
-		ForkData: &proto_sentry.Forks{
+		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
 			HeightForks: s.heightForks,
 			TimeForks:   s.timeForks,
@@ -117,7 +117,7 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *proto_sentry.Status
 	}
 }
 
-func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.StatusData, error) {
+func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
 	chainHead, err := ReadChainHead(ctx, s.db)
 	if err != nil {
 		if errors.Is(err, ErrNoHead) {

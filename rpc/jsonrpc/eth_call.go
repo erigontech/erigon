@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -797,7 +797,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Require nonce to calculate address of created contract
 		if args.Nonce == nil {
 			var nonce uint64
-			reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
+			reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
 				Address: gointerfaces.ConvertAddressToH160(*args.From),
 			}, &grpc.EmptyCallOption{})
 			if err != nil {
@@ -829,6 +829,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
+	// Add 'from', 'to', precompiles to the exclusion list
+	excl[*args.From] = struct{}{}
+	excl[to] = struct{}{}
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}
 	}

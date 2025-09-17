@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -582,7 +582,7 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
+func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, txc wrap.TxContainer, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, test bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -599,7 +599,8 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 			return err
 		}
 	}
-	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, header.Number.Uint64()+1); err != nil {
+	lastNum := headersChain[len(headersChain)-1].Number.Uint64()
+	if err := rawdb.TruncateCanonicalChain(ctx, txc.Tx, lastNum+1); err != nil {
 		return err
 	}
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
@@ -628,35 +629,6 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 				return errors.New("unexpected state step has more work")
 			}
 		}
-
-	}
-
-	// If we did not specify header we stop here
-	if header == nil {
-		return nil
-	}
-	// Prepare memory state for block execution
-	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
-		return err
-	}
-
-	hasMore, err := stateSync.RunNoInterrupt(nil, txc)
-	if err != nil {
-		if !test {
-			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
-				return err
-			}
-		}
-		return err
-	}
-	if hasMore {
-		// should not ever happen since we exec blocks 1 by 1
-		if !test {
-			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
-				return err
-			}
-		}
-		return errors.New("unexpected state step has more work")
 	}
 
 	return nil
@@ -675,7 +647,7 @@ func NewDefaultStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader proto_downloader.DownloaderClient,
+	snapDownloader downloaderproto.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
@@ -711,7 +683,7 @@ func NewPipelineStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader proto_downloader.DownloaderClient,
+	snapDownloader downloaderproto.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,

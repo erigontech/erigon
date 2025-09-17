@@ -43,12 +43,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
-func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
+func testDbAndAggregatorv3(t *testing.T, fpath string, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
 	t.Helper()
 
 	path := t.TempDir()
@@ -56,7 +57,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 		path = fpath
 	}
 	dirs := datadir.New(path)
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, aggStep)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 
@@ -398,7 +399,10 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
 		require.NoError(t, err)
-		require.Equal(t, chainspec.TestGenesisStateRoot, common.BytesToHash(rh))
+
+		s, err := chainspec.ChainSpecByName(networkname.Test)
+		require.NoError(t, err)
+		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 

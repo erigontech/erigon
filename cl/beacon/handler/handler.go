@@ -24,7 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -49,8 +49,8 @@ import (
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
@@ -75,13 +75,13 @@ type ApiHandler struct {
 	operationsPool       pool.OperationsPool
 	syncedData           synced_data.SyncedData
 	stateReader          *historical_states_reader.HistoricalStatesReader
-	sentinel             sentinel.SentinelClient
+	sentinel             sentinelproto.SentinelClient
 	blobStoage           blob_storage.BlobStorage
 	columnStorage        blob_storage.DataColumnStorage
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
-	peerdas das.PeerDas
+	peerDas das.PeerDas
 	version string // Node's version
 
 	// pools
@@ -127,7 +127,7 @@ func NewApiHandler(
 	rcsn freezeblocks.BeaconSnapshotReader,
 	syncedData synced_data.SyncedData,
 	stateReader *historical_states_reader.HistoricalStatesReader,
-	sentinel sentinel.SentinelClient,
+	sentinel sentinelproto.SentinelClient,
 	version string,
 	routerCfg *beacon_router_configuration.RouterConfiguration,
 	emitters *beaconevents.EventEmitter,
@@ -256,6 +256,7 @@ func (a *ApiHandler) init() {
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV1BlindedBlocks))
 					}
+					r.Get("/blobs/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlobs))
 					r.Route("/rewards", func(r chi.Router) {
 						r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsSyncCommittees))
 						r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconRewardsBlocks))

@@ -18,8 +18,8 @@ package heimdall
 
 import (
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 // Bor Events
@@ -43,10 +43,10 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Log
 	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), false, logger)}
 }
 
-func (s *RoSnapshots) Ranges() []snapshotsync.Range {
+func (s *RoSnapshots) Ranges(align bool) []snapshotsync.Range {
 	view := s.View()
 	defer view.Close()
-	return view.base.Ranges()
+	return view.base.Ranges(align)
 }
 
 type View struct {

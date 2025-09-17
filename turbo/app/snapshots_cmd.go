@@ -49,15 +49,16 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/compress"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
@@ -74,7 +75,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
@@ -85,19 +85,38 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 	return res
 }
 
+// This needs to run *after* subcommand arguments are parsed, in case they alter root flags like data dir.
+func commonBeforeSnapshotCommand(cliCtx *cli.Context) error {
+	go mem.LogMemStats(cliCtx.Context, log.New())
+	go disk.UpdateDiskStats(cliCtx.Context, log.New())
+	_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func init() {
+	// Inject commonBeforeSnapshotCommand into all snapshot subcommands Before handlers.
+	for _, cmd := range snapshotCommand.Subcommands {
+		oldBefore := cmd.Before
+		cmd.Before = func(cliCtx *cli.Context) error {
+			err := commonBeforeSnapshotCommand(cliCtx)
+			if err != nil {
+				return fmt.Errorf("common before snapshot subcommand: %w", err)
+			}
+			if oldBefore == nil {
+				return nil
+			}
+			return oldBefore(cliCtx)
+		}
+	}
+}
+
 var snapshotCommand = cli.Command{
 	Name:    "snapshots",
 	Aliases: []string{"seg", "snapshot", "segments", "segment"},
 	Usage:   `Managing historical data segments (partitions)`,
-	Before: func(cliCtx *cli.Context) error {
-		go mem.LogMemStats(cliCtx.Context, log.New())
-		go disk.UpdateDiskStats(cliCtx.Context, log.New())
-		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
-		if err != nil {
-			return err
-		}
-		return nil
-	},
 	Subcommands: []*cli.Command{
 		{
 			Name: "ls",
@@ -244,14 +263,15 @@ var snapshotCommand = cli.Command{
 			Name:   "reset",
 			Usage:  "Reset state to resumable initial sync",
 			Action: resetCliAction,
-			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the environment variable?
-			Flags: append(
-				slices.Clone(logging.Flags),
+			// Something to alter snapcfg.snapshotGitBranch would go here, or should you set the
+			// environment variable? Followup: It would not go here, as it could modify behaviour in
+			// parent commands.
+			Flags: []cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ChainFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-			),
+			},
 		},
 		{
 			Name:    "rm-state-snapshots",
@@ -331,11 +351,6 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-				if err != nil {
-					return err
-				}
-				defer l.Unlock()
 				if err := doPublishable(cliCtx); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
@@ -532,6 +547,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
+		_maxFrom = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -544,6 +560,9 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 			for _, res := range files {
 				if !strings.Contains(res.Name(), domainName) {
 					continue
+				}
+				if removeLatest {
+					_maxFrom = max(_maxFrom, res.From)
 				}
 				domainFiles = append(domainFiles, res)
 			}
@@ -748,7 +767,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -799,7 +818,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -1335,7 +1354,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -1533,7 +1552,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
@@ -1574,7 +1593,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
 
@@ -1856,7 +1875,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer logger.Info("Done")
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -1988,7 +2007,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	decomp.Close()
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2015,7 +2034,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	from := uint64(0)
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2245,7 +2264,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

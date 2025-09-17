@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/tests"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/eth/tracers/js"
@@ -105,7 +105,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := context.Rules(chain.AllProtocolChanges)
-	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))

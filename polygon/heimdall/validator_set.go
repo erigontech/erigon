@@ -420,7 +420,7 @@ func (vals *ValidatorSet) Copy() *ValidatorSet {
 
 	return &ValidatorSet{
 		Validators:       validatorListCopy(vals.Validators),
-		Proposer:         vals.Proposer,
+		Proposer:         vals.Proposer.Copy(),
 		totalVotingPower: vals.totalVotingPower,
 		validatorsMap:    validatorsMap,
 	}

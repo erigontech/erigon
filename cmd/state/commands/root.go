@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/utils"
 	chain2 "github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -83,12 +84,12 @@ func genesisFromFile(genesisPath string) *types.Genesis {
 }
 
 func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Config) {
-	if chain == "" {
-		genesis, chainConfig = chainspec.MainnetGenesisBlock(), chainspec.MainnetChainConfig
-	} else {
-		genesis, chainConfig = chainspec.GenesisBlockByChainName(chain), chainspec.ChainConfigByChainName(chain)
+	name := chain
+	if name == "" {
+		name = networkname.Mainnet
 	}
-	return genesis, chainConfig
+	spec, _ := chainspec.ChainSpecByName(name)
+	return spec.Genesis, spec.Config
 }
 
 func Execute() {

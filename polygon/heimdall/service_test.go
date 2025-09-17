@@ -50,7 +50,7 @@ func TestServiceWithAmoyData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/amoy",
-		chainConfig:                    polychain.AmoyChainConfig,
+		chainConfig:                    polychain.Amoy.Config,
 		expectedLastSpan:               1280,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         150,
@@ -92,7 +92,7 @@ func TestServiceWithMainnetData(t *testing.T) {
 
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/mainnet",
-		chainConfig:                    polychain.BorMainnetChainConfig,
+		chainConfig:                    polychain.BorMainnet.Config,
 		expectedLastSpan:               2344,
 		expectedFirstCheckpoint:        1,
 		expectedLastCheckpoint:         1,
@@ -175,10 +175,11 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupCheckpoints()
 	suite.setupMilestones()
 	suite.service = NewService(ServiceConfig{
-		Store:     store,
-		BorConfig: borConfig,
-		Client:    suite.client,
-		Logger:    suite.logger,
+		Store:       store,
+		ChainConfig: suite.chainConfig,
+		BorConfig:   borConfig,
+		Client:      suite.client,
+		Logger:      suite.logger,
 	})
 
 	err := suite.service.store.Prepare(suite.ctx)

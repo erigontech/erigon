@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package p2p
+package polygonp2p
 
 import (
 	"context"
@@ -27,20 +27,21 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf libsentry.StatusDataFactory) *Service {
-	peerPenalizer := NewPeerPenalizer(sc)
-	messageListener := NewMessageListener(logger, sc, sdf, peerPenalizer)
-	peerTracker := NewPeerTracker(logger, sc, messageListener)
-	messageSender := NewMessageSender(sc)
-	var fetcher Fetcher
-	fetcher = NewFetcher(logger, messageListener, messageSender)
-	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
-	fetcher = NewTrackingFetcher(fetcher, peerTracker)
+	peerPenalizer := p2p.NewPeerPenalizer(sc)
+	messageListener := p2p.NewMessageListener(logger, sc, sdf, peerPenalizer)
+	peerTracker := p2p.NewPeerTracker(logger, messageListener)
+	messageSender := p2p.NewMessageSender(sc)
+	var fetcher p2p.Fetcher
+	fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
+	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
+	fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
 	publisher := NewPublisher(logger, messageSender, peerTracker)
 	return &Service{
 		logger:          logger,
@@ -55,10 +56,10 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 
 type Service struct {
 	logger          log.Logger
-	fetcher         Fetcher
-	messageListener *MessageListener
-	peerPenalizer   *PeerPenalizer
-	peerTracker     *PeerTracker
+	fetcher         p2p.Fetcher
+	messageListener *p2p.MessageListener
+	peerPenalizer   *p2p.PeerPenalizer
+	peerTracker     *p2p.PeerTracker
 	publisher       *Publisher
 	maxPeers        int
 }
@@ -96,19 +97,19 @@ func (s *Service) MaxPeers() int {
 	return s.maxPeers
 }
 
-func (s *Service) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
+func (s *Service) ListPeersMayHaveBlockNum(blockNum uint64) []*p2p.PeerId {
 	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
 }
 
-func (s *Service) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+func (s *Service) FetchHeaders(ctx context.Context, start, end uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
 	return s.fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 }
 
-func (s *Service) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
+func (s *Service) FetchBodies(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error) {
 	return s.fetcher.FetchBodies(ctx, headers, peerId, opts...)
 }
 
-func (s *Service) FetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Block], error) {
+func (s *Service) FetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, amount uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Block], error) {
 	return s.fetcher.FetchBlocksBackwardsByHash(ctx, hash, amount, peerId, opts...)
 }
 
@@ -120,14 +121,14 @@ func (s *Service) PublishNewBlockHashes(block *types.Block) {
 	s.publisher.PublishNewBlockHashes(block)
 }
 
-func (s *Service) Penalize(ctx context.Context, peerId *PeerId) error {
+func (s *Service) Penalize(ctx context.Context, peerId *p2p.PeerId) error {
 	return s.peerPenalizer.Penalize(ctx, peerId)
 }
 
-func (s *Service) RegisterNewBlockObserver(o event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) event.UnregisterFunc {
+func (s *Service) RegisterNewBlockObserver(o event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) event.UnregisterFunc {
 	return s.messageListener.RegisterNewBlockObserver(o)
 }
 
-func (s *Service) RegisterNewBlockHashesObserver(o event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc {
+func (s *Service) RegisterNewBlockHashesObserver(o event.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc {
 	return s.messageListener.RegisterNewBlockHashesObserver(o)
 }

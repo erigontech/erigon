@@ -21,19 +21,15 @@ import (
 	"sort"
 	"strings"
 
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 // DBSchemaVersion versions list
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
-var DBSchemaVersion = types.VersionReply{Major: 7, Minor: 0, Patch: 0}
-
-// PlainContractCode -
-// key - address+incarnation
-// value - code hash
-const PlainContractCode = "PlainCodeHash"
+var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
 const ChangeSets3 = "ChangeSets3"
 
@@ -48,15 +44,6 @@ const (
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
 )
-
-const (
-
-	//key - contract code hash
-	//value - contract code
-	Code = "Code"
-)
-
-const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
 
 const (
 	// DatabaseInfo is used to store information about data layout.
@@ -313,17 +300,14 @@ var (
 var ChaindataTables = []string{
 	E2AccountsHistory,
 	E2StorageHistory,
-	Code,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
-	IncarnationMap,
 	SyncStageProgress,
 	PlainState,
-	PlainContractCode,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -601,21 +585,21 @@ var PolygonBridgeTablesCfg = TableCfg{}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
-	case TxPoolDB:
+	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
-	case SentryDB:
+	case dbcfg.SentryDB:
 		return SentryTablesCfg
-	case DownloaderDB:
+	case dbcfg.DownloaderDB:
 		return DownloaderTablesCfg
-	case DiagnosticsDB:
+	case dbcfg.DiagnosticsDB:
 		return DiagnosticsTablesCfg
-	case HeimdallDB:
+	case dbcfg.HeimdallDB:
 		return HeimdallTablesCfg
-	case PolygonBridgeDB:
+	case dbcfg.PolygonBridgeDB:
 		return PolygonBridgeTablesCfg
-	case ConsensusDB:
+	case dbcfg.ConsensusDB:
 		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
@@ -798,11 +782,6 @@ func String2Enum(in string) (uint16, error) {
 	return uint16(ii), nil
 }
 
-const (
-	ReceiptsAppendable Appendable = 0
-	AppendableLen      Appendable = 0
-)
-
 func (d Domain) String() string {
 	switch d {
 	case AccountsDomain:
@@ -959,9 +938,4 @@ const (
 	*/
 	E2AccountsHistory = "AccountHistory"
 	E2StorageHistory  = "StorageHistory"
-
-	// IncarnationMap for deleted accounts
-	//key - address
-	//value - incarnation of account when it was last deleted
-	IncarnationMap = "IncarnationMap"
 )

@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 var stateTestCommand = cli.Command{
@@ -103,7 +103,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
 	if err != nil {
 		return err
 	}
-	var stateTests map[string]tests.StateTest
+	var stateTests map[string]testutil.StateTest
 	if err = json.Unmarshal(src, &stateTests); err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
 }
 
 func aggregateResultsFromStateTests(
-	stateTests map[string]tests.StateTest, cfg vm.Config,
+	stateTests map[string]testutil.StateTest, cfg vm.Config,
 	jsonOut bool, bench bool) ([]StatetestResult, error) {
 	dirs := datadir.New(filepath.Join(os.TempDir(), "erigon-statetest"))
 
@@ -139,7 +139,7 @@ func aggregateResultsFromStateTests(
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			statedb, root, err := test.Run(tx, st, cfg, dirs)
+			statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()
@@ -159,7 +159,7 @@ func aggregateResultsFromStateTests(
 			// if benchmark requested rerun test w/o verification and collect stats
 			if bench {
 				_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-					_, _, gasUsed, _ := test.RunNoVerify(tx, st, cfg, dirs)
+					_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
 					return nil, gasUsed, nil
 				})
 
