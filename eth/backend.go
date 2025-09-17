@@ -1159,6 +1159,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	// start HTTP API
+	stack.Config().Http.IsArbitrum = chainConfig.IsArbitrum()
 	httpRpcCfg := stack.Config().Http
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {
@@ -1169,7 +1170,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(ctx, chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
+	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{

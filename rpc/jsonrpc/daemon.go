@@ -17,8 +17,6 @@
 package jsonrpc
 
 import (
-	"context"
-
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -33,23 +31,12 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine consensus.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 ) (list []rpc.API) {
-	isArbitrum := false
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader)
-
-	// try to check if the chain is Arbitrum
-	tx, err := db.BeginTemporalRo(ctx)
-	if err == nil {
-		chainConfig, err := base.chainConfig(ctx, tx)
-		if err == nil && chainConfig != nil {
-			isArbitrum = chainConfig.IsArbitrum()
-		}
-		tx.Rollback()
-	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.Feecap, cfg.ReturnDataLimit, cfg.AllowUnprotectedTxs, cfg.MaxGetProofRewindBlockCount, cfg.WebsocketSubscribeLogsChannelSize, logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
@@ -108,7 +95,7 @@ func APIList(ctx context.Context, db kv.TemporalRoDB, eth rpchelper.ApiBackend, 
 				Version:   "1.0",
 			})
 		case "net":
-			if !isArbitrum {
+			if !cfg.IsArbitrum {
 				list = append(list, rpc.API{
 					Namespace: "net",
 					Public:    true,
