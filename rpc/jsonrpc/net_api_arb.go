@@ -24,24 +24,24 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-// NetAPIArb the interface for the net_ RPC commands
+// NetAPIArb is the interface for the net_ RPC commands.
 type NetAPIArb interface {
 	Version(_ context.Context) (string, error)
 }
 
-// NetAPIArbImpl data structure to store things needed for net_ commands
+// NetAPIArbImpl is a data structure to store things needed for net_ commands.
 type NetAPIArbImpl struct {
 	ethBackend rpchelper.ApiBackend
 }
 
-// NewNetAPIArbImpl returns NetAPIArbImpl instance
+// NewNetAPIArbImpl returns a NetAPIArbImpl instance.
 func NewNetAPIArbImpl(eth rpchelper.ApiBackend) *NetAPIArbImpl {
 	return &NetAPIArbImpl{
 		ethBackend: eth,
 	}
 }
 
-// Version implements net_version. Returns the current network id.
+// Version implements net_version. Returns the current network ID.
 func (api *NetAPIArbImpl) Version(ctx context.Context) (string, error) {
 	if api.ethBackend == nil {
 		// We're running in --datadir mode or otherwise cannot get the backend
