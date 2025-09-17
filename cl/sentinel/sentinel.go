@@ -134,6 +134,7 @@ func (s *Sentinel) createLocalNode(
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
 	s.setupENR(localNode)
+	go s.updateENR(localNode)
 
 	return localNode, nil
 }
@@ -287,6 +288,8 @@ func (s *Sentinel) observeBandwidth(ctx context.Context) {
 			}
 			s.GossipManager().subscriptions.Range(func(key, value any) bool {
 				sub := value.(*GossipSubscription)
+				sub.lock.Lock()
+				defer sub.lock.Unlock()
 				if sub.topic == nil {
 					return true
 				}

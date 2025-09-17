@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/compress"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -352,11 +351,6 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-				if err != nil {
-					return err
-				}
-				defer l.Unlock()
 				if err := doPublishable(cliCtx); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
@@ -553,6 +547,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
+		_maxFrom = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -2269,10 +2264,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	if err := state.CheckSnapshotsCompatibility(dirs); err != nil {
-		panic(err)
-	}
-	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

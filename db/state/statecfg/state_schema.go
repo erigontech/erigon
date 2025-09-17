@@ -24,10 +24,7 @@ type AggSetters interface {
 	KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs uint64)
 }
 
-func Configure(a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger) error {
-	if err := AdjustReceiptCurrentVersionIfNeeded(dirs, logger); err != nil {
-		return err
-	}
+func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, logger log.Logger) error { //nolint:gocritic
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.AccountsDomain), salt, dirs, logger); err != nil {
 		return err
 	}
@@ -160,6 +157,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
 			HistoryIdx:         kv.AccountsHistoryIdx,
@@ -180,6 +178,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblStorageHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
 			HistoryIdx:         kv.StorageHistoryIdx,
@@ -201,6 +200,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCodeHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.CodeHistoryIdx,
@@ -223,6 +223,7 @@ var Schema = SchemaGen{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
 			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			HistoryIdx: kv.CommitmentHistoryIdx,
+			Accessors:  AccessorHashMap,
 
 			HistoryLargeValues:            false,
 			HistoryValuesOnCompressedPage: 64,
@@ -247,6 +248,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblReceiptHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
 			HistoryIdx:         kv.ReceiptHistoryIdx,
@@ -268,6 +270,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable: kv.TblRCacheHistoryVals,
 			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			Accessors:   AccessorHashMap,
 
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.RCacheHistoryIdx,

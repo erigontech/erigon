@@ -215,6 +215,35 @@ type E3SnapSchemaBuilder struct {
 	e *E3SnapSchema
 }
 
+func SnapSchemaFromDomainCfg(cfg statecfg.DomainCfg, dirs datadir.Dirs, stepSize uint64) (domain, history, ii *E3SnapSchema) {
+	domainb := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
+		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression)
+	accessors := cfg.Accessors
+	if accessors.Has(statecfg.AccessorBTree) {
+		domainb.BtIndex()
+	}
+	if accessors.Has(statecfg.AccessorExistence) {
+		domainb.Existence()
+	}
+	if accessors.Has(statecfg.AccessorHashMap) {
+		domainb.Accessor(dirs.SnapDomain)
+	}
+	domain = domainb.Build()
+
+	if cfg.Hist.HistoryDisabled {
+		return
+	}
+
+	history = NewE3SnapSchemaBuilder(cfg.Hist.Accessors, stepSize).
+		Data(dirs.SnapHistory, cfg.Name.String(), DataExtensionV, cfg.Hist.Compression).
+		Accessor(dirs.SnapAccessors).Build()
+	ii = NewE3SnapSchemaBuilder(cfg.Hist.IiCfg.Accessors, stepSize).
+		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.Hist.IiCfg.Compression).
+		Accessor(dirs.SnapAccessors).Build()
+
+	return
+}
+
 func NewE3SnapSchemaBuilder(accessors statecfg.Accessors, stepSize uint64) *E3SnapSchemaBuilder {
 	eschema := E3SnapSchemaBuilder{
 		e: &E3SnapSchema{},
