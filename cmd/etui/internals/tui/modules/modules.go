@@ -14,7 +14,7 @@ func Footer() tview.Primitive {
 	return tview.NewBox().SetBorder(true).SetTitle("Bottom (5 rows)")
 }
 
-func Body() (tview.Primitive, *BodyView) {
+func Body() (*tview.Flex, *BodyView) {
 	view := &BodyView{
 		Overview: tview.NewTextView().SetText("starting..."),
 		Stages:   tview.NewTextView().SetText("starting1..."),
