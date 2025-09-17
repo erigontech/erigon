@@ -391,7 +391,7 @@ func (s *simulator) simulateBlock(
 		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
 		vmConfig.Tracer = tracer.Hooks()
 	}
-	var callResults []CallResult
+	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, tx, intraBlockState, callIndex, &call, bsc.BlockOverrides,
 			blockHashOverrides, header, &cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig)
