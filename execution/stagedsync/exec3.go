@@ -145,7 +145,7 @@ var (
 	mxCommitmentmentDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="commitment"}`)
 )
 
-var ErrWrongTrieRoot = errors.New("wrong trie root")
+var ErrWrongTrieRoot = fmt.Errorf("%w: wrong trie root", consensus.ErrInvalidBlock)
 
 const (
 	changesetSafeRange     = 32   // Safety net for long-sync, keep last 32 changesets
@@ -1301,7 +1301,7 @@ func ExecV3(ctx context.Context,
 
 					if !isMining && !bytes.Equal(rh, header.Root.Bytes()) {
 						logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-						return fmt.Errorf("%w: %d", ErrWrongTrieRoot, blockNum)
+						return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 					}
 				}
 
@@ -1879,7 +1879,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *dbstate.SharedDomains) {
 
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
-		return fmt.Errorf("%w: %d", ErrWrongTrieRoot, blockNumber)
+		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
 	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(blockHash, parentHash)
