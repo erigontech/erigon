@@ -1208,9 +1208,10 @@ func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string, out c
 		if err != nil {
 			return err
 		}
+		info.EthTxSequence = 1
 		out <- info
 		for range ticker.C {
-			info, err := InfoStages(tx, sn, borSn)
+			info, err = InfoStages(tx, sn, borSn)
 			if err != nil {
 				return err
 			}
