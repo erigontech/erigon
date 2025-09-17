@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/etui/internals/tui"
 	"github.com/erigontech/erigon/cmd/integration/commands"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
 )
 
@@ -27,21 +26,7 @@ var infoCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		app := tview.NewApplication()
-		flex := tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(tview.NewTextView().SetText("Erigon TUI").SetTextAlign(tview.AlignCenter), 1, 1, false).
-			AddItem(tview.NewTextView().SetText(fmt.Sprintf("%+v", info)), 0, 5, false).
-			AddItem(tview.NewBox().SetBorder(true).SetTitle("Bottom (5 rows)"), 5, 1, false)
-
-		if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
-			func(event *tcell.EventKey) *tcell.EventKey {
-				if event.Key() == tcell.KeyCtrlC || event.Rune() == 'q' {
-					app.Stop()
-				}
-				return event
-			}).Run(); err != nil {
-			panic(err)
-		}
+		tui.MakeTUI(info)
 		return nil
 	},
 }
