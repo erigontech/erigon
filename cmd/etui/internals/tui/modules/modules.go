@@ -21,12 +21,12 @@ func Body() tview.Primitive {
 	return tview.NewTextView().SetText("starting...")
 }
 
-func TextToBody(app *tview.Application, body *tview.TextView, infoCh <-chan *commands.StagesInfo) {
+func TextToBody(app *tview.Application, body *tview.Flex, infoCh <-chan *commands.StagesInfo) {
 	for info := range infoCh {
 		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
 			body.Clear()
-			fmt.Fprintf(body, "info %+v, text %s", info, text)
+			fmt.Fprintf(body.GetItem(1).(*tview.TextView), "info %+v, text %s", info, text)
 		})
 		time.Sleep(time.Second * 5)
 	}
