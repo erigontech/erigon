@@ -17,18 +17,17 @@ func Footer() tview.Primitive {
 	return tview.NewBox().SetBorder(true).SetTitle("Bottom (5 rows)")
 }
 
-func Body(info *commands.StagesInfo) tview.Primitive {
-	return tview.NewTextView().SetText(fmt.Sprintf("%+v", info))
+func Body() tview.Primitive {
+	return tview.NewTextView().SetText("starting...")
 }
 
-func TextToBody(app *tview.Application, body *tview.TextView) {
-	for {
-
+func TextToBody(app *tview.Application, body *tview.TextView, infoCh <-chan *commands.StagesInfo) {
+	for info := range infoCh {
 		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
 			body.Clear()
-			fmt.Fprintf(body, "text %s", text)
+			fmt.Fprintf(body, "info %+v, text %s", info, text)
 		})
-		time.Sleep(time.Millisecond * 200)
+		time.Sleep(time.Second * 5)
 	}
 }

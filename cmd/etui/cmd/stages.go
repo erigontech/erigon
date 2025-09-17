@@ -22,11 +22,12 @@ var infoCmd = &cobra.Command{
 			return fmt.Errorf("--datadir flag is required")
 		}
 		logger := log.New(context.Background())
-		info, err := commands.InfoAllStages(cmd.Context(), logger, datadirCli)
+		infoCh := make(chan *commands.StagesInfo)
+		err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
 		if err != nil {
 			return err
 		}
-		err = tui.MakeTUI(info)
+		err = tui.MakeTUI(infoCh)
 		if err != nil {
 			return err
 		}

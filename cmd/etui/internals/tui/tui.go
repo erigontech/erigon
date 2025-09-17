@@ -7,9 +7,9 @@ import (
 	"github.com/rivo/tview"
 )
 
-func MakeTUI(info *commands.StagesInfo) error {
+func MakeTUI(infoCh <-chan *commands.StagesInfo) error {
 	app := tview.NewApplication()
-	body := modules.Body(info)
+	body := modules.Body()
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(modules.Header(), 1, 1, false).
 		AddItem(body, 0, 5, false).

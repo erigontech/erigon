@@ -1190,28 +1190,34 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
 }
 
-func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string) (info *StagesInfo, err error) {
+func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string, out chan<- *StagesInfo) (err error) {
 	chaindata = filepath.Join(dataDir, "chaindata")
 	datadirCli = dataDir
 	sn, borSn, _, db, err := allDBStaff(dbCfg(dbcfg.ChainDB, chaindata), false, logger, dataDir)
 	if err != nil {
 		logger.Error("Opening DB", "error", err)
-		return nil, err
+		return err
 	}
 	defer db.Close()
 	defer sn.Close()
 	defer borSn.Close()
 	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		info, err = InfoStages(tx, sn, borSn)
-		if err != nil {
-			return err
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			info, err := InfoStages(tx, sn, borSn)
+			if err != nil {
+				return err
+			}
+			out <- info
 		}
+
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return info, nil
+	return nil
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
