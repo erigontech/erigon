@@ -526,7 +526,7 @@ func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err erro
 	}
 	u = &commitment.Update{
 		Flags:      commitment.DeleteUpdate,
-		StorageLen: len(enc),
+		StorageLen: int16(len(enc)),
 	}
 
 	if u.StorageLen > 0 {
