@@ -9,13 +9,13 @@ import (
 
 func MakeTUI(infoCh <-chan *commands.StagesInfo) error {
 	app := tview.NewApplication()
-	body := modules.Body()
+	body, view := modules.Body()
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(modules.Header(), 1, 1, false).
 		AddItem(body, 0, 5, false).
 		AddItem(modules.Footer(), 5, 1, false)
 
-	go modules.TextToBody(app, flex, infoCh)
+	go modules.FillInfo(app, view, infoCh)
 
 	if err := app.SetRoot(flex, true).EnableMouse(true).SetInputCapture(
 		func(event *tcell.EventKey) *tcell.EventKey {

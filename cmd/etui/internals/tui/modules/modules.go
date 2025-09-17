@@ -17,20 +17,31 @@ func Footer() tview.Primitive {
 	return tview.NewBox().SetBorder(true).SetTitle("Bottom (5 rows)")
 }
 
-func Body() tview.Primitive {
+func Body() (tview.Primitive, *BodyView) {
+	view := &BodyView{
+		Overview: tview.NewTextView().SetText("starting..."),
+		Stages:   tview.NewTextView().SetText("starting1..."),
+		DomainII: tview.NewTextView().SetText("starting2..."),
+	}
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(tview.NewTextView().SetText("starting..."), 0, 1, false).
+		AddItem(view.Overview, 0, 1, false).
 		AddItem(tview.NewFlex().
-			AddItem(tview.NewTextView().SetText("starting1..."), 0, 1, false).
-			AddItem(tview.NewTextView().SetText("starting2..."), 0, 1, false),
-			0, 5, false)
+			AddItem(view.Stages, 0, 1, false).
+			AddItem(view.DomainII, 0, 1, false),
+			0, 5, false), view
 }
 
-func TextToBody(app *tview.Application, body *tview.Flex, infoCh <-chan *commands.StagesInfo) {
+type BodyView struct {
+	Overview *tview.TextView
+	Stages   *tview.TextView
+	DomainII *tview.TextView
+}
+
+func FillInfo(app *tview.Application, body *BodyView, infoCh <-chan *commands.StagesInfo) {
 	for info := range infoCh {
 		text := strconv.Itoa(rand.Int())
 		app.QueueUpdateDraw(func() {
-			infoView := body.GetItem(1).(*tview.Flex).GetItem(1).(*tview.Flex).GetItem(0).(*tview.TextView)
+			infoView := body.Stages
 			infoView.Clear()
 			fmt.Fprintf(infoView, "info %+v, text %s", info, text)
 		})
