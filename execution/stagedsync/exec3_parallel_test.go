@@ -60,7 +60,7 @@ type testExecTask struct {
 	dependencies []int
 }
 
-type PathGenerator func(addr common.Address, i int, j int, total int) opkey
+type PathGenerator func(i int, j int, total int) opkey
 
 type TaskRunner func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration)
 
@@ -230,13 +230,13 @@ type opkey struct {
 	path state.AccountPath
 }
 
-var randomPathGenerator = func(sender common.Address, i int, j int, total int) opkey {
+var randomPathGenerator = func(i int, j int, total int) opkey {
 	addr := common.BigToAddress((big.NewInt(int64(i % 10))))
 	hash := common.BigToHash((big.NewInt(int64(total))))
 	return opkey{addr, hash, state.StatePath}
 }
 
-var dexPathGenerator = func(sender common.Address, i int, j int, total int) opkey {
+var dexPathGenerator = func(i int, j int, total int) opkey {
 	if j == total-1 || j == 2 {
 		addr := common.BigToAddress(big.NewInt(int64(0)))
 		return opkey{addr: addr, path: state.BalancePath}
@@ -291,10 +291,10 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 		// Generate time and key path for each op except first two that are always read and write nonce
 		for j := 2; j < len(ops); j++ {
 			if ops[j].opType == readType {
-				ops[j].key = pathGenerator(s, i, j, len(ops))
+				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = readTime(i, j)
 			} else if ops[j].opType == writeType {
-				ops[j].key = pathGenerator(s, i, j, len(ops))
+				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = writeTime(i, j)
 			} else {
 				ops[j].duration = nonIOTime(i, j)
