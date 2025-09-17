@@ -2078,7 +2078,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if chainConfig.Bor != nil {
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
-logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
+	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
 	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
