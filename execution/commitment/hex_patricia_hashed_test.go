@@ -327,7 +327,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 			Build()
 
-		keyLen := 20
+		keyLen := int16(20)
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 
 		stateBatch.SetConcurrentCommitment(true)
@@ -639,7 +639,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 			Build()
 
-		keyLen := 20
+		keyLen := int16(20)
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 		trieBatch := NewHexPatriciaHashed(keyLen, stateBatch)
 
@@ -842,8 +842,8 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 		hashLen:         length.Hash,
 		accountAddrLen:  length.Addr,
 		storageAddrLen:  length.Addr + length.Hash,
-		hashedExtLen:    rnd.Intn(129),
-		extLen:          rnd.Intn(65),
+		hashedExtLen:    int16(rnd.Intn(129)),
+		extLen:          int16(rnd.Intn(65)),
 		hashedExtension: [128]byte{},
 		extension:       [64]byte{},
 		storageAddr:     [52]byte{},
@@ -882,7 +882,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.RootChecked = true
 
 	for i := 0; i < len(s.Depths); i++ {
-		s.Depths[i] = rnd.Intn(256)
+		s.Depths[i] = int16(rnd.Intn(256))
 	}
 	for i := 0; i < len(s.TouchMap); i++ {
 		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))

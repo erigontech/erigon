@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -838,7 +838,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
 
-		medians := make(map[string][]int)
+		medians := make(map[string][]int16)
 		for _, c := range cells {
 			if c == nil {
 				continue
@@ -882,7 +882,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		}
 
 		for k, v := range medians {
-			sort.Ints(v)
+			slices.Sort(v)
 			switch k {
 			case "apk":
 				stat.MedianAPK = uint64(v[len(v)/2])
