@@ -1204,6 +1204,11 @@ func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string, out c
 	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		info, err := InfoStages(tx, sn, borSn)
+		if err != nil {
+			return err
+		}
+		out <- info
 		for range ticker.C {
 			info, err := InfoStages(tx, sn, borSn)
 			if err != nil {
