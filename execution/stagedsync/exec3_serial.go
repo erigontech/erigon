@@ -164,6 +164,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
+				if err != nil {
+					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err)
+				}
+
 				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentLogs.Add(blockReceipts)
 				}
