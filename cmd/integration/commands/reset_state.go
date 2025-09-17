@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/cmd/hack/tool"
 	"os"
 	"text/tabwriter"
 
@@ -117,8 +118,13 @@ func init() {
 }
 
 func InfoStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) (info *StagesInfo, err error) {
+	cfg := tool.ChainConfig(tx)
 	var progress uint64
 	info = &StagesInfo{}
+	info.ChainInfo = ChainInfo{
+		ChainID:   cfg.ChainID.Uint64(),
+		ChainName: cfg.ChainName,
+	}
 	info.StagesProgress = make([]StageProgress, 0, len(stages.AllStages))
 	for _, stage := range stages.AllStages {
 		if progress, err = stages.GetStageProgress(tx, stage); err != nil {

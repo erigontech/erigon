@@ -39,11 +39,18 @@ type StagesInfo struct {
 	EthTxSequence    uint64
 	DB               DB
 	DomainIIProgress []DomainIIProgress
+	ChainInfo        ChainInfo
+}
+
+type ChainInfo struct {
+	ChainID   uint64
+	ChainName string
 }
 
 func (info *StagesInfo) Overview() string {
 	return fmt.Sprintf(
-		"Prune mode: %s\nblocks: seg: %d ind: %d\nbor blocks: seg: %d ind: %d\ninfo about last & state.history: txnum: %d, blocknum: %d, steps: %.2f\nEthTxSequence: %d\nIn DB: first header %d, last header %d, first body %d, last body %d\nlast update on %s",
+		"Chain: ID %d Name %s\nPrune mode: %s\nblocks: seg: %d ind: %d\nbor blocks: seg: %d ind: %d\ninfo about last & state.history: txnum: %d, blocknum: %d, steps: %.2f\nEthTxSequence: %d\nIn DB: first header %d, last header %d, first body %d, last body %d\nlast update on %s",
+		info.ChainInfo.ChainID, info.ChainInfo.ChainName,
 		info.PruneDistance.String(), info.SnapshotInfo.SegMax, info.SnapshotInfo.IndMax,
 		info.BorSnapshotInfo.SegMax, info.BorSnapshotInfo.IndMax,
 		info.LastInfo.TxNum, info.LastInfo.BlockNum, info.LastInfo.IdxSteps,
