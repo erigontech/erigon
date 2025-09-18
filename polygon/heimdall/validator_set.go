@@ -44,6 +44,10 @@ const (
 	PriorityWindowSizeFactor = 2
 )
 
+var (
+	EmptyValidatorSetError = errors.New("applying the validator changes would result in empty set")
+)
+
 type Validator struct {
 	ID               uint64         `json:"ID"`
 	Address          common.Address `json:"signer"`
@@ -420,7 +424,7 @@ func (vals *ValidatorSet) Copy() *ValidatorSet {
 
 	return &ValidatorSet{
 		Validators:       validatorListCopy(vals.Validators),
-		Proposer:         vals.Proposer,
+		Proposer:         vals.Proposer.Copy(),
 		totalVotingPower: vals.totalVotingPower,
 		validatorsMap:    validatorsMap,
 	}
@@ -780,7 +784,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes
 
 	// Check that the resulting set will not be empty.
 	if numNewValidators == 0 && len(vals.Validators) == len(deletes) {
-		return errors.New("applying the validator changes would result in empty set")
+		return EmptyValidatorSetError
 	}
 
 	// Compute the priorities for updates.
@@ -1027,7 +1031,11 @@ func GetUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator,
 	}
 
 	if err := v.UpdateWithChangeSet(changes); err != nil {
-		logger.Error("error while updating change set", "err", err)
+		if errors.Is(err, EmptyValidatorSetError) {
+			logger.Warn("transition to empty validator set")
+		} else {
+			logger.Error("error while updating change set", "err", err)
+		}
 	}
 
 	return v

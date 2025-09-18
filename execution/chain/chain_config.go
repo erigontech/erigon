@@ -164,6 +164,7 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
+		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
 )
@@ -178,11 +179,12 @@ type BorConfig interface {
 	GetAhmedabadBlock() *big.Int
 	IsBhilai(num uint64) bool
 	GetBhilaiBlock() *big.Int
-	IsVeBlop(num uint64) bool
-	GetVeBlopBlock() *big.Int
+	IsRio(num uint64) bool
+	GetRioBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
+	CalculateCoinbase(number uint64) common.Address
 }
 
 func timestampToTime(unixTime *big.Int) *time.Time {
@@ -197,13 +199,13 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, VeBlop: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Rio: %v, Engine: %v}",
 			c.ChainID,
 			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GetAhmedabadBlock(),
 			c.Bor.GetBhilaiBlock(),
-			c.Bor.GetVeBlopBlock(),
+			c.Bor.GetRioBlock(),
 			engine,
 		)
 	}
@@ -444,6 +446,22 @@ func (c *Config) SecondsPerSlot() uint64 {
 		return 5 // Gnosis
 	}
 	return 12 // Ethereum
+}
+
+func (c *Config) SlotsPerEpoch() uint64 {
+	if c.Bor != nil {
+		// Polygon does not have slots, this is such that block range is updated ~5 minutes similar to Ethereum
+		return 192
+	}
+	if c.Aura != nil {
+		return 16 // Gnosis
+	}
+	return 32 // Ethereum
+}
+
+// EpochDuration returns the duration of one epoch in seconds
+func (c *Config) EpochDuration() time.Duration {
+	return time.Duration(c.SecondsPerSlot()*c.SlotsPerEpoch()) * time.Second
 }
 
 func (c *Config) SystemContracts(time uint64) map[string]common.Address {

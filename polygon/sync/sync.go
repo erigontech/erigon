@@ -20,16 +20,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/p2p"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -41,12 +44,22 @@ import (
 // Waypoints may be absent in case if it's an early stage of the chain's evolution, starting from the genesis block.
 // The current constant value is chosen based on observed metrics in production as twice the doubled value of the maximum observed waypoint length.
 const maxFinalizationHeight = 512
+const downloadRequestsCacheSize = 1024
+
+const heimdallSyncRetryIntervalOnTip = 200 * time.Millisecond
+const heimdallSyncRetryIntervalOnStartup = 30 * time.Second
+
+var (
+	futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
+	p2pResponseTimeout   = 5 * time.Second // timeout waiting for P2P response packets
+)
 
 type heimdallSynchronizer interface {
 	IsCatchingUp(ctx context.Context) (bool, error)
 	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, ok bool, err error)
 	SynchronizeMilestones(ctx context.Context) (latest *heimdall.Milestone, ok bool, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
+	WaitUntilHeimdallIsSynced(ctx context.Context, retryInterval time.Duration) error
 	Ready(ctx context.Context) <-chan error
 }
 
@@ -76,7 +89,7 @@ func NewSync(
 	ccBuilderFactory CanonicalChainBuilderFactory,
 	heimdallSync heimdallSynchronizer,
 	bridgeSync bridgeSynchronizer,
-	events <-chan Event,
+	tipEvents *TipEvents,
 	notifications *shards.Notifications,
 	wiggleCalculator wiggleCalculator,
 	engineAPISwitcher EngineAPISwitcher,
@@ -85,44 +98,57 @@ func NewSync(
 	if err != nil {
 		panic(err)
 	}
+	blockRequestsCache, err := lru.NewARC[common.Hash, struct{}](downloadRequestsCacheSize)
+	if err != nil {
+		panic(err)
+	}
+
+	blockHashesRequestsCache, err := lru.NewARC[common.Hash, struct{}](downloadRequestsCacheSize)
+	if err != nil {
+		panic(err)
+	}
 
 	return &Sync{
-		config:            config,
-		logger:            logger,
-		store:             store,
-		execution:         execution,
-		milestoneVerifier: milestoneVerifier,
-		blocksVerifier:    blocksVerifier,
-		p2pService:        p2pService,
-		blockDownloader:   blockDownloader,
-		ccBuilderFactory:  ccBuilderFactory,
-		heimdallSync:      heimdallSync,
-		bridgeSync:        bridgeSync,
-		events:            events,
-		badBlocks:         badBlocksLru,
-		notifications:     notifications,
-		wiggleCalculator:  wiggleCalculator,
-		engineAPISwitcher: engineAPISwitcher,
+		config:                   config,
+		logger:                   logger,
+		store:                    store,
+		execution:                execution,
+		milestoneVerifier:        milestoneVerifier,
+		blocksVerifier:           blocksVerifier,
+		p2pService:               p2pService,
+		blockDownloader:          blockDownloader,
+		ccBuilderFactory:         ccBuilderFactory,
+		heimdallSync:             heimdallSync,
+		bridgeSync:               bridgeSync,
+		tipEvents:                tipEvents,
+		badBlocks:                badBlocksLru,
+		notifications:            notifications,
+		wiggleCalculator:         wiggleCalculator,
+		engineAPISwitcher:        engineAPISwitcher,
+		blockRequestsCache:       blockRequestsCache,
+		blockHashesRequestsCache: blockHashesRequestsCache,
 	}
 }
 
 type Sync struct {
-	config            *ethconfig.Config
-	logger            log.Logger
-	store             Store
-	execution         ExecutionClient
-	milestoneVerifier WaypointHeadersVerifier
-	blocksVerifier    BlocksVerifier
-	p2pService        p2pService
-	blockDownloader   *BlockDownloader
-	ccBuilderFactory  CanonicalChainBuilderFactory
-	heimdallSync      heimdallSynchronizer
-	bridgeSync        bridgeSynchronizer
-	events            <-chan Event
-	badBlocks         *simplelru.LRU[common.Hash, struct{}]
-	notifications     *shards.Notifications
-	wiggleCalculator  wiggleCalculator
-	engineAPISwitcher EngineAPISwitcher
+	config                   *ethconfig.Config
+	logger                   log.Logger
+	store                    Store
+	execution                ExecutionClient
+	milestoneVerifier        WaypointHeadersVerifier
+	blocksVerifier           BlocksVerifier
+	p2pService               p2pService
+	blockDownloader          *BlockDownloader
+	ccBuilderFactory         CanonicalChainBuilderFactory
+	heimdallSync             heimdallSynchronizer
+	bridgeSync               bridgeSynchronizer
+	tipEvents                *TipEvents
+	badBlocks                *simplelru.LRU[common.Hash, struct{}]
+	notifications            *shards.Notifications
+	wiggleCalculator         wiggleCalculator
+	engineAPISwitcher        EngineAPISwitcher
+	blockRequestsCache       *lru.ARCCache[common.Hash, struct{}]
+	blockHashesRequestsCache *lru.ARCCache[common.Hash, struct{}]
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
@@ -131,9 +157,6 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	}
 
 	blockNum := newTip.Number.Uint64()
-	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
-		return err
-	}
 
 	age := common.PrettyAge(time.Unix(int64(newTip.Time), 0))
 	s.logger.Info(syncLogPrefix("update fork choice"), "block", blockNum, "hash", newTip.Hash(), "age", age)
@@ -218,6 +241,23 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 		return nil
 	}
 
+	// milestone is ahead of our current tip
+	if milestone.EndBlock().Uint64() > ccb.Tip().Number.Uint64() {
+		s.logger.Debug(syncLogPrefix("putting milestone event back in the queue because our tip is behind the milestone"),
+			"milestoneId", milestone.RawId(),
+			"milestoneStart", milestone.StartBlock().Uint64(),
+			"milestoneEnd", milestone.EndBlock().Uint64(),
+			"milestoneRootHash", milestone.RootHash(),
+			"tipBlockNumber", ccb.Tip().Number.Uint64(),
+		)
+		// put the milestone back in the queue, so it can be processed at a later time
+		go func() {
+			time.Sleep(futureMilestoneDelay)
+			s.tipEvents.events.PushEvent(Event{Type: EventTypeNewMilestone, newMilestone: event})
+		}()
+		return nil
+	}
+
 	s.logger.Info(
 		syncLogPrefix("applying new milestone event"),
 		"milestoneId", milestone.RawId(),
@@ -234,97 +274,14 @@ func (s *Sync) applyNewMilestoneOnTip(ctx context.Context, event EventNewMilesto
 	return ccb.PruneRoot(milestone.EndBlock().Uint64())
 }
 
-func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb *CanonicalChainBuilder) error {
-	newBlockHeader := event.NewBlock.HeaderNoCopy()
-	newBlockHeaderNum := newBlockHeader.Number.Uint64()
-	newBlockHeaderHash := newBlockHeader.Hash()
-	rootNum := ccb.Root().Number.Uint64()
-	if newBlockHeaderNum <= rootNum || ccb.ContainsHash(newBlockHeaderHash) {
-		return nil
-	}
-
-	if s.badBlocks.Contains(newBlockHeaderHash) {
-		s.logger.Warn(syncLogPrefix("bad block received from peer"),
-			"blockHash", newBlockHeaderHash,
-			"blockNum", newBlockHeaderNum,
-			"peerId", event.PeerId,
-		)
-		s.maybePenalizePeerOnBadBlockEvent(ctx, event)
-		return nil
-	}
-
-	if s.badBlocks.Contains(newBlockHeader.ParentHash) {
-		s.logger.Warn(syncLogPrefix("block with bad parent received from peer"),
-			"blockHash", newBlockHeaderHash,
-			"blockNum", newBlockHeaderNum,
-			"parentHash", newBlockHeader.ParentHash,
-			"peerId", event.PeerId,
-		)
-		s.badBlocks.Add(newBlockHeaderHash, struct{}{})
-		s.maybePenalizePeerOnBadBlockEvent(ctx, event)
-		return nil
-	}
-
-	s.logger.Debug(
-		syncLogPrefix("applying new block event"),
-		"blockNum", newBlockHeaderNum,
-		"blockHash", newBlockHeaderHash,
-		"source", event.Source,
-		"parentBlockHash", newBlockHeader.ParentHash,
-	)
-
-	var blockChain []*types.Block
-	if ccb.ContainsHash(newBlockHeader.ParentHash) {
-		blockChain = []*types.Block{event.NewBlock}
-	} else {
-		amount := newBlockHeaderNum - rootNum + 1
-		s.logger.Debug(
-			syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
-			"rootNum", rootNum,
-			"blockNum", newBlockHeaderNum,
-			"blockHash", newBlockHeaderHash,
-			"amount", amount,
-		)
-
-		if amount > 1024 {
-			// should not ever need to request more than 1024 blocks here in order to backward connect
-			// - if we do then we are missing milestones and need to investigate why
-			// - additionally 1024 blocks should be enough to connect a new block at tip even without milestones
-			// since we do not expect to see such large re-organisations
-			// - if we ever do get a block from a peer for which 1024 blocks back is not enough to connect it
-			// then we shall drop it as the canonical chain builder will fail to connect it and move on
-			// useful read: https://forum.polygon.technology/t/proposal-improved-ux-with-milestones-for-polygon-pos/11534
-			s.logger.Warn(syncLogPrefix("canonical chain builder root is too far"), "amount", amount)
-			amount = 1024
-		}
-
-		opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(5 * time.Second)}
-		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, newBlockHeaderHash, amount, event.PeerId, opts...)
-		if err != nil {
-			if s.ignoreFetchBlocksErrOnTipEvent(err) {
-				s.logger.Debug(
-					syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
-					"err", err,
-					"peerId", event.PeerId,
-					"lastBlockNum", newBlockHeaderNum,
-				)
-
-				return nil
-			}
-
-			return err
-		}
-
-		blockChain = blocks.Data
-	}
-
+func (s *Sync) applyNewBlockChainOnTip(ctx context.Context, blockChain []*types.Block, ccb *CanonicalChainBuilder, source EventSource, peerId *p2p.PeerId) error {
 	if err := s.blocksVerifier(blockChain); err != nil {
 		s.logger.Debug(
 			syncLogPrefix("applyNewBlockOnTip: invalid new block event from peer, penalizing and ignoring"),
 			"err", err,
 		)
 
-		if err = s.p2pService.Penalize(ctx, event.PeerId); err != nil {
+		if err = s.p2pService.Penalize(ctx, peerId); err != nil {
 			s.logger.Debug(syncLogPrefix("applyNewBlockOnTip: issue with penalizing peer"), "err", err)
 		}
 
@@ -334,6 +291,21 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	headerChain := make([]*types.Header, len(blockChain))
 	for i, block := range blockChain {
 		headerChain[i] = block.HeaderNoCopy()
+	}
+
+	// wait until heimdall is synchronized before proceeding
+	err := s.heimdallSync.WaitUntilHeimdallIsSynced(ctx, heimdallSyncRetryIntervalOnTip)
+	if err != nil {
+		return err
+	}
+	// make sure spans are synchronized
+	// math.MaxUint64 is used because post VeBlop/Rio hard fork
+	// spans could be overlapping, and the blocknum for the tip
+	// of the headerChain might still be in the range of the last span
+	// in the store, but we may still be processing a new span in the meantime
+	err = s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64)
+	if err != nil {
+		return err
 	}
 
 	oldTip := ccb.Tip()
@@ -382,24 +354,25 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	newBlocksStartIdx := firstNewConnectedHeader.Number.Uint64() - blockChain[0].NumberU64()
 	newBlocksEndIdx := newBlocksStartIdx + uint64(len(newConnectedHeaders))
 	newConnectedBlocks := blockChain[newBlocksStartIdx:newBlocksEndIdx]
+	newBlock := newConnectedBlocks[len(newConnectedBlocks)-1]
 	if len(newConnectedBlocks) > 1 {
 		s.logger.Info(
 			syncLogPrefix("inserting multiple connected blocks"),
 			"amount", len(newConnectedBlocks),
 			"start", newConnectedBlocks[0].NumberU64(),
-			"end", newConnectedBlocks[len(newConnectedBlocks)-1].NumberU64(),
+			"end", newBlock.NumberU64(),
 		)
 	}
 	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
 		return err
 	}
 
-	if event.Source == EventSourceBlockProducer {
-		go s.publishNewBlock(ctx, event.NewBlock)
-		go s.p2pService.PublishNewBlockHashes(event.NewBlock)
+	if source == EventSourceBlockProducer {
+		go s.publishNewBlock(ctx, newBlock)
+		go s.p2pService.PublishNewBlockHashes(newBlock)
 	}
 
-	if event.Source == EventSourceP2PNewBlock {
+	if source == EventSourceP2PNewBlock {
 		// https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
 		// devp2p spec: when a NewBlock announcement message is received from a peer, the client first verifies the
 		// basic header validity of the block, checking whether the proof-of-work value is valid (replace PoW
@@ -407,7 +380,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		// It then sends the block to a small fraction of connected peers (usually the square root of the total
 		// number of peers) using the NewBlock message.
 		// note, below is non-blocking
-		go s.publishNewBlock(ctx, event.NewBlock)
+		go s.publishNewBlock(ctx, newBlock)
 	}
 
 	if newTip == oldTip {
@@ -421,13 +394,13 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 
 	if err := s.commitExecution(ctx, newTip, ccb.Root()); err != nil {
 		if errors.Is(err, ErrForkChoiceUpdateBadBlock) {
-			return s.handleBadBlockErr(ctx, ccb, event, firstNewConnectedHeader, oldTip, err)
+			return s.handleBadBlockErr(ctx, ccb, newBlock.Hash(), source, peerId, firstNewConnectedHeader, oldTip, err)
 		}
 
 		return err
 	}
 
-	if event.Source == EventSourceP2PNewBlock {
+	if source == EventSourceP2PNewBlock {
 		// https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
 		// devp2p spec: After the header validity check, the client imports the block into its local chain by executing
 		// all transactions contained in the block, computing the block's 'post state'. The block's state-root hash
@@ -437,13 +410,193 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		// Including hashes that the sending node later refuses to honour with a proceeding GetBlockHeaders
 		// message is considered bad form, and may reduce the reputation of the sending node.
 		// note, below is non-blocking
-		s.p2pService.PublishNewBlockHashes(event.NewBlock)
+		s.p2pService.PublishNewBlockHashes(newBlock)
+	}
+	return nil
+}
+
+// apply some checks on new block header. (i.e. bad block , or too old block, or already contained in ccb)
+// returns true if the block should be further processed, false otherwise.
+func (s *Sync) checkNewBlockHeader(ctx context.Context, newBlockHeader *types.Header, ccb *CanonicalChainBuilder, eventSource EventSource, peerId *p2p.PeerId) bool {
+	newBlockHeaderNum := newBlockHeader.Number.Uint64()
+	newBlockHeaderHash := newBlockHeader.Hash()
+	rootNum := ccb.Root().Number.Uint64()
+	if newBlockHeaderNum <= rootNum || ccb.ContainsHash(newBlockHeaderHash) {
+		return false
+	}
+
+	if s.badBlocks.Contains(newBlockHeaderHash) {
+		s.logger.Warn(syncLogPrefix("bad block received from peer"),
+			"blockHash", newBlockHeaderHash,
+			"blockNum", newBlockHeaderNum,
+			"peerId", peerId,
+		)
+		s.maybePenalizePeerOnBadBlockEvent(ctx, eventSource, peerId)
+		return false
+	}
+
+	if s.badBlocks.Contains(newBlockHeader.ParentHash) {
+		s.logger.Warn(syncLogPrefix("block with bad parent received from peer"),
+			"blockHash", newBlockHeaderHash,
+			"blockNum", newBlockHeaderNum,
+			"parentHash", newBlockHeader.ParentHash,
+			"peerId", peerId,
+		)
+		s.badBlocks.Add(newBlockHeaderHash, struct{}{})
+		s.maybePenalizePeerOnBadBlockEvent(ctx, eventSource, peerId)
+		return false
+	}
+	return true
+}
+
+func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb *CanonicalChainBuilder) error {
+	newBlockHeader := event.NewBlock.HeaderNoCopy()
+	newBlockHeaderHash := newBlockHeader.Hash()
+	newBlockHeaderNum := newBlockHeader.Number.Uint64()
+	rootNum := ccb.Root().Number.Uint64()
+	if ok := s.checkNewBlockHeader(ctx, newBlockHeader, ccb, event.Source, event.PeerId); !ok {
+		return nil
+	}
+	s.logger.Debug(
+		syncLogPrefix("applying new block event"),
+		"blockNum", newBlockHeaderNum,
+		"blockHash", newBlockHeaderHash,
+		"parentBlockHash", newBlockHeader.ParentHash,
+		"source", event.Source,
+		"peerId", event.PeerId,
+	)
+
+	var blockChain []*types.Block
+	if ccb.ContainsHash(newBlockHeader.ParentHash) {
+		blockChain = []*types.Block{event.NewBlock}
+	} else {
+		if s.blockRequestsCache.Contains(newBlockHeaderHash) { // we've already seen this download request before
+			s.logger.Debug(syncLogPrefix("ignoring duplicate backward download"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
+				"source", event.Source,
+				"parentBlockHash", newBlockHeader.ParentHash)
+			return nil
+		}
+		// we need to do a backward download. so schedule the download in a goroutine and have it  push an `EventNewBlockBatch` which can be processed later,
+		// so that we don't block the event processing loop
+		s.logger.Debug(
+			syncLogPrefix("block parent hash not in ccb, fetching blocks backwards to root"),
+			"rootNum", rootNum,
+			"blockNum", newBlockHeaderNum,
+			"blockHash", newBlockHeaderHash,
+		)
+		go func() {
+			downloadedBlocks, err := s.backwardDownloadBlocksFromHash(ctx, event, ccb)
+			if err != nil {
+				s.logger.Error(syncLogPrefix("failed to backward download blocks"), "blockNum", newBlockHeaderNum, "blockHash", newBlockHeaderHash,
+					"source", event.Source,
+					"parentBlockHash", newBlockHeader.ParentHash, "err", err)
+			} else if len(downloadedBlocks) > 0 { // push block batch event if there is no error
+				s.logger.Debug(syncLogPrefix("backward download completed, pushing new block batch event"), "from", downloadedBlocks[0].NumberU64(),
+					"to", downloadedBlocks[len(downloadedBlocks)-1].NumberU64(), "blockHash", newBlockHeaderHash, "peerId", event.PeerId)
+				s.tipEvents.events.PushEvent(
+					Event{Type: EventTypeNewBlockBatch,
+						newBlockBatch: EventNewBlockBatch{NewBlocks: downloadedBlocks, PeerId: event.PeerId, Source: event.Source},
+					})
+			}
+		}()
+		return nil
+	}
+	return s.applyNewBlockChainOnTip(ctx, blockChain, ccb, event.Source, event.PeerId)
+}
+
+func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockBatch, ccb *CanonicalChainBuilder) error {
+	numBlocks := len(event.NewBlocks)
+	if numBlocks == 0 {
+		s.logger.Debug(syncLogPrefix("applying new empty block batch event"))
+		return nil
+	} else {
+		s.logger.Debug(syncLogPrefix("applying new block batch event"), "startBlock", event.NewBlocks[0].Number().Uint64(), "endBlock", event.NewBlocks[numBlocks-1].Number().Uint64())
+	}
+	blockChain := event.NewBlocks
+	newBlockHeader := blockChain[len(blockChain)-1].HeaderNoCopy()
+	if ok := s.checkNewBlockHeader(ctx, newBlockHeader, ccb, event.Source, event.PeerId); !ok {
+		return nil
+	}
+	err := s.applyNewBlockChainOnTip(ctx, blockChain, ccb, event.Source, event.PeerId)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
+	go func() { // asynchronously download blocks and in the end place the blocks batch in the event queue
+		blockchain, err := s.downloadBlocksFromHashes(ctx, event, ccb)
+		if err != nil {
+			s.logger.Error(syncLogPrefix("couldn't fetch blocks from block hashes"), "err", err)
+		}
+		if len(blockchain) == 0 { // no blocks downloaded, we can skip pushing an event
+			return
+		}
+		for _, block := range blockchain {
+			newBlockEvent := EventNewBlock{
+				NewBlock: block,
+				PeerId:   event.PeerId,
+				Source:   EventSourceP2PNewBlockHashes,
+			}
+			s.tipEvents.events.PushEvent(Event{Type: EventTypeNewBlock, newBlock: newBlockEvent})
+		}
+	}()
+	return nil
+}
+
+func (s *Sync) backwardDownloadBlocksFromHash(ctx context.Context, event EventNewBlock, ccb *CanonicalChainBuilder) ([]*types.Block, error) {
+	newBlockHeader := event.NewBlock.HeaderNoCopy()
+	newBlockHeaderNum := newBlockHeader.Number.Uint64()
+	newBlockHeaderHash := newBlockHeader.Hash()
+	rootNum := ccb.Root().Number.Uint64()
+	amount := newBlockHeaderNum - rootNum + 1
+	var blockChain = make([]*types.Block, 0, amount) // the return value
+	s.blockRequestsCache.Add(newBlockHeaderHash, struct{}{})
+
+	opts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(p2pResponseTimeout)}
+
+	// This used to be limited to 1024 blocks (eth.MaxHeadersServe) however for the heimdall v1-v2 migration
+	// this limit on backward downloading does not holde so it has been adjusted to recieve several pages
+	// of 1024 blocks until the gap is filled.  For this one off case the gap was ~15,000 blocks.  If this
+	// ever grows substantially this will need to be revisited:
+	// 1. If we need to page we should requests from may peers
+	// 2. We need to do something about memory at the moment this is unconstrained
+
+	fetchHeaderHash := newBlockHeaderHash
+	for amount > 0 {
+		fetchAmount := amount
+
+		if fetchAmount > eth.MaxHeadersServe {
+			fetchAmount = eth.MaxHeadersServe
+		}
+
+		blocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, fetchHeaderHash, fetchAmount, event.PeerId, opts...)
+		if err != nil || len(blocks.Data) == 0 {
+			s.blockRequestsCache.Remove(newBlockHeaderHash)
+			if s.ignoreFetchBlocksErrOnTipEvent(err) {
+				s.logger.Debug(
+					syncLogPrefix("backwardDownloadBlocksFromHash: failed to fetch complete blocks, ignoring event"),
+					"err", err,
+					"peerId", event.PeerId,
+					"lastBlockNum", newBlockHeaderNum,
+				)
+
+				return nil, nil
+			}
+			return nil, err
+		}
+
+		blockChain = append(blocks.Data, blockChain...)
+		fetchHeaderHash = blocks.Data[0].ParentHash()
+		amount -= uint64(len(blocks.Data))
+	}
+	return blockChain, nil
+}
+
+func (s *Sync) downloadBlocksFromHashes(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) ([]*types.Block, error) {
+	blockChain := make([]*types.Block, 0, len(event.NewBlockHashes))
 	for _, hashOrNum := range event.NewBlockHashes {
 		if (hashOrNum.Number <= ccb.Root().Number.Uint64()) || ccb.ContainsHash(hashOrNum.Hash) {
 			continue
@@ -457,21 +610,30 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlock
 				"blockNum", hashOrNum.Number,
 				"peerId", event.PeerId,
 			)
-			return nil
+			continue
 		}
 
+		if s.blockHashesRequestsCache.Contains(hashOrNum.Hash) { // we've already seen this request before, can skip it
+			s.logger.Debug(syncLogPrefix("ignoring duplicate block download from hash"), "blockNum", hashOrNum.Number, "blockHash", hashOrNum.Hash)
+			continue
+		}
+
+		s.blockHashesRequestsCache.Add(hashOrNum.Hash, struct{}{})
+
 		s.logger.Debug(
-			syncLogPrefix("applying new block hash event"),
+			syncLogPrefix("downloading block from block hash event"),
 			"blockNum", hashOrNum.Number,
 			"blockHash", hashOrNum.Hash,
 		)
 
-		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
+		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(p2pResponseTimeout)}
+		// newBlocks should be a singleton
 		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, event.PeerId, fetchOpts...)
 		if err != nil {
+			s.blockHashesRequestsCache.Remove(hashOrNum.Hash)
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
-					syncLogPrefix("applyNewBlockHashesOnTip: failed to fetch complete blocks, ignoring event"),
+					syncLogPrefix("backwardDownloadBlocksFromHashes: failed to fetch complete blocks, ignoring event"),
 					"err", err,
 					"peerId", event.PeerId,
 					"lastBlockNum", hashOrNum.Number,
@@ -479,22 +641,11 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlock
 
 				continue
 			}
-
-			return err
+			return nil, err
 		}
-
-		newBlockEvent := EventNewBlock{
-			NewBlock: newBlocks.Data[0],
-			PeerId:   event.PeerId,
-			Source:   EventSourceP2PNewBlockHashes,
-		}
-
-		err = s.applyNewBlockOnTip(ctx, newBlockEvent, ccb)
-		if err != nil {
-			return err
-		}
+		blockChain = append(blockChain, newBlocks.Data[0]) // there should be a single block downloaded
 	}
-	return nil
+	return blockChain, nil
 }
 
 func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
@@ -597,7 +748,9 @@ func (s *Sync) handleBridgeOnBlocksInsertAheadOfTip(ctx context.Context, tipNum,
 func (s *Sync) handleBadBlockErr(
 	ctx context.Context,
 	ccb *CanonicalChainBuilder,
-	event EventNewBlock,
+	newBlockHash common.Hash,
+	eventSource EventSource,
+	peerId *p2p.PeerId,
 	firstNewConnectedHeader *types.Header,
 	oldTip *types.Header,
 	badBlockErr error,
@@ -608,7 +761,7 @@ func (s *Sync) handleBadBlockErr(
 	oldTipHash := oldTip.Hash()
 	s.logger.Warn(
 		syncLogPrefix("handling bad block after execution"),
-		"peerId", event.PeerId,
+		"peerId", peerId,
 		"badTipNum", badTip.Number.Uint64(),
 		"badTipHash", badTipHash,
 		"oldTipNum", oldTipNum,
@@ -619,8 +772,8 @@ func (s *Sync) handleBadBlockErr(
 	)
 
 	// 1. Mark block as bad and penalize peer
-	s.badBlocks.Add(event.NewBlock.Hash(), struct{}{})
-	s.maybePenalizePeerOnBadBlockEvent(ctx, event)
+	s.badBlocks.Add(newBlockHash, struct{}{})
+	s.maybePenalizePeerOnBadBlockEvent(ctx, eventSource, peerId)
 
 	// 2. Find unwind point
 	lca, ok := ccb.LowestCommonAncestor(oldTipHash, badTip.Hash())
@@ -647,16 +800,16 @@ func (s *Sync) handleBadBlockErr(
 	return s.reorganiseBridge(ctx, ccb, lca)
 }
 
-func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, event EventNewBlock) {
-	if event.Source == EventSourceP2PNewBlockHashes {
+func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, eventSource EventSource, peerId *p2p.PeerId) {
+	if eventSource == EventSourceP2PNewBlockHashes {
 		// note: we do not penalize peer for bad blocks on new block hash events since they have
 		// not necessarily been executed by the peer but just propagated as per the devp2p spec
 		return
 	}
 
-	s.logger.Debug(syncLogPrefix("penalizing peer for bad block"), "peerId", event.PeerId)
-	if err := s.p2pService.Penalize(ctx, event.PeerId); err != nil {
-		s.logger.Debug(syncLogPrefix("issue with penalizing peer for bad block"), "peerId", event.PeerId, "err", err)
+	s.logger.Debug(syncLogPrefix("penalizing peer for bad block"), "peerId", peerId)
+	if err := s.p2pService.Penalize(ctx, peerId); err != nil {
+		s.logger.Debug(syncLogPrefix("issue with penalizing peer for bad block"), "peerId", peerId, "err", err)
 	}
 }
 
@@ -705,6 +858,21 @@ func (s *Sync) Run(ctx context.Context) error {
 
 	s.logger.Info(syncLogPrefix("running sync component"))
 
+	// we have to check if the heimdall we are connected to is synchonised with the chain
+	// to prevent getting empty list of checkpoints/milestones during the sync
+	catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
+	if err != nil {
+		return err
+	}
+
+	if catchingUp {
+		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
+		err = s.heimdallSync.WaitUntilHeimdallIsSynced(ctx, heimdallSyncRetryIntervalOnStartup)
+		if err != nil {
+			return err
+		}
+	}
+
 	result, err := s.syncToTip(ctx)
 	if err != nil {
 		return err
@@ -728,7 +896,7 @@ func (s *Sync) Run(ctx context.Context) error {
 	defer inactivityTicker.Stop()
 	for {
 		select {
-		case event := <-s.events:
+		case event := <-s.tipEvents.Events():
 			if s.config.PolygonPosSingleSlotFinality {
 				block, err := s.execution.CurrentHeader(ctx)
 				if err != nil {
@@ -748,6 +916,10 @@ func (s *Sync) Run(ctx context.Context) error {
 				}
 			case EventTypeNewBlock:
 				if err = s.applyNewBlockOnTip(ctx, event.AsNewBlock(), ccBuilder); err != nil {
+					return err
+				}
+			case EventTypeNewBlockBatch:
+				if err = s.applyNewBlockBatchOnTip(ctx, event.AsNewBlockBatch(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlockHashes:
@@ -833,6 +1005,14 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 	finalisedTip := syncToTipResult{
 		latestTip: latestTipOnStart,
 	}
+
+	// we need to synchronize spans because syncing from checkpoints and milestones below has a dependency on spans
+	// during pruning, and if the span store is not up to date then this can result in an error
+	if err := s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64); err != nil {
+		return syncToTipResult{}, err
+	}
+
+	s.logger.Info(syncLogPrefix("spans synchronized"))
 
 	startTime := time.Now()
 	result, ok, err := s.syncToTipUsingCheckpoints(ctx, finalisedTip.latestTip)

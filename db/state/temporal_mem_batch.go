@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/changeset"
 )
 
 type dataWithPrevStep struct {
@@ -48,8 +49,8 @@ type TemporalMemBatch struct {
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
 
-	currentChangesAccumulator *StateChangeSet
-	pastChangesAccumulator    map[string]*StateChangeSet
+	currentChangesAccumulator *changeset.StateChangeSet
+	pastChangesAccumulator    map[string]*changeset.StateChangeSet
 }
 
 func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
@@ -158,7 +159,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
 }
 
-func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *StateChangeSet) {
+func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
 		if sd.currentChangesAccumulator == nil {
@@ -168,9 +169,9 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *StateChangeSet) {
 		}
 	}
 }
-func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet) {
+func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	if sd.pastChangesAccumulator == nil {
-		sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+		sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	}
 	key := make([]byte, 40)
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
@@ -190,7 +191,7 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 			changeset.Diffs[kv.CommitmentDomain].GetDiffSet(),
 		}, true, nil
 	}
-	return ReadDiffSet(tx, blockNumber, blockHash)
+	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
 
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
@@ -215,7 +216,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
-	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
@@ -223,10 +224,10 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
-	for key, changeset := range sd.pastChangesAccumulator {
+	for key, changeSet := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
-		if err := WriteDiffSet(tx, blockNum, blockHash, changeset); err != nil {
+		if err := changeset.WriteDiffSet(tx, blockNum, blockHash, changeSet); err != nil {
 			return err
 		}
 	}

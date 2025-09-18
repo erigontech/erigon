@@ -10,10 +10,9 @@ REFERENCE_HOST="$3"
 
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
-   #disbale temporaryy to be investigates
-   debug_traceBlockByNumber/test_30.json
-
+   debug_traceBlockByNumber/test_30.json # huge JSON response => slow diff
    debug_traceCall/test_22.json
+   debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
    debug_traceCallMany
    erigon_
    eth_callBundle
@@ -29,4 +28,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.80.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.80.3 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message"
