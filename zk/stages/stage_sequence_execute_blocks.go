@@ -168,7 +168,7 @@ func finaliseBlock(
 	}
 
 	var withdrawals []*types.Withdrawal
-	if batchContext.cfg.chainConfig.IsShanghai(newHeader.Number.Uint64()) {
+	if batchContext.cfg.chainConfig.IsShanghai(newHeader.Time) {
 		withdrawals = []*types.Withdrawal{}
 	}
 

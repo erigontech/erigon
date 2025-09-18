@@ -63,7 +63,7 @@ func (db ErigonDb) WriteHeader(
 	h.Extra = make([]byte, 0)
 	h.Time = ts
 
-	if chainConfig.IsShanghai(blockNo.Uint64()) {
+	if chainConfig.IsShanghai(ts) {
 		h.WithdrawalsHash = &ethTypes.EmptyRootHash
 	}
 
