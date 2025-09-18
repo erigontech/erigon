@@ -307,6 +307,7 @@ func (s *simulator) sanitizeCall(
 	args *ethapi.CallArgs,
 	intraBlockState *state.IntraBlockState,
 	blockContext *evmtypes.BlockContext,
+	baseFee *big.Int,
 	gasUsed uint64,
 	globalGasCap uint64,
 ) error {
@@ -344,7 +345,7 @@ func (s *simulator) sanitizeCall(
 			args.Gas = (*hexutil.Uint64)(&globalGasCap)
 		}
 	}
-	if blockContext.BaseFee == nil {
+	if baseFee == nil {
 		// If there's no base fee, then it must be a non-1559 execution
 		if args.GasPrice == nil {
 			args.GasPrice = new(hexutil.Big)
@@ -459,7 +460,7 @@ func (s *simulator) simulateCall(
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.canonicalReader, s.chainConfig,
 		blockOverrides, blockHashOverrides)
 
-	err := s.sanitizeCall(call, intraBlockState, &blockCtx, *cumulativeGasUsed, s.gasCap)
+	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasCap)
 	if err != nil {
 		return nil, nil, nil, err
 	}
