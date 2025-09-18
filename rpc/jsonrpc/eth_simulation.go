@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/execution/consensus/misc"
 	"math"
 	"math/big"
 	"time"
@@ -33,9 +31,11 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -207,10 +207,10 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		blockNumber := new(big.Int).SetUint64(block.BlockOverrides.BlockNumber.Uint64())
 		diff := new(big.Int).Sub(blockNumber, prevNumber)
 		if diff.Cmp(common.Big0) <= 0 {
-			return nil, fmt.Errorf("block numbers must be in order: %d <= %d", blockNumber, prevNumber)
+			return nil, invalidBlockNumberError(fmt.Sprintf("block numbers must be in order: %d <= %d", blockNumber, prevNumber))
 		}
 		if total := new(big.Int).Sub(blockNumber, s.base.Number); total.Cmp(big.NewInt(maxSimulateBlocks)) > 0 {
-			return nil, fmt.Errorf("too many blocks: %d > %d", total, maxSimulateBlocks)
+			return nil, clientLimitExceededError(fmt.Sprintf("too many blocks: %d > %d", total, maxSimulateBlocks))
 		}
 		if diff.Cmp(big.NewInt(1)) > 0 {
 			// Fill the gap with empty blocks.
@@ -238,7 +238,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		} else {
 			timestamp = block.BlockOverrides.Timestamp.Uint64()
 			if timestamp <= prevTimestamp {
-				return nil, fmt.Errorf("block timestamps must be in order: %d <= %d", timestamp, prevTimestamp)
+				return nil, invalidBlockTimestampError(fmt.Sprintf("block timestamps must be in order: %d <= %d", timestamp, prevTimestamp))
 			}
 		}
 		prevTimestamp = timestamp
@@ -324,7 +324,7 @@ func (s *simulator) sanitizeCall(
 		args.Gas = (*hexutil.Uint64)(&remaining)
 	}
 	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
-		return fmt.Errorf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit)
+		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
 	}
 	if args.ChainID == nil {
 		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID)
@@ -556,42 +556,50 @@ func repairLogs(calls []CallResult, hash common.Hash) {
 	}
 }
 
-type invalidTxError struct {
-	Message string `json:"message"`
-	Code    int    `json:"code"`
-}
-
-func (e *invalidTxError) Error() string  { return e.Message }
-func (e *invalidTxError) ErrorCode() int { return e.Code }
-
-func txValidationError(err error) *invalidTxError {
+func txValidationError(err error) error {
 	if err == nil {
 		return nil
 	}
 	switch {
 	case errors.Is(err, core.ErrNonceTooHigh):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeNonceTooHigh}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeNonceTooHigh}
 	case errors.Is(err, core.ErrNonceTooLow):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeNonceTooLow}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeNonceTooLow}
 	case errors.Is(err, core.ErrSenderNoEOA):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeSenderIsNotEOA}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeSenderIsNotEOA}
 	case errors.Is(err, core.ErrFeeCapVeryHigh):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
 	case errors.Is(err, core.ErrTipVeryHigh):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
 	case errors.Is(err, core.ErrTipAboveFeeCap):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
 	case errors.Is(err, core.ErrFeeCapTooLow):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
 	case errors.Is(err, core.ErrInsufficientFunds):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeInsufficientFunds}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInsufficientFunds}
 	case errors.Is(err, core.ErrIntrinsicGas):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeIntrinsicGas}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeIntrinsicGas}
 	case errors.Is(err, core.ErrMaxInitCodeSizeExceeded):
-		return &invalidTxError{Message: err.Error(), Code: rpc.ErrCodeMaxInitCodeSizeExceeded}
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeMaxInitCodeSizeExceeded}
 	}
-	return &invalidTxError{
+	return &rpc.CustomError{
 		Message: err.Error(),
 		Code:    rpc.ErrCodeInternalError,
 	}
+}
+
+func invalidBlockNumberError(message string) error {
+	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeBlockNumberInvalid}
+}
+
+func invalidBlockTimestampError(message string) error {
+	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeBlockTimestampInvalid}
+}
+
+func blockGasLimitReachedError(message string) error {
+	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeBlockGasLimitReached}
+}
+
+func clientLimitExceededError(message string) error {
+	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeClientLimitExceeded}
 }

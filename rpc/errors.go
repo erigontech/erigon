@@ -36,8 +36,12 @@ const (
 	ErrCodeNonceTooLow             = -38010
 	ErrCodeIntrinsicGas            = -38013
 	ErrCodeInsufficientFunds       = -38014
+	ErrCodeBlockGasLimitReached    = -38015
+	ErrCodeBlockNumberInvalid      = -38020
+	ErrCodeBlockTimestampInvalid   = -38021
 	ErrCodeSenderIsNotEOA          = -38024
 	ErrCodeMaxInitCodeSizeExceeded = -38025
+	ErrCodeClientLimitExceeded     = -38026
 	ErrCodeInternalError           = -32603
 	ErrCodeInvalidParams           = -32602
 	ErrCodeReverted                = -32000
