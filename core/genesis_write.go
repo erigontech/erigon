@@ -107,6 +107,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrides *types.Gene
 			if overrides.OverridePragueTime != nil {
 				config.PragueTime = overrides.OverridePragueTime
 			}
+			if overrides.OverrideCancunTime != nil {
+				config.CancunTime = overrides.OverrideCancunTime
+			}
 			if overrides.OverrideNormalcyBlock != nil {
 				config.NormalcyBlock = overrides.OverrideNormalcyBlock
 			}
