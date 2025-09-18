@@ -37,6 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
@@ -48,7 +49,6 @@ import (
 
 	"github.com/anacrolix/chansync"
 	g "github.com/anacrolix/generics"
-	// Make Go expvars available to Prometheus for diagnostics.
 	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent"
@@ -57,6 +57,7 @@ import (
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/anacrolix/torrent/webseed"
 
+	"github.com/erigontech/erigon-db/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -693,7 +694,7 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 		_, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
 		_, segmentPeers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 
-		diaglib.Send(diaglib.SegmentDownloadStatistics{
+		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
 			Name:            torrentName,
 			TotalBytes:      uint64(tLen),
 			DownloadedBytes: uint64(bytesCompleted),
@@ -810,7 +811,9 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 func (d *Downloader) VerifyData(
 	ctx context.Context,
 	whiteList []string,
+	failFast bool,
 ) error {
+
 	var totalBytes int64
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
@@ -838,6 +841,46 @@ func (d *Downloader) VerifyData(
 		verifiedBytes  atomic.Int64
 		completedFiles atomic.Uint64
 	)
+
+	if failFast {
+		var completedBytes atomic.Uint64
+		g, ctx := errgroup.WithContext(ctx)
+
+		{
+			logEvery := time.NewTicker(10 * time.Second)
+			defer logEvery.Stop()
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-logEvery.C:
+						d.logger.Info("[snapshots] Verify",
+							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
+							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
+							"sz_gb", downloadercfg.DefaultPieceSize*completedBytes.Load()/1024/1024/1024,
+						)
+					}
+				}
+			}()
+		}
+
+		// torrent lib internally limiting amount of hashers per file
+		// set limit here just to make load predictable, not to control Disk/CPU consumption
+		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+		for _, t := range toVerify {
+			t := t
+			g.Go(func() error {
+				defer completedFiles.Add(1)
+				return VerifyFileFailFast(ctx, t, d.SnapDir(), &completedBytes)
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)
@@ -1334,12 +1377,11 @@ func (d *Downloader) logStats() {
 	// This is set externally. Everything else here is only modified by the caller.
 	startTime := d.startTime
 	d.lock.RUnlock()
-	stats := d.stats
-	bytesDone := stats.BytesCompleted
-	percentDone := float32(100) * (float32(bytesDone) / float32(stats.BytesTotal))
-	remainingBytes := stats.BytesTotal - bytesDone
+	bytesDone := d.stats.BytesCompleted
+	percentDone := float32(100) * (float32(bytesDone) / float32(d.stats.BytesTotal))
+	remainingBytes := d.stats.BytesTotal - bytesDone
 
-	haveAllMetadata := stats.MetadataReady == stats.NumTorrents
+	haveAllMetadata := d.stats.MetadataReady == d.stats.NumTorrents
 
 	var logCtx []any
 
@@ -1347,6 +1389,7 @@ func (d *Downloader) logStats() {
 		logCtx = append(logCtx, ctx...)
 	}
 
+	stats := &d.stats
 	if stats.PeersUnique == 0 {
 		ips := d.TorrentClient().BadPeerIPs()
 		if len(ips) > 0 {
@@ -1358,7 +1401,7 @@ func (d *Downloader) logStats() {
 	case Syncing:
 		// TODO: Include what we're syncing.
 		addCtx(
-			"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
+			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
 			"files", fmt.Sprintf(
 				"%d/%d",
 				// For now it's 1:1 files:torrents.
@@ -1378,11 +1421,11 @@ func (d *Downloader) logStats() {
 				}
 			}(),
 			// TODO: Reset on each stage.
-			"time-left", calculateTime(remainingBytes, stats.CompletionRate),
+			"time-left", calculateTime(remainingBytes, d.stats.CompletionRate),
 			"total-time", time.Since(startTime).Truncate(time.Second).String(),
-			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(stats.ClientWebseedBytesDownloadRate)),
-			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(stats.PeerConnBytesDownloadRate)),
-			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.ClientWebseedBytesDownloadRate)),
+			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(d.stats.PeerConnBytesDownloadRate)),
+			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.HashRate)),
 		)
 	}
 
@@ -1390,24 +1433,24 @@ func (d *Downloader) logStats() {
 	dbg.ReadMemStats(&m)
 
 	addCtx(
-		"peers", stats.PeersUnique,
-		"conns", stats.ConnectionsTotal,
-		"upload", fmt.Sprintf("%s/s", common.ByteCount(stats.UploadRate)),
+		"peers", d.stats.PeersUnique,
+		"conns", d.stats.ConnectionsTotal,
+		"upload", fmt.Sprintf("%s/s", common.ByteCount(d.stats.UploadRate)),
 		"alloc", common.ByteCount(m.Alloc),
 		"sys", common.ByteCount(m.Sys),
 	)
 
 	log.Info(fmt.Sprintf("[%s] %s", cmp.Or(d.logPrefix, "snapshots"), state), logCtx...)
 
-	diaglib.Send(diaglib.SnapshotDownloadStatistics{
+	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 		Downloaded:           bytesDone,
-		Total:                stats.BytesTotal,
+		Total:                d.stats.BytesTotal,
 		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
-		DownloadRate:         stats.DownloadRate,
-		UploadRate:           stats.UploadRate,
-		Peers:                stats.PeersUnique,
-		Files:                int32(stats.FilesTotal),
-		Connections:          stats.ConnectionsTotal,
+		DownloadRate:         d.stats.DownloadRate,
+		UploadRate:           d.stats.UploadRate,
+		Peers:                d.stats.PeersUnique,
+		Files:                int32(d.stats.FilesTotal),
+		Connections:          d.stats.ConnectionsTotal,
 		Alloc:                m.Alloc,
 		Sys:                  m.Sys,
 		DownloadFinished:     stats.AllTorrentsComplete(),
@@ -1461,16 +1504,16 @@ func (s *Downloader) Delete(name string) error {
 	defer s.lock.Unlock()
 	// This needs to occur first to prevent it being added again, and also even if it isn't actually
 	// in the Downloader right now.
-	err := s.torrentFS.Delete(name)
+	err = s.torrentFS.Delete(name)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
+		if os.IsNotExist(err) {
 			err = nil
+		} else {
+			s.logger.Log(log.LvlError, "error removing snapshot file torrent", "name", name, "err", err)
 		}
-		// Return the error, but try to remove everything from the client anyway.
 	}
 	t, ok := s.torrentsByName[name]
 	if !ok {
-		// Return torrent file deletion error.
 		return err
 	}
 	// Stop seeding. Erigon will remove data-file and .torrent by self

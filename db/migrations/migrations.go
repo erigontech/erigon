@@ -51,6 +51,7 @@ import (
 var migrations = map[kv.Label][]Migration{
 	dbcfg.ChainDB: {
 		dbSchemaVersion5,
+		ClearBorTables,
 		ResetStageTxnLookup,
 	},
 	dbcfg.TxPoolDB: {},

@@ -29,6 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/version"
+
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -36,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -463,7 +466,19 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 		if s.indexes[i] != nil {
 			continue
 		}
-		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
+		fPathMask, err := version.ReplaceVersionWithMask(filepath.Join(dir, fileName))
+		if err != nil {
+			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
+		}
+		fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+		if err != nil {
+			return fmt.Errorf("%w, fileName: %s", err, fileName)
+		}
+		if !ok {
+			_, fName := filepath.Split(fPath)
+			return fmt.Errorf("[open index] find files by pattern err %w fname %s", os.ErrNotExist, fName)
+		}
+		index, err := recsplit.OpenIndex(fPath)
 
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
@@ -1651,7 +1666,7 @@ func removeOldFiles(toDel []string) {
 		withoutExt := f[:len(f)-len(ext)]
 		_ = dir.RemoveFile(withoutExt + ".idx")
 		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
+		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")

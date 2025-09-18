@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -87,7 +88,7 @@ func NewRemoteReader(client remoteproto.HeimdallBackendClient) *RemoteReader {
 }
 
 func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error) {
-	reply, err := r.client.Producers(ctx, &remoteproto.BorProducersRequest{BlockNum: blockNum})
+	reply, err := r.client.Producers(ctx, &remote.BorProducersRequest{BlockNum: blockNum})
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +132,7 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func decodeValidator(v *remoteproto.Validator) *Validator {
+func decodeValidator(v *remote.Validator) *Validator {
 	return &Validator{
 		ID:               v.Id,
 		Address:          gointerfaces.ConvertH160toAddress(v.Address),

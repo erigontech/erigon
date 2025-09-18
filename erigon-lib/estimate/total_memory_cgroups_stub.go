@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+<<<<<<<< HEAD:erigon-lib/estimate/total_memory_cgroups_stub.go
 //go:build !linux
 
 package estimate
@@ -24,4 +25,14 @@ import (
 
 func cgroupsMemoryLimit() (uint64, error) {
 	return 0, errors.New("cgroups not supported in this environment")
+========
+package cmd
+
+import (
+	"github.com/urfave/cli/v2"
+)
+
+func RegisterCmds(app *cli.App) {
+	registerValidatorRegCheckCmd(app)
+>>>>>>>> release/3.1:txnprovider/shutter/cmd/register.go
 }

@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -33,7 +34,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon-lib/snaptype"
 
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -128,13 +129,13 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs
 	return &ii, nil
 }
 
-func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep kv.Step) string {
+func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep uint64) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.Version.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
 }
-func (ii *InvertedIndex) efNewFilePath(fromStep, toStep kv.Step) string {
+func (ii *InvertedIndex) efNewFilePath(fromStep, toStep uint64) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
@@ -149,6 +150,19 @@ func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string
 }
 func (ii *InvertedIndex) efFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep))
+}
+
+var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
+
+func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
+	accessor, err := recsplit.OpenIndex(fPath)
+	if err != nil {
+		return nil, err
+	}
+	if invIdxExistenceForceInMem {
+		accessor.ForceExistenceFilterInRAM()
+	}
+	return accessor, nil
 }
 
 var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
@@ -239,7 +253,7 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
+	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
 		fPath, _, _, err := version.FindFilesWithVersionsByPattern(ii.efAccessorFilePathMask(fromStep, toStep))
 		if err != nil {
 			panic(err)
@@ -287,6 +301,86 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 			return ii.buildEfAccessor(ctx, item, ps)
 		})
 	}
+}
+
+func (ii *InvertedIndex) openDirtyFiles() error {
+	var invalidFileItems []*FilesItem
+	invalidFileItemsLock := sync.Mutex{}
+	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			item := item
+			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+			if item.decompressor == nil {
+				fPathPattern := ii.efFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
+				if !ok {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
+				if fileVer.Less(ii.version.DataEF.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					version.VersionTooLowPanic(fName, ii.version.DataEF)
+				}
+
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					} else {
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					}
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					// don't interrupt on error. other files may be good. but skip indices open.
+					continue
+				}
+			}
+
+			if item.index == nil {
+				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+				if ok {
+					if fileVer.Less(ii.version.AccessorEFI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						version.VersionTooLowPanic(fName, ii.version.AccessorEFI)
+					}
+					if item.index, err = ii.openHashMapAccessor(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+		}
+
+		return true
+	})
+	for _, item := range invalidFileItems {
+		item.closeFiles()
+		ii.dirtyFiles.Delete(item)
+	}
+
+	return nil
 }
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
@@ -1141,7 +1235,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
 	}
-	if ii.Accessors.Has(statecfg.AccessorHashMap) {
+	if ii.Accessors.Has(AccessorHashMap) {
 		if mapAccessor, err = ii.openHashMapAccessor(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}
@@ -1151,10 +1245,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	return InvertedFiles{decomp: decomp, index: mapAccessor, existence: existenceFilter}, nil
 }
 
-func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
+func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
-	if !ii.Version.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+	if !ii.version.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
 		versionOfRs = 1
 	}
 	cfg := recsplit.RecSplitArgs{

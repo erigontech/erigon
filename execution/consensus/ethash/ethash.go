@@ -23,6 +23,7 @@ package ethash
 import (
 	"errors"
 	"fmt"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"math/big"
 	"math/rand"
 	"os"

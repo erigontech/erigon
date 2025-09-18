@@ -27,6 +27,7 @@ import (
 	polygonchain "github.com/erigontech/erigon/polygon/chain"
 	lru "github.com/hashicorp/golang-lru/v2"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -202,7 +203,7 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		amoySprintsToPatch[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
 	var oldProducers *ValidatorSet
-	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
+	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.AmoyChainConfig.ChainID.Uint64()
 	for i := 0; i < increments; i++ {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
 		if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum) { // on the bad sprint (Amoy)
@@ -286,7 +287,7 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	for i := 0; i < len(amoyPatchedSprints); i++ {
 		amoyPatchedSprints[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
-	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
+	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.AmoyChainConfig.ChainID.Uint64()
 	for i := 0; i < increments; i++ {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
 		if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum) { // on bad sprint

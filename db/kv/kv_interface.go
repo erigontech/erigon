@@ -25,13 +25,11 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
-
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 /*
@@ -43,7 +41,6 @@ Naming:
  RoTx - Read-Only Database Transaction. RwTx - read-write
  k, v - key, value
  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber
- step - amount of txNums in the smallest file
  Table - collection of key-value pairs. In LMDB - it's `dbi`. Analog of SQL's Table. Keys are sorted and unique
  DupSort - if table created `Sorted Duplicates` option: then 1 key can have multiple (sorted and unique) values
  Cursor - low-level mdbx-tide api to navigate over Table
@@ -538,6 +535,19 @@ type PendingMutations interface {
 
 type DBVerbosityLvl int8
 type Label string
+
+const (
+	ChainDB         = "chaindata"
+	TxPoolDB        = "txpool"
+	SentryDB        = "sentry"
+	ConsensusDB     = "consensus"
+	DownloaderDB    = "downloader"
+	HeimdallDB      = "heimdall"
+	DiagnosticsDB   = "diagnostics"
+	PolygonBridgeDB = "polygon-bridge"
+	CaplinDB        = "caplin"
+	TemporaryDB     = "temporary"
+)
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 const dbLabelName = "db"

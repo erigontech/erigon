@@ -27,8 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 type All struct {

@@ -765,7 +765,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 					return nil, storageRootHashIsSet, nil, err
 				}
 				cell.setFromUpdate(update)
-				if hph.trace {
+				if hph.trace { // this is ok to happen during proof generation since memo is off
 					fmt.Printf("Storage %x was not loaded\n", cell.storageAddr[:cell.storageAddrLen])
 				}
 			}
@@ -2072,9 +2072,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	hph.memoizationOff, hph.trace = true, false
-	// defer func() {
-	// 	hph.memoizationOff, hph.trace = false, false
-	// }()
+	//defer func() {
+	//	hph.memoizationOff, hph.trace = false, false
+	//}()
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie

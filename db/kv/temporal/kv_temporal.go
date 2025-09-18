@@ -23,13 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var ( // Compile time interface checks
@@ -202,9 +201,7 @@ func (db *DB) Close() {
 	db.RwDB.Close()
 }
 
-func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
-	db.stateFiles.OnFilesChange(onChange, onDel)
-}
+func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { db.agg.OnFilesChange(onChange, onDel) }
 
 type tx struct {
 	db               *DB

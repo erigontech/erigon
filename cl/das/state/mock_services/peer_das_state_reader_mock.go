@@ -20,7 +20,6 @@ import (
 type MockPeerDasStateReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockPeerDasStateReaderMockRecorder
-	isgomock struct{}
 }
 
 // MockPeerDasStateReaderMockRecorder is the mock recorder for MockPeerDasStateReader.

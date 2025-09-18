@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2021 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+<<<<<<<< HEAD:db/migrations/reset_stage_txn_lookup.go
 package migrations
 
 import (
@@ -45,4 +46,31 @@ var ResetStageTxnLookup = Migration{
 
 		return tx.Commit()
 	},
+========
+package dir
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func Test_CreateTemp(t *testing.T) {
+	dir := t.TempDir()
+	ogfile := filepath.Join(dir, "hello_world")
+	tmpfile, err := CreateTemp(ogfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tmpfile.Close()
+	dir1 := filepath.Dir(tmpfile.Name())
+	dir2 := filepath.Dir(ogfile)
+	require.True(t, dir1 == dir2)
+
+	base1 := filepath.Base(tmpfile.Name())
+	base2 := filepath.Base(ogfile)
+	require.True(t, strings.HasPrefix(base1, base2))
+>>>>>>>> release/3.1:erigon-lib/common/dir/rw_dir_test.go
 }

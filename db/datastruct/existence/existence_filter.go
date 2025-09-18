@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 )
 
 type Filter struct {

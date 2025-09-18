@@ -165,7 +165,30 @@ func abigen(c *cli.Context) error {
 		}
 		var contracts map[string]*compiler.Contract
 
-		if c.IsSet(jsonFlag.Name) {
+		switch {
+		case c.IsSet(solFlag.Name):
+			contracts, err = compiler.CompileSolidity(c.Context, c.String(solcFlag.Name), c.String(solFlag.Name))
+			if err != nil {
+				utils.Fatalf("Failed to build Solidity contract: %v", err)
+			}
+		case c.IsSet(vyFlag.Name):
+			output, err := compiler.CompileVyper(c.Context, c.String(vyperFlag.Name), c.String(vyFlag.Name))
+			if err != nil {
+				utils.Fatalf("Failed to build Vyper contract: %v", err)
+			}
+			contracts = make(map[string]*compiler.Contract)
+			for n, contract := range output {
+				name := n
+				// Sanitize the combined json names to match the
+				// format expected by solidity.
+				if !strings.Contains(n, ":") {
+					// Remove extra path components
+					name = abi.ToCamelCase(strings.TrimSuffix(filepath.Base(name), ".vy"))
+				}
+				contracts[name] = contract
+			}
+
+		case c.IsSet(jsonFlag.Name):
 			jsonOutput, err := os.ReadFile(c.String(jsonFlag.Name))
 			if err != nil {
 				utils.Fatalf("Failed to read combined-json from compiler: %v", err)

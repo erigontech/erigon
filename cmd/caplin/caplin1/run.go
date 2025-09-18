@@ -25,13 +25,16 @@ import (
 	"path"
 	"time"
 
-	"github.com/spf13/afero"
-	"golang.org/x/sync/semaphore"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"golang.org/x/sync/semaphore"
+
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon"
@@ -63,19 +66,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
 	"github.com/erigontech/erigon/cl/utils/bls"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/cl/validator/committee_subscription"
-	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
-	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/snapshotsync"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
 func OpenCaplinDatabase(ctx context.Context,

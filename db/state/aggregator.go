@@ -38,21 +38,13 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/config3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
-	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type Aggregator struct {
@@ -196,6 +188,16 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesDelete = onDel
 }
 
+func (a *Aggregator) StepSize() uint64 { return a.aggregationStep }
+func (a *Aggregator) DisableFsync() {
+	for _, d := range a.d {
+		d.DisableFsync()
+	}
+	for _, ii := range a.iis {
+		ii.DisableFsync()
+	}
+}
+
 func (a *Aggregator) StepSize() uint64   { return a.stepSize }
 func (a *Aggregator) Dirs() datadir.Dirs { return a.dirs }
 
@@ -293,8 +295,8 @@ func (a *Aggregator) DisableAllDependencies() {
 func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	if err := a.reloadSalt(); err != nil {
-		return err
+	if err := a.openFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
 	if err := a.openFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
@@ -890,7 +892,7 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 	return files
 }
 func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
-	return at.d[domain].d.Version.DataKV.Current
+	return at.d[domain].d.version.DataKV.Current
 }
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
@@ -1515,7 +1517,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	// Step 2: delete
 	dryRun = false
 	for id, d := range at.d {
-		if d.d.Disable {
+		if d.d.disable {
 			continue
 		}
 		if in == nil {
@@ -1525,7 +1527,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 	for id, ii := range at.iis {
-		if ii.ii.Disable {
+		if ii.ii.disable {
 			continue
 		}
 		if in == nil {
@@ -1761,14 +1763,14 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return at.d[name].GetAsOf(k, ts, tx)
 }
 
-func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].GetLatest(k, tx)
 	}
 
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
 	if err != nil {
-		return nil, kv.Step(0), false, err
+		return nil, uint64(0), false, err
 	}
 	if ok {
 		return v, step, true, nil
@@ -1776,14 +1778,14 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 
 	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
 	if !found {
-		return nil, kv.Step(0), false, err
+		return nil, uint64(0), false, err
 	}
 
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
+	return v, fileEndTxNum / at.StepSize(), found, err
 }
 
-func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {
+func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, uint64, bool, error) {
 	return at.d[domain].getLatestFromDb(key, tx)
 }
 

@@ -917,7 +917,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			chainConfig := testforks.Forks["Paris"]
 			if test.isShanghai {
-				chainConfig = testforks.Forks["Shanghai"]
+				chainConfig = testutil.Forks["Shanghai"]
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())

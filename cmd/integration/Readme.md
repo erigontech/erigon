@@ -120,7 +120,7 @@ It allows to process this blocks again
 erigon --snap.skip-state-snapshot-download
 
 # Option 2 (on synced datadir):
-erigon snapshots rm-all-state-state
+erigon snapshots rm-all-state
 integration stage_exec --reset
 integration stage_exec 
 

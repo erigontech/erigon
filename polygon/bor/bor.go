@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -814,7 +815,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			// post VeBlop spans won't be committed to smart contract
 			if !c.config.IsRio(header.Number.Uint64()) {
 				// check and commit span
-				if err := c.checkAndCommitSpan(header, syscall); err != nil {
+				if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 					err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
 					c.logger.Error("[bor] committing span", "err", err)
 					return nil, err
@@ -879,7 +880,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 			// Post Rio/VeBlop spans won't be committed to smart contract
 			if !c.config.IsRio(header.Number.Uint64()) {
 				// check and commit span
-				if err := c.checkAndCommitSpan(header, syscall); err != nil {
+				if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 					err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
 					c.logger.Error("[bor] committing span", "err", err)
 					return nil, nil, err
@@ -1116,7 +1117,13 @@ func (c *Bor) checkAndCommitSpan(header *types.Header, syscall consensus.SystemC
 	return nil
 }
 
-func (c *Bor) fetchAndCommitSpan(newSpanID uint64, syscall consensus.SystemCall) error {
+func (c *Bor) fetchAndCommitSpan(
+	newSpanID uint64,
+	state *state.IntraBlockState,
+	header *types.Header,
+	chain statefull.ChainContext,
+	syscall consensus.SystemCall,
+) error {
 	heimdallSpan, ok, err := c.spanReader.Span(context.Background(), newSpanID)
 	if err != nil {
 		return err
@@ -1224,7 +1231,7 @@ func (c *Bor) CommitStates(
 	var err error
 
 	ctx := dbg.ContextWithDebug(c.execCtx, true)
-	if fetchEventsWithinTime {
+	if fetchEventsWithingTime {
 		sprintLength := c.config.CalculateSprintLength(blockNum)
 
 		if blockNum < sprintLength {

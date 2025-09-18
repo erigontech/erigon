@@ -6,6 +6,8 @@ import (
 	"path"
 	"sort"
 
+	"github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"

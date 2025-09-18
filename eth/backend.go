@@ -412,7 +412,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config().Http.DBReadConcurrency, logger, segmentsBuildLimiter)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, agg, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config().Http.DBReadConcurrency, logger, segmentsBuildLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -1493,9 +1493,9 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(frozenFileNames))}
+		req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
 		for _, fName := range frozenFileNames {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
+			req.Items = append(req.Items, &protodownloader.AddItem{
 				Path: fName,
 			})
 		}
@@ -1510,7 +1510,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return
 		}
 
-		if _, err := s.downloaderClient.Delete(ctx, &downloaderproto.DeleteRequest{Paths: deletedFiles}); err != nil {
+		if _, err := s.downloaderClient.Delete(ctx, &protodownloader.DeleteRequest{Paths: deletedFiles}); err != nil {
 			s.logger.Warn("[snapshots] downloader.Delete", "err", err)
 		}
 	})
@@ -1527,9 +1527,6 @@ func (s *Ethereum) setUpSnapDownloader(
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
-		if downloaderCfg == nil || downloaderCfg.ChainName == "" {
-			return nil
-		}
 		// Always disable the asynchronous adder. We will do it here to support downloader.verify.
 		downloaderCfg.AddTorrentsFromDisk = false
 
@@ -1540,9 +1537,11 @@ func (s *Ethereum) setUpSnapDownloader(
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
 		// start embedded Downloader
-		err = s.downloader.AddTorrentsFromDisk(ctx)
-		if err != nil {
-			return fmt.Errorf("adding torrents from disk: %w", err)
+		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) == 0 {
+			err = s.downloader.AddTorrentsFromDisk(ctx)
+			if err != nil {
+				return fmt.Errorf("adding torrents from disk: %w", err)
+			}
 		}
 
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
@@ -1556,15 +1555,22 @@ func (s *Ethereum) setUpSnapDownloader(
 	return err
 }
 
-func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
-	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, *libstate.Aggregator, error) {
+	var minFrozenBlock uint64
+
+	if frozenLimit := snConfig.Sync.FrozenBlockLimit; frozenLimit != 0 {
+		if maxSeedable := snapcfg.MaxSeedableSegment(snConfig.Genesis.Config.ChainName, dirs.Snap); maxSeedable > frozenLimit {
+			minFrozenBlock = maxSeedable - frozenLimit
+		}
+	}
+	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
 	var bridgeStore bridge.Store
 	var heimdallStore heimdall.Store
 
 	if chainConfig.Bor != nil {
-		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
+		allBorSnapshots = heimdall.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, false, int64(dbReadConcurrency)), allBorSnapshots, chainConfig.Bor)
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, false, int64(dbReadConcurrency)), allBorSnapshots)
 	}

@@ -25,11 +25,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/rpc/rpccfg"
+
 	"github.com/holiman/uint256"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
+	chainparams "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/race"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -238,6 +242,50 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	decryptionKeySenderPort, err := testutil.NextFreePort()
 	require.NoError(t, err)
+	jsonRpcPort, err := testhelpers.NextFreePort()
+	require.NoError(t, err)
+	shutterPort, err := testhelpers.NextFreePort()
+	require.NoError(t, err)
+	decryptionKeySenderPort, err := testhelpers.NextFreePort()
+	require.NoError(t, err)
+
+	const localhost = "127.0.0.1"
+	httpConfig := httpcfg.HttpCfg{
+		Enabled:                  true,
+		HttpServerEnabled:        true,
+		HttpListenAddress:        localhost,
+		HttpPort:                 jsonRpcPort,
+		API:                      []string{"eth"},
+		AuthRpcHTTPListenAddress: localhost,
+		AuthRpcPort:              engineApiPort,
+		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
+		ReturnDataLimit:          100_000,
+		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
+	}
+
+	nodeKeyConfig := p2p.NodeKeyConfig{}
+	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(dataDir))
+	require.NoError(t, err)
+	nodeConfig := nodecfg.Config{
+		Dirs: dirs,
+		Http: httpConfig,
+		P2P: p2p.Config{
+			ListenAddr:      fmt.Sprintf("127.0.0.1:%d", sentryPort),
+			MaxPeers:        1,
+			MaxPendingPeers: 1,
+			NoDiscovery:     true,
+			NoDial:          true,
+			ProtocolVersion: []uint{direct.ETH68},
+			AllowedPorts:    []uint{uint(sentryPort)},
+			PrivateKey:      nodeKey,
+		},
+	}
+
+	txPoolConfig := txpoolcfg.DefaultConfig
+	txPoolConfig.DBDir = dirs.TxPool
+
+	chainId := big.NewInt(987656789)
+	chainIdU256, _ := uint256.FromBig(chainId)
 	decryptionKeySenderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	decryptionKeySenderPrivKeyBytes := make([]byte, 32)
@@ -259,10 +307,92 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	shutterConfig.ChainId = chainIdU256
 	shutterConfig.SecondsPerSlot = 1
 	shutterConfig.EncryptedGasLimit = 3 * 21_000 // max 3 simple encrypted transfers per block
-	shutterConfig.SequencerContractAddress = types.CreateAddress(contractDeployer, 0).String()
-	shutterConfig.KeyperSetManagerContractAddress = types.CreateAddress(contractDeployer, 1).String()
-	shutterConfig.KeyBroadcastContractAddress = types.CreateAddress(contractDeployer, 2).String()
-	// top up a few accounts with some ETH and deploy the shutter contracts
+	shutterConfig.SequencerContractAddress = crypto.CreateAddress(contractDeployer, 0).String()
+	shutterConfig.KeyperSetManagerContractAddress = crypto.CreateAddress(contractDeployer, 1).String()
+	shutterConfig.KeyBroadcastContractAddress = crypto.CreateAddress(contractDeployer, 2).String()
+
+	ethConfig := ethconfig.Config{
+		Dirs: dirs,
+		Snapshot: ethconfig.BlocksFreezing{
+			NoDownloader: true,
+		},
+		TxPool: txPoolConfig,
+		Miner: params.MiningConfig{
+			EnabledPOS: true,
+		},
+		Shutter: shutterConfig,
+	}
+
+	ethNode, err := node.New(ctx, &nodeConfig, logger)
+	require.NoError(t, err)
+	cleanNode := func(ethNode *node.Node) func() {
+		return func() {
+			err := ethNode.Close()
+			if errors.Is(err, node.ErrNodeStopped) {
+				return
+			}
+			require.NoError(t, err)
+		}
+	}
+	t.Cleanup(cleanNode(ethNode))
+
+	var chainConfig chain.Config
+	err = copier.Copy(&chainConfig, chainspec.ChiadoChainConfig)
+	require.NoError(t, err)
+	chainConfig.ChainName = "shutter-devnet"
+	chainConfig.ChainID = chainId
+	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
+	chainConfig.ShanghaiTime = big.NewInt(0)
+	chainConfig.CancunTime = big.NewInt(0)
+	chainConfig.PragueTime = big.NewInt(0)
+	genesis := chainspec.ChiadoGenesisBlock()
+	genesis.Timestamp = uint64(time.Now().Unix() - 1)
+	genesis.Config = &chainConfig
+	genesis.Alloc[chainparams.ConsolidationRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	genesis.Alloc[chainparams.WithdrawalRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	// 1_000 ETH in wei in the bank
+	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
+	bank.RegisterGenesisAlloc(genesis)
+	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
+	require.NoError(t, err)
+	_, gensisBlock, err := core.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
+	require.NoError(t, err)
+	chainDB.Close()
+
+	// note we need to create jwt secret before calling ethBackend.Init to avoid race conditions
+	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
+	require.NoError(t, err)
+	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
+	require.NoError(t, err)
+	err = ethBackend.Init(ethNode, &ethConfig, &chainConfig)
+	require.NoError(t, err)
+	err = ethNode.Start()
+	require.NoError(t, err)
+
+	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
+	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
+	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
+	//goland:noinspection HttpUrlsUsage
+	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
+	engineApiClient, err := engineapi.DialJsonRpcClient(
+		engineApiUrl,
+		jwtSecret,
+		logger,
+		// requests should not take more than 5 secs in a test env, yet we can spam frequently
+		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
+		engineapi.WithJsonRpcClientMaxRetries(100),
+	)
+	require.NoError(t, err)
 	slotCalculator := shutter.NewBeaconChainSlotCalculator(shutterConfig.BeaconChainGenesisTimestamp, shutterConfig.SecondsPerSlot)
 	cl := testhelpers.NewMockCl(logger, eat.MockCl, slotCalculator)
 	require.NoError(t, err)

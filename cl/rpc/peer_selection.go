@@ -31,7 +31,7 @@ var (
 )
 
 type columnDataPeers struct {
-	sentinel      sentinelproto.SentinelClient
+	sentinel      sentinel.SentinelClient
 	beaconConfig  *clparams.BeaconChainConfig
 	ethClock      eth_clock.EthereumClock
 	peerMetaCache *lru.CacheWithTTL[peerDataKey, *peerData]
@@ -173,7 +173,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 }
 
 func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic string, respContainer ssz.EncodableSSZ, payload []byte) error {
-	resp, err := c.sentinel.SendPeerRequest(ctx, &sentinelproto.RequestDataWithPeer{
+	resp, err := c.sentinel.SendPeerRequest(ctx, &sentinel.RequestDataWithPeer{
 		Pid:   pid,
 		Data:  payload,
 		Topic: topic,

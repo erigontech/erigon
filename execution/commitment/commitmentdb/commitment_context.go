@@ -418,11 +418,11 @@ type TrieContext struct {
 	trace              bool
 }
 
-func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
-func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
 	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
 		return nil
 	}
@@ -440,7 +440,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
 // Step returned only when reading from domain files, otherwise it is always 0.
 // Step is used in Trie for memo stats and file depth access statistics.
-func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
+func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step uint64, err error) {
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
@@ -453,8 +453,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 
 		if enc == nil {
 			var ok bool
-			// reading from domain files this way will dereference domain key correctly,
-			// rotx.GetAsOf itself does not dereference keys in commitment domain values
+			// reading from domain files this way will dereference domain key correctly, rotx.GetAsOf
 			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
 				enc = nil
@@ -464,11 +463,9 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 			return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
 		}
 	}
-
 	if enc == nil {
 		enc, step, err = sdc.getter.GetLatest(d, plainKey)
 	}
-
 	if err != nil {
 		return nil, 0, fmt.Errorf("readDomain %q: %w", d, err)
 	}
@@ -542,62 +539,4 @@ func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err erro
 func (sdc *TrieContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.limitReadAsOfTxNum = txNum
 	sdc.withHistory = !domainOnly
-}
-
-type ValueMerger func(prev, current []byte) (merged []byte, err error)
-
-// TODO revisit encoded commitmentState.
-//   - Add versioning
-//   - add trie variant marker
-//   - simplify decoding. Rn it's 3 embedded structure: RootNode encoded, Trie state encoded and commitmentState wrapper for search.
-//     | search through states seems mostly useless so probably commitmentState should become header of trie state.
-type commitmentState struct {
-	txNum     uint64
-	blockNum  uint64
-	trieState []byte
-}
-
-func (cs *commitmentState) Decode(buf []byte) error {
-	if len(buf) < 10 {
-		return fmt.Errorf("ivalid commitment state buffer size %d, expected at least 10b", len(buf))
-	}
-	pos := 0
-	cs.txNum = binary.BigEndian.Uint64(buf[pos : pos+8])
-	pos += 8
-	cs.blockNum = binary.BigEndian.Uint64(buf[pos : pos+8])
-	pos += 8
-	cs.trieState = make([]byte, binary.BigEndian.Uint16(buf[pos:pos+2]))
-	pos += 2
-	if len(cs.trieState) == 0 && len(buf) == 10 {
-		return nil
-	}
-	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])
-	return nil
-}
-
-func (cs *commitmentState) Encode() ([]byte, error) {
-	buf := bytes.NewBuffer(nil)
-	var v [18]byte
-	binary.BigEndian.PutUint64(v[:], cs.txNum)
-	binary.BigEndian.PutUint64(v[8:16], cs.blockNum)
-	binary.BigEndian.PutUint16(v[16:18], uint16(len(cs.trieState)))
-	if _, err := buf.Write(v[:]); err != nil {
-		return nil, err
-	}
-	if _, err := buf.Write(cs.trieState); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState)
-	if err != nil {
-		return 0, err
-	}
-	if len(stateVal) == 0 {
-		return 0, nil
-	}
-	_, minUnwindale := _decodeTxBlockNums(stateVal)
-	return minUnwindale, nil
 }

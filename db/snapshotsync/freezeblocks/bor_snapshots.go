@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"reflect"
 
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/erigontech/erigon-lib/common"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"

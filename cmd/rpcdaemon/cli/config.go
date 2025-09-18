@@ -414,8 +414,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 
-		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
-		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allSnapshots.DownloadComplete()
 		allBorSnapshots.DownloadComplete()
 

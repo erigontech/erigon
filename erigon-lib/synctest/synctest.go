@@ -16,9 +16,19 @@
 
 package synctest
 
+<<<<<<<< HEAD:erigon-lib/synctest/synctest.go
 import (
 	"testing"
 	"testing/synctest"
+========
+// see https://calver.org
+const (
+	Major                    = 3             // Major version component of the current release
+	Minor                    = 1             // Minor version component of the current release
+	Micro                    = 0             // Patch version component of the current release
+	Modifier                 = ""            // Modifier component of the current release
+	DefaultSnapshotGitBranch = "release/3.1" // Branch of erigontech/erigon-snapshot to use in OtterSync
+>>>>>>>> release/3.1:erigon-lib/version/app.go
 )
 
 //

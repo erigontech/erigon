@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"os"
 	"reflect"
 	"testing"

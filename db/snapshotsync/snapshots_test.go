@@ -24,6 +24,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/stretchr/testify/require"
 
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
@@ -56,7 +58,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
@@ -71,7 +73,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, coresnaptype.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -216,8 +218,12 @@ func TestMergeSnapshots(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
-		for _, snT := range snaptype2.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
+		for i, snT := range coresnaptype.BlockSnapshotTypes {
+			ver := version.V1_0
+			if i%2 == 1 {
+				ver = version.V1_1
+			}
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, ver, logger)
 		}
 	}
 
@@ -397,7 +403,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
-	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true))
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps(func(delFiles []string) error {
 		require.Len(delFiles, 69)
 		mustSeeFile(delFiles, "000000-000010-bodies.seg")
@@ -452,7 +458,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.NoError(err)
 	require.Equal(4, len(list))
 
-	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true))
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false, true))
 	require.NoError(s.RemoveOverlaps(func(delList []string) error {
 		require.Len(delList, 0)
 		return nil
@@ -674,7 +680,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-070200-070300-bodies.seg.torrent4014494284"))
 	require.True(ok)
 	require.False(e3)
-	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
+	require.Equal(f.Type.Enum(), coresnaptype.Bodies.Enum())
 	require.Equal(70200_000, int(f.From))
 	require.Equal(70300_000, int(f.To))
 	require.Equal("bodies", f.TypeString)
@@ -803,7 +809,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
 
-	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, snaptype2.Headers.Name()))
+	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, coresnaptype.Headers.Name()))
 	err := dir2.RemoveFile(missingIdxFile)
 	require.NoError(err)
 

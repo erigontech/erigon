@@ -309,10 +309,10 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	remoteproto.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
+	remote.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
 		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
-	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpoolproto.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
+	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
+	txpool.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {

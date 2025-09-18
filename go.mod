@@ -21,15 +21,15 @@ require (
 	github.com/99designs/gqlgen v0.17.78
 	github.com/FastFilter/xorfilter v0.2.1
 	github.com/Masterminds/sprig/v3 v3.2.3
-	github.com/RoaringBitmap/roaring/v2 v2.10.0
+	github.com/RoaringBitmap/roaring/v2 v2.9.0
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/chansync v0.7.0
+	github.com/anacrolix/chansync v0.7.0 // indirect
 	github.com/anacrolix/envpprof v1.4.0
 	github.com/anacrolix/generics v0.1.0
-	github.com/anacrolix/go-libutp v1.3.2
-	github.com/anacrolix/log v0.17.0
+	github.com/anacrolix/go-libutp v1.3.2 // indirect
+	github.com/anacrolix/log v0.17.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.59.2-0.20250831024100-5a4e71ecb3c3
+	github.com/anacrolix/torrent v1.59.2-0.20250903105451-d922d78d2e61
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/charmbracelet/bubbles v0.21.0
@@ -75,7 +75,7 @@ require (
 	github.com/huandu/xstrings v1.5.0
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.0.2
-	github.com/jedib0t/go-pretty/v6 v6.6.8
+	github.com/jedib0t/go-pretty/v6 v6.5.9
 	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/jinzhu/copier v0.4.0
 	github.com/json-iterator/go v1.1.12
@@ -114,20 +114,20 @@ require (
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.42.0
-	golang.org/x/exp v0.0.0-20250911091902-df9299821621
-	golang.org/x/net v0.44.0
-	golang.org/x/sync v0.17.0
-	golang.org/x/sys v0.36.0
-	golang.org/x/text v0.29.0
-	golang.org/x/time v0.13.0
-	golang.org/x/tools v0.37.0
-	google.golang.org/grpc v1.75.1
+	golang.org/x/crypto v0.41.0
+	golang.org/x/exp v0.0.0-20250811191247-51f88131bc50
+	golang.org/x/net v0.43.0
+	golang.org/x/sync v0.16.0
+	golang.org/x/sys v0.35.0
+	golang.org/x/time v0.12.0
+	google.golang.org/grpc v1.74.2
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
-	google.golang.org/protobuf v1.36.9
+	google.golang.org/protobuf v1.36.7
+	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
+	modernc.org/sqlite v1.38.2
 	pgregory.net/rapid v1.2.0
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -300,17 +300,18 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	go.opentelemetry.io/otel v1.37.0 // indirect
-	go.opentelemetry.io/otel/metric v1.37.0 // indirect
-	go.opentelemetry.io/otel/trace v1.37.0 // indirect
+	go.opentelemetry.io/otel v1.36.0 // indirect
+	go.opentelemetry.io/otel/metric v1.36.0 // indirect
+	go.opentelemetry.io/otel/trace v1.36.0 // indirect
 	go.uber.org/dig v1.18.0 // indirect
 	go.uber.org/fx v1.23.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/mod v0.28.0 // indirect
-	golang.org/x/telemetry v0.0.0-20250908211612-aef8a434d053 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
+	golang.org/x/mod v0.27.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/tools v0.36.0
+	google.golang.org/genproto/googleapis/api v0.0.0-20250528174236-200df99c418a // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 	modernc.org/libc v1.66.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

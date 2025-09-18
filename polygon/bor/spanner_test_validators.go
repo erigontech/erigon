@@ -18,7 +18,6 @@ package bor
 
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 

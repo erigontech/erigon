@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Version struct {
@@ -205,15 +203,11 @@ func ReplaceVersionWithMask(path string) (string, error) {
 	return strings.ReplaceAll(path, fNameOld, fName), nil
 }
 
-func (v *Version) UnmarshalYAML(node *yaml.Node) error {
-	var s string
-	if err := node.Decode(&s); err != nil {
-		return err
-	}
-	ver, err := ParseVersion(s)
-	if err != nil {
-		return err
-	}
-	*v = ver
-	return nil
+func VersionTooLowPanic(filename string, version Versions) {
+	panic(fmt.Sprintf(
+		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+		filename,
+		version.MinSupported,
+		version.Current,
+	))
 }

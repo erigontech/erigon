@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dir"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/dir"

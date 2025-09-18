@@ -541,10 +541,37 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	expHeadBits := max(expBitWidth, 1) - 1
 	adjExpLen := max(adjExpFactor*uint64(expTailLen)+uint64(expHeadBits), 1)
 
-	maxLen := max(baseLen, modLen)
-	multComplexity := calcMultComplexity(maxLen)
-	gasHi, gasLo := bits.Mul64(multComplexity, adjExpLen)
-	if gasHi != 0 {
+	// Calculate the gas cost of the operation
+	gas := new(big.Int).Set(math.BigMax(modLen, baseLen)) // max_length
+	if c.osaka {
+		// EIP-7883: ModExp Gas Cost Increase
+		gas = modExpMultComplexityEip7883(gas /*max_length */)
+		gas.Mul(gas, adjExpLen)
+		if gas.BitLen() > 64 {
+			return math.MaxUint64
+		}
+
+		return max(500, gas.Uint64())
+	} else if c.eip2565 {
+		// EIP-2565 has three changes compared to EIP-198:
+
+		// 1. Different multiplication complexity
+		gas = modExpMultComplexityEip2565(gas)
+
+		gas.Mul(gas, adjExpLen)
+		// 2. Different divisor (`GQUADDIVISOR`) (3)
+		gas.Div(gas, big3)
+		if gas.BitLen() > 64 {
+			return math.MaxUint64
+		}
+		// 3. Minimum price of 200 gas
+		return max(200, gas.Uint64())
+	}
+	gas = modExpMultComplexityEip198(gas)
+	gas.Mul(gas, adjExpLen)
+	gas.Div(gas, big20)
+
+	if gas.BitLen() > 64 {
 		return math.MaxUint64
 	}
 	gas := gasLo / finalDivisor

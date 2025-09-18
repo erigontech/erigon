@@ -79,7 +79,7 @@ func BorDevnetGenesisBlock() *types.Genesis {
 // MumbaiGenesisBlock returns the Mumbai network genesis block.
 func MumbaiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     mumbaiChainConfig,
+		Config:     MumbaiChainConfig,
 		Nonce:      0,
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
