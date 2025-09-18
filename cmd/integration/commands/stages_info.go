@@ -55,7 +55,8 @@ func (info *StagesInfo) OverviewTUI() string {
 			"[yellow]Bor blocks:[-] seg: [cyan]%d[-]  ind: [cyan]%d[-]\n"+
 			"[yellow]Last & state.history:[-] txnum: [cyan]%d[-], blocknum: [cyan]%d[-], steps: [magenta]%.2f[-]\n"+
 			"[yellow]EthTxSequence:[-] [cyan]%d[-]\n"+
-			"[yellow]In DB:[-] first header [cyan]%d[-], last header [cyan]%d[-], first body [cyan]%d[-], last body [cyan]%d[-]\n"+
+			"[yellow]In DB:[-] first header [cyan]%d[-], last header [cyan]%d[-],\n"+
+			"first body [cyan]%d[-], last body [cyan]%d[-]\n"+
 			"[yellow]Last update on[-] [::d]%s[-]",
 		info.ChainInfo.ChainID, info.ChainInfo.ChainName,
 		info.PruneDistance.String(),

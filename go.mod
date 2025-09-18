@@ -49,6 +49,7 @@ require (
 	github.com/ethereum/c-kzg-4844/v2 v2.1.1
 	github.com/felixge/fgprof v0.9.5
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
+	github.com/gdamore/tcell/v2 v2.8.1
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.1
 	github.com/go-echarts/go-echarts/v2 v2.3.3
@@ -97,6 +98,7 @@ require (
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/quic-go/quic-go v0.48.2
+	github.com/rivo/tview v0.42.1-0.20250904205922-4cdaaa9bd6f6
 	github.com/rs/cors v1.11.1
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/shirou/gopsutil/v4 v4.24.8
@@ -186,7 +188,6 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
-	github.com/gdamore/tcell/v2 v2.8.1 // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -286,7 +287,6 @@ require (
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rivo/tview v0.42.1-0.20250904205922-4cdaaa9bd6f6 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect

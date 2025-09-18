@@ -26,7 +26,7 @@ func Body() (*tview.Flex, *BodyView) {
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewFlex().
 			AddItem(view.Overview, 0, 1, false).
-			AddItem(view.Clock, 0, 1, false), 8, 1, false).
+			AddItem(view.Clock, 0, 1, false), 9, 1, false).
 		AddItem(tview.NewFlex().
 			AddItem(view.Stages, 0, 1, false).
 			AddItem(view.DomainII, 0, 1, false),
