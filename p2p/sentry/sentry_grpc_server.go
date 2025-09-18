@@ -1259,10 +1259,7 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 	}
 
 	msgcode, protocolVersions := ss.messageCode(req.Id)
-	if protocolVersions.Cardinality() == 0 { // this message is enabled for this protocol, do nothing
-		return reply, nil
-	}
-	if !slices.Contains(allowedMsgCodes, msgcode) {
+	if protocolVersions.Cardinality() == 0 || !slices.Contains(allowedMsgCodes, msgcode) { // this message is not enabled for this protocol, do nothing
 		return reply, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
