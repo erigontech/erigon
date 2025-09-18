@@ -168,7 +168,7 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 	sentries := cs.Sentries()
 	status, err := cs.statusDataProvider.GetStatusData(ctx)
 	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
+		cs.logger.Debug("blockRangeUpdate", "err", err)
 		return
 	}
 
@@ -183,7 +183,7 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 
 	data, err := rlp.EncodeToBytes(&request)
 	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
+		cs.logger.Debug("blockRangeUpdate", "err", err)
 		return
 	}
 
@@ -193,7 +193,7 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 			Data: data,
 		})
 		if err != nil {
-			cs.logger.Error("blockRangeUpdate", "err", err)
+			cs.logger.Debug("blockRangeUpdate", "err", err)
 			continue // continue sending message to other sentries
 		}
 	}
