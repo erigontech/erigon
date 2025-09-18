@@ -46,7 +46,7 @@ require (
 	github.com/elastic/go-freelru v0.16.0
 	github.com/emicklei/dot v1.6.2
 	github.com/erigontech/speedtest v0.0.2
-	github.com/ethereum/c-kzg-4844/v2 v2.1.1
+	github.com/ethereum/c-kzg-4844/v2 v2.1.3
 	github.com/felixge/fgprof v0.9.5
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/go-chi/chi/v5 v5.2.3
@@ -104,7 +104,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	github.com/supranational/blst v0.3.14
+	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.2.13
