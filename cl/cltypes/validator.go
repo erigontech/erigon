@@ -41,6 +41,7 @@ type DepositData struct {
 }
 
 func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
+
 	return ssz2.MarshalSSZ(dst, d.PubKey[:], d.WithdrawalCredentials[:], ssz.Uint64SSZ(d.Amount), d.Signature[:])
 }
 
