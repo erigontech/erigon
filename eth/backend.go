@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"io/fs"
 	"math/big"
 	"net"
@@ -36,6 +35,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -1158,6 +1159,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	// start HTTP API
+	stack.Config().Http.IsArbitrum = chainConfig.IsArbitrum()
 	httpRpcCfg := stack.Config().Http
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {

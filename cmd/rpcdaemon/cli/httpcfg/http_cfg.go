@@ -107,4 +107,6 @@ type HttpCfg struct {
 	OtsMaxPageSize uint64
 
 	RPCSlowLogThreshold time.Duration
+
+	IsArbitrum bool // Whether the chain is Arbitrum
 }
