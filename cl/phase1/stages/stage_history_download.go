@@ -458,10 +458,8 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		if len(fuluBlocks) > 0 {
-			for _, block := range fuluBlocks {
-				if err := cfg.forkchoiceStore.GetPeerDas().DownloadColumnsAndRecoverBlobs(ctx, []*cltypes.SignedBlindedBeaconBlock{block}); err != nil {
-					cfg.logger.Warn("Error recovering blobs from block", "err", err, "slot", block.Block.Slot)
-				}
+			if err := cfg.forkchoiceStore.GetPeerDas().DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+				cfg.logger.Warn("Error recovering blobs from block", "err", err, "startSlot", fuluBlocks[0].Block.Slot, "endSlot", fuluBlocks[len(fuluBlocks)-1].Block.Slot)
 			}
 		}
 		time.Sleep(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
