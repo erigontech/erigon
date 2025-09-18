@@ -47,14 +47,24 @@ type ChainInfo struct {
 	ChainName string
 }
 
-func (info *StagesInfo) Overview() string {
+func (info *StagesInfo) OverviewTUI() string {
 	return fmt.Sprintf(
-		"Chain: ID %d Name %s\nPrune mode: %s\nblocks: seg: %d ind: %d\nbor blocks: seg: %d ind: %d\ninfo about last & state.history: txnum: %d, blocknum: %d, steps: %.2f\nEthTxSequence: %d\nIn DB: first header %d, last header %d, first body %d, last body %d\nlast update on %s",
+		"[yellow]Chain:[-] ID [cyan]%d[-]  Name [green]%s[-]\n"+
+			"[yellow]Prune mode:[-] %s\n"+
+			"[yellow]Blocks:[-] seg: [cyan]%d[-]  ind: [cyan]%d[-]\n"+
+			"[yellow]Bor blocks:[-] seg: [cyan]%d[-]  ind: [cyan]%d[-]\n"+
+			"[yellow]Last & state.history:[-] txnum: [cyan]%d[-], blocknum: [cyan]%d[-], steps: [magenta]%.2f[-]\n"+
+			"[yellow]EthTxSequence:[-] [cyan]%d[-]\n"+
+			"[yellow]In DB:[-] first header [cyan]%d[-], last header [cyan]%d[-], first body [cyan]%d[-], last body [cyan]%d[-]\n"+
+			"[yellow]Last update on[-] [::d]%s[-]",
 		info.ChainInfo.ChainID, info.ChainInfo.ChainName,
-		info.PruneDistance.String(), info.SnapshotInfo.SegMax, info.SnapshotInfo.IndMax,
+		info.PruneDistance.String(),
+		info.SnapshotInfo.SegMax, info.SnapshotInfo.IndMax,
 		info.BorSnapshotInfo.SegMax, info.BorSnapshotInfo.IndMax,
 		info.LastInfo.TxNum, info.LastInfo.BlockNum, info.LastInfo.IdxSteps,
-		info.EthTxSequence, info.DB.FirstHeader, info.DB.LastHeader, info.DB.FirstBody, info.DB.LastBody, time.Now().Format("15:04:05"))
+		info.EthTxSequence,
+		info.DB.FirstHeader, info.DB.LastHeader, info.DB.FirstBody, info.DB.LastBody,
+		time.Now().Format("15:04:05"))
 }
 
 func (info *StagesInfo) Stages() string {
