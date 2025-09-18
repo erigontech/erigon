@@ -1382,7 +1382,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 
 		if blockResult.complete {
-			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
+			pe.RLock()
+			blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]
+			pe.RUnlock()
+
+			if ok {
 				pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
 				pe.execCount.Add(int64(blockExecutor.cntExec))
 				pe.abortCount.Add(int64(blockExecutor.cntAbort))
@@ -1475,10 +1479,16 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
 				blockExecutor.applyResults <- blockResult
+				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
+				pe.Unlock()
 			}
 
-			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
+			pe.RLock()
+			blockExecutor, ok = pe.blockExecutors[blockResult.BlockNum+1]
+			pe.RUnlock()
+
+			if ok {
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
@@ -1543,6 +1553,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 
 		if t.IsBlockEnd() {
+			pe.Lock()
 			if len(pe.blockExecutors) == 0 {
 				pe.blockExecutors = map[uint64]*blockExecutor{
 					blockNum: executor,
@@ -1551,6 +1562,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			} else {
 				pe.blockExecutors[t.Version().BlockNum] = executor
 			}
+			pe.Unlock()
 
 			executor = nil
 		}
@@ -1578,7 +1590,9 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 			}
 		}
 
+		pe.RLock()
 		blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
+		pe.RUnlock()
 
 		if !ok {
 			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
