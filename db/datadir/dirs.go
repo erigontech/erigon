@@ -26,6 +26,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+
 	"github.com/gofrs/flock"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
@@ -427,6 +429,27 @@ func (d *Dirs) RenameNewVersions() error {
 			log.Info(fmt.Sprintf("Removed chaindata directory: %s", d.Chaindata))
 		}
 	}
+
+	log.Info(fmt.Sprintf("Renamed %d directories to old format and removed %d unsupported files", renamed, removed))
+
+	//eliminate polygon-bridge && heimdall && chaindata just in case
+	if d.DataDir != "" {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)))
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.HeimdallDB)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, dbcfg.HeimdallDB)))
+		if d.Chaindata != "" {
+			if err := dir.RemoveAll(d.Chaindata); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			log.Info(fmt.Sprintf("Removed chaindata directory: %s", d.Chaindata))
+		}
+	}
+
 	return nil
 }
 

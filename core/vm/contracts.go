@@ -31,6 +31,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
+	patched_big "github.com/ethereum/go-bigmodexpfix/src/math/big"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -582,6 +583,7 @@ var (
 	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
 	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
 	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
+	patchedBig1                     = patched_big.NewInt(1)
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
@@ -626,17 +628,17 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
-		base = new(big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
+		base = new(patched_big.Int).SetBytes(getData(input, 0, baseLen))
+		exp  = new(patched_big.Int).SetBytes(getData(input, baseLen, expLen))
+		mod  = new(patched_big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
 		v    []byte
 	)
 	switch {
-	case mod.Cmp(common.Big1) <= 0:
+	case mod.Cmp(patchedBig1) <= 0:
 		// Leave the result as zero for mod 0 (undefined) and 1
-	case base.Cmp(common.Big1) == 0:
+	case base.Cmp(patchedBig1) == 0:
 		// If base == 1 (and mod > 1), then the result is 1
-		v = common.Big1.Bytes()
+		v = patchedBig1.Bytes()
 	default:
 		v = base.Exp(base, exp, mod).Bytes()
 	}
@@ -645,26 +647,6 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 
 func (c *bigModExp) Name() string {
 	return "MODEXP"
-}
-
-// newCurvePoint unmarshals a binary blob into a bn254 elliptic curve point,
-// returning it, or an error if the point is invalid.
-func newCurvePoint(blob []byte) (*libbn254.G1, error) {
-	p := new(libbn254.G1)
-	if _, err := p.Unmarshal(blob); err != nil {
-		return nil, err
-	}
-	return p, nil
-}
-
-// newTwistPoint unmarshals a binary blob into a bn254 elliptic curve point,
-// returning it, or an error if the point is invalid.
-func newTwistPoint(blob []byte) (*libbn254.G2, error) {
-	p := new(libbn254.G2)
-	if _, err := p.Unmarshal(blob); err != nil {
-		return nil, err
-	}
-	return p, nil
 }
 
 // runBn254Add implements the Bn254Add precompile, referenced by both

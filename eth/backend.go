@@ -686,6 +686,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		genesis,
 		backend.config.NetworkID,
 		logger,
+		blockReader,
 	)
 
 	// limit "new block" broadcasts to at most 10 random peers at time

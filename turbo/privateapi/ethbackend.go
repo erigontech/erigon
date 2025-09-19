@@ -512,3 +512,14 @@ func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.B
 		Present:     ok,
 	}, err
 }
+
+func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *emptypb.Empty) (*remoteproto.MinimumBlockAvailableReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
+	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
+}
