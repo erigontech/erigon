@@ -9,8 +9,10 @@ import (
 	"github.com/tidwall/btree"
 )
 
-const FlagDone = 0
-const FlagEstimate = 1
+type statusFlag uint
+
+const FlagDone statusFlag = 0
+const FlagEstimate statusFlag = 1
 const UnknownDep = -2
 
 type AccountPath int8
@@ -111,7 +113,7 @@ func (vm *VersionMap) Write(addr common.Address, path AccountPath, key common.Ha
 
 	ci, ok := cells.Get(v.TxIndex)
 
-	var flag uint = FlagDone
+	var flag statusFlag = FlagDone
 
 	if !complete {
 		flag = FlagEstimate
@@ -344,7 +346,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 }
 
 type WriteCell struct {
-	flag        uint
+	flag        statusFlag
 	incarnation int
 	data        interface{}
 }
