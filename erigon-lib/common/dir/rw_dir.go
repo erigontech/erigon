@@ -201,7 +201,7 @@ func RemoveFile(path string) error {
 		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
 	}
 
-	if err := dir.Remove(path); err != nil {
+	if err := os.Remove(path); err != nil {
 		return err
 	}
 	if dbg.AssertEnabled {
