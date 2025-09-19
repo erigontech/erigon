@@ -745,6 +745,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				}
 
 				peerBestHash := statusPacket.Head
+
 				getBlockHeadersErr := ss.getBlockHeaders(ctx, peerBestHash, peerID)
 				if getBlockHeadersErr != nil {
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
@@ -1284,6 +1285,14 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.H
 	case direct.ETH69:
 		reply.Protocol = sentryproto.Protocol_ETH69
 	}
+
+	// Add side protocols if available
+	for _, protocol := range ss.Protocols {
+		if protocol.Name == wit.ProtocolName && protocol.Version == wit.ProtocolVersions[0] {
+			reply.SideProtocols = append(reply.SideProtocols, sentryproto.Protocol_WIT0)
+		}
+	}
+
 	return reply, nil
 }
 
