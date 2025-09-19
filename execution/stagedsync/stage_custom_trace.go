@@ -116,7 +116,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}
 	}
 
-	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
+	//log.Info
+	fmt.Println("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader(ctx)
 
 	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
@@ -153,7 +154,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).MadvNormal().DisableReadAhead()
 	//defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
-	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
+	//log.Info
+	fmt.Println("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
 	for startBlock < endBlock {
 		to := min(endBlock+1, startBlock+batchSize)
@@ -179,7 +181,8 @@ Loop:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 			//TODO: log progress and list of domains/files
-			logger.Info("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			//logger.Info
+			fmt.Println("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		}
 	}
 
