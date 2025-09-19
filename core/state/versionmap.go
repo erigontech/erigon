@@ -85,7 +85,7 @@ func (vm *VersionMap) getKeyCells(addr common.Address, path AccountPath, key com
 		cells, ok = it[AccountKey{path, key}]
 	}
 
-	if !ok {
+	if !ok && fNoKey != nil {
 		cells = fNoKey(addr, path, key)
 	}
 
@@ -151,9 +151,7 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 	res.depIdx = UnknownDep
 	res.incarnation = -1
 
-	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] {
-		return nil
-	})
+	cells := vm.getKeyCells(addr, path, key, nil)
 
 	if cells == nil {
 		return
@@ -232,7 +230,7 @@ func (vm *VersionMap) MarkComplete(addr common.Address, path AccountPath, key co
 func (vm *VersionMap) Delete(addr common.Address, path AccountPath, key common.Hash, txIdx int, checkExists bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
-	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] { return nil })
+	cells := vm.getKeyCells(addr, path, key, nil)
 
 	if cells == nil {
 		if !checkExists {
@@ -332,6 +330,7 @@ func (vm *VersionMap) validateRead(txIndex int, addr common.Address, path Accoun
 	return valid
 }
 
+// ValidateVersion check if transaction's readSet is still valid based on the current multi-versioned memory
 func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
 		readSet.Scan(func(vr *VersionedRead) bool {
