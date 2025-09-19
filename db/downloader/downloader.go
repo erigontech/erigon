@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/puzpuzpuz/xsync/v4"
 	"io/fs"
 	"iter"
 	"math"
@@ -37,10 +38,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-
 	"github.com/c2h5oh/datasize"
-	"github.com/puzpuzpuz/xsync/v4
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
