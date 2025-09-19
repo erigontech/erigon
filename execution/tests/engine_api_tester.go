@@ -210,6 +210,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		// requests should not take more than 5 secs in a test env, yet we can spam frequently
 		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
 		engineapi.WithJsonRpcClientMaxRetries(100),
+		engineapi.WithRetryableErrCheckers(engineapi.ErrContainsRetryableErrChecker("connection refused")),
 	)
 	require.NoError(t, err)
 	var mockCl *MockCl
