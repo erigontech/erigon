@@ -203,7 +203,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx.(kv.TemporalTx)), accumulator, 0)
+		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx), accumulator, 0)
 	}
 }
 
@@ -346,7 +346,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.IsHistoric() && rw.historyMode {
-		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))))
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
 	}
 
 	if rw.background && rw.chainTx == nil {
@@ -417,7 +417,6 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	}
 	if background {
 		for i := 0; i < workerCount; i++ {
-			i := i
 			g.Go(func() error {
 				return reconWorkers[i].Run()
 			})
