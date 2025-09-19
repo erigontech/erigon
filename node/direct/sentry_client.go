@@ -39,29 +39,21 @@ const (
 	WIT0 = 1
 )
 
-// protocolToUint converts sentryproto.Protocol enum to eth p2p protocol version
-func protocolToUint(proto sentryproto.Protocol) uint {
-	switch proto {
-	case sentryproto.Protocol_ETH67:
-		return ETH67
-	case sentryproto.Protocol_ETH68:
-		return ETH68
-	default:
-		return 0 // ok to return since constructor errors out if protocol is not found
+var (
+	protocolToUintMap = map[sentryproto.Protocol]uint{
+		sentryproto.Protocol_ETH67: ETH67,
+		sentryproto.Protocol_ETH68: ETH68,
+		sentryproto.Protocol_ETH69: ETH69,
 	}
-}
-
-// uintToProtocol converts eth p2p protocol version to sentryproto.Protocol enum
-func uintToProtocol(version uint) (sentryproto.Protocol, error) {
-	switch version {
-	case ETH67:
-		return sentryproto.Protocol_ETH67, nil
-	case ETH68:
-		return sentryproto.Protocol_ETH68, nil
-	default:
-		return 0, fmt.Errorf("unsupported protocol version: %d", version)
+	uintToProtocolMap = map[uint]sentryproto.Protocol{
+		ETH67: sentryproto.Protocol_ETH67,
+		ETH68: sentryproto.Protocol_ETH68,
+		ETH69: sentryproto.Protocol_ETH69,
 	}
-}
+	supportedSideProtocols = map[sentryproto.Protocol]struct{}{
+		sentryproto.Protocol_WIT0: {},
+	}
+)
 
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient
 type SentryClient interface {
@@ -92,7 +84,10 @@ func NewSentryClientRemote(client sentryproto.SentryClient) *SentryClientRemote 
 func (c *SentryClientRemote) Protocol() uint {
 	c.RLock()
 	defer c.RUnlock()
-	return protocolToUint(c.protocol)
+	if version, ok := protocolToUintMap[c.protocol]; ok {
+		return version
+	}
+	return 0
 }
 
 func (c *SentryClientRemote) Ready() bool {
@@ -114,21 +109,18 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	}
 	c.Lock()
 	defer c.Unlock()
-	switch reply.Protocol {
-	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68, sentryproto.Protocol_ETH69:
-		c.protocol = reply.Protocol
-		c.sideProtocols = nil // Reset side protocols
-		if reply.SideProtocols != nil {
-			for _, s := range reply.SideProtocols {
-				if s == sentryproto.Protocol_WIT0 {
-					c.sideProtocols = append(c.sideProtocols, sentryproto.Protocol_WIT0)
-					break
-				}
-			}
-		}
-	default:
+	if _, ok := protocolToUintMap[reply.Protocol]; !ok {
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
+	c.protocol = reply.Protocol
+	c.sideProtocols = nil // Reset side protocols
+	for _, s := range reply.SideProtocols {
+		if _, ok := supportedSideProtocols[s]; ok {
+			c.sideProtocols = append(c.sideProtocols, s)
+			break
+		}
+	}
+
 	c.ready = true
 	return reply, nil
 }
@@ -166,9 +158,9 @@ type SentryClientDirect struct {
 }
 
 func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer, enableWitness bool) (*SentryClientDirect, error) {
-	protocolEnum, err := uintToProtocol(protocol)
-	if err != nil {
-		return nil, err
+	protocolEnum, ok := uintToProtocolMap[protocol]
+	if !ok {
+		return nil, fmt.Errorf("unsupported protocol version: %d", protocol)
 	}
 	client := &SentryClientDirect{
 		server:   sentryServer,
@@ -181,7 +173,10 @@ func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer,
 }
 
 func (c *SentryClientDirect) Protocol() uint {
-	return protocolToUint(c.protocol)
+	if version, ok := protocolToUintMap[c.protocol]; ok {
+		return version
+	}
+	return 0
 }
 func (c *SentryClientDirect) Ready() bool       { return true }
 func (c *SentryClientDirect) MarkDisconnected() {}
