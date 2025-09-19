@@ -246,6 +246,9 @@ type Config struct {
 	// No heimdall service
 	WithoutHeimdall bool
 
+	// Use arbitrum chain reader in preference to POW downloader
+	ArbitrumSync bool
+
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
