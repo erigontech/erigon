@@ -268,7 +268,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	err = cl.Initialise(ctx)
 	require.NoError(t, err)
-	transactor := testhelpers.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
+	transactor := executiontests.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
 	acc1PrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	acc1 := crypto.PubkeyToAddress(acc1PrivKey.PublicKey)
@@ -351,7 +351,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	cl = testhelpers.NewMockCl(logger, eat.MockCl, slotCalculator)
 	err = cl.Initialise(ctx)
 	require.NoError(t, err)
-	transactor = testhelpers.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
+	transactor = executiontests.NewTransactor(eat.RpcApiClient, chainConfig.ChainID)
 	deployer = testhelpers.NewContractsDeployer(contractDeployerPrivKey, eat.ContractBackend, cl, chainConfig.ChainID, eat.TxnInclusionVerifier)
 	// wait for the shutter validator to connect to our test decryptionKeySender bootstrap node
 	shutterValidatorP2pPrivKeyBytes := make([]byte, 32)
