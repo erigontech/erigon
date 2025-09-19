@@ -179,7 +179,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 			ExecutionRequests *cltypes.ExecutionRequests `json:"execution_requests"`
 		}{
 			ExecutionPayload:  cltypes.NewEth1Block(version, b.beaconConfig),
-			BlobsBundle:       &engine_types.BlobsBundle{},
+			BlobsBundle:       &engine_types.BlobsBundleV1{},
 			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
 		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {

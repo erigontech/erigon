@@ -629,6 +629,34 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 				return errors.New("unexpected state step has more work")
 			}
 		}
+
+	}
+
+	// If we did not specify header we stop here
+	if header == nil {
+		return nil
+	}
+	// Prepare memory state for block execution
+	if err := addAndVerifyBlockStep(txc.Tx, engine, chainReader, header, body); err != nil {
+		return err
+	}
+
+	hasMore, err := stateSync.RunNoInterrupt(nil, txc)
+	if err != nil {
+		if !test {
+			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
+				return err
+			}
+		}
+	}
+	if hasMore {
+		// should not ever happen since we exec blocks 1 by 1
+		if !test {
+			if err := cleanupProgressIfNeeded(txc.Tx, header); err != nil {
+				return err
+			}
+		}
+		return errors.New("unexpected state step has more work")
 	}
 
 	return nil

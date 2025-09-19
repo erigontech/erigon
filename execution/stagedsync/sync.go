@@ -378,7 +378,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 	}
 
 	s.currentStage = 0
-	return hasMore, errBadBlock
+	return hasMore, nil
 }
 
 // ErrLoopExhausted is used to allow the sync loop to continue when one of the stages has thrown it due to reaching

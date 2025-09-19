@@ -211,7 +211,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		var borTx types.Transaction
+		var borTx types2.Transaction
 		possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
 		if err != nil {
@@ -283,7 +283,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		var borTx types.Transaction
+		var borTx types2.Transaction
 		possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
 		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
 		if err != nil {

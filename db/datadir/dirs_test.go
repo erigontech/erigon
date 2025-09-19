@@ -1,12 +1,12 @@
 package datadir
 
 import (
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,8 +54,8 @@ func touch(t *testing.T, p string) {
 func Test_RenameNewVersions(t *testing.T) {
 	base := t.TempDir()
 	d := New(base)
-	bridgeDir := filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)
-	heimdallDir := filepath.Join(d.DataDir, dbcfg.HeimdallDB)
+	bridgeDir := filepath.Join(d.DataDir, kv.PolygonBridgeDB)
+	heimdallDir := filepath.Join(d.DataDir, kv.HeimdallDB)
 	touch(t, bridgeDir)
 	touch(t, heimdallDir)
 

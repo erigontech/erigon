@@ -5,14 +5,12 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type spanRangeIndexTest struct {
@@ -26,8 +24,8 @@ func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 	ctx, cancel := context.WithCancel(t.Context())
 	logger := log.New()
 
-	db, err := mdbx.New(dbcfg.HeimdallDB, logger).
-		InMem(t, tmpDir).
+	db, err := mdbx.New(kv.HeimdallDB, logger).
+		InMem(tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{kv.BorSpansIndex: {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
@@ -59,52 +57,52 @@ func TestSpanRangeIndexNonOverlappingSpans(t *testing.T) {
 	ctx := test.ctx
 
 	spans := []Span{
-		{
+		Span{
 			Id:         0,
 			StartBlock: 0,
 			EndBlock:   999,
 		},
-		{
+		Span{
 			Id:         1,
 			StartBlock: 1000,
 			EndBlock:   1999,
 		},
-		{
+		Span{
 			Id:         2,
 			StartBlock: 2000,
 			EndBlock:   2999,
 		},
-		{
+		Span{
 			Id:         3,
 			StartBlock: 3000,
 			EndBlock:   3999,
 		},
-		{
+		Span{
 			Id:         4,
 			StartBlock: 4000,
 			EndBlock:   4999,
 		},
-		{
+		Span{
 			Id:         5,
 			StartBlock: 5000,
 			EndBlock:   5999,
 		},
-		{
+		Span{
 			Id:         6,
 			StartBlock: 6000,
 			EndBlock:   6999,
 		},
-		{
+		Span{
 			Id:         7,
 			StartBlock: 7000,
 			EndBlock:   7999,
 		},
-		{
+		Span{
 			Id:         8,
 			StartBlock: 8000,
 			EndBlock:   8999,
 		},
-		{
+		Span{
 			Id:         9,
 			StartBlock: 9000,
 			EndBlock:   9999,
@@ -135,17 +133,17 @@ func TestSpanRangeIndexSpanRotation(t *testing.T) {
 
 	// span data that is irregular, containing possible span rotations
 	var spans = []Span{
-		{
+		Span{
 			Id:         0,
 			StartBlock: 0,
 			EndBlock:   999,
 		},
-		{
+		Span{
 			Id:         1, // new span announced
 			StartBlock: 1000,
 			EndBlock:   1999,
 		},
-		{
+		Span{
 			Id:         2, // span rotation
 			StartBlock: 5,
 			EndBlock:   1999,
@@ -187,32 +185,32 @@ func TestSpanRangeIndexComplicatedSpanRotations(t *testing.T) {
 
 	// span data that is irregular, containing possible span rotations
 	var spans = []Span{
-		{ // first  span
+		Span{ // first  span
 			Id:         0,
 			StartBlock: 0,
 			EndBlock:   999,
 		},
-		{ // new span announced
+		Span{ // new span announced
 			Id:         1,
 			StartBlock: 1000,
 			EndBlock:   1999,
 		},
-		{ // span rotation
+		Span{ // span rotation
 			Id:         2,
 			StartBlock: 4,
 			EndBlock:   1999,
 		},
-		{ // span rotation
+		Span{ // span rotation
 			Id:         3,
 			StartBlock: 5,
 			EndBlock:   1999,
 		},
-		{ // span rotation
+		Span{ // span rotation
 			Id:         4,
 			StartBlock: 6,
 			EndBlock:   1999,
 		},
-		{ // new span announced
+		Span{ // new span announced
 			Id:         5,
 			StartBlock: 2000,
 			EndBlock:   2999,

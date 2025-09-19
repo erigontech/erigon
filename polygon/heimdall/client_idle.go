@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/params"
 )
 
 type IdleClient struct {

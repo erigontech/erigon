@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
 
 type eventFetcher interface {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -100,7 +101,7 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 			withoutExt := f[:len(f)-len(ext)]
 			_ = dir.RemoveFile(withoutExt + ".idx")
 			_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-			isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
+			isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 			if isTxnType {
 				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 				_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")

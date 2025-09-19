@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/version"
+
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -38,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1701,7 +1704,7 @@ func removeOldFiles(toDel []string) {
 		withoutExt := f[:len(f)-len(ext)]
 		_ = dir.RemoveFile(withoutExt + ".idx")
 		_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-		isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
+		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx")
 			_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")

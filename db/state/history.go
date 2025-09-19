@@ -21,10 +21,12 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	btree2 "github.com/tidwall/btree"
@@ -103,11 +105,11 @@ func NewHistory(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Dirs, logger
 func (h *History) vFileName(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("%s-%s.%d-%d.v", h.Version.DataV.String(), h.FilenameBase, fromStep, toStep)
 }
-func (h *History) vNewFilePath(fromStep, toStep kv.Step) string {
+func (h *History) vNewFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
-func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.Version.AccessorVI.String(), h.FilenameBase, fromStep, toStep))
+func (h *History) vAccessorNewFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
 
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
@@ -118,6 +120,14 @@ func (h *History) vFilePathMask(fromStep, toStep kv.Step) string {
 }
 func (h *History) vAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep))
+}
+
+func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
+	accessor, err := recsplit.OpenIndex(fPath)
+	if err != nil {
+		return nil, err
+	}
+	return accessor, nil
 }
 
 func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -161,6 +171,94 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 			h.dirtyFiles.Set(dirtyFile)
 		}
 	}
+}
+
+func (h *History) openDirtyFiles() error {
+	invalidFilesMu := sync.Mutex{}
+	invalidFileItems := make([]*FilesItem, 0)
+	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			if item.decompressor == nil {
+				fPathMask := h.vFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
+				}
+				if !ok {
+					_, fName := filepath.Split(fPath)
+					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
+				}
+				if fileVer.Less(h.version.DataV.MinSupported) {
+					_, fName := filepath.Split(fPath)
+					version.VersionTooLowPanic(fName, h.version.DataV)
+				}
+
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+					_, fName := filepath.Split(fPath)
+					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+						h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
+						// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
+						//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
+						//
+						// itemPaths := []string{
+						// 	fPath,
+						// 	h.vAccessorNewFilePath(fromStep, toStep),
+						// }
+						// for _, fp := range itemPaths {
+						// 	err = dir.Remove(fp)
+						// 	if err != nil {
+						// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
+						// 	}
+						// }
+					} else {
+						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+					}
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					// don't interrupt on error. other files may be good. but skip indices open.
+					continue
+				}
+			}
+
+			if item.index == nil {
+				fPathMask := h.vAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+				}
+				if ok {
+					if fileVer.Less(h.version.AccessorVI.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						version.VersionTooLowPanic(fName, h.version.AccessorVI)
+					}
+					if item.index, err = h.openHashMapAccessor(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+		}
+		return true
+	})
+	for _, item := range invalidFileItems {
+		item.closeFiles()
+		h.dirtyFiles.Delete(item)
+	}
+
+	return nil
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
@@ -213,7 +311,7 @@ func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
+	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
 		fPath, _, _, err := version.FindFilesWithVersionsByPattern(h.vAccessorFilePathMask(fromStep, toStep))
 		if err != nil {
 			panic(err)
@@ -236,7 +334,7 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 	if iiItem.decompressor == nil {
 		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.FilenameBase, item.startTxNum/h.stepSize, item.endTxNum/h.stepSize)
 	}
-	fromStep, toStep := kv.Step(item.startTxNum/h.stepSize), kv.Step(item.endTxNum/h.stepSize)
+	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorNewFilePath(fromStep, toStep)
 
 	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)

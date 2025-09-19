@@ -7,8 +7,9 @@ ifeq ($(CGO_CXXFLAGS),)
 	CGO_CXXFLAGS += -O2
 endif
 
-GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
+GOBUILD = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go build -trimpath
 GOTEST = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GOEXPERIMENT=synctest go test -trimpath
+GOTEST_NOFUZZ = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GOEXPERIMENT=synctest go test -trimpath --tags=nofuzz
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -107,7 +108,7 @@ lint-deps: lintci-deps
 lint: lintci lint-mod-tidy
 
 test-short:
-	$(GOTEST) -short ./...
+	$(GOTEST_NOFUZZ) -short ./...
 
 test-all:
 	$(GOTEST) -coverprofile=coverage-test-all.out ./...

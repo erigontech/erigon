@@ -27,16 +27,17 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/config3"
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/config3"
-	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -402,29 +403,6 @@ func SyncSnapshots(
 			}
 		}
 
-		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
-		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
-		if !headerchain && toBlock > 0 {
-			toTxNum, err := txNumsReader.Min(tx, syncCfg.SnapshotDownloadToBlock)
-			if err != nil {
-				return err
-			}
-			toStep = toTxNum / uint64(config3.DefaultStepSize)
-			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
-			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
-			// so that we can correctly calculate toTxNum above (now we should delete these)
-			for _, f := range blockReader.FrozenFiles() {
-				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
-				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
-					continue
-				}
-				log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "file", fileInfo.Name(), "toBlock", toBlock)
-				if err := blockReader.Snapshots().Delete(fileInfo.Name()); err != nil {
-					return err
-				}
-			}
-		}
-
 		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).
 		if syncCfg.PersistReceiptsCacheV2 {
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
@@ -476,10 +454,6 @@ func SyncSnapshots(
 				continue
 			}
 
-			if filterToBlock(p.Name, toBlock, toStep, headerchain) {
-				continue
-			}
-
 			downloadRequest = append(downloadRequest, DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
@@ -507,7 +481,7 @@ func SyncSnapshots(
 	// Check for completion immediately, then growing intervals.
 	interval := time.Second
 	for {
-		completedResp, err := snapshotDownloader.Completed(ctx, &downloaderproto.CompletedRequest{})
+		completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 		if err != nil {
 			return fmt.Errorf("waiting for snapshot download: %w", err)
 		}

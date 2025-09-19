@@ -576,7 +576,7 @@ func (db *MdbxKV) Close() {
 	db.env.Close()
 	db.env = nil
 
-	if db.opts.autoRemove {
+	if db.opts.inMem {
 		if err := dir.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}

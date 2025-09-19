@@ -90,20 +90,7 @@ func TestMiningBenchmark(t *testing.T) {
 	defer clean()
 
 	logger := testlog.Logger(t, log.LvlDebug)
-	goroutineDumpTimer := time.NewTimer(timeout - 5*time.Second)
-	defer goroutineDumpTimer.Stop()
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-goroutineDumpTimer.C:
-			logger.Error("goroutine dump timer expired")
-			err := pprof.Lookup("goroutine").WriteTo(os.Stderr, 2)
-			if err != nil {
-				logger.Error("failed to dump goroutines", "err", err)
-			}
-		}
-	}()
+	fdlimit.Raise(2048)
 
 	debug.RaiseFdLimit()
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)

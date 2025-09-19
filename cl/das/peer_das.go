@@ -420,7 +420,8 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
-	if !d.IsArchivedMode() && !d.StateReader().IsSupernode() {
+	if !d.IsArchivedMode() {
+		// only recover blobs in archived mode
 		return nil
 	}
 

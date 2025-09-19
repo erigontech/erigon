@@ -10,18 +10,17 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/urfave/cli/v2"
-
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/execution/chain"
+	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -134,11 +133,11 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	// Remove chaindata last, so that the config is available if there's an error.
 	if removeLocal {
 		for _, extraDir := range []string{
-			dbcfg.HeimdallDB,
-			dbcfg.PolygonBridgeDB,
+			kv.HeimdallDB,
+			kv.PolygonBridgeDB,
 		} {
 			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
-			err = dir.RemoveAll(extraFullPath)
+			err = os.RemoveAll(extraFullPath)
 			if err != nil {
 				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
 			}

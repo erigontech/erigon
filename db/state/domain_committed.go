@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -54,23 +56,21 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
-// ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
-// Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
-func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
-	const minStepsForReferencing = 2
-
-	return ((to-from)/stepSize)%minStepsForReferencing == 0
-}
-
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
 // by looking them up in the account and storage domain files.
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
 	logger := log.Root()
 	aggTx := at
 
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
-	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
+	if !aggTx.a.commitmentValuesTransform || !aggTx.d[kv.CommitmentDomain].d.replaceKeysInValues || bytes.Equal(prefix, keyCommitmentState) {
+		return branch, nil
+	}
+
+	if !aggTx.a.commitmentValuesTransform ||
+		len(branch) == 0 ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
+		bytes.Equal(prefix, keyCommitmentState) ||
+		((fEndTxNum-fStartTxNum)/at.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
 
 		return branch, nil // do not transform, return as is
 	}
@@ -113,7 +113,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
 			if !found {
 				s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
-				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
+				logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
@@ -130,7 +130,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
 			s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
-			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
+			logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}

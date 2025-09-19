@@ -8,5 +8,4 @@ type PeerDasStateReader interface {
 	GetRealCgc() uint64
 	GetAdvertisedCgc() uint64
 	GetMyCustodyColumns() (map[cltypes.CustodyIndex]bool, error)
-	IsSupernode() bool
 }

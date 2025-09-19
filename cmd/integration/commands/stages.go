@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -37,9 +36,13 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
+	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -47,19 +50,6 @@ import (
 	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/migrations"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
@@ -85,7 +75,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
-	"github.com/erigontech/erigon/turbo/app"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
@@ -435,27 +424,27 @@ var cmdRunMigrations = &cobra.Command{
 
 		// Chaindata DB *must* be the first one because guaranteed to contain data in Config table
 		// (see openSnapshotOnce in allSnapshots below).
-		migrateDB(dbcfg.ChainDB, chaindata)
+		migrateDB(kv.ChainDB, chaindata)
 
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
 		// (see kv/tables.go).
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
-			migrateDB(dbcfg.ConsensusDB, consensus)
+			migrateDB(kv.ConsensusDB, consensus)
 		} else {
 			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
 			if exists, err := dir.Exist(consensus); err == nil && exists {
-				migrateDB(dbcfg.ConsensusDB, consensus)
+				migrateDB(kv.ConsensusDB, consensus)
 			}
 		}
 		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
 		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
 		if exists, err := dir.Exist(heimdall); err == nil && exists {
-			migrateDB(dbcfg.HeimdallDB, heimdall)
+			migrateDB(kv.HeimdallDB, heimdall)
 		}
 		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
 		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
-			migrateDB(dbcfg.PolygonBridgeDB, polygonBridge)
+			migrateDB(kv.PolygonBridgeDB, polygonBridge)
 		}
 	},
 }
@@ -933,7 +922,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		if execProgress == 0 {
-			doms, err := dbstate.NewSharedDomains(tx, log.New())
+			doms, err := libstate.NewSharedDomains(tx, log.New())
 			if err != nil {
 				panic(err)
 			}
@@ -1368,9 +1357,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
-	if borSn != nil {
-		borSn.DownloadComplete() // mark as ready
-	}
+	borSn.DownloadComplete() // mark as ready
 	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
