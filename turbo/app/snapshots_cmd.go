@@ -918,19 +918,19 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	var maxTo uint64
 	verMap := map[string]map[string]version.Versions{
 		"headers": {
-			"seg": coresnaptype.Headers.Versions(),
-			"idx": coresnaptype.Headers.Indexes()[0].Version,
+			"seg": snaptype2.Headers.Versions(),
+			"idx": snaptype2.Headers.Indexes()[0].Version,
 		},
 		"transactions": {
-			"seg": coresnaptype.Transactions.Versions(),
-			"idx": coresnaptype.Transactions.Indexes()[0].Version,
+			"seg": snaptype2.Transactions.Versions(),
+			"idx": snaptype2.Transactions.Indexes()[0].Version,
 		},
 		"bodies": {
-			"seg": coresnaptype.Bodies.Versions(),
-			"idx": coresnaptype.Bodies.Indexes()[0].Version,
+			"seg": snaptype2.Bodies.Versions(),
+			"idx": snaptype2.Bodies.Indexes()[0].Version,
 		},
 		"transactions-to-block": {
-			"idx": coresnaptype.Transactions.Indexes()[1].Version,
+			"idx": snaptype2.Transactions.Indexes()[1].Version,
 		},
 	}
 	// Check block sanity

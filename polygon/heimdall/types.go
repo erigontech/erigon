@@ -311,7 +311,7 @@ var (
 					baseSpanId = uint64(firstSpan.Id)
 				}
 
-				return buildValueIndex(ctx, sn, salt, d, baseSpanId, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, Indexes.BorSpanId.Version, sn, salt, d, baseSpanId, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -376,7 +376,7 @@ var (
 					firstCheckpointId = uint64(firstCheckpoint.Id)
 				}
 
-				return buildValueIndex(ctx, sn, salt, d, firstCheckpointId, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, Indexes.BorCheckpointId.Version, sn, salt, d, firstCheckpointId, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -439,7 +439,7 @@ var (
 					}
 				}
 
-				return buildValueIndex(ctx, sn, salt, d, firstMilestoneId, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, Indexes.BorMilestoneId.Version, sn, salt, d, firstMilestoneId, tmpDir, p, lvl, logger)
 			}),
 	)
 )
@@ -502,7 +502,7 @@ func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uin
 	return valueTo, nil
 }
 
-func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *seg.Decompressor, baseId uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.FileInfo, salt uint32, d *seg.Decompressor, baseId uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
@@ -515,7 +515,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.From, sn.To)),
+		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(version.Current, sn.From, sn.To)),
 		BaseDataID: baseId,
 		Salt:       &salt,
 	}, logger)

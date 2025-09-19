@@ -223,7 +223,7 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.From, sn.To)),
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(Indexes.TxnHash.Version.Current, sn.From, sn.To)),
 					BaseDataID: baseTxnID.U64(),
 				}, logger)
 				if err != nil {
@@ -237,7 +237,9 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.From, sn.To, Indexes.TxnHash2BlockNum)),
+					IndexFile: filepath.Join(sn.Dir(),
+						sn.Type.IdxFileName(Indexes.TxnHash2BlockNum.Version.Current,
+							sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,
 				}, logger)
 				if err != nil {
