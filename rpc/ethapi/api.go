@@ -56,6 +56,10 @@ type CallArgs struct {
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
+func (args *CallArgs) FromOrEmpty() common.Address {
+	return args.from()
+}
+
 // from retrieves the transaction sender address.
 func (args *CallArgs) from() common.Address {
 	if args.From == nil {
@@ -160,8 +164,12 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
+	var nonce uint64
+	if args.Nonce != nil {
+		nonce = args.Nonce.Uint64()
+	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+	msg := types.NewMessage(addr, args.To, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
