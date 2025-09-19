@@ -38,20 +38,17 @@ import (
 )
 
 type StateV3 struct {
-	domains             *dbstate.SharedDomains
-	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	logger              log.Logger
-	syncCfg             ethconfig.Sync
-	trace               bool
+	domains *dbstate.SharedDomains
+	logger  log.Logger
+	syncCfg ethconfig.Sync
+	trace   bool
 }
 
 func NewStateV3(domains *dbstate.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
 	return &StateV3{
-		domains:             domains,
-		applyPrevAccountBuf: make([]byte, 256),
-		logger:              logger,
-		syncCfg:             syncCfg,
+		domains: domains,
+		logger:  logger,
+		syncCfg: syncCfg,
 		//trace: true,
 	}
 }
@@ -60,8 +57,8 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, domains *dbstate.SharedDomains, rules *chain.Rules) error {
-
+func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[common.Address]uint256.Int, rules *chain.Rules) error {
+	domains := rs.domains
 	if stateUpdates.BTreeG != nil {
 		var err error
 		stateUpdates.Scan(func(update *stateUpdate) bool {
@@ -200,11 +197,11 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyUpdates(roTx, blockNum, txNum, accountUpdates, balanceIncreases, rs.domains, rules); err != nil {
+	if err := rs.applyUpdates(roTx, blockNum, txNum, accountUpdates, balanceIncreases, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 
-	if err := rs.ApplyLogsAndTraces4(roTx, txNum, receipts, logs, traceFroms, traceTos, rs.domains); err != nil {
+	if err := rs.applyLogsAndTraces4(roTx, txNum, receipts, logs, traceFroms, traceTos); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -221,7 +218,8 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *dbstate.SharedDomains) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}) error {
+	domains := rs.domains
 	for addr := range traceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txNum); err != nil {
 			return err
