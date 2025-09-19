@@ -75,11 +75,14 @@ func checkCompatibility(networkID uint64, protocolVersion uint32, genesis common
 	if networkID != expectedNetworkID {
 		return fmt.Errorf("network id does not match: theirs %d, ours %d", networkID, expectedNetworkID)
 	}
-	if uint(protocolVersion) > version {
-		return fmt.Errorf("version is more than what this senty supports: theirs %d, max %d", protocolVersion, version)
-	}
 	if uint(protocolVersion) < minVersion {
 		return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", protocolVersion, minVersion)
+	}
+	if uint(protocolVersion) > version {
+		// The peer supports a newer ETH protocol version. Fall back to the
+		// negotiated (lower) version instead of failing the handshake so long as
+		// the peer also supports our advertised minimum.
+		protocolVersion = uint32(version)
 	}
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	if genesis != genesisHash {
