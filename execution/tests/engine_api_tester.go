@@ -229,6 +229,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
+		Transactor:           NewTransactor(rpcApiClient, genesis.Config.ChainID),
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
@@ -252,6 +253,7 @@ type EngineApiTester struct {
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
+	Transactor           Transactor
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
