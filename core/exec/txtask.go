@@ -966,7 +966,7 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 	select {
 	case <-ctx.Done():
 		return q.results.Len() == 0, ctx.Err()
-	case next := <- resultCh:
+	case next := <-resultCh:
 		return q.Drain(ctx, next)
 	case <-waitChan:
 		var none T
@@ -978,12 +978,12 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	q.Lock()
 	defer q.Unlock()
 
-	if q.resultCh == nil {
-		return q.results.Len() == 0, nil
-	}
-
 	if !item.isNil() {
 		heap.Push(q.results, item)
+	}
+
+	if q.resultCh == nil {
+		return q.results.Len() == 0, nil
 	}
 
 	for {
