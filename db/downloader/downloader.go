@@ -19,6 +19,7 @@ package downloader
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -72,7 +73,10 @@ import (
 
 var debugWebseed = false
 
-const TorrentClientStatusPath = "/downloader/torrentClientStatus"
+const (
+	TorrentClientStatusPath = "/downloader/torrentClientStatus"
+	TorrentsInfoPath        = "/downloader/torrentsInfo"
+)
 
 func init() {
 	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
@@ -1440,6 +1444,40 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(TorrentClientStatusPath, h)
+	}
+}
+
+// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http, and
+// the provided "debug" mux if non-nil. Only do this if you have a single instance of a Downloader.
+func (d *Downloader) HandleTorrents(debugMux *http.ServeMux) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		torrents := d.torrentClient.Torrents()
+
+		tInfo := struct {
+			Total    uint64 `json:"total"`
+			Complete uint64 `json:"complete"`
+		}{
+			Total: uint64(len(torrents)),
+		}
+		for _, t := range torrents {
+			if t.Complete().Bool() {
+				tInfo.Complete++
+			}
+		}
+		// Кодируем структуру и пишем в ответ
+		if err := json.NewEncoder(w).Encode(tInfo); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	})
+
+	// This is for gopprof.
+	defaultMux := http.DefaultServeMux
+	defaultMux.Handle(TorrentsInfoPath, h)
+	if debugMux != nil && debugMux != defaultMux {
+		debugMux.Handle(TorrentsInfoPath, h)
 	}
 }
 
