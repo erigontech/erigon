@@ -74,11 +74,12 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
-	t.Run("version higher allowed", func(t *testing.T) {
+	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 + 1
 		err := compatStatusPacket(reply, &status, version, version)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "version is more")
 	})
 	t.Run("genesis mismatch", func(t *testing.T) {
 		reply := goodReply
