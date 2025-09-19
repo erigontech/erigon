@@ -78,10 +78,10 @@ var Indexes = struct {
 	BorCheckpointId,
 	BorMilestoneId snaptype.Index
 }{
-	BorTxnHash:      snaptype.Index{Name: "borevents"},
-	BorSpanId:       snaptype.Index{Name: "borspans"},
-	BorCheckpointId: snaptype.Index{Name: "borcheckpoints"},
-	BorMilestoneId:  snaptype.Index{Name: "bormilestones"},
+	BorTxnHash:      snaptype.Index{Name: "borevents", Version: version.V1_1_standart},
+	BorSpanId:       snaptype.Index{Name: "borspans", Version: version.V1_1_standart},
+	BorCheckpointId: snaptype.Index{Name: "borcheckpoints", Version: version.V1_1_standart},
+	BorMilestoneId:  snaptype.Index{Name: "bormilestones", Version: version.V1_1_standart},
 }
 
 var ErrHeimdallDataIsNotReady = errors.New("heimdall data is not ready to extract for the specified interval")
