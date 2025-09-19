@@ -356,7 +356,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
-	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, false)
+	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 

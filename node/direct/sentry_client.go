@@ -157,7 +157,7 @@ type SentryClientDirect struct {
 	sideProtocols []sentryproto.Protocol
 }
 
-func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer, enableWitness bool) (*SentryClientDirect, error) {
+func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer, sideProtocols []sentryproto.Protocol) (*SentryClientDirect, error) {
 	protocolEnum, ok := uintToProtocolMap[protocol]
 	if !ok {
 		return nil, fmt.Errorf("unsupported protocol version: %d", protocol)
@@ -166,8 +166,11 @@ func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer,
 		server:   sentryServer,
 		protocol: protocolEnum,
 	}
-	if enableWitness {
-		client.sideProtocols = []sentryproto.Protocol{sentryproto.Protocol_WIT0}
+	for _, s := range sideProtocols {
+		if _, ok := supportedSideProtocols[s]; ok {
+			client.sideProtocols = append(client.sideProtocols, s)
+			break
+		}
 	}
 	return client, nil
 }

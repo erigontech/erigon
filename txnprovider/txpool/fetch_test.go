@@ -51,7 +51,7 @@ func TestFetch(t *testing.T) {
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH67, m, false)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH67, m, nil)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
@@ -100,7 +100,7 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
@@ -132,7 +132,7 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
@@ -169,7 +169,7 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
@@ -211,7 +211,7 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, false)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)

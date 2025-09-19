@@ -746,7 +746,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 				peerBestHash := statusPacket.Head
 
-			getBlockHeadersErr := ss.getBlockHeaders(ctx, peerBestHash, peerID)
+				getBlockHeadersErr := ss.getBlockHeaders(ctx, peerBestHash, peerID)
 				if getBlockHeadersErr != nil {
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 				}
