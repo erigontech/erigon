@@ -42,7 +42,7 @@ make integration
 
 ## Update version.go
 
-After a release branch has been created, update `erigon-lib/version/version.go`.
+After a release branch has been created, update `erigon/db/version/version.go`.
 Let's say you're releasing Erigon v3.1.0.
 Then in branch `release/3.1` of [erigon](https://github.com/erigontech/erigon) set `Major = 3`, `Minor = 1`, `Patch = 0`, `Modifier = ""`, and `DefaultSnapshotGitBranch = "release/3.1"`. (Don't forget to create branch `release/3.1` of [erigon-snapshot](https://github.com/erigontech/erigon-snapshot).)
 In branch `main` of [erigon](https://github.com/erigontech/erigon) set `Major = 3`, `Minor = 2`, `Patch = 0`, `Modifier = "dev"`, and `DefaultSnapshotGitBranch = "main"`.

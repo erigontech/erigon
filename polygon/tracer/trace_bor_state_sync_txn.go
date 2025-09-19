@@ -22,18 +22,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -61,7 +61,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	defer cancel()
 	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
 	tracer = NewBorStateSyncTxnTracer(tracer, stateReceiverContract)
-	rules := chainConfig.Rules(blockNum, blockTime)
+	rules := blockCtx.Rules(chainConfig)
 	stateWriter := state.NewNoopWriter()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), common.Address{})
@@ -97,8 +97,8 @@ func TraceBorStateSyncTxnTraceAPI(
 	}
 
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
-	rules := chainConfig.Rules(blockNum, blockTime)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, *vmConfig)
+	rules := evm.ChainRules()
 
 	return traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, true)
 }

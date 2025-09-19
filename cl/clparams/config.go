@@ -34,11 +34,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 var LatestStateFileName = "latest.ssz_snappy"
@@ -161,8 +161,7 @@ var (
 		"enr:-Ly4QCD5D99p36WafgTSxB6kY7D2V1ca71C49J4VWI2c8UZCCPYBvNRWiv0-HxOcbpuUdwPVhyWQCYm1yq2ZH0ukCbQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYVSJc2VjcDI1NmsxoQJJMSV8iSZ8zvkgbi8cjIGEUVJeekLqT0LQha_co-siT4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-KK4QKXJq1QOVWuJAGige4uaT8LRPQGCVRf3lH3pxjaVScMRUfFW1eiiaz8RwOAYvw33D4EX-uASGJ5QVqVCqwccxa-Bi4RldGgykCGm-DYDAABk__________-CaWSCdjSCaXCEM0QnzolzZWNwMjU2azGhAhNvrRkpuK4MWTf3WqiOXSOePL8Zc-wKVpZ9FQx_BDadg3RjcIIjKIN1ZHCCIyg",
 		"enr:-LO4QO87Rn2ejN3SZdXkx7kv8m11EZ3KWWqoIN5oXwQ7iXR9CVGd1dmSyWxOL1PGsdIqeMf66OZj4QGEJckSi6okCdWBpIdhdHRuZXRziAAAAABgAAAAhGV0aDKQPr_UhAQAAGT__________4JpZIJ2NIJpcIQj0iX1iXNlY3AyNTZrMaEDd-_eqFlWWJrUfEp8RhKT9NxdYaZoLHvsp3bbejPyOoeDdGNwgiMog3VkcIIjKA",
-		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo",
-	}...)
+		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo"}...)
 	ChiadoBootstrapNodes = append(MainnetBootstrapNodes, []string{
 		"enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
 		"enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
@@ -210,6 +209,8 @@ type NetworkConfig struct {
 	Eth2key                    string `yaml:"-" json:"-"` // ETH2Key is the ENR key of the Ethereum consensus object in an enr.
 	AttSubnetKey               string `yaml:"-" json:"-"` // AttSubnetKey is the ENR key of the subnet bitfield in the enr.
 	SyncCommsSubnetKey         string `yaml:"-" json:"-"` // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
+	CgcKey                     string `yaml:"-" json:"-"` // CgcKey is the ENR key of the CGC in the enr.
+	NfdKey                     string `yaml:"-" json:"-"` // NfdKey is the ENR key of the NFD in the enr.
 	MinimumPeersInSubnetSearch uint64 `yaml:"-" json:"-"` // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
 	BootNodes   []string `yaml:"-" json:"-"`
@@ -232,6 +233,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       MainnetBootstrapNodes,
 	},
@@ -251,6 +254,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       SepoliaBootstrapNodes,
 	},
@@ -270,6 +275,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       GnosisBootstrapNodes,
 	},
@@ -289,6 +296,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
@@ -308,6 +317,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoleskyBootstrapNodes,
 	},
@@ -327,6 +338,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoodiBootstrapNodes,
 	},
@@ -354,7 +367,6 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.HoleskyChainID: {
-		"https://holesky.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
 		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
 		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
@@ -979,6 +991,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Fulu
 	ValidatorCustodyRequirement:      8,
 	BalancePerAdditionalCustodyGroup: 32_000_000_000,
+	BlobSchedule:                     []BlobParameters{},
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1089,6 +1102,7 @@ func hoodiConfig() BeaconChainConfig {
 
 	// Time parameters
 	cfg.SecondsPerSlot = 12
+	cfg.SecondsPerETH1Block = 12
 	cfg.Eth1FollowDistance = 2048
 
 	// Forking

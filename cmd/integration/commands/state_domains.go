@@ -31,20 +31,23 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	downloadertype "github.com/erigontech/erigon-lib/snaptype"
-	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/seg"
+	downloadertype "github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/execution/chainspec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/nodecfg"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -98,7 +101,12 @@ var readDomains = &cobra.Command{
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = chainspec.GenesisBlockByChainName(chain)
+
+		spec, err := chainspec.ChainSpecByName(chain)
+		if err != nil {
+			utils.Fatalf("unknown chain %s", chain)
+		}
+		ethConfig.Genesis = spec.Genesis
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		var readFromDomain string
@@ -123,14 +131,14 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
 		defer chainDb.Close()
 
-		stateDb, err := mdbx.New(kv.ChainDB, log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
+		stateDb, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
 		if err != nil {
 			return
 		}
@@ -163,7 +171,7 @@ var compactDomains = &cobra.Command{
 			panic("can't build index when replace-in-datadir=false (consider removing --build-idx)")
 		}
 
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -176,7 +184,7 @@ var compactDomains = &cobra.Command{
 			return
 		}
 		defer tx.Rollback()
-		defer statelib.AggTx(tx).MadvNormal().DisableReadAhead()
+		defer dbstate.AggTx(tx).MadvNormal().DisableReadAhead()
 
 		// Iterate over all the files in  dirs.SnapDomain and print them
 		domainDir := dirs.SnapDomain
@@ -187,7 +195,7 @@ var compactDomains = &cobra.Command{
 			logger.Error("Error creating temporary directory", "error", err)
 			return
 		}
-		defer os.RemoveAll(tmpDir)
+		defer dir.RemoveAll(tmpDir)
 		// make a temporary DB to store the keys
 
 		compactionDB := mdbx.MustOpen(tmpDir)
@@ -339,8 +347,8 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 }
 
 func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingCompacted bool, err error) {
-	compressionType := statelib.Schema.GetDomainCfg(domain).Compression
-	compressCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
+	compressionType := statecfg.Schema.GetDomainCfg(domain).Compression
+	compressCfg := statecfg.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
 	switch domain {
@@ -486,7 +494,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := statelib.NewSharedDomains(temporalTx, logger)
+	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}
@@ -537,6 +545,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 func removeManyIgnoreError(filePaths ...string) {
 	for _, filePath := range filePaths {
-		os.Remove(filePath)
+		dir.RemoveFile(filePath)
 	}
 }

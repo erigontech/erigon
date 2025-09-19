@@ -56,7 +56,7 @@ jobs:
       DASHBOARDS_GIT_CONFIG: ${{ secrets.DASHBOARDS_GIT_CONFIG }}
     steps:
     - name: Clone erigon from ${{ env.ERIGON_BRANCH }} branch
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         ref: ${{ env.ERIGON_BRANCH }}
         fetch-depth: 1
@@ -70,7 +70,7 @@ jobs:
         echo ${{ secrets.DASHBOARDS_GIT_CONFIG }} | base64 -d > $HOME/.gitconfig
               
     - name: Download dashboard-backup
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: dashboard-backup
         path: /tmp
@@ -91,7 +91,7 @@ jobs:
     if: always()
     steps:
       - name: cleaning up
-        uses: geekyeggo/delete-artifact@v2
+        uses: geekyeggo/delete-artifact@v5
         with:
           name: |
             dashboard-backup

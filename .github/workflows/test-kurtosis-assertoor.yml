@@ -8,8 +8,10 @@ on:
   push:
     branches:
         - main
-        - release/*
-        - docker_pectra
+        - 'release/**'
+  pull_request:
+    branches:
+      - main
   workflow_call:
   workflow_dispatch:
 
@@ -19,7 +21,7 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -36,6 +38,7 @@ jobs:
         with:
             enclave_name: "kurtosis-run1-${{ github.run_id }}"
             ethereum_package_args: ".github/workflows/kurtosis/regular-assertoor.io"
+            ethereum_package_branch: "5.0.1"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
 
@@ -44,7 +47,7 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Login to Docker Hub
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
@@ -61,5 +64,6 @@ jobs:
         with:
             enclave_name: "kurtosis-run2-${{ github.run_id }}"
             ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
+            ethereum_package_branch: "5.0.1"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"

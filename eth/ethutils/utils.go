@@ -23,13 +23,13 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
 	ErrNilBlobHashes       = errors.New("nil blob hashes array")
-	ErrMaxBlobGasUsed      = errors.New("max blob gas used")
+	ErrMaxBlobGasUsed      = errors.New("blobs/blobgas exceeds max")
 	ErrMismatchBlobHashes  = errors.New("mismatch blob hashes")
 	ErrInvalidVersiondHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
@@ -74,7 +74,7 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 			}
 		}
 	}
-	if len(actualBlobHashes) > int(maxBlobsPerBlock) { // maybe we shouldn't check by maxBlobsGas?
+	if len(actualBlobHashes) > int(maxBlobsPerBlock) {
 		log.Debug("error max blob gas used", "blobGasUsed", blobGasUsed, "maxBlobsGas", maxBlobsGas, "actualBlobHashes", len(actualBlobHashes), "maxBlobsPerBlock", maxBlobsPerBlock)
 		return ErrMaxBlobGasUsed
 	}

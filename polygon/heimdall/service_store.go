@@ -22,8 +22,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
@@ -37,14 +38,12 @@ type Store interface {
 }
 
 func NewMdbxStore(logger log.Logger, dataDir string, accede bool, roTxLimit int64) *MdbxStore {
-	return newMdbxStore(polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger, accede, roTxLimit))
+	return newMdbxStore(polygoncommon.NewDatabase(dataDir, dbcfg.HeimdallDB, databaseTablesCfg, logger, accede, roTxLimit))
 }
 
 func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
-	spanIndex := RangeIndexFunc(
-		func(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-			return uint64(SpanIdAt(blockNum)), true, nil
-		})
+	spanIndex := NewSpanRangeIndex(db, kv.BorSpansIndex)
+	producerSelectionIndex := NewSpanRangeIndex(db, kv.BorProducerSelectionsIndex)
 
 	return &MdbxStore{
 		db: db,
@@ -57,7 +56,7 @@ func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 		spans: newMdbxEntityStore(
 			db, kv.BorSpans, Spans, generics.New[Span], spanIndex),
 		spanBlockProducerSelections: newMdbxEntityStore(
-			db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], spanIndex),
+			db, kv.BorProducerSelections, nil, generics.New[SpanBlockProducerSelection], producerSelectionIndex),
 	}
 }
 

@@ -32,55 +32,24 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/abi"
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	stateLib "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/asm"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/program"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
-
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggregator) {
-	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
-	tb.Cleanup(db.Close)
-
-	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := stateLib.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-
-	agg, err := stateLib.NewAggregator2(context.Background(), dirs, 16, salt, db, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return _db, tx, agg
-}
 
 func TestDefaults(t *testing.T) {
 	t.Parallel()
@@ -154,10 +123,9 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+	db := testTemporalDB(t)
+	tx, domains := testTemporalTxSD(t, db)
+
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	address := common.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
@@ -180,26 +148,16 @@ func TestCall(t *testing.T) {
 	}
 }
 
-func testTemporalDB(t testing.TB) *temporal.DB {
-	db := memdb.NewStateDB(t.TempDir())
-
-	t.Cleanup(db.Close)
-
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	return _db
+func testTemporalDB(t testing.TB) kv.TemporalRwDB {
+	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
-func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *dbstate.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := stateLib.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -231,7 +189,6 @@ func BenchmarkCall(b *testing.B) {
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
-	defer tx.Rollback()
 	//cfg.w = state.NewWriter(sd, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
@@ -249,14 +206,9 @@ func BenchmarkCall(b *testing.B) {
 
 func benchmarkEVM_Create(b *testing.B, code string) {
 	db := testTemporalDB(b)
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	tx, domains := testTemporalTxSD(b, db)
 
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
 	var (
@@ -325,12 +277,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	}
 
 	db := testTemporalDB(b)
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	tx, domains := testTemporalTxSD(b, db)
 
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
@@ -402,13 +349,6 @@ func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool 
 func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
 func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
 func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
-func (cr *FakeChainHeaderReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	return nil
-}
-func (cr *FakeChainHeaderReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
-	return 0
-}
-func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }
 
 type dummyChain struct {
 	counter int
@@ -514,18 +454,13 @@ func TestBlockhash(t *testing.T) {
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
 func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
+	b.Helper()
 	cfg := new(Config)
 	setDefaults(cfg)
 	db := testTemporalDB(b)
-	defer db.Close()
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	tx, domains := testTemporalTxSD(b, db)
 
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
 	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
@@ -598,9 +533,9 @@ func BenchmarkSimpleLoop(b *testing.B) {
 		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
 	p, lbl = program.New().Jumpdest()
-	callEOA := p.
-		Call(nil, 0xE0, 0, 0, 0, 0, 0). // call addr of EOA
-		Op(vm.POP).Jump(lbl).Bytes()    // pop return value and jump to label
+	// call addr of EOA
+	// pop return value and jump to label
+	callEOA := p.Call(nil, 0xE0, 0, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 
 	p, lbl = program.New().Jumpdest()
 	// Push as if we were making call, then pop it off again, and loop
@@ -769,10 +704,8 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 		return contract
 	}
 
-	_, tx, _ := NewTestTemporalDb(b)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 

@@ -29,19 +29,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -127,29 +126,16 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 
 	externalState := cfg.State != nil
 	if !externalState {
-		db := memdb.NewStateDB(tempdir)
-		defer db.Close()
 		dirs := datadir.New(tempdir)
-		logger := log.New()
-		salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		agg, err := state3.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, nil, err
-		}
-		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		db := temporaltest.NewTestDB(nil, dirs)
+		defer db.Close()
+
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := dbstate.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -196,25 +182,17 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	externalState := cfg.State != nil
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer os.RemoveAll(tmp) //nolint
+		defer dir.RemoveAll(tmp) //nolint
 
-		db := memdb.NewStateDB(tmp)
+		dirs := datadir.New(tmp)
+		db := temporaltest.NewTestDB(nil, dirs)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := dbstate.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}

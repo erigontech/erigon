@@ -350,17 +350,17 @@ func (c *MockEthereumClockGetEpochAtSlotCall) DoAndReturn(f func(uint64) uint64)
 }
 
 // GetSlotByTime mocks base method.
-func (m *MockEthereumClock) GetSlotByTime(time time.Time) uint64 {
+func (m *MockEthereumClock) GetSlotByTime(arg0 time.Time) uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSlotByTime", time)
+	ret := m.ctrl.Call(m, "GetSlotByTime", arg0)
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
 // GetSlotByTime indicates an expected call of GetSlotByTime.
-func (mr *MockEthereumClockMockRecorder) GetSlotByTime(time any) *MockEthereumClockGetSlotByTimeCall {
+func (mr *MockEthereumClockMockRecorder) GetSlotByTime(arg0 any) *MockEthereumClockGetSlotByTimeCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), time)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), arg0)
 	return &MockEthereumClockGetSlotByTimeCall{Call: call}
 }
 
@@ -537,6 +537,44 @@ func (c *MockEthereumClockNextForkDigestCall) Do(f func() (common.Bytes4, error)
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockEthereumClockNextForkDigestCall) DoAndReturn(f func() (common.Bytes4, error)) *MockEthereumClockNextForkDigestCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// NextForkEpochIncludeBPO mocks base method.
+func (m *MockEthereumClock) NextForkEpochIncludeBPO() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NextForkEpochIncludeBPO")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// NextForkEpochIncludeBPO indicates an expected call of NextForkEpochIncludeBPO.
+func (mr *MockEthereumClockMockRecorder) NextForkEpochIncludeBPO() *MockEthereumClockNextForkEpochIncludeBPOCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextForkEpochIncludeBPO", reflect.TypeOf((*MockEthereumClock)(nil).NextForkEpochIncludeBPO))
+	return &MockEthereumClockNextForkEpochIncludeBPOCall{Call: call}
+}
+
+// MockEthereumClockNextForkEpochIncludeBPOCall wrap *gomock.Call
+type MockEthereumClockNextForkEpochIncludeBPOCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEthereumClockNextForkEpochIncludeBPOCall) Return(arg0 uint64) *MockEthereumClockNextForkEpochIncludeBPOCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEthereumClockNextForkEpochIncludeBPOCall) Do(f func() uint64) *MockEthereumClockNextForkEpochIncludeBPOCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEthereumClockNextForkEpochIncludeBPOCall) DoAndReturn(f func() uint64) *MockEthereumClockNextForkEpochIncludeBPOCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
