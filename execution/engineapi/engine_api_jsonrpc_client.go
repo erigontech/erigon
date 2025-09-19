@@ -100,7 +100,7 @@ func (c *JsonRpcClient) NewPayloadV1(ctx context.Context, payload *enginetypes.E
 		var result enginetypes.PayloadStatus
 		err := c.rpcClient.CallContext(ctx, &result, "engine_newPayloadV1", payload)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -111,7 +111,7 @@ func (c *JsonRpcClient) NewPayloadV2(ctx context.Context, payload *enginetypes.E
 		var result enginetypes.PayloadStatus
 		err := c.rpcClient.CallContext(ctx, &result, "engine_newPayloadV2", payload)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -134,7 +134,7 @@ func (c *JsonRpcClient) NewPayloadV3(
 			parentBeaconBlockRoot,
 		)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -159,7 +159,7 @@ func (c *JsonRpcClient) NewPayloadV4(
 			executionRequests,
 		)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -174,7 +174,7 @@ func (c *JsonRpcClient) ForkchoiceUpdatedV1(
 		var result enginetypes.ForkChoiceUpdatedResponse
 		err := c.rpcClient.CallContext(ctx, &result, "engine_forkchoiceUpdatedV1", forkChoiceState, payloadAttributes)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -189,7 +189,7 @@ func (c *JsonRpcClient) ForkchoiceUpdatedV2(
 		var result enginetypes.ForkChoiceUpdatedResponse
 		err := c.rpcClient.CallContext(ctx, &result, "engine_forkchoiceUpdatedV2", forkChoiceState, payloadAttributes)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -204,7 +204,7 @@ func (c *JsonRpcClient) ForkchoiceUpdatedV3(
 		var result enginetypes.ForkChoiceUpdatedResponse
 		err := c.rpcClient.CallContext(ctx, &result, "engine_forkchoiceUpdatedV3", forkChoiceState, payloadAttributes)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -215,7 +215,7 @@ func (c *JsonRpcClient) GetPayloadV1(ctx context.Context, payloadID hexutil.Byte
 		var result enginetypes.ExecutionPayload
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV1", payloadID)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -226,7 +226,7 @@ func (c *JsonRpcClient) GetPayloadV2(ctx context.Context, payloadID hexutil.Byte
 		var result enginetypes.GetPayloadResponse
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV2", payloadID)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -237,7 +237,7 @@ func (c *JsonRpcClient) GetPayloadV3(ctx context.Context, payloadID hexutil.Byte
 		var result enginetypes.GetPayloadResponse
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV3", payloadID)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -248,7 +248,7 @@ func (c *JsonRpcClient) GetPayloadV4(ctx context.Context, payloadID hexutil.Byte
 		var result enginetypes.GetPayloadResponse
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV4", payloadID)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
 	}, c.backOff(ctx))
@@ -259,7 +259,7 @@ func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []c
 		var result []*enginetypes.ExecutionPayloadBody
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV1", hashes)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return result, nil
 	}, c.backOff(ctx))
@@ -270,7 +270,7 @@ func (c *JsonRpcClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, co
 		var result []*enginetypes.ExecutionPayloadBody
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV1", start, count)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return result, nil
 	}, c.backOff(ctx))
@@ -281,7 +281,7 @@ func (c *JsonRpcClient) GetClientVersionV1(ctx context.Context, callerVersion *e
 		var result []enginetypes.ClientVersionV1
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getClientVersionV1", callerVersion)
 		if err != nil {
-			return nil, c.retryable(err)
+			return nil, c.maybeMakePermanent(err)
 		}
 		return result, nil
 	}, c.backOff(ctx))
@@ -294,7 +294,7 @@ func (c *JsonRpcClient) backOff(ctx context.Context) backoff.BackOff {
 	return backoff.WithContext(backOff, ctx)
 }
 
-func (c *JsonRpcClient) retryable(err error) error {
+func (c *JsonRpcClient) maybeMakePermanent(err error) error {
 	if err == nil {
 		return nil
 	}
