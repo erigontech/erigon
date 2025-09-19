@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	zktx "github.com/erigontech/erigon/zk/tx"
 	"time"
+
+	zktx "github.com/erigontech/erigon/zk/tx"
 
 	"encoding/binary"
 
@@ -124,7 +125,7 @@ func SpawnSequencerL1BlockSyncStage(
 		}()
 	}
 
-	logChan := cfg.syncer.GetLogsChan()
+	logChan := cfg.syncer.GetLogsChan(syncer.LogsModeImmediate)
 	progressChan := cfg.syncer.GetProgressMessageChan()
 	var progress uint64
 

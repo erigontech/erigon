@@ -70,6 +70,13 @@ type LogEvent struct {
 	Done     bool
 }
 
+type LogsRetrieveMode int
+
+const (
+	LogsModeImmediate LogsRetrieveMode = iota
+	LogsModeOnCompletion
+)
+
 type L1Syncer struct {
 	ctx                 context.Context
 	etherMans           []IEtherman
@@ -164,14 +171,14 @@ func (s *L1Syncer) WaitQueryBlocksToFinish() {
 }
 
 // Channels
-func (s *L1Syncer) GetLogsChan() <-chan LogEvent {
+func (s *L1Syncer) GetLogsChan(mode LogsRetrieveMode) <-chan LogEvent {
 	s.logsSwapMutex.Lock()
 	defer s.logsSwapMutex.Unlock()
 
 	s.logsConsumChan = s.logsProduceChan
 
 	// If not downloading, grab existing data and close the channel
-	if !s.isDownloading.Load() {
+	if !s.isDownloading.Load() && mode == LogsModeImmediate {
 		s.closeLogsChannel.Store(true)
 	}
 	return s.logsConsumChan

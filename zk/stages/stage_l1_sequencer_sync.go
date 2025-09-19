@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/zk/contracts"
 	"github.com/erigontech/erigon/zk/hermez_db"
 	"github.com/erigontech/erigon/zk/l1infotree"
+	"github.com/erigontech/erigon/zk/syncer"
 	"github.com/erigontech/erigon/zk/types"
 )
 
@@ -55,12 +56,19 @@ func SpawnL1SequencerSyncStage(
 		defer tx.Rollback()
 	}
 
+	logsRetrieveMode := syncer.LogsModeImmediate
+	if cfg.zkCfg.SequencerHaltOnBatchNumber > 0 || cfg.zkCfg.IsL1Recovery() {
+		logsRetrieveMode = syncer.LogsModeOnCompletion
+	}
+
 	progress, err := stages.GetStageProgress(tx, stages.L1SequencerSync)
 	if err != nil {
 		return err
 	}
 	if progress == 0 {
 		progress = cfg.zkCfg.L1FirstBlock - 1
+		// wait for all logs to be fetched if starting from genesis
+		logsRetrieveMode = syncer.LogsModeOnCompletion
 	}
 
 	// if the flag is set - wait for that block to be finalized on L1 before continuing
@@ -93,7 +101,7 @@ func SpawnL1SequencerSyncStage(
 		}()
 	}
 
-	logChan := cfg.syncer.GetLogsChan()
+	logChan := cfg.syncer.GetLogsChan(logsRetrieveMode)
 	progressChan := cfg.syncer.GetProgressMessageChan()
 
 	idleTicker := time.NewTimer(10 * time.Second)
@@ -130,10 +138,12 @@ Loop:
 					verifierType := l.Data[96:128] // 4th positioned item in the log data
 					verifierBig := new(big.Int).SetBytes(verifierType)
 					if verifierBig.Uint64() == 0 {
+						log.Info(fmt.Sprintf("Saving rollup type %d for forkId %d", rollupType, forkId))
 						if funcErr = hermezDb.WriteRollupType(rollupType, forkId); funcErr != nil {
 							return funcErr
 						}
 					} else {
+						log.Info(fmt.Sprintf("Saving PP rollup type %d", rollupType))
 						if err := hermezDb.WritePPRollupType(rollupType); err != nil {
 							return err
 						}

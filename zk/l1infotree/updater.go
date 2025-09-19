@@ -31,7 +31,7 @@ type Syncer interface {
 	GetLastCheckedL1Block() uint64
 	CheckL1BlockFinalized(blockNo uint64) (finalized bool, finalizedBn uint64, err error)
 	RunQueryBlocks(lastCheckedBlock uint64)
-	GetLogsChan() (logs <-chan syncer.LogEvent)
+	GetLogsChan(mode syncer.LogsRetrieveMode) (logs <-chan syncer.LogEvent)
 	GetProgressMessageChan() <-chan string
 	GetHeader(blockNumber uint64) (*types.Header, error)
 	StopQueryBlocks()
@@ -827,7 +827,7 @@ func truncateL1InfoTreeData(hermezDb *hermez_db.HermezDb, fromIndex uint64) erro
 func (u *Updater) getLogs(logPrefix string) ([]types.Log, map[LogKey]*zkTypes.L1InfoTreeUpdateWithLeafHash, uint64, error) {
 	allLogs := make([]types.Log, 0)
 
-	logChan := u.syncer.GetLogsChan()
+	logChan := u.syncer.GetLogsChan(syncer.LogsModeImmediate)
 	progressChan := u.syncer.GetProgressMessageChan()
 	// Signals that no more logs will arrive
 	logsInputDone := make(chan uint64)

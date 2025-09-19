@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/zk/hermez_db"
 	"github.com/erigontech/erigon/zk/l1infotree"
 	"github.com/erigontech/erigon/zk/sequencer"
+	"github.com/erigontech/erigon/zk/syncer"
 	"github.com/erigontech/erigon/zk/types"
 )
 
@@ -106,7 +107,7 @@ func SpawnStageL1Syncer(
 		}()
 	}
 
-	logsChan := cfg.syncer.GetLogsChan()
+	logsChan := cfg.syncer.GetLogsChan(syncer.LogsModeImmediate)
 	progressMessageChan := cfg.syncer.GetProgressMessageChan()
 	highestVerification := types.L1BatchInfo{}
 

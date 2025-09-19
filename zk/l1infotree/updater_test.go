@@ -33,8 +33,8 @@ func (m *MockSyncer) RunQueryBlocks(lastCheckedBlock uint64) {
 	m.Called(lastCheckedBlock)
 }
 
-func (m *MockSyncer) GetLogsChan() <-chan syncer.LogEvent {
-	args := m.Called()
+func (m *MockSyncer) GetLogsChan(mode syncer.LogsRetrieveMode) <-chan syncer.LogEvent {
+	args := m.Called(mode)
 	return args.Get(0).(<-chan syncer.LogEvent)
 }
 
@@ -412,7 +412,7 @@ func TestCheckForInfoTreeUpdates(t *testing.T) {
 			logsChan := make(chan syncer.LogEvent, 10)
 
 			// Set up mock expectations
-			mockSyncer.On("GetLogsChan").Return((<-chan syncer.LogEvent)(logsChan))
+			mockSyncer.On("GetLogsChan", syncer.LogsModeImmediate).Return((<-chan syncer.LogEvent)(logsChan))
 			mockSyncer.On("GetProgressMessageChan").Return((<-chan string)(make(chan string)))
 			mockSyncer.On("StopQueryBlocks").Return().Maybe()
 			mockSyncer.On("ConsumeQueryBlocks").Return().Maybe()
