@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func MarshalReceipt(
@@ -36,6 +36,7 @@ func MarshalReceipt(
 	header *types.Header,
 	txnHash common.Hash,
 	signed bool,
+	withBlockTimestamp bool,
 ) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
@@ -49,8 +50,28 @@ func MarshalReceipt(
 
 	var from common.Address
 	if signed {
-		signer := types.LatestSignerForChainID(chainId)
-		from, _ = txn.Sender(*signer)
+		signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId))
+		from, _ = signer.Sender(txn)
+	}
+
+	var logsToMarshal interface{}
+
+	if withBlockTimestamp {
+		if receipt.Logs != nil {
+			rpcLogs := []*types.RPCLog{}
+			for _, l := range receipt.Logs {
+				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
+			}
+			logsToMarshal = rpcLogs
+		} else {
+			logsToMarshal = make([]*types.RPCLog, 0)
+		}
+	} else {
+		if receipt.Logs == nil {
+			logsToMarshal = make([]*types.Log, 0)
+		} else {
+			logsToMarshal = receipt.Logs
+		}
 	}
 
 	fields := map[string]interface{}{
@@ -64,7 +85,7 @@ func MarshalReceipt(
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
-		"logs":              receipt.Logs,
+		"logs":              logsToMarshal,
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
@@ -78,9 +99,6 @@ func MarshalReceipt(
 
 	// Assign receipt status.
 	fields["status"] = hexutil.Uint64(receipt.Status)
-	if receipt.Logs == nil {
-		fields["logs"] = [][]*types.Log{}
-	}
 
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {
@@ -102,5 +120,36 @@ func MarshalReceipt(
 		}
 	}
 
+	// Set arbitrum related fields
+	if chainConfig.IsArbitrum() {
+		fields["gasUsedForL1"] = hexutil.Uint64(receipt.GasUsedForL1)
+
+		if chainConfig.IsArbitrumNitro(header.Number) {
+			fields["effectiveGasPrice"] = hexutil.Uint64(header.BaseFee.Uint64())
+			fields["l1BlockNumber"] = hexutil.Uint64(types.DeserializeHeaderExtraInformation(header).L1BlockNumber)
+		} else {
+			arbTx, ok := txn.(*types.ArbitrumLegacyTxData)
+			if !ok {
+				log.Error("Expected transaction to contain arbitrum data", "txHash", txn.Hash())
+			} else {
+				fields["effectiveGasPrice"] = hexutil.Uint64(arbTx.EffectiveGasPrice)
+				fields["l1BlockNumber"] = hexutil.Uint64(arbTx.L1BlockNumber)
+			}
+		}
+
+		// todo
+		// If blockMetadata exists for the block containing this tx, then we will determine if it was timeboosted or not
+		// and add that info to the receipt object
+		// blockMetadata, err := backend.BlockMetadataByNumber(ctx, blockNumber)
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// if blockMetadata != nil {
+		// 	fields["timeboosted"], err = blockMetadata.IsTxTimeboosted(txIndex)
+		// 	if err != nil {
+		// 		log.Error("Error checking if a tx was timeboosted", "txIndex", txIndex, "txHash", tx.Hash(), "err", err)
+		// 	}
+		// }
+	}
 	return fields
 }

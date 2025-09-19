@@ -24,17 +24,17 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/erigontech/erigon/arb/osver"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
@@ -83,7 +83,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 	// assert if network is ARB0 to change pervrandao
 	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	if arbOsVersion > chain.ArbosVersion_0 {
+	if arbOsVersion > osver.ArbosVersion_0 {
 		difficultyHash := common.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
 	}

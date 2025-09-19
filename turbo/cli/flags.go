@@ -29,17 +29,16 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -74,6 +73,12 @@ var (
 		Name:  "private.api.ratelimit",
 		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
 		Value: kv.ReadersLimit - 128,
+	}
+
+	L2RPCAddrFlag = cli.StringFlag{
+		Name:  "l2rpc",
+		Usage: "address of arbitrum L2 rpc server to get blocks and transactions from",
+		Value: "",
 	}
 
 	PruneModeFlag = cli.StringFlag{
@@ -247,12 +252,6 @@ var (
 		Usage: "Maximum number of topics per subscription to filter logs by.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
-
-	TxPoolCommitEvery = cli.DurationFlag{
-		Name:  "txpool.commit.every",
-		Usage: "How often transactions should be committed to the storage",
-		Value: txpoolcfg.DefaultConfig.CommitEvery,
-	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
@@ -262,8 +261,13 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	_ = chainId
 
+	cfg.L2RPCAddr = ctx.String(L2RPCAddrFlag.Name)
+	log.Info("[Arbitrum] Using L2 RPC server to fetch blocks", "address", cfg.L2RPCAddr)
+
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
+
+	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 
 	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
 	if err != nil {
@@ -336,12 +340,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		}
 	}
 
-	disableIPV6 := ctx.Bool(utils.DisableIPV6.Name)
-	disableIPV4 := ctx.Bool(utils.DisableIPV4.Name)
-	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
-	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
-
-	logger.Info("[Downloader] Running with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
 	if ctx.Bool(utils.DisableIPV6.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv6 = true
 	}
@@ -374,6 +372,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 
 	cfg.Prune = mode
+
+	l2RPC := f.String(L2RPCAddrFlag.Name, L2RPCAddrFlag.DefaultText, "")
+	cfg.L2RPCAddr = *l2RPC
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))

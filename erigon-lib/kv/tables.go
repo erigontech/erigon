@@ -132,9 +132,7 @@ const (
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
 	// BOR
-	BorFinality             = "BorFinality"
 	BorTxLookup             = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorSeparate             = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
 	BorEvents               = "BorEvents"                 // event_id -> event_payload
 	BorEventNums            = "BorEventNums"              // block_num -> event_id (last event_id in that block)
 	BorEventProcessedBlocks = "BorEventProcessedBlocks"   // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
@@ -350,9 +348,7 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	BorFinality,
 	BorTxLookup,
-	BorSeparate,
 	BorEvents,
 	BorEventNums,
 	BorEventProcessedBlocks,
@@ -615,7 +611,6 @@ var AuRaTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorFinality:             {Flags: DupSort},
 	BorTxLookup:             {Flags: DupSort},
 	BorEvents:               {Flags: DupSort},
 	BorEventNums:            {Flags: DupSort},
@@ -644,7 +639,7 @@ var ReconTablesCfg = TableCfg{
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB, TemporaryDB, CaplinDB, ArbitrumDB, ArbClassicDB, ArbWasmDB: //TODO: move caplindb tables to own table config
+	case ChainDB, TemporaryDB, CaplinDB, ArbitrumDB, ArbClassicDB, ArbWasmDB, ArbStreamerDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case TxPoolDB:
 		return TxpoolTablesCfg

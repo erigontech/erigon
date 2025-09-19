@@ -21,6 +21,7 @@ package nodecfg
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -171,6 +172,8 @@ type Config struct {
 	HealthCheck bool
 
 	Http httpcfg.HttpCfg
+
+	DebugMux *http.ServeMux
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into

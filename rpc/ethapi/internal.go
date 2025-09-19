@@ -19,7 +19,7 @@ package ethapi
 // This file stores proxy-objects for `internal` package
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // nolint

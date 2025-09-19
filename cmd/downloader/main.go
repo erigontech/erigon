@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/c2h5oh/datasize"
 	"github.com/go-viper/mapstructure/v2"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -44,9 +43,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	"github.com/erigontech/erigon-db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -60,6 +56,9 @@ import (
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
@@ -69,7 +68,7 @@ import (
 	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/db/snaptype"      //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
@@ -229,11 +228,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	var downloadRate, uploadRate datasize.ByteSize
-	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
+	downloadRate, err := utils.GetStringFlagRateLimit(downloadRateStr)
+	if err != nil {
 		return err
 	}
-	if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
+	uploadRate, err := utils.GetStringFlagRateLimit(uploadRateStr)
+	if err != nil {
 		return err
 	}
 
@@ -248,7 +248,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"upload.rate", uploadRate.String(),
 		"webseed", webseeds,
 	)
-	staticPeers := common.CliString2Array(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
@@ -267,15 +266,15 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		dirs,
 		version,
 		torrentLogLevel,
-		downloadRate,
-		uploadRate,
 		torrentPort,
 		torrentConnsPerFile,
-		staticPeers,
 		webseedsList,
 		chain,
 		dbWritemap,
-		downloadercfg.NewCfgOpts{},
+		downloadercfg.NewCfgOpts{
+			DownloadRateLimit: downloadRate.TorrentRateLimit(),
+			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+		},
 	)
 	if err != nil {
 		return err
@@ -303,7 +302,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	d.HandleTorrentClientStatus()
+	d.HandleTorrentClientStatus(nil)
 
 	err = d.AddTorrentsFromDisk(ctx)
 	if err != nil {
@@ -335,7 +334,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	d.MainLoopInBackground(false)
 	if seedbox {
 		var downloadItems []*proto_downloader.AddItem
-		for _, it := range snapcfg.KnownCfg(chain).Preverified.Items {
+		snapCfg, _ := snapcfg.KnownCfg(chain)
+		for _, it := range snapCfg.Preverified.Items {
 			downloadItems = append(downloadItems, &proto_downloader.AddItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),

@@ -55,10 +55,11 @@ import (
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
 
+// Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob
-	KzgProof   common.Bytes48
+	KzgProofs  []common.Bytes48
 }
 
 type ApiHandler struct {
@@ -152,6 +153,7 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
@@ -301,6 +303,9 @@ func (a *ApiHandler) init() {
 							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
+							r.Get("/pending_consolidations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingConsolidations))
+							r.Get("/pending_deposits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingDeposits))
+							r.Get("/pending_partial_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingPartialWithdrawals))
 						})
 					})
 				})

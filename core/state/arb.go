@@ -12,11 +12,12 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/arb/lru"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
+	"github.com/erigontech/erigon/execution/types"
+
 	"github.com/erigontech/nitro-erigon/util/arbmath"
 )
 
@@ -357,6 +358,14 @@ func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
 func (sdb *IntraBlockState) SetWasmDB(wasmDB wasmdb.WasmIface) {
 	sdb.wasmDB = wasmDB
 }
+
+func (s *IntraBlockState) ExpectBalanceMint(amount *uint256.Int) {
+	if amount.Sign() < 0 {
+		panic(fmt.Sprintf("ExpectBalanceMint called with negative amount %v", amount))
+	}
+	s.arbExtraData.unexpectedBalanceDelta.Sub(s.arbExtraData.unexpectedBalanceDelta, amount)
+}
+
 func (sdb *IntraBlockState) ExpectBalanceBurn(amount *uint256.Int) {
 	if amount.Sign() < 0 {
 		panic(fmt.Sprintf("ExpectBalanceBurn called with negative amount %v", amount))

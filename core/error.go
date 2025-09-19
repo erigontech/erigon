@@ -22,7 +22,7 @@ package core
 import (
 	"errors"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (

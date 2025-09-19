@@ -164,17 +164,3 @@ func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir
 	logger.Info("[integrity] ValidateBorCheckpoints: done", "err", err)
 	return err
 }
-
-func ValidateBorMilestones(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
-	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
-	snapshotStore := heimdall.NewMilestoneSnapshotStore(baseStore.Milestones(), snaps)
-	err := snapshotStore.Prepare(ctx)
-	if err != nil {
-		return err
-	}
-	defer snapshotStore.Close()
-	defer baseStore.Close()
-	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
-	logger.Info("[integrity] ValidateBorMilestones: done", "err", err)
-	return err
-}

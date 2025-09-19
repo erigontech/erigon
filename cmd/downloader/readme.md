@@ -10,7 +10,7 @@
 - Where snapshots are stored? - `datadir/snapshots` - you can symlink/mount it to cheaper disk.
 
 - When snapshots are pulled? - Erigon download snapshots **only-once** when creating node - all other files are
-  self-generated
+  self-generated.
 
 - How does it benefit the new nodes? - P2P and Becaon networks may have not enough good peers for old data (no
   incentives). StageSenders results are included into blocks snaps - means new node can skip it.
@@ -18,10 +18,20 @@
 - How network benefit? - Serve immutable snapshots can use cheaper infrastructure: Bittorrent/S3/R2/etc... - because
   there is no incentive. Polygon mainnet is 12Tb now. Also Beacon network is very bad in serving old data.
 
-- How does it benefit current nodes? - Erigon's db is 1-file (doesens of Tb of nvme) - which is not friendly for
+- How does it benefit current nodes? - Erigon's db is 1-file (multiple TB of NVME) - which is not friendly for
   maintenance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps
   but Erigon3 also moving there `cold latest state` and `state history` - means new node doesn't need re-exec all blocks
   from genesis.
+
+# snapshots directory structure
+
+The downloader maintains the data files in the datadir/snapshots directory. Files in subdirectories are also data files.
+
+The file `preverified.toml` is created when all the snapshots described by a snapshot hashes files are downloaded and verified. The file contains the hashes of the snapshot files that were successfully synced to entirety. This is used as a marker for whether initial sync is/has completed. Removing this file will cause the downloader to sync to the latest published snapshot hashes.
+
+`.torrent` files are created for each snapshot file. During initial sync this is only created after the file is completely downloaded to avoid locking to a version of a file that can't be completed.
+
+`.part` files are created for snapshot files that haven't finished downloading. This prevents other components accessing data that the downloader hasn't finished downloading.
 
 # Downloader
 
@@ -161,7 +171,7 @@ downloader --seedbox --datadir=<your> --chain=mainnet
 ```
 
 Seedbox can fallback to **Webseed** - HTTP url to centralized infrastructure. For example: private S3 bucket with
-signed_urls, or any HTTP server with files. Main idea: erigon decentralized infrastructure has higher prioriity than
+signed_urls, or any HTTP server with files. Main idea: Erigon decentralized infrastructure has higher priority than
 centralized (which used as **support/fallback**).
 
 ```

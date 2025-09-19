@@ -22,11 +22,11 @@ import (
 	"math/big"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -372,7 +373,15 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 
 func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
 
-	if err := <-e.blockReader.Ready(ctx); err != nil {
+	// setup a timeout for the context to avoid waiting indefinitely
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			e.logger.Trace("ethereumExecutionModule.Ready: context deadline exceeded")
+			return &execution.ReadyResponse{Ready: false}, nil
+		}
 		return &execution.ReadyResponse{Ready: false}, err
 	}
 

@@ -38,9 +38,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -51,11 +48,14 @@ import (
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/state/stats"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	coresnaptype "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -267,10 +267,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
-	log.Info(fmt.Sprintf("[%s] Syncing header-chain", s.LogPrefix()))
-	if err := snapshotsync.WaitForDownloader(
+	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
+		"header-chain",
 		cfg.dirs,
 		true, /*headerChain=*/
 		cfg.blobs,
@@ -280,23 +280,24 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
+		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Header-chain synced", s.LogPrefix()))
 
 	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
+		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	log.Info(fmt.Sprintf("[%s] Syncing remaining snapshots", s.LogPrefix()))
-	if err := snapshotsync.WaitForDownloader(
+	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
+		"remaining snapshots",
 		cfg.dirs,
 		false, /*headerChain=*/
 		cfg.blobs,
@@ -306,13 +307,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
+		cfg.blockReader.TxnumReader(ctx),
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Remaining snapshots synced", s.LogPrefix()))
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
@@ -454,42 +455,55 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []snapshotsync.DownloadRequest) error {
-			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
+		started := cfg.blockRetire.RetireBlocksInBackground(
+			ctx,
+			minBlockNumber,
+			s.ForwardProgress,
+			log.LvlDebug,
+			func(downloadRequest []snapshotsync.DownloadRequest) error {
+				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
+						return err
+					}
+				}
+
+				return nil
+			}, func(l []string) error {
+				//if cfg.snapshotUploader != nil {
+				// TODO - we need to also remove files from the uploader (100k->500K transition)
+				//}
+
+				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
 					return err
 				}
-			}
 
-			return nil
-		}, func(l []string) error {
-			//if cfg.snapshotUploader != nil {
-			// TODO - we need to also remove files from the uploader (100k->500K transition)
-			//}
-
-			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+				return nil
+			}, func() error {
+				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+				if filesDeleted && cfg.notifier != nil {
+					cfg.notifier.Events.OnNewSnapshot()
+				}
 				return err
-			}
-
-			return nil
-		}, func() error {
-			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
-			if filesDeleted && cfg.notifier != nil {
-				cfg.notifier.Events.OnNewSnapshot()
-			}
-			return err
-		})
+			}, func() {
+				if cfg.notifier != nil {
+					cfg.notifier.Events.OnRetirementDone()
+				}
+			})
+		if cfg.notifier != nil {
+			cfg.notifier.Events.OnRetirementStart(started)
+		}
 
 		//	cfg.agg.BuildFilesInBackground()
-
 	}
 
 	pruneLimit := 10
+	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneLimit = 10_000
+		pruneTimeout = time.Hour
 	}
-	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
@@ -717,7 +731,8 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 	}
 
 	if checkKnownSizes {
-		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName).Preverified.Items {
+		snapCfg, _ := snapcfg.KnownCfg(u.cfg.chainConfig.ChainName)
+		for _, it := range snapCfg.Preverified.Items {
 			info, _, _ := snaptype.ParseFileName("", it.Name)
 
 			if fi.From == info.From {

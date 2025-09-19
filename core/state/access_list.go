@@ -20,14 +20,11 @@
 package state
 
 import (
-	"maps"
-
 	"github.com/erigontech/erigon-lib/common"
 )
 
 type accessList struct {
-	addresses    map[common.Address]map[common.Hash]struct{}
-	codeAccesses map[common.Address]struct{}
+	addresses map[common.Address]map[common.Hash]struct{}
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -62,8 +59,7 @@ func (al *accessList) Contains(address common.Address, slot common.Hash) (addres
 // newAccessList creates a new accessList.
 func newAccessList() *accessList {
 	return &accessList{
-		addresses:    map[common.Address]map[common.Hash]struct{}{},
-		codeAccesses: map[common.Address]struct{}{},
+		addresses: map[common.Address]map[common.Hash]struct{}{},
 	}
 }
 
@@ -86,7 +82,7 @@ func (al *accessList) Copy() *accessList {
 			cp.addresses[k] = slots
 		}
 	}
-	maps.Copy(cp.codeAccesses, al.codeAccesses)
+
 	return cp
 }
 
@@ -153,16 +149,4 @@ func (al *accessList) DeleteAddress(address common.Address) {
 		panic("reverting address change, address has slots")
 	}
 	delete(al.addresses, address)
-}
-
-func (al *accessList) AddCodeAccess(codeAddr common.Address) bool {
-	if _, ok := al.codeAccesses[codeAddr]; ok {
-		return false
-	}
-	al.codeAccesses[codeAddr] = struct{}{}
-	return true
-}
-
-func (al *accessList) DeleteCodeAccess(codeAddr common.Address) {
-	delete(al.codeAccesses, codeAddr)
 }

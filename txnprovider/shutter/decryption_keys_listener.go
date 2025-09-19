@@ -235,6 +235,7 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 			err = backoff.Retry(connect, backoff.WithContext(backoff.NewExponentialBackOff(), ctx))
 			if err != nil {
 				dkl.logger.Error("failed to connect to bootstrap node", "node", node, "err", err)
+				return nil
 			}
 
 			dkl.logger.Info("connected to bootstrap node", "node", node)

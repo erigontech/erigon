@@ -3,7 +3,7 @@ Erigon Types
 ================
 
 This document will list each major types defined and used by Erigon.
-They are found in `github.com/erigontech/erigon-lib/types` and `github.com/erigontech/erigon-lib/common`
+They are found in `github.com/erigontech/erigon/execution/types` and `github.com/erigontech/erigon-lib/common`
 
 Address and Hash
 ================
@@ -130,7 +130,7 @@ represent an Ethereum Transaction.
 Block Header
 ============
 
-package: `github.com/erigontech/erigon-lib/types`
+package: `github.com/erigontech/erigon/execution/types`
 
 .. code-block:: go
 

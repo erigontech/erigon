@@ -77,10 +77,14 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	})
 
 	denebBlocks := []*cltypes.SignedBeaconBlock{}
-	fuluBlocks := []*cltypes.SignedBeaconBlock{}
+	fuluBlocks := []*cltypes.SignedBlindedBeaconBlock{}
 	for _, block := range blocks {
+		blindedBlock, err := block.Blinded()
+		if err != nil {
+			return nil, err
+		}
 		if block.Version() >= clparams.FuluVersion {
-			fuluBlocks = append(fuluBlocks, block)
+			fuluBlocks = append(fuluBlocks, blindedBlock)
 		} else if block.Version() >= clparams.DenebVersion {
 			denebBlocks = append(denebBlocks, block)
 		}
@@ -88,8 +92,14 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 	if len(fuluBlocks) > 0 {
 		// download missing column data for the fulu blocks
-		if err = cfg.peerDas.DownloadMissingColumnsByBlocks(ctx, fuluBlocks); err != nil {
-			return nil, err
+		if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
+			if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+				log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
+			}
+		} else {
+			if err := cfg.peerDas.DownloadOnlyCustodyColumns(ctx, fuluBlocks); err != nil {
+				log.Warn("[chainTipSync] failed to download only custody columns", "err", err)
+			}
 		}
 	}
 

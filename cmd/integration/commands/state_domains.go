@@ -40,9 +40,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	downloadertype "github.com/erigontech/erigon-lib/snaptype"
-	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/state"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chainspec"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -177,7 +177,7 @@ var compactDomains = &cobra.Command{
 			return
 		}
 		defer tx.Rollback()
-		defer statelib.AggTx(tx).MadvNormal().DisableReadAhead()
+		defer dbstate.AggTx(tx).MadvNormal().DisableReadAhead()
 
 		// Iterate over all the files in  dirs.SnapDomain and print them
 		domainDir := dirs.SnapDomain
@@ -270,8 +270,9 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	fileInfos := []downloadertype.FileInfo{}
-	for _, file := range files {
-		res, ok, _ := downloadertype.ParseFileName("", file)
+	for _, f := range files {
+		dirPart, fileName := filepath.Split(f)
+		res, ok, _ := downloadertype.ParseFileName(dirPart, fileName)
 		if !ok {
 			panic("invalid file name")
 		}
@@ -339,8 +340,8 @@ func makeCompactableIndexDB(ctx context.Context, db kv.RwDB, files []string, dir
 }
 
 func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) (somethingCompacted bool, err error) {
-	compressionType := statelib.Schema.GetDomainCfg(domain).Compression
-	compressCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
+	compressionType := dbstate.Schema.GetDomainCfg(domain).Compression
+	compressCfg := dbstate.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
 	switch domain {
@@ -361,8 +362,9 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	fileInfos := []downloadertype.FileInfo{}
-	for _, file := range files {
-		res, ok, _ := downloadertype.ParseFileName("", file)
+	for _, f := range files {
+		dirPart, fileName := filepath.Split(f)
+		res, ok, _ := downloadertype.ParseFileName(dirPart, fileName)
 		if !ok {
 			panic("invalid file name")
 		}
@@ -485,7 +487,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := statelib.NewSharedDomains(temporalTx, logger)
+	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}

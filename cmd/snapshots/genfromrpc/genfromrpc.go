@@ -10,17 +10,16 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -341,14 +340,43 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 	return tx
 }
 
+func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
+	tx := &types.ArbitrumLegacyTxData{LegacyTx: &types.LegacyTx{CommonTx: *commonTx}}
+
+	if gasPriceHex, ok := rawTx["gasPrice"].(string); ok {
+		tx.GasPrice = uint256.MustFromHex(gasPriceHex)
+	}
+	if l1BlockNum, ok := rawTx["l1BlockNumber"].(string); ok {
+		tx.L1BlockNumber = convertHexToBigInt(l1BlockNum).Uint64()
+		// } else {
+		// 	if l1BlockNum, ok := rawTx["blockNumber"].(string); ok {
+		// 		tx.L1BlockNumber = convertHexToBigInt(l1BlockNum).Uint64()
+		// 	}
+	}
+	if effectiveGasPrice, ok := rawTx["effectiveGasPrice"].(string); ok {
+		tx.EffectiveGasPrice = uint256.MustFromHex(effectiveGasPrice).Uint64()
+	}
+	// if hashOverride, ok := rawTx["hashOverride"].(string); ok {
+	// 	tx.HashOverride = common.HexToHash(hashOverride)
+	// }
+	if hashOverride, ok := rawTx["hash"].(string); ok {
+		tx.HashOverride = common.HexToHash(hashOverride)
+	}
+	sender, ok := commonTx.GetSender()
+	if ok {
+		tx.OverrideSender = &sender
+	}
+
+	// return types.NewArbitrumLegacyTx(&types.LegacyTx{CommonTx: *commonTx, GasPrice: tx.GasPrice}, tx.HashOverride, tx.EffectiveGasPrice, tx.L1BlockNumber, tx.OverrideSender)
+	return tx
+}
+
 func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	tx := &types.ArbitrumSubmitRetryableTx{}
 
 	// Chain ID: required field (hex string)
 	if chainIdHex, ok := rawTx["chainId"].(string); ok {
 		tx.ChainId = convertHexToBigInt(chainIdHex)
-	} else {
-		// Optionally handle missing field (e.g. log or return an error)
 	}
 
 	// Request ID: expected as a hex string
@@ -644,8 +672,7 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 				ChainId: chainID,
 			}
 		case "0x78": // ArbitrumLegacyTxType
-			// types.NewArbitrumLegacyTx()
-			panic("imlement me")
+			tx = makeArbitrumLegacyTxFunc(commonTx, rawTx)
 		default:
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
@@ -655,8 +682,8 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 	return txs, nil
 }
 
-// getBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
+// GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
+func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
@@ -738,10 +765,12 @@ func genFromRPc(cliCtx *cli.Context) error {
 		}
 		if curBlock == 0 {
 			// write arb genesis
-			log.Info("Writing arbitrum sepolia-rollup genesis")
-			gen := core.GenesisBlockByChainName("sepolia-rollup")
-			b := core.MustCommitGenesis(gen, db, dirs, log.New())
-			log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
+			// log.Info("Writing arbitrum sepolia-rollup genesis")
+
+			// gen := chain.ArbSepoliaRollupGenesisBlock()
+
+			// b := core.MustCommitGenesis(gen, db, dirs, log.New())
+			// log.Info("wrote arbitrum sepolia-rollup genesis", "block_hash", b.Hash().String(), "state_root", b.Root().String())
 		} else {
 			start = curBlock
 		}
@@ -767,7 +796,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := getBlockByNumber(client, &blockNumber, verification)
+				blk, err := GetBlockByNumber(client, &blockNumber, verification)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}

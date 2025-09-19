@@ -68,9 +68,9 @@ func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation 
 		return nil
 	}
 	if value.IsZero() {
-		cw.cache.SetStorageDelete(address.Bytes(), incarnation, key.Bytes())
+		cw.cache.SetStorageDelete(address.Bytes(), incarnation, key[:])
 	} else {
-		cw.cache.SetStorageWrite(address.Bytes(), incarnation, key.Bytes(), value.Bytes())
+		cw.cache.SetStorageWrite(address.Bytes(), incarnation, key[:], value.Bytes())
 	}
 	return nil
 }

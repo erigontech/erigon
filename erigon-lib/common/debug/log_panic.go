@@ -18,6 +18,7 @@ package debug
 
 import (
 	"os"
+	"runtime/debug"
 	"sync/atomic"
 	"syscall"
 
@@ -31,7 +32,7 @@ func GetSigC(sig *chan os.Signal) {
 	sigc.Store(*sig)
 }
 
-// LogPanic - does log panic to logger and to <datadir>/crashreports then stops the process
+// LogPanic - does log panic to logger then stops the process
 func LogPanic() {
 	panicResult := recover()
 	if panicResult == nil {
@@ -42,4 +43,22 @@ func LogPanic() {
 	if sl := sigc.Load(); sl != nil {
 		sl.(chan os.Signal) <- syscall.SIGINT
 	}
+}
+
+// Recovers errors, logs the stack trace and sets an error value.
+func RecoverPanicIntoError(logger log.Logger, outErr *error) {
+	if *outErr != nil {
+		// Don't swallow panics if an error is already set. This is an unrecoverable situation.
+		return
+	}
+	r := recover()
+	if r == nil {
+		return
+	}
+	err, ok := r.(error)
+	if !ok {
+		panic(r)
+	}
+	*outErr = err
+	logger.Crit("recovered panic", "err", err, "stack", string(debug.Stack()))
 }

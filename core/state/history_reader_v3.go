@@ -20,12 +20,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/db/state"
 )
 
 var PrunedError = errors.New("old data not available due to pruning")

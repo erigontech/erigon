@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -96,14 +97,16 @@ type Sentinel struct {
 
 	indiciesDB kv.RoDB
 
-	discoverConfig   discover.Config
-	pubsub           *pubsub.PubSub
-	subManager       *GossipManager
-	metrics          bool
-	logger           log.Logger
-	forkChoiceReader forkchoice.ForkChoiceStorageReader
-	pidToEnr         sync.Map
-	ethClock         eth_clock.EthereumClock
+	discoverConfig     discover.Config
+	pubsub             *pubsub.PubSub
+	subManager         *GossipManager
+	metrics            bool
+	logger             log.Logger
+	forkChoiceReader   forkchoice.ForkChoiceStorageReader
+	pidToEnr           sync.Map
+	pidToEnodeId       sync.Map
+	ethClock           eth_clock.EthereumClock
+	peerDasStateReader peerdasstate.PeerDasStateReader
 
 	metadataLock sync.Mutex
 }
@@ -188,7 +191,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		s.peers,
 		s.cfg.NetworkConfig,
 		localNode,
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.cfg.EnableBlocks).Start()
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
 
 	return net, err
 }
@@ -204,18 +207,20 @@ func New(
 	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:               ctx,
-		cfg:               cfg,
-		blockReader:       blockReader,
-		indiciesDB:        indiciesDB,
-		metrics:           true,
-		logger:            logger,
-		forkChoiceReader:  forkChoiceReader,
-		blobStorage:       blobStorage,
-		ethClock:          ethClock,
-		dataColumnStorage: dataColumnStorage,
+		ctx:                ctx,
+		cfg:                cfg,
+		blockReader:        blockReader,
+		indiciesDB:         indiciesDB,
+		metrics:            true,
+		logger:             logger,
+		forkChoiceReader:   forkChoiceReader,
+		blobStorage:        blobStorage,
+		ethClock:           ethClock,
+		dataColumnStorage:  dataColumnStorage,
+		peerDasStateReader: peerDasStateReader,
 	}
 
 	// Setup discovery
@@ -262,7 +267,7 @@ func New(
 	mux.Get("/", httpreqresp.NewRequestHandler(host))
 	s.httpApi = mux
 
-	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi)
+	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi, peerDasStateReader)
 
 	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
@@ -276,10 +281,9 @@ func New(
 func (s *Sentinel) observeBandwidth(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
-		countSubnetsSubscribed := func() int {
-			count := 0
+		countAttSubnetsSubscribed, countColumnSidecarSubscribed := func() (attCount int, columnSidecarCount int) {
 			if s.subManager == nil {
-				return count
+				return
 			}
 			s.GossipManager().subscriptions.Range(func(key, value any) bool {
 				sub := value.(*GossipSubscription)
@@ -287,16 +291,20 @@ func (s *Sentinel) observeBandwidth(ctx context.Context) {
 					return true
 				}
 				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
-					count++
+					attCount++
+				}
+				if strings.Contains(sub.topic.String(), "data_column_sidecar") && sub.subscribed.Load() {
+					columnSidecarCount++
 				}
 				return true
 			})
-			return count
+			return
 		}()
 
 		multiplierForAdaptableTraffic := 1.0
 		if s.cfg.AdaptableTrafficRequirements {
-			multiplierForAdaptableTraffic = ((float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+			multiplierForAdaptableTraffic = ((float64(countAttSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+			multiplierForAdaptableTraffic += ((float64(countColumnSidecarSubscribed) / float64(s.cfg.BeaconConfig.NumberOfColumns)) * 16)
 		}
 		select {
 		case <-ctx.Done():
@@ -524,6 +532,11 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 		} else {
 			continue
 		}
+		if enodeId, ok := s.pidToEnodeId.Load(p); ok {
+			entry.EnodeId = enodeId.(enode.ID).String()
+		} else {
+			continue
+		}
 		agent, err := s.host.Peerstore().Get(p, "AgentVersion")
 		if err == nil {
 			entry.AgentVersion = agent.(string)
@@ -571,7 +584,7 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
 		s.logger.Debug("[IDENTITY] Could not load sync subnet", "err", err)
 	}
-	cgc := s.cfg.BeaconConfig.CustodyRequirement // TODO
+	cgc := s.forkChoiceReader.GetPeerDas().StateReader().GetAdvertisedCgc()
 	metadata = &cltypes.Metadata{
 		SeqNumber:         s.listener.LocalNode().Seq(),
 		Attnets:           [8]byte(subnetField),

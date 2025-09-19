@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/arb/osver"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -180,6 +181,8 @@ type BorConfig interface {
 	GetAhmedabadBlock() *big.Int
 	IsBhilai(num uint64) bool
 	GetBhilaiBlock() *big.Int
+	IsVeBlop(num uint64) bool
+	GetVeBlopBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
@@ -197,12 +200,13 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, VeBlop: %v, Engine: %v}",
 			c.ChainID,
 			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GetAhmedabadBlock(),
 			c.Bor.GetBhilaiBlock(),
+			c.Bor.GetVeBlopBlock(),
 			engine,
 		)
 	}
@@ -311,7 +315,7 @@ func (c *Config) IsGrayGlacier(num uint64) bool {
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
 func (c *Config) IsShanghai(time uint64, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
-		return currentArbosVersion >= ArbosVersion_11
+		return currentArbosVersion >= osver.ArbosVersion_11
 	}
 	return isForked(c.ShanghaiTime, time)
 }
@@ -337,7 +341,7 @@ func (c *Config) IsBhilai(num uint64) bool {
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
-		return currentArbosVersion >= ArbosVersion_20
+		return currentArbosVersion >= osver.ArbosVersion_20
 	}
 	return isForked(c.CancunTime, time)
 }
@@ -345,7 +349,7 @@ func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
-		return currentArbosVersion >= ArbosVersion_40
+		return currentArbosVersion >= osver.ArbosVersion_40
 	}
 	return isForked(c.PragueTime, time)
 }
@@ -370,7 +374,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) getBlobConfig(time uint64, currentArbosVer uint64) *params.BlobConfig {
+func (c *Config) GetBlobConfig(time uint64, currentArbosVer uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
@@ -427,7 +431,7 @@ func (c *Config) getBlobConfig(time uint64, currentArbosVer uint64) *params.Blob
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
-	return c.getBlobConfig(time, currentArbosVer).Max
+	return c.GetBlobConfig(time, currentArbosVer).Max
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64, currentArbosVer uint64) uint64 {
@@ -435,11 +439,11 @@ func (c *Config) GetMaxBlobGasPerBlock(time uint64, currentArbosVer uint64) uint
 }
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
-	return c.getBlobConfig(time, currentArbosVer).Target
+	return c.GetBlobConfig(time, currentArbosVer).Target
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64, currentArbosVer uint64) uint64 {
-	return c.getBlobConfig(time, currentArbosVer).BaseFeeUpdateFraction
+	return c.GetBlobConfig(time, currentArbosVer).BaseFeeUpdateFraction
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
@@ -457,6 +461,20 @@ func (c *Config) SecondsPerSlot() uint64 {
 		return 5 // Gnosis
 	}
 	return 12 // Ethereum
+}
+
+func (c *Config) SystemContracts(time uint64) map[string]common.Address {
+	contracts := map[string]common.Address{}
+	if c.IsCancun(time, 0 /* currentArbosVersion */) {
+		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
+	}
+	if c.IsPrague(time, 0 /* currentArbosVersion */) {
+		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		contracts["DEPOSIT_CONTRACT_ADDRESS"] = c.DepositContract
+		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
+		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+	}
+	return contracts
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -715,7 +733,7 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		IsAura:             c.Aura != nil,
 		ArbOSVersion:       currentArbosVersion,
 		IsArbitrum:         c.IsArbitrum(),
-		IsStylus:           c.IsArbitrum() && currentArbosVersion >= ArbosVersion_Stylus,
+		IsStylus:           c.IsArbitrum() && currentArbosVersion >= osver.ArbosVersion_Stylus,
 	}
 }
 
@@ -810,7 +828,7 @@ func ArbitrumOneParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       ArbosVersion_6,
+		InitialArbOSVersion:       osver.ArbosVersion_6,
 		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
 	}
 }
@@ -820,7 +838,7 @@ func ArbitrumNovaParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       ArbosVersion_1,
+		InitialArbOSVersion:       osver.ArbosVersion_1,
 		InitialChainOwner:         common.HexToAddress("0x9C040726F2A657226Ed95712245DeE84b650A1b5"),
 	}
 }
@@ -830,7 +848,7 @@ func ArbitrumRollupGoerliTestnetParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       ArbosVersion_2,
+		InitialArbOSVersion:       osver.ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -840,7 +858,7 @@ func ArbitrumDevTestParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       ArbosVersion_32,
+		InitialArbOSVersion:       osver.ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -850,7 +868,7 @@ func ArbitrumDevTestDASParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       ArbosVersion_32,
+		InitialArbOSVersion:       osver.ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -860,7 +878,7 @@ func ArbitrumAnytrustGoerliTestnetParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       ArbosVersion_2,
+		InitialArbOSVersion:       osver.ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -870,7 +888,7 @@ func DisableArbitrumParams() ArbitrumChainParams {
 		EnableArbOS:               false,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       ArbosVersion_0,
+		InitialArbOSVersion:       osver.ArbosVersion_0,
 		InitialChainOwner:         common.Address{},
 	}
 }

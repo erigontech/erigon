@@ -71,8 +71,11 @@ func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) 
 	return sd, sd.ReadFrom(buf, cfg)
 }
 
-func ReadEpochData(getFn GetValFn, slot uint64) (*EpochData, error) {
-	ed := &EpochData{}
+func ReadEpochData(getFn GetValFn, slot uint64, beaconConfig *clparams.BeaconChainConfig) (*EpochData, error) {
+	ed := &EpochData{
+		BeaconConfig: beaconConfig,
+		Version:      beaconConfig.GetCurrentStateVersion(slot / beaconConfig.SlotsPerEpoch),
+	}
 	v, err := getFn(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
@@ -86,20 +89,13 @@ func ReadEpochData(getFn GetValFn, slot uint64) (*EpochData, error) {
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadCheckpoints(getFn GetValFn, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, ok bool, err error) {
-	ed := &EpochData{}
-	var v []byte
-	v, err = getFn(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+func ReadCheckpoints(getFn GetValFn, slot uint64, beaconConfig *clparams.BeaconChainConfig) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, ok bool, err error) {
+	ed, err := ReadEpochData(getFn, slot, beaconConfig)
 	if err != nil {
-		return
+		return solid.Checkpoint{}, solid.Checkpoint{}, solid.Checkpoint{}, false, err
 	}
-	if len(v) == 0 {
-		return
-	}
-	buf := bytes.NewBuffer(v)
-
-	if err = ed.ReadFrom(buf); err != nil {
-		return
+	if ed == nil {
+		return solid.Checkpoint{}, solid.Checkpoint{}, solid.Checkpoint{}, false, nil
 	}
 	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, true, nil
 }

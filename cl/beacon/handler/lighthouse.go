@@ -124,14 +124,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 	}
 
 	// read the epoch datas first
-	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
 	if epochData == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
-	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
+	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -286,14 +286,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 	defer snRoTx.Close()
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	// read the epoch datas first
-	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
 	if epochData == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
-	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
+	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}

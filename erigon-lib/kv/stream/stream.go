@@ -100,7 +100,6 @@ func (it *ReverseRangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
-// UnionUno
 type UnionUno[T cmp.Ordered] struct {
 	x, y           Uno[T]
 	asc            bool
@@ -110,6 +109,8 @@ type UnionUno[T cmp.Ordered] struct {
 	limit          int
 }
 
+// Union - returns all elements that are in A, or in B, or in both. When duplicate elements - first stream (x) takes precedence.
+// in Set Theory: A ∪ B = {x | x ∈ A ∨ x ∈ B}
 func Union[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil && y == nil {
 		return &Empty[T]{}
@@ -206,6 +207,8 @@ type Intersected[T cmp.Ordered] struct {
 	err                error
 }
 
+// Intersect - returns only elements that exist in BOTH A AND B
+// Set Theory Definition: A ∩ B = {x | x ∈ A ∧ x ∈ B}
 func Intersect[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &Empty[T]{}

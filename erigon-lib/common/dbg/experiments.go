@@ -33,11 +33,13 @@ import (
 var (
 	MaxReorgDepth = EnvInt("MAX_REORG_DEPTH", 512)
 
-	noMemstat           = EnvBool("NO_MEMSTAT", false)
-	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
-	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
+	noMemstat            = EnvBool("NO_MEMSTAT", false)
+	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
+	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
+	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -208,7 +210,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*45 {
+	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
 		return
 	}
 
@@ -247,7 +249,7 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 		return
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(heapProfileFrequency)
 	defer ticker.Stop()
 
 	for {

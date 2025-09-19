@@ -54,5 +54,5 @@
     "agraBlock": 100,
     "napoliBlock": 100
   },
-  "defaultBlockGasLimit" : 45000000
+  "defaultBlockGasLimit": 45000000
 }

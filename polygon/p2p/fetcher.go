@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type Fetcher interface {
@@ -29,6 +29,16 @@ type Fetcher interface {
 		ctx context.Context,
 		start uint64,
 		end uint64,
+		peerId *PeerId,
+		opts ...FetcherOption,
+	) (FetcherResponse[[]*types.Header], error)
+
+	// FetchHeadersBackwards fetches a given number of headers backwards from a hash from a peer.
+	// Blocks until data is received.
+	FetchHeadersBackwards(
+		ctx context.Context,
+		hash common.Hash,
+		amount uint64,
 		peerId *PeerId,
 		opts ...FetcherOption,
 	) (FetcherResponse[[]*types.Header], error)

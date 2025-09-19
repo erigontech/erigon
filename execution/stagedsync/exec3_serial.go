@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 
@@ -115,13 +115,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			return false, nil
 		}
 
-		var receipt *types.Receipt
+		var logIndexAfterTx uint32
+		var cumGasUsed uint64
 		if !txTask.Final {
 			if txTask.TxIndex >= 0 {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
-			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
-				return false, err
+				receipt := txTask.BlockReceipts[txTask.TxIndex]
+				if receipt != nil {
+					logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(txTask.Logs))
+					cumGasUsed = receipt.CumulativeGasUsed
+				}
 			}
 		} else {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
@@ -143,6 +145,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						prevTask.Final = false
 						prevTask.HistoryExecution = true
 						se.applyWorker.RunTxTaskNoLock(&prevTask, se.isMining, se.skipPostEvaluation)
+						if prevTask.Error != nil {
+							return false, fmt.Errorf("error while finding last receipt: %w", prevTask.Error)
+						}
 						prevTask.CreateReceipt(se.applyTx.(kv.TemporalTx))
 						lastReceipt = txTask.BlockReceipts[txTask.TxIndex-1]
 					} else {
@@ -151,15 +156,18 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-					receipt = &types.Receipt{
-						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
-						FirstLogIndexWithinBlock: uint32(firstIndex),
-					}
+					logIndexAfterTx = uint32(firstIndex) + uint32(len(txTask.Logs))
+					cumGasUsed = lastReceipt.CumulativeGasUsed
 				}
 			}
 		}
-		if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
-			return false, err
+		if !txTask.HistoryExecution {
+			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx.(kv.TemporalTx)) {
+				logIndexAfterTx -= uint32(len(txTask.Logs))
+			}
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
+				return false, err
+			}
 		}
 
 		// MA applystate
@@ -199,7 +207,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 	if !ok {
 		return t2, errors.New("tx is not a temporal tx")
 	}
-	se.doms, err = state2.NewSharedDomains(temporalTx, se.logger)
+	se.doms, err = dbstate.NewSharedDomains(temporalTx, se.logger)
 	if err != nil {
 		return t2, err
 	}

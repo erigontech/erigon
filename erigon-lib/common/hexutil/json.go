@@ -111,14 +111,13 @@ func (b *Big) UnmarshalText(input []byte) error {
 	return nil
 }
 
-func (b *Big) ToUint256() *uint256.Int {
-	return uint256.MustFromBig(b.ToInt())
-}
-
 // ToInt converts b to a big.Int.
 func (b *Big) ToInt() *big.Int {
 	return (*big.Int)(b)
 }
+
+// ToUint256 converts b to a uint256.Int.
+func (b *Big) ToUint256() *uint256.Int { return uint256.MustFromBig(b.ToInt()) }
 
 // String returns the hex encoding of b.
 func (b *Big) String() string {

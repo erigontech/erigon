@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -147,6 +147,7 @@ type IntraBlockState interface {
 
 	RemoveEscrowProtection(addr common.Address)
 	ExpectBalanceBurn(amount *uint256.Int)
+	ExpectBalanceMint(amount *uint256.Int)
 
 	GetNonce(common.Address) (uint64, error)
 	SetNonce(common.Address, uint64) error

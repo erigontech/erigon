@@ -49,14 +49,16 @@ var (
 
 // ID is a fork identifier as defined by EIP-2124.
 type ID struct {
-	Hash [4]byte // CRC32 checksum of the genesis block and passed fork block numbers
-	Next uint64  // Block number of the next upcoming fork, or 0 if no forks are known
+	Hash       [4]byte // CRC32 checksum of the genesis block and passed fork block numbers
+	Activation uint64  `rlp:"-"` // Block number/time activation for current fork
+	Next       uint64  // Block number/time of the next upcoming fork, or 0 if no forks are known
 }
 
 // Filter is a fork id filter to validate a remotely advertised ID.
 type Filter func(id ID) error
 
 func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) ID {
+	var activation uint64
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
@@ -64,22 +66,24 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 	for _, fork := range heightForks {
 		if headHeight >= fork {
 			// Fork already passed, checksum the previous hash and the fork number
-			hash = checksumUpdate(hash, fork)
+			hash = ChecksumUpdate(hash, fork)
+			activation = fork
 			continue
 		}
-		return ID{Hash: ChecksumToBytes(hash), Next: fork}
+		return ID{Hash: ChecksumToBytes(hash), Activation: activation, Next: fork}
 	}
 	var next uint64
 	for _, fork := range timeForks {
 		if headTime >= fork {
 			// Fork passed, checksum the previous hash and the fork time
-			hash = checksumUpdate(hash, fork)
+			hash = ChecksumUpdate(hash, fork)
+			activation = fork
 			continue
 		}
 		next = fork
 		break
 	}
-	return ID{Hash: ChecksumToBytes(hash), Next: next}
+	return ID{Hash: ChecksumToBytes(hash), Activation: activation, Next: next}
 }
 
 func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
@@ -88,7 +92,7 @@ func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash,
 		return id.Hash
 	} else {
 		hash := binary.BigEndian.Uint32(id.Hash[:])
-		return ChecksumToBytes(checksumUpdate(hash, id.Next))
+		return ChecksumToBytes(ChecksumUpdate(hash, id.Next))
 	}
 }
 
@@ -120,7 +124,7 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 	hash := crc32.ChecksumIEEE(genesis[:])
 	sums[0] = ChecksumToBytes(hash)
 	for i, fork := range forks {
-		hash = checksumUpdate(hash, fork)
+		hash = ChecksumUpdate(hash, fork)
 		sums[i+1] = ChecksumToBytes(hash)
 	}
 	// Add two sentries to simplify the fork checks and don't require special
@@ -194,9 +198,9 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 	}
 }
 
-// checksumUpdate calculates the next IEEE CRC32 checksum based on the previous
+// ChecksumUpdate calculates the next IEEE CRC32 checksum based on the previous
 // one and a fork block number (equivalent to CRC32(original-blob || fork)).
-func checksumUpdate(hash uint32, fork uint64) uint32 {
+func ChecksumUpdate(hash uint32, fork uint64) uint32 {
 	var blob [8]byte
 	binary.BigEndian.PutUint64(blob[:], fork)
 	return crc32.Update(hash, crc32.IEEETable, blob[:])

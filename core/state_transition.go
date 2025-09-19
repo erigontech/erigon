@@ -25,9 +25,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/erigontech/erigon/arb/osver"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -36,12 +36,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var arbTrace bool
@@ -167,7 +167,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, nil, evm.Config())
+			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -233,7 +233,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 			isCancun := st.evm.ChainRules().IsCancun
 			if st.evm.ChainRules().IsArbitrum {
-				isCancun = isCancun && st.evm.Context.ArbOSVersion >= chain.ArbosVersion_20
+				isCancun = isCancun && st.evm.Context.ArbOSVersion >= osver.ArbosVersion_20
 			}
 			if isCancun {
 				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
@@ -400,7 +400,6 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	// set code tx
@@ -411,14 +410,8 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP7907 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
-		}
-	} else if isEIP3860 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSize {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-		}
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -473,22 +466,24 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}, nil
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			// Recover from dependency panic and retry the execution.
-			if r != state.ErrDependency {
-				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+	if st.evm.IntraBlockState().IsVersioned() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Recover from dependency panic and retry the execution.
+				if r != state.ErrDependency {
+					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+				}
+				st.gp.AddGas(st.gasUsed())
+				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
+				if depTxIndex < 0 {
+					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
+				}
+				err = ErrExecAbortError{
+					DependencyTxIndex: depTxIndex,
+					OriginError:       err}
 			}
-			st.gp.AddGas(st.gasUsed())
-			depTxIndex := st.evm.IntraBlockState().DepTxIndex()
-			if depTxIndex < 0 {
-				err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
-			}
-			err = ErrExecAbortError{
-				DependencyTxIndex: depTxIndex,
-				OriginError:       err}
-		}
-	}()
+		}()
+	}
 
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
@@ -517,11 +512,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
 		mmsg := st.msg.(*types.Message)
 		mmsg.SetGasPrice(st.evm.Context.BaseFee)
-		mmsg.SetFeeCap(common.Num0)
+		// mmsg.SetFeeCap(common.Num0)
 		mmsg.SetTip(common.Num0)
 
 		st.gasPrice = st.evm.Context.BaseFee
-		st.feeCap = common.Num0
+		// st.feeCap = common.Num0
 		st.tipCap = common.Num0
 		st.msg = mmsg
 	}
@@ -536,7 +531,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	isEIP7907 := rules.IsOsaka
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
@@ -589,14 +583,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP7907 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSizeEip7907 {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSizeEip7907)
-		}
-	} else if isEIP3860 {
-		if contractCreation && len(st.data) > params.MaxInitCodeSize {
-			return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
-		}
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
+		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
 	// Execute the preparatory steps for state transition which includes:
@@ -714,7 +702,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 	}
 	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
-		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, burnAmount, st.gasPrice, st.gasUsed())
+		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 	// Arbitrum: record the tip
 	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil && !st.evm.ProcessingHook.DropTip() {

@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"io"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -35,6 +36,10 @@ type EpochData struct {
 	FinalizedCheckpoint         solid.Checkpoint
 	HistoricalSummariesLength   uint64
 	HistoricalRootsLength       uint64
+	ProposerLookahead           solid.Uint64VectorSSZ
+
+	BeaconConfig *clparams.BeaconChainConfig // Used to determine the version of the state
+	Version      clparams.StateVersion
 }
 
 func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
@@ -53,6 +58,10 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 		FinalizedCheckpoint:         s.FinalizedCheckpoint(),
 		HistoricalSummariesLength:   s.HistoricalSummariesLength(),
 		HistoricalRootsLength:       s.HistoricalRootsLength(),
+		ProposerLookahead:           s.GetProposerLookahead(),
+
+		BeaconConfig: s.BeaconConfig(),
+		Version:      s.Version(),
 	}
 }
 
@@ -84,9 +93,24 @@ func (m *EpochData) ReadFrom(r io.Reader) error {
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
 	}
+	if m.Version >= clparams.FuluVersion {
+		m.ProposerLookahead = solid.NewUint64VectorSSZ(int((1 + m.BeaconConfig.MinSeedLookahead) * m.BeaconConfig.SlotsPerEpoch))
+	}
 	return ssz2.UnmarshalSSZ(buf, 0, m.getSchema()...)
 }
 
 func (m *EpochData) getSchema() []interface{} {
-	return []interface{}{&m.TotalActiveBalance, m.JustificationBits, &m.CurrentJustifiedCheckpoint, &m.PreviousJustifiedCheckpoint, &m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+	if m.Version < clparams.FuluVersion {
+		return []interface{}{&m.TotalActiveBalance, m.JustificationBits, &m.CurrentJustifiedCheckpoint, &m.PreviousJustifiedCheckpoint, &m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+	}
+	return []interface{}{
+		&m.TotalActiveBalance,
+		m.JustificationBits,
+		&m.CurrentJustifiedCheckpoint,
+		&m.PreviousJustifiedCheckpoint,
+		&m.FinalizedCheckpoint,
+		&m.HistoricalSummariesLength,
+		&m.HistoricalRootsLength,
+		&m.ProposerLookahead,
+	}
 }

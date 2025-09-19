@@ -257,6 +257,7 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
+	t.Skip("todo: https://github.com/erigontech/erigon/issues/16150")
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}

@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 )
 
@@ -43,5 +43,6 @@ type ApiBackend interface {
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
+	RemovePeer(ctx context.Context, url *remote.RemovePeerRequest) (*remote.RemovePeerReply, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)
 }

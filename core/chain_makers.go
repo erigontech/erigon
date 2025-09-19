@@ -31,13 +31,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // BlockGen creates blocks for testing.
@@ -326,7 +326,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := libstate.NewSharedDomains(tx, logger)
+	domains, err := dbstate.NewSharedDomains(tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +504,7 @@ func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Bloc
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
-func (cr *FakeChainReader) FrozenBorBlocks() uint64                                 { return 0 }
+func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }
 func (cr *FakeChainReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
 	return nil
 }

@@ -1943,6 +1943,7 @@ func (x *HasPrefixReply) GetHasPrefix() bool {
 type HistoryStartFromReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Domain        uint32                 `protobuf:"varint,1,opt,name=domain,proto3" json:"domain,omitempty"`
+	TxId          uint64                 `protobuf:"varint,2,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1980,6 +1981,13 @@ func (*HistoryStartFromReq) Descriptor() ([]byte, []int) {
 func (x *HistoryStartFromReq) GetDomain() uint32 {
 	if x != nil {
 		return x.Domain
+	}
+	return 0
+}
+
+func (x *HistoryStartFromReq) GetTxId() uint64 {
+	if x != nil {
+		return x.TxId
 	}
 	return 0
 }
@@ -2171,9 +2179,10 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\tfirst_key\x18\x01 \x01(\fR\bfirstKey\x12\x1b\n" +
 	"\tfirst_val\x18\x02 \x01(\fR\bfirstVal\x12\x1d\n" +
 	"\n" +
-	"has_prefix\x18\x03 \x01(\bR\thasPrefix\"-\n" +
+	"has_prefix\x18\x03 \x01(\bR\thasPrefix\"B\n" +
 	"\x13HistoryStartFromReq\x12\x16\n" +
-	"\x06domain\x18\x01 \x01(\rR\x06domain\"6\n" +
+	"\x06domain\x18\x01 \x01(\rR\x06domain\x12\x13\n" +
+	"\x05tx_id\x18\x02 \x01(\x04R\x04txId\"6\n" +
 	"\x15HistoryStartFromReply\x12\x1d\n" +
 	"\n" +
 	"start_from\x18\x01 \x01(\x04R\tstartFrom*\xfb\x01\n" +

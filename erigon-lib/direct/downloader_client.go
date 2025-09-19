@@ -18,7 +18,6 @@ package direct
 
 import (
 	"context"
-	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -28,10 +27,6 @@ import (
 
 type DownloaderClient struct {
 	server proto_downloader.DownloaderServer
-}
-
-func (c *DownloaderClient) CommitPreverified(ctx context.Context, in *proto_downloader.CommitPreverifiedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.CommitPreverified(ctx, in)
 }
 
 func NewDownloaderClient(server proto_downloader.DownloaderServer) *DownloaderClient {
@@ -50,55 +45,4 @@ func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *proto_downloade
 }
 func (c *DownloaderClient) Completed(ctx context.Context, in *proto_downloader.CompletedRequest, opts ...grpc.CallOption) (*proto_downloader.CompletedReply, error) {
 	return c.server.Completed(ctx, in)
-}
-
-type DownloadeSubscribeC struct {
-	ch  chan *downloadedReply
-	ctx context.Context
-	grpc.ClientStream
-}
-
-func (c *DownloadeSubscribeC) Recv() (*proto_downloader.TorrentCompletedReply, error) {
-	if c.ctx.Err() != nil {
-		return nil, io.EOF
-	}
-
-	m, ok := <-c.ch
-	if !ok || m == nil {
-		return nil, io.EOF
-	}
-	return m.r, m.err
-}
-func (c *DownloadeSubscribeC) Context() context.Context { return c.ctx }
-
-type DownloadeSubscribeS struct {
-	ch  chan *downloadedReply
-	ctx context.Context
-	grpc.ServerStream
-}
-
-type downloadedReply struct {
-	r   *proto_downloader.TorrentCompletedReply
-	err error
-}
-
-func (s *DownloadeSubscribeS) Send(m *proto_downloader.TorrentCompletedReply) error {
-	if s.ctx.Err() != nil {
-		if s.ch != nil {
-			ch := s.ch
-			s.ch = nil
-			close(ch)
-		}
-		return s.ctx.Err()
-	}
-
-	s.ch <- &downloadedReply{r: m}
-	return nil
-}
-func (s *DownloadeSubscribeS) Context() context.Context { return s.ctx }
-func (s *DownloadeSubscribeS) Err(err error) {
-	if err == nil {
-		return
-	}
-	s.ch <- &downloadedReply{err: err}
 }

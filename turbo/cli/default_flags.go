@@ -40,6 +40,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
 	&PruneDistanceFlag,
+	&L2RPCAddrFlag,
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
@@ -121,6 +122,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentDisableTrackers,
 	&utils.TorrentUploadRateFlag,
 	&utils.TorrentDownloadRateFlag,
+	&utils.TorrentWebseedDownloadRateFlag,
 	&utils.TorrentVerbosityFlag,
 	&utils.ListenPortFlag,
 	&utils.P2pProtocolVersionFlag,
@@ -173,9 +175,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithoutHeimdallFlag,
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
-	&utils.WithHeimdallMilestones,
-	&utils.WithHeimdallWaypoints,
-	&utils.PolygonSyncFlag,
+
 	&utils.ArbitrumSyncFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
@@ -254,4 +254,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
+	&utils.ElBlockDownloaderV2,
 }

@@ -22,8 +22,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type readerMock struct{}
@@ -63,7 +63,7 @@ func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
 func (r readerMock) FrozenBlocks() uint64 {
 	return 0
 }
-func (r readerMock) FrozenBorBlocks() uint64 { return 0 }
+func (r readerMock) FrozenBorBlocks(align bool) uint64 { return 0 }
 
 func (r readerMock) BorSpan(spanId uint64) []byte {
 	return nil

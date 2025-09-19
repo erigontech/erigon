@@ -17,7 +17,6 @@
 package heimdall
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -26,13 +25,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
@@ -170,6 +167,8 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 }
 
 func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+	defer eventSegment.Src().MadvNormal().DisableReadAhead()
+
 	g := eventSegment.Src().MakeGetter()
 
 	word := make([]byte, 0, 4096)
@@ -238,85 +237,16 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 		prevEventId = eventId
 		prevBlock = block
 
-		var logChan <-chan time.Time
-
-		if logEvery != nil {
-			logChan = logEvery.C
-		}
-
 		select {
 		case <-ctx.Done():
 			return prevEventId, ctx.Err()
-		case <-logChan:
+		case <-logEvery.C:
 			log.Info("[integrity] NoGapsInBorEvents", "blockNum", fmt.Sprintf("%dK/%dK", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])/1000, maxBlockNum/1000))
 		default:
 		}
 	}
 
 	return prevEventId, nil
-}
-
-func RemoteEventCheckForBlock(header *types.Header, previousHeader *types.Header, chainId string, startEventId uint64, events []rlp.RawValue,
-	heimdallClient Client, config *borcfg.BorConfig, logger log.Logger) error {
-
-	blockNum := header.Number.Uint64()
-
-	// temp
-	var to time.Time
-	if config.IsIndore(blockNum) {
-		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
-		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-	} else {
-		to = time.Unix(int64(previousHeader.Time), 0)
-	}
-
-	if blockNum == 14980032 {
-		startEventId = 252101
-	}
-
-	if startEventId > 0 {
-		remote, err := heimdallClient.FetchStateSyncEvents(context.Background(), startEventId, to, 0)
-
-		if err != nil {
-			return err
-		}
-
-		logger.Info("remote bor events", "blockNum", blockNum, "hash", bortypes.ComputeBorTxHash(blockNum, header.Hash()),
-			"startEventId", startEventId, "endId", startEventId+uint64(len(events)), "remote", startEventId+uint64(len(remote)))
-
-		var remoteEvents []rlp.RawValue
-
-		if len(remote) > 0 {
-
-			for i, ev := range remote {
-				if ev.ChainID != chainId {
-					continue
-				}
-				if ev.Time.After(to) {
-					continue
-				}
-
-				data, err := ev.MarshallBytes()
-				if err != nil {
-					return fmt.Errorf("remote bor event data invalid at: %d: %w", i, err)
-				}
-
-				remoteEvents = append(remoteEvents, data)
-			}
-		}
-
-		if len(events) != len(remoteEvents) {
-			return fmt.Errorf("bor event count mismatch: expected: %d, got: %d", len(remoteEvents), len(events))
-		}
-
-		for i, event := range events {
-			if !bytes.Equal(event, remoteEvents[i]) {
-				return fmt.Errorf("bor event data mismatch at: %d", i)
-			}
-		}
-	}
-
-	return nil
 }
 
 func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventTime *time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader headerReader) bool {

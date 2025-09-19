@@ -19,11 +19,11 @@ package keystore
 import (
 	"errors"
 	"fmt"
-	ethereum "github.com/erigontech/erigon"
 	"math/big"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // keystoreWallet implements the Account interface for the original

@@ -23,15 +23,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/tests/txpool/helper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 var (

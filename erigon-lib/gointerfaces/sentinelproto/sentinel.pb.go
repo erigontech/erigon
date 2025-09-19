@@ -110,6 +110,7 @@ type Peer struct {
 	Address       string                 `protobuf:"bytes,4,opt,name=address,proto3" json:"address,omitempty"`
 	Enr           string                 `protobuf:"bytes,5,opt,name=enr,proto3" json:"enr,omitempty"`
 	AgentVersion  string                 `protobuf:"bytes,6,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	EnodeId       string                 `protobuf:"bytes,7,opt,name=enode_id,json=enodeId,proto3" json:"enode_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +183,13 @@ func (x *Peer) GetEnr() string {
 func (x *Peer) GetAgentVersion() string {
 	if x != nil {
 		return x.AgentVersion
+	}
+	return ""
+}
+
+func (x *Peer) GetEnodeId() string {
+	if x != nil {
+		return x.EnodeId
 	}
 	return ""
 }
@@ -351,14 +359,15 @@ func (x *GossipData) GetSubnetId() uint64 {
 }
 
 type Status struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	ForkDigest     uint32                 `protobuf:"varint,1,opt,name=fork_digest,json=forkDigest,proto3" json:"fork_digest,omitempty"` // 4 bytes can be repressented in uint32.
-	FinalizedRoot  *typesproto.H256       `protobuf:"bytes,2,opt,name=finalized_root,json=finalizedRoot,proto3" json:"finalized_root,omitempty"`
-	FinalizedEpoch uint64                 `protobuf:"varint,3,opt,name=finalized_epoch,json=finalizedEpoch,proto3" json:"finalized_epoch,omitempty"`
-	HeadRoot       *typesproto.H256       `protobuf:"bytes,4,opt,name=head_root,json=headRoot,proto3" json:"head_root,omitempty"`
-	HeadSlot       uint64                 `protobuf:"varint,5,opt,name=head_slot,json=headSlot,proto3" json:"head_slot,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	ForkDigest            uint32                 `protobuf:"varint,1,opt,name=fork_digest,json=forkDigest,proto3" json:"fork_digest,omitempty"` // 4 bytes can be repressented in uint32.
+	FinalizedRoot         *typesproto.H256       `protobuf:"bytes,2,opt,name=finalized_root,json=finalizedRoot,proto3" json:"finalized_root,omitempty"`
+	FinalizedEpoch        uint64                 `protobuf:"varint,3,opt,name=finalized_epoch,json=finalizedEpoch,proto3" json:"finalized_epoch,omitempty"`
+	HeadRoot              *typesproto.H256       `protobuf:"bytes,4,opt,name=head_root,json=headRoot,proto3" json:"head_root,omitempty"`
+	HeadSlot              uint64                 `protobuf:"varint,5,opt,name=head_slot,json=headSlot,proto3" json:"head_slot,omitempty"`
+	EarliestAvailableSlot *uint64                `protobuf:"varint,6,opt,name=earliest_available_slot,json=earliestAvailableSlot,proto3,oneof" json:"earliest_available_slot,omitempty"` // fulu EIP:7594
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *Status) Reset() {
@@ -422,6 +431,13 @@ func (x *Status) GetHeadRoot() *typesproto.H256 {
 func (x *Status) GetHeadSlot() uint64 {
 	if x != nil {
 		return x.HeadSlot
+	}
+	return 0
+}
+
+func (x *Status) GetEarliestAvailableSlot() uint64 {
+	if x != nil && x.EarliestAvailableSlot != nil {
+		return *x.EarliestAvailableSlot
 	}
 	return 0
 }
@@ -554,6 +570,66 @@ func (x *RequestData) GetTopic() string {
 	return ""
 }
 
+type RequestDataWithPeer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"` // SSZ encoded data
+	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
+	Pid           string                 `protobuf:"bytes,3,opt,name=pid,proto3" json:"pid,omitempty"` // Peer to send the request to.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestDataWithPeer) Reset() {
+	*x = RequestDataWithPeer{}
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestDataWithPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestDataWithPeer) ProtoMessage() {}
+
+func (x *RequestDataWithPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestDataWithPeer.ProtoReflect.Descriptor instead.
+func (*RequestDataWithPeer) Descriptor() ([]byte, []int) {
+	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RequestDataWithPeer) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *RequestDataWithPeer) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *RequestDataWithPeer) GetPid() string {
+	if x != nil {
+		return x.Pid
+	}
+	return ""
+}
+
 type ResponseData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`    // prefix-stripped SSZ encoded data
@@ -565,7 +641,7 @@ type ResponseData struct {
 
 func (x *ResponseData) Reset() {
 	*x = ResponseData{}
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[9]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -577,7 +653,7 @@ func (x *ResponseData) String() string {
 func (*ResponseData) ProtoMessage() {}
 
 func (x *ResponseData) ProtoReflect() protoreflect.Message {
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[9]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -590,7 +666,7 @@ func (x *ResponseData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResponseData.ProtoReflect.Descriptor instead.
 func (*ResponseData) Descriptor() ([]byte, []int) {
-	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{9}
+	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ResponseData) GetData() []byte {
@@ -625,7 +701,7 @@ type Metadata struct {
 
 func (x *Metadata) Reset() {
 	*x = Metadata{}
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[10]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +713,7 @@ func (x *Metadata) String() string {
 func (*Metadata) ProtoMessage() {}
 
 func (x *Metadata) ProtoReflect() protoreflect.Message {
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[10]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +726,7 @@ func (x *Metadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metadata.ProtoReflect.Descriptor instead.
 func (*Metadata) Descriptor() ([]byte, []int) {
-	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{10}
+	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Metadata) GetSeq() uint64 {
@@ -687,7 +763,7 @@ type IdentityResponse struct {
 
 func (x *IdentityResponse) Reset() {
 	*x = IdentityResponse{}
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[11]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -699,7 +775,7 @@ func (x *IdentityResponse) String() string {
 func (*IdentityResponse) ProtoMessage() {}
 
 func (x *IdentityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[11]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -712,7 +788,7 @@ func (x *IdentityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityResponse.ProtoReflect.Descriptor instead.
 func (*IdentityResponse) Descriptor() ([]byte, []int) {
-	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{11}
+	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *IdentityResponse) GetPid() string {
@@ -760,7 +836,7 @@ type RequestSubscribeExpiry struct {
 
 func (x *RequestSubscribeExpiry) Reset() {
 	*x = RequestSubscribeExpiry{}
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[12]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -772,7 +848,7 @@ func (x *RequestSubscribeExpiry) String() string {
 func (*RequestSubscribeExpiry) ProtoMessage() {}
 
 func (x *RequestSubscribeExpiry) ProtoReflect() protoreflect.Message {
-	mi := &file_p2psentinel_sentinel_proto_msgTypes[12]
+	mi := &file_p2psentinel_sentinel_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -785,7 +861,7 @@ func (x *RequestSubscribeExpiry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestSubscribeExpiry.ProtoReflect.Descriptor instead.
 func (*RequestSubscribeExpiry) Descriptor() ([]byte, []int) {
-	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{12}
+	return file_p2psentinel_sentinel_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RequestSubscribeExpiry) GetTopic() string {
@@ -810,14 +886,15 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"\fEmptyMessage\":\n" +
 	"\x10SubscriptionData\x12\x1b\n" +
 	"\x06filter\x18\x01 \x01(\tH\x00R\x06filter\x88\x01\x01B\t\n" +
-	"\a_filter\"\x9d\x01\n" +
+	"\a_filter\"\xb8\x01\n" +
 	"\x04Peer\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\tR\x03pid\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1c\n" +
 	"\tdirection\x18\x03 \x01(\tR\tdirection\x12\x18\n" +
 	"\aaddress\x18\x04 \x01(\tR\aaddress\x12\x10\n" +
 	"\x03enr\x18\x05 \x01(\tR\x03enr\x12#\n" +
-	"\ragent_version\x18\x06 \x01(\tR\fagentVersion\"h\n" +
+	"\ragent_version\x18\x06 \x01(\tR\fagentVersion\x12\x19\n" +
+	"\benode_id\x18\a \x01(\tR\aenodeId\"h\n" +
 	"\x10PeersInfoRequest\x12!\n" +
 	"\tdirection\x18\x01 \x01(\tH\x00R\tdirection\x88\x01\x01\x12\x19\n" +
 	"\x05state\x18\x02 \x01(\tH\x01R\x05state\x88\x01\x01B\f\n" +
@@ -834,14 +911,16 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"\tsubnet_id\x18\x04 \x01(\x04H\x01R\bsubnetId\x88\x01\x01B\a\n" +
 	"\x05_peerB\f\n" +
 	"\n" +
-	"_subnet_id\"\xcd\x01\n" +
+	"_subnet_id\"\xa6\x02\n" +
 	"\x06Status\x12\x1f\n" +
 	"\vfork_digest\x18\x01 \x01(\rR\n" +
 	"forkDigest\x122\n" +
 	"\x0efinalized_root\x18\x02 \x01(\v2\v.types.H256R\rfinalizedRoot\x12'\n" +
 	"\x0ffinalized_epoch\x18\x03 \x01(\x04R\x0efinalizedEpoch\x12(\n" +
 	"\thead_root\x18\x04 \x01(\v2\v.types.H256R\bheadRoot\x12\x1b\n" +
-	"\thead_slot\x18\x05 \x01(\x04R\bheadSlot\"\xab\x01\n" +
+	"\thead_slot\x18\x05 \x01(\x04R\bheadSlot\x12;\n" +
+	"\x17earliest_available_slot\x18\x06 \x01(\x04H\x00R\x15earliestAvailableSlot\x88\x01\x01B\x1a\n" +
+	"\x18_earliest_available_slot\"\xab\x01\n" +
 	"\tPeerCount\x12\x16\n" +
 	"\x06active\x18\x01 \x01(\x04R\x06active\x12\x1c\n" +
 	"\tconnected\x18\x02 \x01(\x04R\tconnected\x12\"\n" +
@@ -852,7 +931,11 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"\rdisconnecting\x18\x05 \x01(\x04R\rdisconnecting\"7\n" +
 	"\vRequestData\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
-	"\x05topic\x18\x02 \x01(\tR\x05topic\"\\\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\"Q\n" +
+	"\x13RequestDataWithPeer\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x10\n" +
+	"\x03pid\x18\x03 \x01(\tR\x03pid\"\\\n" +
 	"\fResponseData\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\bR\x05error\x12\"\n" +
@@ -869,7 +952,7 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"\bmetadata\x18\x05 \x01(\v2\x12.sentinel.MetadataR\bmetadata\"X\n" +
 	"\x16RequestSubscribeExpiry\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12(\n" +
-	"\x10expiry_unix_secs\x18\x02 \x01(\x04R\x0eexpiryUnixSecs2\xea\x05\n" +
+	"\x10expiry_unix_secs\x18\x02 \x01(\x04R\x0eexpiryUnixSecs2\xb4\x06\n" +
 	"\bSentinel\x12N\n" +
 	"\x12SetSubscribeExpiry\x12 .sentinel.RequestSubscribeExpiry\x1a\x16.sentinel.EmptyMessage\x12E\n" +
 	"\x0fSubscribeGossip\x12\x1a.sentinel.SubscriptionData\x1a\x14.sentinel.GossipData0\x01\x12<\n" +
@@ -883,7 +966,8 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"RewardPeer\x12\x0e.sentinel.Peer\x1a\x16.sentinel.EmptyMessage\x12=\n" +
 	"\rPublishGossip\x12\x14.sentinel.GossipData\x1a\x16.sentinel.EmptyMessage\x12>\n" +
 	"\bIdentity\x12\x16.sentinel.EmptyMessage\x1a\x1a.sentinel.IdentityResponse\x12D\n" +
-	"\tPeersInfo\x12\x1a.sentinel.PeersInfoRequest\x1a\x1b.sentinel.PeersInfoResponseB\x1aZ\x18./sentinel;sentinelprotob\x06proto3"
+	"\tPeersInfo\x12\x1a.sentinel.PeersInfoRequest\x1a\x1b.sentinel.PeersInfoResponse\x12H\n" +
+	"\x0fSendPeerRequest\x12\x1d.sentinel.RequestDataWithPeer\x1a\x16.sentinel.ResponseDataB\x1aZ\x18./sentinel;sentinelprotob\x06proto3"
 
 var (
 	file_p2psentinel_sentinel_proto_rawDescOnce sync.Once
@@ -897,7 +981,7 @@ func file_p2psentinel_sentinel_proto_rawDescGZIP() []byte {
 	return file_p2psentinel_sentinel_proto_rawDescData
 }
 
-var file_p2psentinel_sentinel_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_p2psentinel_sentinel_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_p2psentinel_sentinel_proto_goTypes = []any{
 	(*EmptyMessage)(nil),           // 0: sentinel.EmptyMessage
 	(*SubscriptionData)(nil),       // 1: sentinel.SubscriptionData
@@ -908,20 +992,21 @@ var file_p2psentinel_sentinel_proto_goTypes = []any{
 	(*Status)(nil),                 // 6: sentinel.Status
 	(*PeerCount)(nil),              // 7: sentinel.PeerCount
 	(*RequestData)(nil),            // 8: sentinel.RequestData
-	(*ResponseData)(nil),           // 9: sentinel.ResponseData
-	(*Metadata)(nil),               // 10: sentinel.Metadata
-	(*IdentityResponse)(nil),       // 11: sentinel.IdentityResponse
-	(*RequestSubscribeExpiry)(nil), // 12: sentinel.RequestSubscribeExpiry
-	(*typesproto.H256)(nil),        // 13: types.H256
+	(*RequestDataWithPeer)(nil),    // 9: sentinel.RequestDataWithPeer
+	(*ResponseData)(nil),           // 10: sentinel.ResponseData
+	(*Metadata)(nil),               // 11: sentinel.Metadata
+	(*IdentityResponse)(nil),       // 12: sentinel.IdentityResponse
+	(*RequestSubscribeExpiry)(nil), // 13: sentinel.RequestSubscribeExpiry
+	(*typesproto.H256)(nil),        // 14: types.H256
 }
 var file_p2psentinel_sentinel_proto_depIdxs = []int32{
 	2,  // 0: sentinel.PeersInfoResponse.peers:type_name -> sentinel.Peer
 	2,  // 1: sentinel.GossipData.peer:type_name -> sentinel.Peer
-	13, // 2: sentinel.Status.finalized_root:type_name -> types.H256
-	13, // 3: sentinel.Status.head_root:type_name -> types.H256
+	14, // 2: sentinel.Status.finalized_root:type_name -> types.H256
+	14, // 3: sentinel.Status.head_root:type_name -> types.H256
 	2,  // 4: sentinel.ResponseData.peer:type_name -> sentinel.Peer
-	10, // 5: sentinel.IdentityResponse.metadata:type_name -> sentinel.Metadata
-	12, // 6: sentinel.Sentinel.SetSubscribeExpiry:input_type -> sentinel.RequestSubscribeExpiry
+	11, // 5: sentinel.IdentityResponse.metadata:type_name -> sentinel.Metadata
+	13, // 6: sentinel.Sentinel.SetSubscribeExpiry:input_type -> sentinel.RequestSubscribeExpiry
 	1,  // 7: sentinel.Sentinel.SubscribeGossip:input_type -> sentinel.SubscriptionData
 	8,  // 8: sentinel.Sentinel.SendRequest:input_type -> sentinel.RequestData
 	6,  // 9: sentinel.Sentinel.SetStatus:input_type -> sentinel.Status
@@ -933,20 +1018,22 @@ var file_p2psentinel_sentinel_proto_depIdxs = []int32{
 	5,  // 15: sentinel.Sentinel.PublishGossip:input_type -> sentinel.GossipData
 	0,  // 16: sentinel.Sentinel.Identity:input_type -> sentinel.EmptyMessage
 	3,  // 17: sentinel.Sentinel.PeersInfo:input_type -> sentinel.PeersInfoRequest
-	0,  // 18: sentinel.Sentinel.SetSubscribeExpiry:output_type -> sentinel.EmptyMessage
-	5,  // 19: sentinel.Sentinel.SubscribeGossip:output_type -> sentinel.GossipData
-	9,  // 20: sentinel.Sentinel.SendRequest:output_type -> sentinel.ResponseData
-	0,  // 21: sentinel.Sentinel.SetStatus:output_type -> sentinel.EmptyMessage
-	7,  // 22: sentinel.Sentinel.GetPeers:output_type -> sentinel.PeerCount
-	0,  // 23: sentinel.Sentinel.BanPeer:output_type -> sentinel.EmptyMessage
-	0,  // 24: sentinel.Sentinel.UnbanPeer:output_type -> sentinel.EmptyMessage
-	0,  // 25: sentinel.Sentinel.PenalizePeer:output_type -> sentinel.EmptyMessage
-	0,  // 26: sentinel.Sentinel.RewardPeer:output_type -> sentinel.EmptyMessage
-	0,  // 27: sentinel.Sentinel.PublishGossip:output_type -> sentinel.EmptyMessage
-	11, // 28: sentinel.Sentinel.Identity:output_type -> sentinel.IdentityResponse
-	4,  // 29: sentinel.Sentinel.PeersInfo:output_type -> sentinel.PeersInfoResponse
-	18, // [18:30] is the sub-list for method output_type
-	6,  // [6:18] is the sub-list for method input_type
+	9,  // 18: sentinel.Sentinel.SendPeerRequest:input_type -> sentinel.RequestDataWithPeer
+	0,  // 19: sentinel.Sentinel.SetSubscribeExpiry:output_type -> sentinel.EmptyMessage
+	5,  // 20: sentinel.Sentinel.SubscribeGossip:output_type -> sentinel.GossipData
+	10, // 21: sentinel.Sentinel.SendRequest:output_type -> sentinel.ResponseData
+	0,  // 22: sentinel.Sentinel.SetStatus:output_type -> sentinel.EmptyMessage
+	7,  // 23: sentinel.Sentinel.GetPeers:output_type -> sentinel.PeerCount
+	0,  // 24: sentinel.Sentinel.BanPeer:output_type -> sentinel.EmptyMessage
+	0,  // 25: sentinel.Sentinel.UnbanPeer:output_type -> sentinel.EmptyMessage
+	0,  // 26: sentinel.Sentinel.PenalizePeer:output_type -> sentinel.EmptyMessage
+	0,  // 27: sentinel.Sentinel.RewardPeer:output_type -> sentinel.EmptyMessage
+	0,  // 28: sentinel.Sentinel.PublishGossip:output_type -> sentinel.EmptyMessage
+	12, // 29: sentinel.Sentinel.Identity:output_type -> sentinel.IdentityResponse
+	4,  // 30: sentinel.Sentinel.PeersInfo:output_type -> sentinel.PeersInfoResponse
+	10, // 31: sentinel.Sentinel.SendPeerRequest:output_type -> sentinel.ResponseData
+	19, // [19:32] is the sub-list for method output_type
+	6,  // [6:19] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -960,13 +1047,14 @@ func file_p2psentinel_sentinel_proto_init() {
 	file_p2psentinel_sentinel_proto_msgTypes[1].OneofWrappers = []any{}
 	file_p2psentinel_sentinel_proto_msgTypes[3].OneofWrappers = []any{}
 	file_p2psentinel_sentinel_proto_msgTypes[5].OneofWrappers = []any{}
+	file_p2psentinel_sentinel_proto_msgTypes[6].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_p2psentinel_sentinel_proto_rawDesc), len(file_p2psentinel_sentinel_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
