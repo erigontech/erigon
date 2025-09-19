@@ -112,6 +112,9 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	if err != nil {
 		return nil, err
 	}
+	if block == nil {
+		return nil, errors.New("header not found")
+	}
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber - 1))
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNumberOrHash, 0, api.filters, api.stateCache, api._txNumReader)
