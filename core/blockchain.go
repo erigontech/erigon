@@ -191,6 +191,22 @@ func ExecuteBlockEphemerally(
 	}
 	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
+	// EIP-7928: Block-Level Access Lists validation
+	// Validate the provided BlockAccessList against the actual execution
+	if chainConfig.IsBlockAccessList(header.Time) && block.BlockAccessList() != nil {
+		// Get the execution BAL from the state's access tracker
+		var executionBAL *types.BlockAccessList
+		if ibs.AccessTracker() != nil {
+			executionBAL = ibs.AccessTracker().GetBlockAccessList()
+		}
+
+		// Create validator and validate
+		balValidator := NewBlockAccessListValidator(true)
+		if err := balValidator.ValidateBlockAccessList(block.BlockAccessList(), executionBAL, header); err != nil {
+			return nil, fmt.Errorf("block access list validation failed: %w", err)
+		}
+	}
+
 	execRs := &EphemeralExecResult{
 		StateRoot:   newRoot,
 		TxRoot:      types.DeriveSha(includedTxs),

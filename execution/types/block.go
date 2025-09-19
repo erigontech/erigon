@@ -106,6 +106,8 @@ type Header struct {
 
 	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
 
+	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
+
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -171,6 +173,10 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.RequestsHash != nil {
+		encodingSize += 33
+	}
+
+	if h.BlockAccessListHash != nil {
 		encodingSize += 33
 	}
 
@@ -320,6 +326,16 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 		if _, err := w.Write(h.RequestsHash[:]); err != nil {
+			return err
+		}
+	}
+
+	if h.BlockAccessListHash != nil {
+		b[0] = 128 + 32
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.BlockAccessListHash[:]); err != nil {
 			return err
 		}
 	}
@@ -486,6 +502,23 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.RequestsHash = new(common.Hash)
 	h.RequestsHash.SetBytes(b)
 
+	// BlockAccessListHash
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.BlockAccessListHash = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no BlockAccessListHash): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read BlockAccessListHash: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for BlockAccessListHash: %d", len(b))
+	}
+	h.BlockAccessListHash = new(common.Hash)
+	h.BlockAccessListHash.SetBytes(b)
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
 	}
@@ -589,9 +622,10 @@ func (h *Header) SanityCheck() error {
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
-	Transactions []Transaction
-	Uncles       []*Header
-	Withdrawals  []*Withdrawal
+	Transactions    []Transaction
+	Uncles          []*Header
+	Withdrawals     []*Withdrawal
+	BlockAccessList *BlockAccessList // EIP-7928
 }
 
 func (b *Body) MatchesHeader(h *Header) error {
@@ -617,6 +651,20 @@ func (b *Body) MatchesHeader(h *Header) error {
 		}
 	}
 
+	if h.BlockAccessListHash == nil {
+		if b.BlockAccessList != nil {
+			return errors.New("body has unexpected block access list")
+		}
+	} else {
+		if b.BlockAccessList == nil {
+			return errors.New("body is missing block access list")
+		}
+
+		if hash := rlpHash(b.BlockAccessList); hash != *h.BlockAccessListHash {
+			return fmt.Errorf("body has invalid block access list hash: have %x, exp: %x", hash, h.BlockAccessListHash)
+		}
+	}
+
 	return nil
 }
 
@@ -624,9 +672,10 @@ func (b *Body) MatchesHeader(h *Header) error {
 // It is useful in the situations when actual transaction context is not important, for example
 // when downloading Block bodies from other peers or serving them to other peers
 type RawBody struct {
-	Transactions [][]byte
-	Uncles       []*Header
-	Withdrawals  []*Withdrawal
+	Transactions    [][]byte
+	Uncles          []*Header
+	Withdrawals     []*Withdrawal
+	BlockAccessList []byte // EIP-7928 - raw RLP bytes
 }
 
 // BaseTxnID represents internal auto-incremented transaction number in block, may be different across the nodes
@@ -753,10 +802,11 @@ func (r RawBlock) AsBlock() (*Block, error) {
 
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
-	header       *Header
-	uncles       []*Header
-	transactions Transactions
-	withdrawals  []*Withdrawal
+	header          *Header
+	uncles          []*Header
+	transactions    Transactions
+	withdrawals     []*Withdrawal
+	blockAccessList *BlockAccessList // EIP-7928
 
 	// caches
 	size atomic.Uint64
@@ -1108,10 +1158,11 @@ func NewBlockWithHeader(header *Header) *Block {
 // when there is no reason to copy parts, or re-calculate headers fields.
 func NewBlockFromNetwork(header *Header, body *Body) *Block {
 	return &Block{
-		header:       header,
-		transactions: body.Transactions,
-		uncles:       body.Uncles,
-		withdrawals:  body.Withdrawals,
+		header:          header,
+		transactions:    body.Transactions,
+		uncles:          body.Uncles,
+		withdrawals:     body.Withdrawals,
+		blockAccessList: body.BlockAccessList,
 	}
 }
 
@@ -1312,10 +1363,16 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
-	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
+	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals, BlockAccessList: b.blockAccessList}
 	bd.SendersFromTxs()
 	return bd
 }
+
+// BlockAccessList returns the block access list for EIP-7928
+func (b *Block) BlockAccessList() *BlockAccessList {
+	return b.blockAccessList
+}
+
 func (b *Block) SendersToTxs(senders []common.Address) {
 	if len(senders) == 0 {
 		return

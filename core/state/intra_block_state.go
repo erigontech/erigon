@@ -21,6 +21,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -86,6 +87,9 @@ type IntraBlockState struct {
 	// Per-transaction access list
 	accessList *accessList
 
+	// EIP-7928 Block Access List tracking
+	accessTracker types.AccessTracker
+
 	// Transient storage
 	transientStorage transientStorage
 
@@ -112,6 +116,16 @@ type IntraBlockState struct {
 
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
+	return NewWithTracker(stateReader, types.NewNoopAccessTracker())
+}
+
+// AccessTracker returns the access tracker for this state
+func (sdb *IntraBlockState) AccessTracker() types.AccessTracker {
+	return sdb.accessTracker
+}
+
+// Create a new state from a given trie with access tracking
+func NewWithTracker(stateReader StateReader, tracker types.AccessTracker) *IntraBlockState {
 	return &IntraBlockState{
 		stateReader:       stateReader,
 		stateObjects:      map[common.Address]*stateObject{},
@@ -120,6 +134,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
+		accessTracker:     tracker,
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[common.Address]*BalanceIncrease{},
 		txIndex:           0,
@@ -185,6 +200,26 @@ func (sdb *IntraBlockState) StorageReadDuration() time.Duration {
 
 func (sdb *IntraBlockState) StorageReadCount() int64 {
 	return sdb.storageReadCount
+}
+
+// trackAccess records a state access in the block access list
+func (sdb *IntraBlockState) trackAccess(addr common.Address, key *common.Hash, accessType types.AccessType, value []byte) {
+	if sdb.accessTracker != nil {
+		index := sdb.accessTracker.GetCurrentIndex()
+		sdb.accessTracker.RecordAccess(addr, key, accessType, index, value)
+	}
+}
+
+// getBalanceBytes converts a uint256.Int to bytes for storage
+func (sdb *IntraBlockState) getBalanceBytes(balance uint256.Int) []byte {
+	return balance.Bytes()
+}
+
+// getNonceBytes converts a uint64 to bytes for storage
+func (sdb *IntraBlockState) getNonceBytes(nonce uint64) []byte {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, nonce)
+	return buf
 }
 
 func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {

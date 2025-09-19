@@ -82,17 +82,18 @@ func (e ErrExecAbortError) Error() string {
 }
 
 type StateTransition struct {
-	gp           *GasPool
-	msg          Message
-	gasRemaining uint64
-	gasPrice     *uint256.Int
-	feeCap       *uint256.Int
-	tipCap       *uint256.Int
-	initialGas   uint64
-	value        *uint256.Int
-	data         []byte
-	state        *state.IntraBlockState
-	evm          *vm.EVM
+	gp            *GasPool
+	msg           Message
+	gasRemaining  uint64
+	gasPrice      *uint256.Int
+	feeCap        *uint256.Int
+	tipCap        *uint256.Int
+	initialGas    uint64
+	value         *uint256.Int
+	data          []byte
+	state         *state.IntraBlockState
+	evm           *vm.EVM
+	accessTracker types.AccessTracker // EIP-7928 - Block Access List tracking
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
@@ -126,16 +127,22 @@ type Message interface {
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
+	return NewStateTransitionWithTracker(evm, msg, gp, types.NewNoopAccessTracker())
+}
+
+// NewStateTransitionWithTracker initialises and returns a new state transition object with access tracking.
+func NewStateTransitionWithTracker(evm *vm.EVM, msg Message, gp *GasPool, tracker types.AccessTracker) *StateTransition {
 	return &StateTransition{
-		gp:       gp,
-		evm:      evm,
-		msg:      msg,
-		gasPrice: msg.GasPrice(),
-		feeCap:   msg.FeeCap(),
-		tipCap:   msg.TipCap(),
-		value:    msg.Value(),
-		data:     msg.Data(),
-		state:    evm.IntraBlockState(),
+		gp:            gp,
+		evm:           evm,
+		msg:           msg,
+		gasPrice:      msg.GasPrice(),
+		feeCap:        msg.FeeCap(),
+		tipCap:        msg.TipCap(),
+		value:         msg.Value(),
+		data:          msg.Data(),
+		state:         evm.IntraBlockState(),
+		accessTracker: tracker,
 	}
 }
 

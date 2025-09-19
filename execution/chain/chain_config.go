@@ -75,6 +75,9 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
+	// EIP-7928: Block-Level Access Lists
+	BlockAccessListTime *big.Int `json:"blockAccessListTime,omitempty"`
+
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
@@ -344,6 +347,11 @@ func (c *Config) IsPrague(time uint64) bool {
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
 func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
+}
+
+// IsBlockAccessList returns whether time is either equal to the Block Access List fork time or greater.
+func (c *Config) IsBlockAccessList(time uint64) bool {
+	return isForked(c.BlockAccessListTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) *common.Address {
@@ -686,7 +694,7 @@ type Rules struct {
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
-	IsAura                                            bool
+	IsAura, IsBlockAccessList                         bool
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
