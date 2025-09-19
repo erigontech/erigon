@@ -217,3 +217,12 @@ func (v *Version) UnmarshalYAML(node *yaml.Node) error {
 	*v = ver
 	return nil
 }
+
+func VersionTooLowPanic(filename string, version Versions) {
+	panic(fmt.Sprintf(
+		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+		filename,
+		version.MinSupported,
+		version.Current,
+	))
+}

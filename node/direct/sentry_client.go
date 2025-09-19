@@ -34,6 +34,7 @@ import (
 const (
 	ETH67 = 67
 	ETH68 = 68
+	ETH69 = 69
 
 	WIT0 = 1
 )
@@ -114,7 +115,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
-	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
+	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68, sentryproto.Protocol_ETH69:
 		c.protocol = reply.Protocol
 		c.sideProtocols = nil // Reset side protocols
 		if reply.SideProtocols != nil {
@@ -189,8 +190,16 @@ func (c *SentryClientDirect) PenalizePeer(ctx context.Context, in *sentryproto.P
 	return c.server.PenalizePeer(ctx, in)
 }
 
-func (c *SentryClientDirect) PeerMinBlock(ctx context.Context, in *sentryproto.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.PeerMinBlock(ctx, in)
+func (c *SentryClientDirect) SetPeerLatestBlock(ctx context.Context, in *sentryproto.SetPeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetPeerLatestBlock(ctx, in)
+}
+
+func (c *SentryClientDirect) SetPeerBlockRange(ctx context.Context, in *sentryproto.SetPeerBlockRangeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetPeerBlockRange(ctx, in)
+}
+
+func (c *SentryClientDirect) SetPeerMinimumBlock(ctx context.Context, in *sentryproto.SetPeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetPeerMinimumBlock(ctx, in)
 }
 
 func (c *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
