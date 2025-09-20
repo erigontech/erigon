@@ -210,6 +210,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		// requests should not take more than 5 secs in a test env, yet we can spam frequently
 		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
 		engineapi.WithJsonRpcClientMaxRetries(100),
+		engineapi.WithRetryableErrCheckers(engineapi.ErrContainsRetryableErrChecker("connection refused")),
 	)
 	require.NoError(t, err)
 	var mockCl *MockCl
@@ -228,6 +229,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
+		Transactor:           NewTransactor(rpcApiClient, genesis.Config.ChainID),
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
@@ -251,6 +253,7 @@ type EngineApiTester struct {
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
+	Transactor           Transactor
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
