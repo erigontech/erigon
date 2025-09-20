@@ -97,7 +97,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		return nil, nil, err
 	}
 
-	grpcServer := sentry.NewGrpcServer(context.TODO(), nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, log.New())
+	grpcServer := sentry.NewGrpcServer(context.TODO(), nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, nil, log.New())
 	sentry := direct.NewSentryClientDirect(direct.ETH69, grpcServer)
 
 	_, err = sentry.SetStatus(context.TODO(), &sentryproto.StatusData{

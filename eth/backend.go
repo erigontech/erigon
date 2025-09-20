@@ -497,6 +497,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
+		peerLimiter := sentry.NewPeerSlotLimiter(p2pConfig.MaxPeers)
+
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
 		if err != nil {
 			return nil, err
@@ -535,7 +537,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 
 			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
-			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
+			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, peerLimiter, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
 		}

@@ -80,6 +80,7 @@ type PeerInfo struct {
 	rw                    p2p.MsgReadWriter
 	protocol, witProtocol uint
 	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
+	countsTowardsLimit    bool
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -203,6 +204,22 @@ func (pi *PeerInfo) SetIncreasedHeight(newHeight uint64) {
 		pi.height = newHeight
 	}
 	pi.lock.Unlock()
+}
+
+func (pi *PeerInfo) markCountsTowardsLimit() {
+	pi.lock.Lock()
+	pi.countsTowardsLimit = true
+	pi.lock.Unlock()
+}
+
+func (pi *PeerInfo) clearCountsTowardsLimit() bool {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	if !pi.countsTowardsLimit {
+		return false
+	}
+	pi.countsTowardsLimit = false
+	return true
 }
 
 // MinBlock gets earliest block for eth/69 peers, falls back to height if not available
@@ -693,7 +710,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	return grpcServer, nil
 }
 
-func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger) *GrpcServer {
+func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, limiter *PeerSlotLimiter, logger log.Logger) *GrpcServer {
 	ss := &GrpcServer{
 		ctx:                   ctx,
 		p2p:                   cfg,
@@ -701,6 +718,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		logger:                logger,
 		goodPeers:             make(map[[64]byte]*PeerInfo),
 		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
+		peerLimiter:           limiter,
 	}
 
 	var disc enode.Iterator
@@ -733,6 +751,11 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			if protocol >= direct.ETH69 {
 				statusPacket69, err := handShake[eth.StatusPacket69](ctx, status, rw, protocol, protocol, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 				if err != nil {
+					ss.deletePeer(peerID)
+					return err
+				}
+				if err := ss.registerPeer(peerInfo); err != nil {
+					ss.deletePeer(peerID)
 					return err
 				}
 
@@ -741,12 +764,18 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			} else {
 				statusPacket, err := handShake[eth.StatusPacket](ctx, status, rw, protocol, protocol, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 				if err != nil {
+					ss.deletePeer(peerID)
+					return err
+				}
+				if err := ss.registerPeer(peerInfo); err != nil {
+					ss.deletePeer(peerID)
 					return err
 				}
 
 				peerBestHash := statusPacket.Head
 				getBlockHeadersErr := ss.getBlockHeaders(ctx, peerBestHash, peerID)
 				if getBlockHeadersErr != nil {
+					ss.deletePeer(peerID)
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
 				}
 			}
@@ -853,7 +882,8 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 		return d
 	}
 	cfg.DiscoveryDNS = discoveryDNS
-	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, logger)
+	limiter := NewPeerSlotLimiter(cfg.MaxPeers)
+	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, limiter, logger)
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
 	if err != nil {
@@ -870,6 +900,7 @@ type GrpcServer struct {
 	sentryproto.UnimplementedSentryServer
 	ctx                  context.Context
 	Protocols            []p2p.Protocol
+	peerLimiter          *PeerSlotLimiter
 	goodPeersMu          sync.RWMutex
 	goodPeers            map[[64]byte]*PeerInfo
 	p2pServer            *p2p.Server
@@ -947,6 +978,30 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 	return peerInfo
 }
 
+func (ss *GrpcServer) registerPeer(peerInfo *PeerInfo) *p2p.PeerError {
+	if ss.peerLimiter == nil {
+		return nil
+	}
+	info := peerInfo.peer.Info()
+	isTrusted := info.Network.Trusted || info.Network.Static
+	if !ss.peerLimiter.TryAcquire(isTrusted) {
+		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscTooManyPeers, nil, "too many peers")
+	}
+	if !isTrusted {
+		peerInfo.markCountsTowardsLimit()
+	}
+	return nil
+}
+
+func (ss *GrpcServer) releasePeerSlot(peerInfo *PeerInfo) {
+	if ss.peerLimiter == nil || peerInfo == nil {
+		return
+	}
+	if peerInfo.clearCountsTowardsLimit() {
+		ss.peerLimiter.Release()
+	}
+}
+
 // getOrCreatePeer gets or creates PeerInfo
 func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, protocolName string) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()
@@ -993,18 +1048,27 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 
 func (ss *GrpcServer) loadAndDeletePeer(peerID [64]byte) (*PeerInfo, bool) {
 	ss.goodPeersMu.Lock()
-	defer ss.goodPeersMu.Unlock()
 	peerInfo, ok := ss.goodPeers[peerID]
 	if ok {
 		delete(ss.goodPeers, peerID)
+	}
+	ss.goodPeersMu.Unlock()
+	if ok {
+		ss.releasePeerSlot(peerInfo)
 	}
 	return peerInfo, ok
 }
 
 func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 	ss.goodPeersMu.Lock()
-	defer ss.goodPeersMu.Unlock()
-	delete(ss.goodPeers, peerID)
+	peerInfo, ok := ss.goodPeers[peerID]
+	if ok {
+		delete(ss.goodPeers, peerID)
+	}
+	ss.goodPeersMu.Unlock()
+	if ok {
+		ss.releasePeerSlot(peerInfo)
+	}
 }
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
