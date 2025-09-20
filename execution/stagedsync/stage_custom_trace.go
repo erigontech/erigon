@@ -338,6 +338,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				cumulativeBlobGasUsedInBlock += txTask.Tx().GetBlobGas()
 			}
 
+			logger.Info("Reducer", "block", txTask.BlockNumber(), "tx", txTask.TxIndex, "last", txTask.IsBlockEnd())
+
 			doms.SetTxNum(txTask.TxNum)
 			putter := doms.AsPutDel(tx)
 
@@ -370,6 +372,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					}
 				}
 
+				logger.Info("Append Reciept", "block", txTask.BlockNumber(), "tx", txTask.TxNum, "logidx", logIndexAfterTx, "gas", cumGasUsed)
 				if err := rawtemporaldb.AppendReceipt(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
