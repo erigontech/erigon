@@ -179,8 +179,7 @@ Loop:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 			//TODO: log progress and list of domains/files
-			//logger.Info
-			fmt.Println("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			logger.Info("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		}
 	}
 
@@ -337,8 +336,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			if txTask.Tx() != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx().GetBlobGas()
 			}
-
-			logger.Info("Reducer", "block", txTask.BlockNumber(), "tx", txTask.TxIndex, "last", txTask.IsBlockEnd())
 
 			doms.SetTxNum(txTask.TxNum)
 			putter := doms.AsPutDel(tx)
