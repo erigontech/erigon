@@ -989,7 +989,7 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return q.resultCh == nil, ctx.Err()
+			return q.resultCh == nil && q.results.Len() == 0, ctx.Err()
 		case next, ok := <-q.resultCh:
 			if !ok {
 				return q.results.Len() == 0, nil

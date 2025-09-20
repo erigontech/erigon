@@ -390,16 +390,7 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 
 	var resultProcessor historicalResultProcessor
 
-	//logEvery := time.NewTicker(1 * time.Second)
-	//defer logEvery.Stop()
-
 	for outputTxNum.Load() <= toTxNum {
-		//select {
-		//case <-logEvery.C:
-		//	log.Info("[dbg] out", "chanLen", out.ChanLen(), "chanCapacity", out.ChanCapacity(), "heapLen", out.Len(), "heapCapacity", out.Capacity())
-		//default:
-		//}
-
 		closed, err := out.AwaitDrain(ctx, 10*time.Millisecond)
 
 		if err != nil {
@@ -407,6 +398,10 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 		}
 
 		if closed {
+			if outputTxNum.Load() <= toTxNum {
+				logger.Warn("not all txnums proceeded", "toTxNum", toTxNum, "outputTxNum", outputTxNum.Load())
+				return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
+			}
 			return nil
 		}
 
@@ -419,9 +414,7 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 			outputTxNum.Store(processedTxNum)
 		}
 	}
-	//if outputTxNum.Load() != toTxNum {
-	//	return fmt.Errorf("not all txnums proceeded: toTxNum=%d, outputTxNum=%d", toTxNum, outputTxNum.Load())
-	//}
+
 	return nil
 }
 
