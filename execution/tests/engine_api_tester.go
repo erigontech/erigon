@@ -152,7 +152,10 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
+	syncDefault := ethconfig.Defaults.Sync
+	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{
+		Sync: syncDefault,
 		Dirs: dirs,
 		Snapshot: ethconfig.BlocksFreezing{
 			NoDownloader: true,

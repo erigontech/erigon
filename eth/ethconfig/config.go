@@ -91,6 +91,7 @@ var Defaults = Config{
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
+		MaxReorgDepth:            dbg.MaxReorgDepth,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -290,6 +291,7 @@ type Sync struct {
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
+	MaxReorgDepth            uint64
 	KeepExecutionProofs      bool
 	PersistReceiptsCacheV2   bool
 	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
