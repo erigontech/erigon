@@ -327,7 +327,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 			Build()
 
-		keyLen := 20
+		keyLen := int16(20)
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 
 		stateBatch.SetConcurrentCommitment(true)
@@ -639,7 +639,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 			Build()
 
-		keyLen := 20
+		keyLen := int16(20)
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 		trieBatch := NewHexPatriciaHashed(keyLen, stateBatch)
 
@@ -842,8 +842,8 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 		hashLen:         length.Hash,
 		accountAddrLen:  length.Addr,
 		storageAddrLen:  length.Addr + length.Hash,
-		hashedExtLen:    rnd.Intn(129),
-		extLen:          rnd.Intn(65),
+		hashedExtLen:    int16(rnd.Intn(129)),
+		extLen:          int16(rnd.Intn(65)),
 		hashedExtension: [128]byte{},
 		extension:       [64]byte{},
 		storageAddr:     [52]byte{},
@@ -882,7 +882,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.RootChecked = true
 
 	for i := 0; i < len(s.Depths); i++ {
-		s.Depths[i] = rnd.Intn(256)
+		s.Depths[i] = int16(rnd.Intn(256))
 	}
 	for i := 0; i < len(s.TouchMap); i++ {
 		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))
@@ -1505,12 +1505,12 @@ func TestUpdate_EncodeDecode(t *testing.T) {
 		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
-			CodeHash: [length.Hash]byte{
+			CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
 				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
-		{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+		{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
 		{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 	}
 
@@ -1551,19 +1551,19 @@ func TestUpdate_Merge(t *testing.T) {
 		{
 			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: empty.CodeHash},
 			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
-				CodeHash: [length.Hash]byte{
+				CodeHash: common.Hash{
 					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
 					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
-			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124, CodeHash: [length.Hash]byte{
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124, CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
 				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
 		},
 		{
-			a: Update{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+			a: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
 			b: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 			e: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 		},
@@ -1619,7 +1619,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
 	update.Nonce = rand.Uint64()
 	rnd.Read(update.Storage[:])
-	update.StorageLen = len(update.Storage)
+	update.StorageLen = int16(len(update.Storage))
 	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
 
 	target.reset()
@@ -1636,7 +1636,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
 	update.Nonce = rand.Uint64()
 	rnd.Read(update.Storage[:rnd.Intn(len(update.Storage))])
-	update.StorageLen = len(update.Storage)
+	update.StorageLen = int16(len(update.Storage))
 	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
 
 	target.reset()

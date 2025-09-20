@@ -114,7 +114,7 @@ package commitment
 //}
 //
 //type BinaryCell struct {
-//	h             [length.Hash]byte               // cell hash
+//	h             common.Hash               // cell hash
 //	hl            int                             // Length of the hash (or embedded)
 //	apk           [length.Addr]byte               // account plain key
 //	apl           int                             // length of account plain key
@@ -126,8 +126,8 @@ package commitment
 //	extLen        int
 //	Nonce         uint64
 //	Balance       uint256.Int
-//	CodeHash      [length.Hash]byte // hash of the bytecode
-//	Storage       [length.Hash]byte
+//	CodeHash      common.Hash // hash of the bytecode
+//	Storage       common.Hash
 //	StorageLen    int
 //	Delete        bool
 //}
@@ -405,7 +405,7 @@ package commitment
 //	cell.Nonce = nonce
 //}
 //
-//func (cell *BinaryCell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
+//func (cell *BinaryCell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 //	balanceBytes := 0
 //	if !cell.Balance.LtUint64(128) {
 //		balanceBytes = cell.Balance.ByteLen()
@@ -582,8 +582,8 @@ package commitment
 //	return bph.completeLeafHash(buf, keyPrefix[:], kp, kl, compactLen, key, compact0, ni, val, true)
 //}
 //
-//func (bph *BinPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Hash]byte, error) {
-//	var hashBuf [length.Hash]byte
+//func (bph *BinPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Hash, error) {
+//	var hashBuf common.Hash
 //
 //	// Compute the total length of binary representation
 //	var kp, kl int
@@ -674,7 +674,7 @@ package commitment
 //
 //func (bph *BinPatriciaHashed) computeBinaryCellHash(cell *BinaryCell, depth int, buf []byte) ([]byte, error) {
 //	var err error
-//	var storageRootHash [length.Hash]byte
+//	var storageRootHash common.Hash
 //	storageRootHashIsSet := false
 //	if cell.spl > 0 {
 //		var hashedKeyOffset int
@@ -694,7 +694,7 @@ package commitment
 //			if aux, err = bph.leafHashWithKeyVal(aux, cell.hashedExtension[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
 //				return nil, err
 //			}
-//			storageRootHash = *(*[length.Hash]byte)(aux[1:])
+//			storageRootHash = *(*common.Hash)(aux[1:])
 //			storageRootHashIsSet = true
 //		} else {
 //			if bph.trace {
@@ -724,7 +724,7 @@ package commitment
 //			} else if cell.hl > 0 {
 //				storageRootHash = cell.h
 //			} else {
-//				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
+//				storageRootHash = *(*common.Hash)(EmptyRootHash)
 //			}
 //		}
 //		var valBuf [128]byte
@@ -741,7 +741,7 @@ package commitment
 //			if bph.trace {
 //				fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.h[:cell.hl])
 //			}
-//			var hash [length.Hash]byte
+//			var hash common.Hash
 //			if hash, err = bph.extensionHash(cell.extension[:cell.extLen], cell.h[:cell.hl]); err != nil {
 //				return nil, err
 //			}
@@ -1624,7 +1624,7 @@ package commitment
 //
 //func binHashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int) error {
 //	keccak.Reset()
-//	var hashBufBack [length.Hash]byte
+//	var hashBufBack common.Hash
 //	hashBuf := hashBufBack[:]
 //	if _, err := keccak.Write(plainKey); err != nil {
 //		return err
