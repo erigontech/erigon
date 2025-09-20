@@ -724,20 +724,15 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
 			}
 
-			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
-			if err != nil {
-				return err
-			}
-			peerInfo.protocol = protocol
-
+			var minBlock, latestBlock uint64
 			if protocol >= direct.ETH69 {
 				statusPacket69, err := handShake[eth.StatusPacket69](ctx, status, rw, protocol, protocol, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 				if err != nil {
 					return err
 				}
 
-				peerInfo.SetMinimumBlock(statusPacket69.MinimumBlock)
-				peerInfo.SetIncreasedHeight(statusPacket69.LatestBlock)
+				minBlock = statusPacket69.MinimumBlock
+				latestBlock = statusPacket69.LatestBlock
 			} else {
 				statusPacket, err := handShake[eth.StatusPacket](ctx, status, rw, protocol, protocol, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 				if err != nil {
@@ -754,6 +749,17 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
 
+			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			if err != nil {
+				return err
+			}
+
+			if protocol >= direct.ETH69 {
+				peerInfo.SetMinimumBlock(minBlock)
+				peerInfo.SetIncreasedHeight(latestBlock)
+			}
+
+			peerInfo.protocol = protocol
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer peerInfo.Close()
