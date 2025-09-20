@@ -302,6 +302,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	d.HandleTorrentClientStatus(nil)
+	d.HandleTorrents(nil)
 
 	err = d.AddTorrentsFromDisk(ctx)
 	if err != nil {

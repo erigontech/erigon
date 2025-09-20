@@ -299,7 +299,7 @@ var cmdPrintStages = &cobra.Command{
 			return
 		}
 		defer db.Close()
-
+		log.New()
 		if err := printAllStages(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -1188,6 +1188,41 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	defer sn.Close()
 	defer borSn.Close()
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
+}
+
+func InfoAllStages(ctx context.Context, logger log.Logger, dataDir string, out chan<- *StagesInfo) (err error) {
+	chaindata = filepath.Join(dataDir, "chaindata")
+	datadirCli = dataDir
+	sn, borSn, _, db, err := allDBStaff(dbCfg(dbcfg.ChainDB, chaindata), false, logger, dataDir)
+	if err != nil {
+		logger.Error("Opening DB", "error", err)
+		return err
+	}
+	defer db.Close()
+	defer sn.Close()
+	defer borSn.Close()
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		info, err := InfoStages(tx, sn, borSn)
+		if err != nil {
+			return err
+		}
+		out <- info
+		for range ticker.C {
+			info, err = InfoStages(tx, sn, borSn)
+			if err != nil {
+				return err
+			}
+			out <- info
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
