@@ -229,7 +229,7 @@ var snapshotCommand = cli.Command{
 					return err
 				}
 				defer l.Unlock()
-				return dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
+				return dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
@@ -485,7 +485,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		dirPath  string
 		filePath string
 	}, 0)
-	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
+	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			return err
@@ -554,7 +554,10 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 			if err != nil {
 				_, err = kv.String2Domain(domainName)
 				if err != nil {
-					return err
+					_, err = kv.String2Forkable(domainName)
+					if err != nil {
+						return err
+					}
 				}
 			}
 			for _, res := range files {
@@ -773,7 +776,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, _, _, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -824,7 +827,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, borSnaps, _, blockRetire, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1365,7 +1368,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, _, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, _, br, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1572,7 +1575,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, caplinSnaps, br, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1584,7 +1587,13 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
 	}
-	err = agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers())
+
+	temporalDb, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+
+	err = temporalDb.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers())
 	if err != nil {
 		return err
 	}
@@ -1603,7 +1612,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
 
-	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1623,6 +1632,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	csn *freezeblocks.CaplinSnapshots,
 	br *freezeblocks.BlockRetire,
 	agg *state.Aggregator,
+	forkagg *state.ForkableAgg,
 	clean func(),
 	err error,
 ) {
@@ -1676,6 +1686,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+
 	clean = func() {
 		defer blockSnaps.Close()
 		defer borSnaps.Close()
@@ -1887,7 +1898,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	ctx := cliCtx.Context
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	_, _, _, _, agg, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -2017,7 +2028,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, _, br, _, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -2045,7 +2056,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	_, _, caplinSnaps, br, agg, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
