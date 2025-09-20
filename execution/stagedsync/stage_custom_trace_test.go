@@ -18,7 +18,7 @@ package stagedsync_test
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,20 +36,17 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
 
-	fmt.Println(t.Name(), 0)
+	os.Setenv("MOCK_SENTRY_LOG_LEVEL", "info")
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 
-	fmt.Println(t.Name(), 1)
 	stageCfg := stagedsync.StageCustomTraceCfg([]string{"receipt"}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
 	err := stagedsync.StageCustomTraceReset(ctx, m.DB, stageCfg.Produce)
 	require.NoError(err)
 
-	fmt.Println(t.Name(), 2)
 	err = stagedsync.SpawnCustomTrace(stageCfg, ctx, m.Log)
 	require.NoError(err)
 
 	err = m.DB.ViewTemporal(ctx, func(rtx kv.TemporalTx) error {
-		fmt.Println(t.Name(), 3, rtx.Debug().DomainProgress(kv.ReceiptDomain))
 		progress := rtx.Debug().DomainProgress(kv.ReceiptDomain)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 
@@ -94,6 +91,7 @@ func TestCustomTraceDomainProgressConsistency(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
 
+	os.Setenv("MOCK_SENTRY_LOG_LEVEL", "info")
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 
 	require.NoError(m.DB.Update(m.Ctx, func(tx kv.RwTx) error {

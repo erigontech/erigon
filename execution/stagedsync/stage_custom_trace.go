@@ -108,8 +108,6 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
-	fmt.Println("[stage_custom_trace] spawned")
-	defer func() { fmt.Println("[stage_custom_trace] done", dbg.Stack()) }()
 	if cfg.Produce.RCacheDomain {
 		if err := cfg.db.View(context.Background(), func(tx kv.Tx) error {
 			return kvcfg.PersistReceipts.MustBeEnabled(tx, "you must enable `--persist.receipts` flag in db. remove chaindata and start erigon with this flag")
@@ -118,8 +116,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}
 	}
 
-	//log.Info
-	fmt.Println("[stage_custom_trace] start params", "produce", cfg.Produce)
+	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader(ctx)
 
 	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
@@ -156,8 +153,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).MadvNormal().DisableReadAhead()
 	//defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
-	//log.Info
-	fmt.Println("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
+	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 	batchSize := uint64(50_000)
 	for startBlock < endBlock {
 		to := min(endBlock+1, startBlock+batchSize)
@@ -193,8 +189,10 @@ Loop:
 		return err
 	}
 	defer tx.Rollback()
-	//log.Info
-	fmt.Println("SpawnCustomTrace finish", "receipts", tx.Debug().DomainProgress(kv.ReceiptDomain), "accounts", tx.Debug().DomainProgress(kv.AccountsDomain))
+	log.Info("SpawnCustomTrace finish",
+		"accounts", tx.Debug().DomainProgress(kv.AccountsDomain),
+		"receipts", tx.Debug().DomainProgress(kv.ReceiptDomain),
+		"rcache", tx.Debug().DomainProgress(kv.RCacheDomain))
 
 	if cfg.Produce.ReceiptDomain {
 		if err := AssertNotBehindAccounts(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
