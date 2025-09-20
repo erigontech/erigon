@@ -380,7 +380,9 @@ const (
 	GasChangeCallFailedExecution GasChangeReason = 14
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
-
+	// GasChangeTxDataFloor is the amount of extra gas the transaction has to pay to reach the minimum gas requirement for the
+	// transaction data. This change will always be a negative change.
+	GasChangeTxDataFloor GasChangeReason = 19
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
 	GasChangeIgnored GasChangeReason = 0xFF

@@ -630,11 +630,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 				// After EIP-7623: Data-heavy transactions pay the floor gas.
 				if st.gasUsed() < floorGas7623 {
-					//prev := st.gasRemaining
+					prev := st.gasRemaining
 					st.gasRemaining = st.initialGas - floorGas7623
-					//if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
-					//	t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
-					//}
+					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+					}
 				}
 			}
 		} else { // Other networks
