@@ -344,6 +344,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		checkGas:   true,
 	}
 	if !rules.IsLondon {
 		return nil, errors.New("eip-1559 transactions require London")

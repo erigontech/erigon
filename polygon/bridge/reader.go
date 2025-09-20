@@ -100,8 +100,10 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 			core.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
-			event, nil, false,
-			true,
+			event, nil,
+			false, // checkNonce
+			false, // checkGas
+			true,  // isFree
 			nil,
 		)
 
@@ -133,8 +135,10 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 			core.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
-			event, nil, false,
-			true,
+			event, nil,
+			false, // checkNonce
+			false, // checkGas
+			true,  // isFree
 			nil,
 		)
 
@@ -226,8 +230,10 @@ func messageFromData(to common.Address, data []byte) *types.Message {
 		core.SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true,
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
 		nil,
 	)
 
@@ -250,6 +256,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			event,
 			nil,   // accessList
 			false, // checkNonce
+			false, // checkGas
 			true,  // isFree
 			nil,   // maxFeePerBlobGas
 		)
