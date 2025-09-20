@@ -109,7 +109,7 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	fmt.Println("[stage_custom_trace] spawned")
-	defer fmt.Println("[stage_custom_trace] done", dbg.Stack())
+	defer func() { fmt.Println("[stage_custom_trace] done", dbg.Stack()) }()
 	if cfg.Produce.RCacheDomain {
 		if err := cfg.db.View(context.Background(), func(tx kv.Tx) error {
 			return kvcfg.PersistReceipts.MustBeEnabled(tx, "you must enable `--persist.receipts` flag in db. remove chaindata and start erigon with this flag")
@@ -176,7 +176,7 @@ Loop:
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Warn("[snapshots] user has interrupted process but anyway waiting for build & merge files")
+			logger.Warn("[snapshots] user has interrupted process, waiting for build & merge files")
 		case <-cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).WaitForBuildAndMerge(context.Background()):
 			break Loop // Here we don't quit due to ctx because it's not safe for files.
 		case <-logEvery.C:
@@ -188,7 +188,8 @@ Loop:
 		}
 	}
 
-	log.Info("SpawnCustomTrace finish")
+	//log.Info
+	fmt.Println("SpawnCustomTrace finish")
 	if cfg.Produce.ReceiptDomain {
 		if err := AssertNotBehindAccounts(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
 			return err
