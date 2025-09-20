@@ -397,7 +397,6 @@ func (a *Aggregator) Close() {
 func (a *Aggregator) closeDirtyFiles() {
 	wg := &sync.WaitGroup{}
 	for _, d := range a.d {
-		d := d
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -405,7 +404,6 @@ func (a *Aggregator) closeDirtyFiles() {
 		}()
 	}
 	for _, ii := range a.iis {
-		ii := ii
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

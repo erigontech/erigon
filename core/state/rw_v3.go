@@ -150,7 +150,6 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *dbstate.Sh
 
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	for addr, increase := range txTask.BalanceIncreaseSet {
-		increase := increase
 		addrBytes := addr.Bytes()
 		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, rs.tx, addrBytes)
 		if err != nil {

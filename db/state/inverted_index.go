@@ -282,7 +282,6 @@ func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, iiFiles *MissedAccessorIIFiles) {
 	for _, item := range iiFiles.missedMapAccessors() {
-		item := item
 		g.Go(func() error {
 			return ii.buildEfAccessor(ctx, item, ps)
 		})
