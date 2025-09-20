@@ -113,12 +113,11 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
 // To ensure compatibility, we've temporarily added support for the start parameter in two formats:
-// - hexutil.Bytes (e.g., "0x..."), which is used by Geth and other APIs (i.e debug_storageRangeAt).
-// - []byte, which was used in older versions of Erigon.
+// - string (e.g., "0x..."), which is used by Geth and other APIs (i.e debug_storageRangeAt).
+// - []byte, which was used in Erigon.
 // Deprecation of []byte format: The []byte format is now deprecated and will be removed in a future release.
-// Please use hexutil.Bytes for all new requests.
 //
-// New optional parameter incompletes: This parameter has been added for compatibility with Geth. It is currently not supported when set to true, as its functionality is specific to the Geth protocol.
+// New optional parameter incompletes: This parameter has been added for compatibility with Geth. It is currently not supported when set to true(as its functionality is specific to the Geth protocol).
 func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start interface{}, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
 	var startBytes []byte
 
@@ -129,6 +128,10 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		if err != nil {
 			return state.IteratorDump{}, fmt.Errorf("invalid hex string for start parameter: %v", err)
 		}
+
+	case []byte:
+		startBytes = v
+
 	case []interface{}:
 		for _, val := range v {
 			if b, ok := val.(float64); ok {
