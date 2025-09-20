@@ -1076,9 +1076,6 @@ func (q *PriorityQueue[T]) Len() (l int) {
 	q.Unlock()
 	return l
 }
-func (q *ResultsQueue) LenLocked() (l int)     { return q.results.Len() }
-func (q *ResultsQueue) HasLocked() bool        { return len(*q.results) > 0 }
-func (q *ResultsQueue) PushLocked(t *TxResult) { heap.Push(q.results, t) }
 func (q *ResultsQueue) Push(t *TxResult) {
 	q.Lock()
 	heap.Push(q.results, t)
