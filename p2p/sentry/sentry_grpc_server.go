@@ -218,7 +218,7 @@ func (pi *PeerInfo) MinBlock() uint64 {
 	return pi.height
 }
 
-// SetBlockRange updates both minBlock and height fields in a single lock
+// SetBlockRange updates minBlock and (monotonically) increases height under a single lock
 func (pi *PeerInfo) SetBlockRange(newMinBlock, newHeight uint64) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
