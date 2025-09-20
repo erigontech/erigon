@@ -39,17 +39,17 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 	fmt.Println(t.Name(), 0)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 
-	fmt.Println(t.Name(), 0)
+	fmt.Println(t.Name(), 1)
 	stageCfg := stagedsync.StageCustomTraceCfg([]string{"receipt"}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
 	err := stagedsync.StageCustomTraceReset(ctx, m.DB, stageCfg.Produce)
 	require.NoError(err)
 
-	fmt.Println(t.Name(), 0)
+	fmt.Println(t.Name(), 2)
 	err = stagedsync.SpawnCustomTrace(stageCfg, ctx, m.Log)
 	require.NoError(err)
 
 	err = m.DB.ViewTemporal(ctx, func(rtx kv.TemporalTx) error {
-		fmt.Println(t.Name(), 0)
+		fmt.Println(t.Name(), 3, rtx.Debug().DomainProgress(kv.ReceiptDomain))
 		progress := rtx.Debug().DomainProgress(kv.ReceiptDomain)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 

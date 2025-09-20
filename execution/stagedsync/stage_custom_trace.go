@@ -188,8 +188,14 @@ Loop:
 		}
 	}
 
+	tx, err := cfg.db.BeginTemporalRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	//log.Info
-	fmt.Println("SpawnCustomTrace finish")
+	fmt.Println("SpawnCustomTrace finish", "receipts", tx.Debug().DomainProgress(kv.ReceiptDomain), "accounts", tx.Debug().DomainProgress(kv.AccountsDomain))
+
 	if cfg.Produce.ReceiptDomain {
 		if err := AssertNotBehindAccounts(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
 			return err
