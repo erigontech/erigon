@@ -218,6 +218,16 @@ func (pi *PeerInfo) MinBlock() uint64 {
 	return pi.height
 }
 
+// SetBlockRange updates both minBlock and height fields in a single lock
+func (pi *PeerInfo) SetBlockRange(newMinBlock, newHeight uint64) {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	pi.minBlock = newMinBlock
+	if pi.height < newHeight {
+		pi.height = newHeight
+	}
+}
+
 // SetMinimumBlock updates PeerInfo.minBlock from BlockRangeUpdate message
 func (pi *PeerInfo) SetMinimumBlock(newMinBlock uint64) {
 	pi.lock.Lock()
@@ -755,8 +765,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			}
 
 			if protocol >= direct.ETH69 {
-				peerInfo.SetMinimumBlock(minBlock)
-				peerInfo.SetIncreasedHeight(latestBlock)
+				peerInfo.SetBlockRange(minBlock, latestBlock)
 			}
 
 			peerInfo.protocol = protocol
@@ -1083,8 +1092,7 @@ func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *sentryproto.Se
 func (ss *GrpcServer) SetPeerBlockRange(_ context.Context, req *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		peerInfo.SetMinimumBlock(req.MinBlockHeight)
-		peerInfo.SetIncreasedHeight(req.LatestBlockHeight)
+		peerInfo.SetBlockRange(req.MinBlockHeight, req.LatestBlockHeight)
 	}
 	return &emptypb.Empty{}, nil
 }
