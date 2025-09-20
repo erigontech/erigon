@@ -965,7 +965,7 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 
 	select {
 	case <-ctx.Done():
-		return q.results.Len() == 0, ctx.Err()
+		return resultCh == nil && q.results.Len() == 0, ctx.Err()
 	case next := <-resultCh:
 		return q.Drain(ctx, next)
 	case <-waitChan:
