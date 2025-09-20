@@ -27,6 +27,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/math"
 
 	"github.com/c2h5oh/datasize"
 	mmap2 "github.com/edsrzf/mmap-go"
@@ -222,8 +223,11 @@ const MetaHeaderSize = 64
 func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, amount uint64, logger log.Logger) (*FixedSizeBitmapsWriter, error) {
 	pageSize := os.Getpagesize()
 	_, fileName := filepath.Split(indexFile)
-	//TODO: use math.SafeMul()
-	bytesAmount := MetaHeaderSize + (bitsPerBitmap*int(amount))/8 + 1
+	bitsTotal, overflow := math.SafeMul(uint64(bitsPerBitmap), amount)
+	if overflow {
+		return nil, fmt.Errorf("overflow when calculating total bits: %d * %d", bitsPerBitmap, amount)
+	}
+	bytesAmount := MetaHeaderSize + int(bitsTotal)/8 + 1
 	size := (bytesAmount/pageSize + 1) * pageSize // must be page-size-aligned
 	idx := &FixedSizeBitmapsWriter{
 		indexFile:      indexFile,
