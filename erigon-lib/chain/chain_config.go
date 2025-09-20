@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/arb/chain/types"
 	"github.com/erigontech/erigon/arb/osver"
 )
 
@@ -110,7 +111,7 @@ type Config struct {
 	// Account Abstraction
 	AllowAA bool
 
-	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
+	ArbitrumChainParams types.ArbitrumChainParams `json:"arbitrum,omitempty"`
 }
 
 var (
@@ -823,205 +824,6 @@ func (c *Config) checkArbitrumCompatible(newcfg *Config, head *big.Int) *ConfigC
 	return nil
 }
 
-func ArbitrumOneParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               true,
-		AllowDebugPrecompiles:     false,
-		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       osver.ArbosVersion_6,
-		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
-	}
-}
-
-func ArbitrumNovaParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               true,
-		AllowDebugPrecompiles:     false,
-		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       osver.ArbosVersion_1,
-		InitialChainOwner:         common.HexToAddress("0x9C040726F2A657226Ed95712245DeE84b650A1b5"),
-	}
-}
-
-func ArbitrumRollupGoerliTestnetParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               true,
-		AllowDebugPrecompiles:     false,
-		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       osver.ArbosVersion_2,
-		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
-	}
-}
-
-func ArbitrumDevTestParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               true,
-		AllowDebugPrecompiles:     true,
-		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       osver.ArbosVersion_32,
-		InitialChainOwner:         common.Address{},
-	}
-}
-
-func ArbitrumDevTestDASParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               true,
-		AllowDebugPrecompiles:     true,
-		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       osver.ArbosVersion_32,
-		InitialChainOwner:         common.Address{},
-	}
-}
-
-func ArbitrumAnytrustGoerliTestnetParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               true,
-		AllowDebugPrecompiles:     false,
-		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       osver.ArbosVersion_2,
-		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
-	}
-}
-
-func DisableArbitrumParams() ArbitrumChainParams {
-	return ArbitrumChainParams{
-		EnableArbOS:               false,
-		AllowDebugPrecompiles:     false,
-		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       osver.ArbosVersion_0,
-		InitialChainOwner:         common.Address{},
-	}
-}
-
-func ArbitrumOneChainConfig() *Config {
-	return &Config{
-		ChainID:             big.NewInt(42161),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		ArbitrumChainParams: ArbitrumOneParams(),
-		Clique: &CliqueConfig{
-			Period: 0,
-			Epoch:  0,
-		},
-	}
-}
-
-func ArbitrumNovaChainConfig() *Config {
-	return &Config{
-		ChainID:             big.NewInt(42170),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		ArbitrumChainParams: ArbitrumNovaParams(),
-		Clique: &CliqueConfig{
-			Period: 0,
-			Epoch:  0,
-		},
-	}
-}
-
-func ArbitrumRollupGoerliTestnetChainConfig() *Config {
-	return &Config{
-		ChainID:             big.NewInt(421613),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		ArbitrumChainParams: ArbitrumRollupGoerliTestnetParams(),
-		Clique: &CliqueConfig{
-			Period: 0,
-			Epoch:  0,
-		},
-	}
-}
-
-func ArbitrumDevTestChainConfig() *Config {
-	return &Config{
-		ChainID:             big.NewInt(412346),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		ArbitrumChainParams: ArbitrumDevTestParams(),
-		Clique: &CliqueConfig{
-			Period: 0,
-			Epoch:  0,
-		},
-	}
-}
-
-func ArbitrumDevTestDASChainConfig() *Config {
-	return &Config{
-		ChainID:             big.NewInt(412347),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		ArbitrumChainParams: ArbitrumDevTestDASParams(),
-		Clique: &CliqueConfig{
-			Period: 0,
-			Epoch:  0,
-		},
-	}
-}
-
-func ArbitrumAnytrustGoerliTestnetChainConfig() *Config {
-	return &Config{
-		ChainID:             big.NewInt(421703),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		ArbitrumChainParams: ArbitrumAnytrustGoerliTestnetParams(),
-		Clique: &CliqueConfig{
-			Period: 0,
-			Epoch:  0,
-		},
-	}
-}
-
-var ArbitrumSupportedChainConfigs = []*Config{
-	ArbitrumOneChainConfig(),
-	ArbitrumNovaChainConfig(),
-	ArbitrumRollupGoerliTestnetChainConfig(),
-	ArbitrumDevTestChainConfig(),
-	ArbitrumDevTestDASChainConfig(),
-	ArbitrumAnytrustGoerliTestnetChainConfig(),
-}
-
 // DefaultCacheConfigWithScheme returns a deep copied default cache config with
 // a provided trie node scheme.
 func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {
@@ -1071,35 +873,4 @@ type CacheConfig struct {
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
-}
-
-type ArbitrumChainParams struct {
-	ParentChainID         int    `json:"parent-chain-id"`
-	ParentChainIsArbitrum bool   `json:"parent-chain-is-arbitrum"`
-	ChainName             string `json:"chain-name"`
-	SequencerURL          string `json:"sequencer-url"`
-	FeedURL               string `json:"feed-url"`
-
-	EnableArbOS               bool           `json:"EnableArbOS"`
-	AllowDebugPrecompiles     bool           `json:"AllowDebugPrecompiles"`
-	DataAvailabilityCommittee bool           `json:"DataAvailabilityCommittee"`
-	InitialArbOSVersion       uint64         `json:"InitialArbOSVersion"`
-	InitialChainOwner         common.Address `json:"InitialChainOwner"`
-	GenesisBlockNum           uint64         `json:"GenesisBlockNum"`
-
-	MaxCodeSize     uint64 `json:"MaxCodeSize,omitempty"`     // Maximum bytecode to permit for a contract. 0 value implies params.DefaultMaxCodeSize
-	MaxInitCodeSize uint64 `json:"MaxInitCodeSize,omitempty"` // Maximum initcode to permit in a creation transaction and create instructions. 0 value implies params.DefaultMaxInitCodeSize
-
-	Rollup ArbRollupConfig `json:"rollup"`
-}
-
-type ArbRollupConfig struct {
-	Bridge                 string `json:"bridge"`
-	Inbox                  string `json:"inbox"`
-	SequencerInbox         string `json:"sequencer-inbox"`
-	Rollup                 string `json:"rollup"`
-	ValidatorUtils         string `json:"validator-utils"`
-	ValidatorWalletCreator string `json:"validator-wallet-creator"`
-	StakeToken             string `json:"stake-token"`
-	DeployedAt             int    `json:"deployed-at"`
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	arbparams "github.com/erigontech/erigon/arb/chain/params"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
 )
@@ -36,7 +37,7 @@ func ChainConfig(tx kv.Tx) *chain.Config {
 	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	Check(err)
 	if genesisBlockHash == (common.Hash{}) {
-		return chain.ArbitrumOneChainConfig()
+		return arbparams.ArbitrumOneChainConfig()
 	}
 	chainConfig, err := core.ReadChainConfig(tx, genesisBlockHash)
 	Check(err)

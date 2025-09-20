@@ -19,13 +19,14 @@ package params
 import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/arb/chain/types"
 	"github.com/erigontech/erigon/arb/osver"
 
 	"math/big"
 )
 
-func ArbitrumOneParams() chain.ArbitrumChainParams {
-	return chain.ArbitrumChainParams{
+func ArbitrumOneParams() types.ArbitrumChainParams {
+	return types.ArbitrumChainParams{
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
@@ -34,8 +35,8 @@ func ArbitrumOneParams() chain.ArbitrumChainParams {
 	}
 }
 
-func ArbitrumNovaParams() chain.ArbitrumChainParams {
-	return chain.ArbitrumChainParams{
+func ArbitrumNovaParams() types.ArbitrumChainParams {
+	return types.ArbitrumChainParams{
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
@@ -44,8 +45,8 @@ func ArbitrumNovaParams() chain.ArbitrumChainParams {
 	}
 }
 
-func ArbitrumRollupGoerliTestnetParams() chain.ArbitrumChainParams {
-	return chain.ArbitrumChainParams{
+func ArbitrumRollupGoerliTestnetParams() types.ArbitrumChainParams {
+	return types.ArbitrumChainParams{
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
@@ -54,8 +55,8 @@ func ArbitrumRollupGoerliTestnetParams() chain.ArbitrumChainParams {
 	}
 }
 
-func ArbitrumDevTestParams() chain.ArbitrumChainParams {
-	return chain.ArbitrumChainParams{
+func ArbitrumDevTestParams() types.ArbitrumChainParams {
+	return types.ArbitrumChainParams{
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: false,
@@ -64,8 +65,8 @@ func ArbitrumDevTestParams() chain.ArbitrumChainParams {
 	}
 }
 
-func ArbitrumDevTestDASParams() chain.ArbitrumChainParams {
-	return chain.ArbitrumChainParams{
+func ArbitrumDevTestDASParams() types.ArbitrumChainParams {
+	return types.ArbitrumChainParams{
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: true,
@@ -74,8 +75,8 @@ func ArbitrumDevTestDASParams() chain.ArbitrumChainParams {
 	}
 }
 
-func ArbitrumAnytrustGoerliTestnetParams() chain.ArbitrumChainParams {
-	return chain.ArbitrumChainParams{
+func ArbitrumAnytrustGoerliTestnetParams() types.ArbitrumChainParams {
+	return types.ArbitrumChainParams{
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
@@ -84,8 +85,8 @@ func ArbitrumAnytrustGoerliTestnetParams() chain.ArbitrumChainParams {
 	}
 }
 
-func DisableArbitrumParams() chain.ArbitrumChainParams {
-	return chain.ArbitrumChainParams{
+func DisableArbitrumParams() types.ArbitrumChainParams {
+	return types.ArbitrumChainParams{
 		EnableArbOS:               false,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
@@ -96,19 +97,17 @@ func DisableArbitrumParams() chain.ArbitrumChainParams {
 
 func ArbitrumOneChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(42161),
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArbitrumChainParams:   ArbitrumOneParams(),
+		ChainID:             big.NewInt(42161),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumOneParams(),
 		Clique: &chain.CliqueConfig{
 			Period: 0,
 			Epoch:  0,
@@ -118,19 +117,17 @@ func ArbitrumOneChainConfig() *chain.Config {
 
 func ArbitrumNovaChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(42170),
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArbitrumChainParams:   ArbitrumNovaParams(),
+		ChainID:             big.NewInt(42170),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumNovaParams(),
 		Clique: &chain.CliqueConfig{
 			Period: 0,
 			Epoch:  0,
@@ -140,19 +137,17 @@ func ArbitrumNovaChainConfig() *chain.Config {
 
 func ArbitrumRollupGoerliTestnetChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(421613),
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArbitrumChainParams:   ArbitrumRollupGoerliTestnetParams(),
+		ChainID:             big.NewInt(421613),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumRollupGoerliTestnetParams(),
 		Clique: &chain.CliqueConfig{
 			Period: 0,
 			Epoch:  0,
@@ -162,19 +157,17 @@ func ArbitrumRollupGoerliTestnetChainConfig() *chain.Config {
 
 func ArbitrumDevTestChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(412346),
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArbitrumChainParams:   ArbitrumDevTestParams(),
+		ChainID:             big.NewInt(412346),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumDevTestParams(),
 		Clique: &chain.CliqueConfig{
 			Period: 0,
 			Epoch:  0,
@@ -184,19 +177,17 @@ func ArbitrumDevTestChainConfig() *chain.Config {
 
 func ArbitrumDevTestDASChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(412347),
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArbitrumChainParams:   ArbitrumDevTestDASParams(),
+		ChainID:             big.NewInt(412347),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumDevTestDASParams(),
 		Clique: &chain.CliqueConfig{
 			Period: 0,
 			Epoch:  0,
@@ -206,19 +197,17 @@ func ArbitrumDevTestDASChainConfig() *chain.Config {
 
 func ArbitrumAnytrustGoerliTestnetChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(421703),
-		HomesteadBlock:        big.NewInt(0),
-		DAOForkBlock:          nil,
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		ArbitrumChainParams:   ArbitrumAnytrustGoerliTestnetParams(),
+		ChainID:             big.NewInt(421703),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArbitrumChainParams: ArbitrumAnytrustGoerliTestnetParams(),
 		Clique: &chain.CliqueConfig{
 			Period: 0,
 			Epoch:  0,
