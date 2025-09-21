@@ -403,8 +403,7 @@ func (so *stateObject) IsDirty() bool {
 }
 
 // Never called, but must be present to allow stateObject to be used
-// as a vm.Account interface that also satisfies the vm.ContractRef
-// interface. Interfaces are awesome.
+// as a vm.Account interface. Interfaces are awesome.
 func (so *stateObject) Value() *big.Int {
 	panic("Value on stateObject should never be called")
 }
