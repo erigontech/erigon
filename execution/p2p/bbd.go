@@ -210,7 +210,7 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 		return nil, fmt.Errorf("asked to download hash at num 0: %s", hash)
 	}
 	currentHead := config.chainLengthCurrentHead
-	if currentHead != nil && *currentHead > headerNum && *currentHead-headerNum >= config.chainLengthLimit {
+	if currentHead != nil && *currentHead > headerNum && *currentHead-headerNum > config.chainLengthLimit {
 		return nil, fmt.Errorf(
 			"%w: num=%d, hash=%s, currentHead=%d, limit=%d",
 			ErrChainLengthExceedsLimit,
@@ -260,7 +260,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	}
 	// if not, then continue fetching headers backwards until we find a connecting point
 	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
-		if chainLen >= config.chainLengthLimit {
+		if chainLen > config.chainLengthLimit {
 			return nil, fmt.Errorf(
 				"%w: num=%d, hash=%s, len=%d, limit=%d",
 				ErrChainLengthExceedsLimit,
