@@ -933,12 +933,14 @@ func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 		return err
 	}
 
-	if resultCh != nil {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case resultCh <- item: // Needs to have outside of the lock
-		}
+	if resultCh == nil {
+		return errors.New("can't add to closed queue")
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case resultCh <- item: // Needs to have outside of the lock
 	}
 
 	return nil
@@ -1028,6 +1030,8 @@ func (q *PriorityQueueIter[T]) PopNext() T {
 }
 
 func (q *PriorityQueue[T]) ResultCh() chan T {
+	q.Lock()
+	defer q.Unlock()
 	return q.resultCh
 }
 
@@ -1067,9 +1071,7 @@ func (q *PriorityQueue[T]) Close() {
 	q.Unlock()
 }
 
-func (q *PriorityQueue[T]) ResultChLen() int { return len(q.resultCh) }
-func (q *PriorityQueue[T]) ResultChCap() int { return cap(q.resultCh) }
-func (q *PriorityQueue[T]) Limit() int       { return q.limit }
+func (q *PriorityQueue[T]) Limit() int { return q.limit }
 func (q *PriorityQueue[T]) Len() (l int) {
 	q.Lock()
 	l = q.results.Len()
@@ -1081,9 +1083,7 @@ func (q *ResultsQueue) Push(t *TxResult) {
 	heap.Push(q.results, t)
 	q.Unlock()
 }
-func (q *ResultsQueue) PopLocked() (t *TxResult) {
-	return heap.Pop(q.results).(*TxResult)
-}
+
 func (q *ResultsQueue) Dbg() (t *TxResult) {
 	if len(*q.results) > 0 {
 		return (*q.results)[0]

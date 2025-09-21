@@ -410,7 +410,7 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 			return fmt.Errorf("processResultQueueHistorical: %w", err)
 		}
 		if processedTxNum > 0 {
-			logger.Info("Processed", "tx", processedTxNum, "qlen", out.Len())
+			logger.Info("Processed", "tx", processedTxNum, "qlen", out.Len(), "resultch", out.ResultCh())
 			outputTxNum.Store(processedTxNum)
 		}
 	}
