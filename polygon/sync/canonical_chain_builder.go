@@ -161,7 +161,7 @@ func (ccb *CanonicalChainBuilder) HeaderReader() CcbHeaderReader {
 func (ccb *CanonicalChainBuilder) PruneRoot(newRootNum uint64) error {
 	ccb.mu.Lock()
 	defer ccb.mu.Unlock()
-	if (newRootNum < ccb.root.header.Number.Uint64()) || (newRootNum > ccb.Tip().Number.Uint64()) {
+	if (newRootNum < ccb.root.header.Number.Uint64()) || (newRootNum > ccb.tip.header.Number.Uint64()) {
 		return errors.New("CanonicalChainBuilder.PruneRoot: newRootNum outside of the canonical chain")
 	}
 
@@ -258,15 +258,15 @@ func (ccb *CanonicalChainBuilder) Connect(ctx context.Context, headers []*types.
 	}
 
 	var isBehindRoot = func(h *types.Header) bool {
-		return h.Number.Cmp(ccb.Root().Number) < 0
+		return h.Number.Cmp(ccb.root.header.Number) < 0
 	}
 
 	// early return check: if last header is behind root, there is no connection point
 	if isBehindRoot(headers[len(headers)-1]) {
 		return nil, nil
 	}
-	var connectionIdx int = 0
-	if headers[0].Number.Cmp(ccb.Root().Number) <= 0 {
+	var connectionIdx = 0
+	if headers[0].Number.Cmp(ccb.root.header.Number) <= 0 {
 		// try to find connection point: i.e. smallest idx such that the header[idx] is not behind the root
 		for ; connectionIdx < len(headers) && isBehindRoot(headers[connectionIdx]); connectionIdx++ {
 		}
@@ -405,7 +405,7 @@ func (ccb *CanonicalChainBuilder) LowestCommonAncestor(a, b common.Hash) (*types
 }
 
 func (ccb *CanonicalChainBuilder) pathToRoot(from common.Hash) []*forkTreeNode {
-	path := make([]*forkTreeNode, 0, ccb.Tip().Number.Uint64()-ccb.Root().Number.Uint64())
+	path := make([]*forkTreeNode, 0, ccb.tip.header.Number.Uint64()-ccb.root.header.Number.Uint64())
 	pathToRootRec(ccb.root, from, &path)
 	return path
 }

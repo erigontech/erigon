@@ -49,9 +49,7 @@ const heimdallSyncRetryIntervalOnTip = 200 * time.Millisecond
 const heimdallSyncRetryIntervalOnStartup = 30 * time.Second
 
 var (
-	futureMilestoneDelay = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
-	p2pResponseTimeout   = 5 * time.Second // timeout waiting for P2P response packets
-
+	futureMilestoneDelay  = 1 * time.Second // amount of time to wait before putting a future milestone back in the event queue
 	errAlreadyProcessed   = errors.New("already processed")
 	errKnownBadBlock      = errors.New("known bad block")
 	errKnowBadParentBlock = errors.New("known bad parent block")
@@ -488,7 +486,7 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockBatch, ccb *CanonicalChainBuilder) error {
 	var err error
 	defer func() {
-		if err == nil {
+		if err == nil || errors.Is(err, errAlreadyProcessed) {
 			close(event.Processed)
 			return
 		}

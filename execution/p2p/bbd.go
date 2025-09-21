@@ -250,6 +250,15 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	lastHeader := initialHeader
 	maxHeadersBatchLen := min(config.blocksBatchSize, eth.MaxHeadersServe)
 	var connectionPoint *types.Header
+	// the initial header may be the connection point
+	h, err := headerReader.HeaderByHash(ctx, initialHeader.Hash())
+	if err != nil {
+		return nil, err
+	}
+	if h != nil {
+		connectionPoint = initialHeader
+	}
+	// if not, then continue fetching headers backwards until we find a connecting point
 	for connectionPoint == nil && lastHeader.Number.Uint64() > 0 {
 		if chainLen >= config.chainLengthLimit {
 			return nil, fmt.Errorf(
