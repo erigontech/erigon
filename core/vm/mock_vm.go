@@ -67,7 +67,7 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
 		res, err := evm.env.interpreter.Run(NewContract(
-			&dummyContractRef{},
+			common.Address{},
 			common.Address{},
 			new(uint256.Int),
 			0,
