@@ -44,6 +44,7 @@ import (
 // The current constant value is chosen based on observed metrics in production as twice the doubled value of the maximum observed waypoint length.
 const maxFinalizationHeight = 512
 const downloadRequestsCacheSize = 1024
+const maxBlockBatchDownloadSize = 256
 
 const heimdallSyncRetryIntervalOnTip = 200 * time.Millisecond
 const heimdallSyncRetryIntervalOnStartup = 30 * time.Second
@@ -192,7 +193,7 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		event.RootHash(),
 		ccb.HeaderReader(),
 		p2p.WithChainLengthLimit(distanceToRoot),
-		p2p.WithBlocksBatchSize(distanceToRoot),
+		p2p.WithBlocksBatchSize(min(distanceToRoot, maxBlockBatchDownloadSize)),
 	)
 	if err != nil {
 		s.logger.Warn(syncLogPrefix("failed to fetch blocks backwards during milestone mismatch"), "err", err)
@@ -605,7 +606,7 @@ func (s *Sync) backwardDownloadBlockBatches(
 		fromHash,
 		ccb.HeaderReader(),
 		p2p.WithChainLengthLimit(amount),
-		p2p.WithBlocksBatchSize(1024),
+		p2p.WithBlocksBatchSize(min(amount, maxBlockBatchDownloadSize)),
 		p2p.WithPeerId(fromPeerId),
 	)
 	if err != nil {
