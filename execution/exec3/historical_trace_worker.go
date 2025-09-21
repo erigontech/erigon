@@ -585,7 +585,6 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	outTxNum.Store(fromTxNum)
 
 	ctx, cancleCtx := context.WithCancel(ctx)
-	log.Info("Starting Trace workers", "toTx", toTxNum)
 	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 

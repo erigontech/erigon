@@ -921,6 +921,7 @@ func NewPriorityQueue[T queueable[T]](channelLimit, heapLimit int) *PriorityQueu
 // Add result of execution. May block when internal channel is full
 func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 	q.Lock()
+	closed := q.closed
 	resultCh := q.resultCh
 	addWaiters := q.addWaiters
 	q.addWaiters = nil
@@ -934,7 +935,7 @@ func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 		return err
 	}
 
-	if resultCh == nil {
+	if closed {
 		return errors.New("can't add to closed queue")
 	}
 
@@ -950,6 +951,7 @@ func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 
 func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duration) (bool, error) {
 	q.Lock()
+	closed := q.closed
 	resultCh := q.resultCh
 	q.Unlock()
 
@@ -987,6 +989,10 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	}
 
 	if q.resultCh == nil {
+		return q.results.Len() == 0, nil
+	} else if q.closed && len(q.resultCh) == 0 {
+		close(q.resultCh)
+		q.resultCh = nil
 		return q.results.Len() == 0, nil
 	}
 
@@ -1045,15 +1051,17 @@ func (q *PriorityQueue[T]) Close() {
 	q.closed = true
 
 	q.Lock()
-	close(q.resultCh)
-	q.resultCh = nil
-	fmt.Println("q closed", q.adds, q.removes, q.results.Len(), dbg.Stack())
+	if len(q.resultCh) == 0 {
+		close(q.resultCh)
+		q.resultCh = nil
+	}
+	fmt.Println("q closed", q.adds, q.removes, len(q.resultCh), q.results.Len(), dbg.Stack())
 	q.Unlock()
 }
 
 func (q *PriorityQueue[T]) Len() (l int) {
 	q.Lock()
-	l = q.results.Len()
+	l = len(q.resultCh) + q.results.Len()
 	q.Unlock()
 	return l
 }
