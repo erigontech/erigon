@@ -189,6 +189,9 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req BackwardDownloadRequest) error {
 	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
+	if e.stopped.Load() {
+		return errors.New("engine block downloader is stopped")
+	}
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
