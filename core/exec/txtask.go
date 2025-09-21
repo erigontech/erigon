@@ -951,7 +951,6 @@ func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 
 func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duration) (bool, error) {
 	q.Lock()
-	closed := q.closed
 	resultCh := q.resultCh
 	q.Unlock()
 
