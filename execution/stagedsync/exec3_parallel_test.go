@@ -1,3 +1,6 @@
+//go:build !windows
+
+// these tests have cleanup issues for mdbx on windows
 package stagedsync
 
 ///go:build integration
@@ -475,7 +478,6 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 	return nil
 }
 
-// nolint: unparam
 func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	t.Helper()
 
