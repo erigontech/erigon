@@ -1004,6 +1004,11 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 				return q.results.Len() == 0, nil
 			}
 			if next.isNil() {
+				if q.closed && len(q.resultCh) == 0 {
+					close(q.resultCh)
+					q.resultCh = nil
+					return q.results.Len() == 0, nil
+				}
 				continue
 			}
 			heap.Push(q.results, next)
@@ -1059,7 +1064,6 @@ func (q *PriorityQueue[T]) Close() {
 		close(q.resultCh)
 		q.resultCh = nil
 	}
-	fmt.Println("q closed", q.adds, q.removes, len(q.resultCh), q.results.Len(), dbg.Stack())
 	q.Unlock()
 }
 
