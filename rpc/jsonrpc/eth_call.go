@@ -105,8 +105,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.ReturnDataLimit)
 	}
 
-	// If the result contains a revert reason, try to unpack and return it.
-	if len(result.Revert()) > 0 {
+	if errors.Is(result.Err, vm.ErrExecutionReverted) {
 		return nil, ethapi2.NewRevertError(result)
 	}
 
@@ -829,6 +828,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
+	// Add 'from', 'to', precompiles to the exclusion list
+	excl[*args.From] = struct{}{}
+	excl[to] = struct{}{}
 	for _, pc := range precompiles {
 		excl[pc] = struct{}{}
 	}

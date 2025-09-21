@@ -175,7 +175,8 @@ func (e *EngineBlockDownloader) Run(ctx context.Context) error {
 		})
 		return eg.Wait()
 	}
-	return nil
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {

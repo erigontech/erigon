@@ -41,9 +41,9 @@ import (
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/tests"
 )
 
 func TestEmptyQuery(t *testing.T) {
@@ -410,7 +410,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+			statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			require.NoError(t, err)
 			txContext := core.NewEVMTxContext(msg)
