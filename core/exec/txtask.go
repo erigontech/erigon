@@ -1069,6 +1069,7 @@ func (q *PriorityQueue[T]) Close() {
 	close(q.resultCh)
 	q.resultCh = nil
 	q.Unlock()
+	fmt.Println("q closed", dbg.Stack())
 }
 
 func (q *PriorityQueue[T]) Limit() int { return q.limit }
