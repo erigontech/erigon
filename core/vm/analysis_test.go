@@ -91,12 +91,10 @@ func BenchmarkJumpDest(b *testing.B) {
 	pc := new(uint256.Int)
 	hash := common.Hash{1, 2, 3, 4, 5}
 
-	contractRef := dummyContractRef{}
-
 	c := NewJumpDestCache(16)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		contract := NewContract(contractRef, common.Address{}, nil, 0, false /* skipAnalysis */, c)
+		contract := NewContract(common.Address{}, common.Address{}, nil, 0, false /* skipAnalysis */, c)
 		contract.Code = code
 		contract.CodeHash = hash
 
