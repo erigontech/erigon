@@ -898,9 +898,10 @@ func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
 }
 
 type PriorityQueue[T queueable[T]] struct {
-	limit  int
-	closed bool
-
+	limit      int
+	closed     bool
+	adds       int
+	removes    int
 	resultCh   chan T
 	addWaiters chan any
 	sync.RWMutex
@@ -941,6 +942,7 @@ func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case resultCh <- item: // Needs to have outside of the lock
+		q.adds++
 	}
 
 	return nil
@@ -1026,6 +1028,7 @@ func (q *PriorityQueueIter[T]) HasNext() bool {
 func (q *PriorityQueueIter[T]) PopNext() T {
 	q.q.Lock()
 	defer q.q.Unlock()
+	q.q.removes++
 	return heap.Pop(q.q.results).(T)
 }
 
@@ -1033,30 +1036,6 @@ func (q *PriorityQueue[T]) ResultCh() chan T {
 	q.Lock()
 	defer q.Unlock()
 	return q.resultCh
-}
-
-func (q *PriorityQueue[T]) Drop(ctx context.Context, f func(t T)) {
-	q.Lock()
-	defer q.Unlock()
-Loop:
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case txTask, ok := <-q.resultCh:
-			if !ok {
-				break Loop
-			}
-			f(txTask)
-		default:
-			break Loop
-		}
-	}
-
-	// Drain results queue as well
-	for q.results.Len() > 0 {
-		f(heap.Pop(q.results).(T))
-	}
 }
 
 func (q *PriorityQueue[T]) Close() {
@@ -1068,24 +1047,18 @@ func (q *PriorityQueue[T]) Close() {
 	q.Lock()
 	close(q.resultCh)
 	q.resultCh = nil
-	fmt.Println("q closed", q.results.Len(), dbg.Stack())
+	fmt.Println("q closed", q.adds, q.removes, q.results.Len(), dbg.Stack())
 	q.Unlock()
 }
 
-func (q *PriorityQueue[T]) Limit() int { return q.limit }
 func (q *PriorityQueue[T]) Len() (l int) {
 	q.Lock()
 	l = q.results.Len()
 	q.Unlock()
 	return l
 }
-func (q *ResultsQueue) Push(t *TxResult) {
-	q.Lock()
-	heap.Push(q.results, t)
-	q.Unlock()
-}
 
-func (q *ResultsQueue) Dbg() (t *TxResult) {
+func (q *ResultsQueue) Peek() (t *TxResult) {
 	if len(*q.results) > 0 {
 		return (*q.results)[0]
 	}
