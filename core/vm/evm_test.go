@@ -57,7 +57,7 @@ func TestInterpreterReadonly(t *testing.T) {
 		env.interpreter = evmInterpreter
 
 		dummyContract := NewContract(
-			&dummyContractRef{},
+			common.Address{},
 			common.Address{},
 			new(uint256.Int),
 			0,
@@ -315,7 +315,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 				env.interpreter = evmInterpreter
 
 				dummyContract := NewContract(
-					&dummyContractRef{},
+					common.Address{},
 					common.Address{},
 					new(uint256.Int),
 					0,
@@ -408,7 +408,7 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
 	c := NewJumpDestCache(16)
 	nextContract := NewContract(
-		&dummyContractRef{},
+		common.Address{},
 		common.Address{},
 		new(uint256.Int),
 		0,
