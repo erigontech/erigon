@@ -1008,6 +1008,11 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 				continue
 			}
 			heap.Push(q.results, next)
+			if q.closed && len(q.resultCh) == 0 {
+				close(q.resultCh)
+				q.resultCh = nil
+				return false, nil
+			}
 			if q.results.Len() > q.limit {
 				return false, nil
 			}
