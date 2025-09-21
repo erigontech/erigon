@@ -149,27 +149,9 @@ func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, err
 }
 
 func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
-	return e.getHeader(ctx, &executionproto.GetSegmentRequest{BlockNumber: &blockNum})
-}
-
-func (e *executionClient) GetHeaderByHash(ctx context.Context, h common.Hash) (*types.Header, error) {
-	return e.getHeader(ctx, &executionproto.GetSegmentRequest{BlockHash: gointerfaces.ConvertHashToH256(h)})
-}
-
-func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error) {
-	response, err := e.client.GetTD(ctx, &executionproto.GetSegmentRequest{
+	response, err := e.client.GetHeader(ctx, &executionproto.GetSegmentRequest{
 		BlockNumber: &blockNum,
-		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return eth1utils.ConvertBigIntFromRpc(response.GetTd()), nil
-}
-
-func (e *executionClient) getHeader(ctx context.Context, req *executionproto.GetSegmentRequest) (*types.Header, error) {
-	response, err := e.client.GetHeader(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +167,18 @@ func (e *executionClient) getHeader(ctx context.Context, req *executionproto.Get
 	}
 
 	return header, nil
+}
+
+func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error) {
+	response, err := e.client.GetTD(ctx, &executionproto.GetSegmentRequest{
+		BlockNumber: &blockNum,
+		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return eth1utils.ConvertBigIntFromRpc(response.GetTd()), nil
 }
 
 func (e *executionClient) retryBusy(ctx context.Context, label string, f func() error) error {
