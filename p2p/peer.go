@@ -171,6 +171,15 @@ func (p *Peer) Caps() []Cap {
 	return p.rw.caps
 }
 
+// RunningProtocol returns true if the peer is actively connected using the
+// specified protocol, regardless of version.
+func (p *Peer) RunningProtocol(protocol string) bool {
+	if _, ok := p.running[protocol]; ok {
+		return true
+	}
+	return false
+}
+
 // RunningCap returns true if the peer is actively connected using any of the
 // enumerated versions of a specific protocol, meaning that at least one of the
 // versions is supported by both this node and the peer p.

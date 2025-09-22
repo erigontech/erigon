@@ -80,6 +80,7 @@ type PeerInfo struct {
 	rw                    p2p.MsgReadWriter
 	protocol, witProtocol uint
 	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
+	ethReady              chan struct{}
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -147,6 +148,7 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	p := &PeerInfo{
 		peer:           peer,
 		rw:             rw,
+		ethReady:       make(chan struct{}),
 		knownWitnesses: wit.NewKnownCache(wit.MaxKnownWitnesses),
 		removed:        make(chan struct{}),
 		tasks:          make(chan func(), 32),
@@ -194,6 +196,43 @@ func (pi *PeerInfo) Height() uint64 {
 	pi.lock.RLock()
 	defer pi.lock.RUnlock()
 	return pi.height
+}
+
+// SetEthProtocol sets protocol version and marks the ETH protocol as ready
+func (pi *PeerInfo) SetEthProtocol(version uint) {
+	if version == 0 {
+		return
+	}
+
+	pi.lock.Lock()
+	pi.protocol = version
+	close(pi.ethReady)
+	pi.lock.Unlock()
+}
+
+// WaitForEth blocks until the ETH handshake completes or returns a disconnect reason
+func (pi *PeerInfo) WaitForEth(ctx context.Context) *p2p.PeerError {
+	if !pi.peer.RunningProtocol(eth.ProtocolName) {
+		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscProtocolError, nil, "wit protocol requires eth capability")
+	}
+
+	pi.lock.RLock()
+	ready := pi.protocol != 0
+	readyCh := pi.ethReady
+	pi.lock.RUnlock()
+
+	if ready {
+		return nil
+	}
+
+	select {
+	case <-readyCh:
+		return nil
+	case <-pi.removed:
+		return pi.RemoveReason()
+	case <-ctx.Done():
+		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "wit protocol waiting for eth handshake cancelled")
+	}
 }
 
 // SetIncreasedHeight updates PeerInfo.height only if newHeight is higher (threadsafe)
@@ -552,6 +591,10 @@ func runWitPeer(
 	getWitnessRequest func(hash common.Hash, peerID [64]byte) bool,
 	logger log.Logger,
 ) *p2p.PeerError {
+	if err := peerInfo.WaitForEth(ctx); err != nil {
+		return err
+	}
+
 	protocol := uint(wit.WIT1)
 	pubkey := peerInfo.peer.Pubkey()
 	logger.Debug("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
@@ -728,7 +771,6 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			if err != nil {
 				return err
 			}
-			peerInfo.protocol = protocol
 
 			if protocol >= direct.ETH69 {
 				statusPacket69, err := handShake[eth.StatusPacket69](ctx, status, rw, protocol, protocol, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
@@ -753,6 +795,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
+			peerInfo.SetEthProtocol(protocol)
 
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
