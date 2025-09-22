@@ -6,6 +6,7 @@ import (
 
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -141,6 +142,11 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 			sentMessage = req
 			return &proto_sentry.SentPeers{}, nil
 		},
+		handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+			return &proto_sentry.HandShakeReply{
+				Protocol: proto_sentry.Protocol_ETH69,
+			}, nil
+		},
 	}
 
 	mockStatus := &mockStatusDataProvider{
@@ -198,6 +204,7 @@ type mockSentryClient struct {
 	proto_sentry.SentryClient
 	sendMessageByIdFunc  func(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	sendMessageToAllFunc func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
+	handShakeFunc        func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error)
 }
 
 func (m *mockSentryClient) SendMessageById(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
@@ -206,6 +213,10 @@ func (m *mockSentryClient) SendMessageById(ctx context.Context, req *proto_sentr
 
 func (m *mockSentryClient) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
 	return m.sendMessageToAllFunc(ctx, req, opts...)
+}
+
+func (m *mockSentryClient) HandShake(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+	return m.handShakeFunc(ctx, req, opts...)
 }
 
 type mockBlockReader struct {
