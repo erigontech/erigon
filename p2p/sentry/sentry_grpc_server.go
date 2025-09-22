@@ -81,6 +81,7 @@ type PeerInfo struct {
 	protocol, witProtocol uint
 	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
 	ethReady              chan struct{}
+	ethReadyOnce          sync.Once
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -206,8 +207,9 @@ func (pi *PeerInfo) SetEthProtocol(version uint) {
 
 	pi.lock.Lock()
 	pi.protocol = version
-	close(pi.ethReady)
 	pi.lock.Unlock()
+
+	pi.ethReadyOnce.Do(func() { close(pi.ethReady) })
 }
 
 // WaitForEth blocks until the ETH handshake completes or returns a disconnect reason

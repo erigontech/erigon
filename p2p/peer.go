@@ -174,10 +174,8 @@ func (p *Peer) Caps() []Cap {
 // RunningProtocol returns true if the peer is actively connected using the
 // specified protocol, regardless of version.
 func (p *Peer) RunningProtocol(protocol string) bool {
-	if _, ok := p.running[protocol]; ok {
-		return true
-	}
-	return false
+	_, ok := p.running[protocol]
+	return ok
 }
 
 // RunningCap returns true if the peer is actively connected using any of the
