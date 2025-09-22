@@ -92,9 +92,11 @@ func TestCreation(t *testing.T) {
 				{2990908, 1677557088, ID{Hash: ChecksumToBytes(0xf7f9bc08), Activation: 1677557088, Next: 1706655072}}, // First Shanghai block
 				{5187022, 1706655060, ID{Hash: ChecksumToBytes(0xf7f9bc08), Activation: 1677557088, Next: 1706655072}}, // Last Shanghai block
 				{5187023, 1706655072, ID{Hash: ChecksumToBytes(0x88cf81d9), Activation: 1706655072, Next: 1741159776}}, // First Cancun block
-				{7844466, 1741159764, ID{Hash: ChecksumToBytes(0x88cf81d9), Activation: 1706655072, Next: 1741159776}}, // Last Cancun block (approx)
-				{7844467, 1741159776, ID{Hash: ChecksumToBytes(0xed88b5fd), Activation: 1741159776, Next: 0}},          // First Prague block (approx)
-				{12000000, 1800000000, ID{Hash: ChecksumToBytes(0xed88b5fd), Activation: 1741159776, Next: 0}},         // Future Prague block (mock)
+				{7836330, 1741159764, ID{Hash: ChecksumToBytes(0x88cf81d9), Activation: 1706655072, Next: 1741159776}}, // Last Cancun block
+				{7836331, 1741159776, ID{Hash: ChecksumToBytes(0xed88b5fd), Activation: 1741159776, Next: 1760427360}}, // First Prague block
+				{9412738, 1760427360, ID{Hash: ChecksumToBytes(0xe2ae4999), Activation: 1760427360, Next: 1761017184}}, // First Osaka block (approx)
+				{9461890, 1761017184, ID{Hash: ChecksumToBytes(0x56078a1e), Activation: 1761017184, Next: 1761607008}}, // First BPO1 block (approx)
+				{12000000, 1800000000, ID{Hash: ChecksumToBytes(0x268956b6), Activation: 1761607008, Next: 0}},         // Future BPO2 block (mock)
 			},
 		},
 		{
