@@ -188,6 +188,9 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req BackwardDownloadRequest) error {
 	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
+	if e.stopped.Load() {
+		return errors.New("engine block downloader is stopped")
+	}
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
@@ -203,7 +206,8 @@ func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req Backwa
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
-	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, opts...)
+	hr := headerReader{db: e.db, blockReader: e.blockReader}
+	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, hr, opts...)
 	if err != nil {
 		return err
 	}
