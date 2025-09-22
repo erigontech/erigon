@@ -116,6 +116,7 @@ type Message interface {
 	FeeCap() *uint256.Int
 	TipCap() *uint256.Int
 	Gas() uint64
+	CheckGas() bool
 	BlobGas() uint64
 	MaxFeePerBlobGas() *uint256.Int
 	Value() *uint256.Int
@@ -377,7 +378,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	// 	}
 	// }
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
 	}
 

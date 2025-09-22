@@ -13,9 +13,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/arb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/holiman/uint256"
 )
 

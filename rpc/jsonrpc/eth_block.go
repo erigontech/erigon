@@ -175,6 +175,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	for _, txn := range txs {
 		msg, err := txn.AsMessage(*signer, nil, rules)
 		msg.SetCheckNonce(false)
+		msg.SetCheckGas(false)
 		if err != nil {
 			return nil, err
 		}
