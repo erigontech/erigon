@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -192,7 +191,7 @@ func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req Backwa
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
-		opts = append(opts, p2p.WithChainLengthLimit(uint64(dbg.MaxReorgDepth)))
+		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
 		currentHeader := e.chainRW.CurrentHeader(ctx)
 		if currentHeader != nil {
 			opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))

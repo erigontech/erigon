@@ -356,21 +356,20 @@ func (d *blockDuration) Add(i time.Duration) {
 
 type txExecutor struct {
 	sync.RWMutex
-	cfg                      ExecuteBlockCfg
-	agg                      *dbstate.Aggregator
-	rs                       *state.StateV3Buffered
-	doms                     *dbstate.SharedDomains
-	u                        Unwinder
-	isMining                 bool
-	inMemExec                bool
-	applyTx                  kv.TemporalTx
-	logger                   log.Logger
-	logPrefix                string
-	progress                 *Progress
-	taskExecMetrics          *exec3.WorkerMetrics
-	blockExecMetrics         *blockExecMetrics
-	hooks                    *tracing.Hooks
-	shouldGenerateChangesets bool
+	cfg              ExecuteBlockCfg
+	agg              *dbstate.Aggregator
+	rs               *state.StateV3Buffered
+	doms             *dbstate.SharedDomains
+	u                Unwinder
+	isMining         bool
+	inMemExec        bool
+	applyTx          kv.TemporalTx
+	logger           log.Logger
+	logPrefix        string
+	progress         *Progress
+	taskExecMetrics  *exec3.WorkerMetrics
+	blockExecMetrics *blockExecMetrics
+	hooks            *tracing.Hooks
 
 	lastExecutedBlockNum  atomic.Int64
 	lastExecutedTxNum     atomic.Int64
