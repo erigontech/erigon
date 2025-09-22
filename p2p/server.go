@@ -26,6 +26,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"sort"
 	"strconv"
@@ -893,18 +894,39 @@ running:
 }
 
 func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount int, c *conn) error {
+	clog := srv.logger.New("remoteNode", c.node.ID())
+
+	// Log connection state for debugging
+	clog.Info("Post-handshake checks", "isTrusted", c.is(trustedConn), "isInbound", c.is(inboundConn),
+		"totalPeers", len(peers), "maxPeers", srv.MaxPeers, "inboundCount", inboundCount, "maxInbound", srv.maxInboundConns())
+
+	// Log our capabilities and remote capabilities for comparison
+	ourCaps := make([]string, len(srv.Protocols))
+	for i, proto := range srv.Protocols {
+		ourCaps[i] = fmt.Sprintf("%s/%d", proto.Name, proto.Version)
+	}
+
+	matchingCount := countMatchingProtocols(srv.Protocols, c.caps)
+	clog.Info("Protocol matching check", "ourProtocols", ourCaps, "remoteCaps", capsToString(c.caps), "matchingCount", matchingCount)
+
 	switch {
 	case !c.is(trustedConn) && len(peers) >= srv.MaxPeers:
+		clog.Info("Rejected: too many peers", "current", len(peers), "max", srv.MaxPeers)
 		return DiscTooManyPeers
 	case !c.is(trustedConn) && c.is(inboundConn) && inboundCount >= srv.maxInboundConns():
+		clog.Info("Rejected: too many inbound connections", "current", inboundCount, "max", srv.maxInboundConns())
 		return DiscTooManyPeers
 	case peers[c.node.ID()] != nil:
+		clog.Info("Rejected: already connected")
 		return DiscAlreadyConnected
 	case c.node.ID() == srv.localnode.ID():
+		clog.Info("Rejected: self connection")
 		return DiscSelf
-	case (len(srv.Protocols) > 0) && (countMatchingProtocols(srv.Protocols, c.caps) == 0):
+	case (len(srv.Protocols) > 0) && (matchingCount == 0):
+		clog.Info("Rejected: no matching protocols", "ourProtocols", ourCaps, "remoteCaps", capsToString(c.caps))
 		return DiscUselessPeer
 	default:
+		clog.Info("Post-handshake checks passed")
 		return nil
 	}
 }
@@ -1059,17 +1081,19 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	}
 
 	// Run the capability negotiation handshake.
+	clog.Info("Starting protocol handshake", "remoteNode", c.node.ID(), "remoteAddr", c.fd.RemoteAddr())
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		srv.addError(err)
-		clog.Trace("Failed p2p handshake", "err", err)
+		clog.Info("Failed p2p handshake", "err", err, "remoteNode", c.node.ID())
 		return err
 	}
 	if id := c.node.ID(); !bytes.Equal(crypto.Keccak256(phs.Pubkey), id[:]) {
-		clog.Trace("Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.Pubkey))
+		clog.Info("Wrong devp2p handshake identity", "expectedId", id, "receivedPubkey", hex.EncodeToString(phs.Pubkey))
 		return DiscUnexpectedIdentity
 	}
 	c.caps, c.name = phs.Caps, phs.Name
+	clog.Info("Protocol handshake completed", "remoteNode", c.node.ID(), "remoteName", phs.Name, "remoteCaps", capsToString(phs.Caps))
 	err = srv.checkpoint(c, srv.checkpointAddPeer)
 	if err != nil {
 		clog.Trace("Rejected peer", "err", err)
@@ -1236,6 +1260,14 @@ func (srv *Server) listErrors() []interface{} {
 		list = append(list, err, count)
 	}
 	return list
+}
+
+func capsToString(caps []Cap) []string {
+	result := make([]string, len(caps))
+	for i, cap := range caps {
+		result[i] = cap.String()
+	}
+	return result
 }
 
 func cleanError(err string) string {

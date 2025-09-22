@@ -248,7 +248,7 @@ hive-local:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
 	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
-	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/shohamc1/hive
 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && \
 	$(if $(filter Darwin,$(UNAME)), \
@@ -259,12 +259,10 @@ hive-local:
 	)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
-	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
+	#cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
+	#cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
-	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
-	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
-	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
+	#cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi

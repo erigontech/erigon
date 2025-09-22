@@ -218,7 +218,26 @@ func (p *Peer) Inbound() bool {
 func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte, metricsEnabled bool) *Peer {
 	log := logger.New("id", conn.node.ID(), "conn", conn.flags)
 
+	// Log detailed protocol matching information
+	ourProtocols := make([]string, len(protocols))
+	for i, proto := range protocols {
+		ourProtocols[i] = fmt.Sprintf("%s/%d", proto.Name, proto.Version)
+	}
+	remoteCaps := make([]string, len(conn.caps))
+	for i, cap := range conn.caps {
+		remoteCaps[i] = cap.String()
+	}
+	log.Info("Creating new peer", "remoteNode", conn.node.ID(), "ourProtocols", ourProtocols, "remoteCaps", remoteCaps)
+
 	protomap := matchProtocols(protocols, conn.caps, conn, log)
+
+	// Log what protocols actually matched
+	matchedProtocols := make([]string, 0, len(protomap))
+	for name, proto := range protomap {
+		matchedProtocols = append(matchedProtocols, fmt.Sprintf("%s/%d", name, proto.Version))
+	}
+	log.Info("Protocol matching completed", "matchedProtocols", matchedProtocols, "totalMatches", len(protomap))
+
 	p := &Peer{
 		rw:             conn,
 		running:        protomap,
@@ -315,16 +334,20 @@ func (p *Peer) pingLoop() {
 	for {
 		select {
 		case <-ping.C:
+			p.log.Info("Sending PING message", "remoteNode", p.ID())
 			if err := SendItems(p.rw, pingMsg); err != nil {
 				p.protoErr <- NewPeerError(PeerErrorPingFailure, DiscNetworkError, err, "Failed to send pingMsg")
 				return
 			}
+			p.log.Info("PING message sent successfully")
 			ping.Reset(pingInterval)
 		case <-p.pingRecv:
+			p.log.Info("Received PING, sending PONG response", "remoteNode", p.ID())
 			if err := SendItems(p.rw, pongMsg); err != nil {
 				p.protoErr <- NewPeerError(PeerErrorPongFailure, DiscNetworkError, err, "Failed to send pongMsg")
 				return
 			}
+			p.log.Info("PONG response sent successfully")
 		case <-p.closed:
 			return
 		}
@@ -351,9 +374,11 @@ func (p *Peer) readLoop(errc chan<- error) {
 func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
+		p.log.Info("Received PING message", "remoteNode", p.ID(), "msgSize", msg.Size)
 		msg.Discard()
 		select {
 		case p.pingRecv <- struct{}{}:
+			p.log.Info("PING message queued for processing", "remoteNode", p.ID())
 		case <-p.closed:
 		}
 	case msg.Code == discMsg:
