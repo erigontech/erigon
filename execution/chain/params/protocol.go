@@ -260,7 +260,6 @@ var DefaultPragueBlobConfig = BlobConfig{
 	BaseFeeUpdateFraction: 5007716,
 }
 
-// TODO(yperbasis): update when Fusaka's blob config is decided
 var DefaultOsakaBlobConfig = BlobConfig{
 	Target:                6,
 	Max:                   9,
