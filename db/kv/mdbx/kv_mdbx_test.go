@@ -20,7 +20,10 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io/fs"
 	"math/rand"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1150,4 +1153,25 @@ func TestAutoRemove(t *testing.T) {
 		db.Close()
 		require.DirExists(t, dbPath)
 	})
+}
+
+func TestNoSubdir(t *testing.T) {
+	tmpdir := t.TempDir()
+	db := New(dbcfg.TemporaryDB, log.Root()).InMem(t, tmpdir).Flags(func(u uint) uint {
+		return u | mdbxgo.NoSubdir
+	}).MustOpen()
+	filepath.WalkDir(tmpdir, func(path string, d fs.DirEntry, err error) error {
+		fmt.Printf("NoSubdir: %s\n", path)
+		return nil
+	})
+	db.Close()
+
+	db = New(dbcfg.TemporaryDB, log.Root()).InMem(t, tmpdir).Flags(func(u uint) uint {
+		return u
+	}).MustOpen()
+	filepath.WalkDir(tmpdir, func(path string, d fs.DirEntry, err error) error {
+		fmt.Printf("Usual:  %s\n", path)
+		return nil
+	})
+	db.Close()
 }
