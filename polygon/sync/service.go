@@ -52,20 +52,18 @@ func NewService(
 	notifications *shards.Notifications,
 	engineAPISwitcher EngineAPISwitcher,
 	minedBlockReg MinedBlockObserverRegistrar,
-
+	tmpDir string,
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := polygonp2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
+	p2pService := polygonp2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData, tmpDir)
 	execution := newExecutionClient(logger, executionClient)
-
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
-
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,

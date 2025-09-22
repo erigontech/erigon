@@ -64,6 +64,7 @@ type EventNewBlockBatch struct { // new batch of blocks from peer
 	NewBlocks []*types.Block
 	PeerId    *p2p.PeerId
 	Source    EventSource
+	Processed chan<- error // closed with nil error when processed successfully, otherwise error sent
 }
 
 type EventNewBlockHashes struct {
