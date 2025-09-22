@@ -83,6 +83,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			mt.nonceDistance = mt.Tx.Nonce - senderNonce
 		}
 
+		// Invalidate sort key since we updated sorting-relevant fields
+		mt.invalidateSortKey()
+
 		// Sender has enough balance for: gasLimit x feeCap + transferred_value
 		needBalance := uint256.NewInt(mt.Tx.Gas)
 		needBalance.Mul(needBalance, &mt.Tx.FeeCap)
@@ -125,6 +128,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				}
 			}
 		}
+
+		// Invalidate sort key since we updated subPool and cumulativeBalanceDistance
+		mt.invalidateSortKey()
 
 		mt.subPool &^= NotTooMuchGas
 		// zk: here we don't care about block limits any more and care about only the transaction gas limit in ZK
