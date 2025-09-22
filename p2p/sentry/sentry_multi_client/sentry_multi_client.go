@@ -202,7 +202,7 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 				Data: data,
 			})
 			if err != nil {
-				cs.logger.Debug("blockRangeUpdate", "err", err)
+				cs.logger.Error("blockRangeUpdate", "err", err)
 				continue // continue sending message to other sentries
 			}
 		}
