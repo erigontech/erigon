@@ -127,10 +127,6 @@ func (a *Antiquary) Loop() error {
 		return nil
 	}
 	if a.downloader != nil {
-		completedReply, err := a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
-		if err != nil {
-			return err
-		}
 		reCheckTicker := time.NewTicker(3 * time.Second)
 		defer reCheckTicker.Stop()
 
@@ -144,7 +140,7 @@ func (a *Antiquary) Loop() error {
 		for !time.Now().Add(completionEpoch).Before(progress) && !a.backfilled.Load() {
 			select {
 			case <-reCheckTicker.C:
-				completedReply, err = a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
+				completedReply, err := a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
 				if err != nil {
 					return err
 				}
