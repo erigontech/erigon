@@ -193,6 +193,7 @@ Loop:
 					}
 					latestVerifiedBytes := l.Data[32:64]
 					latestVerified := new(big.Int).SetBytes(latestVerifiedBytes).Uint64()
+					log.Info(fmt.Sprintf("Updating fork history, new fork %d, latest verified %d", fork, latestVerified))
 					if funcErr = hermezDb.WriteNewForkHistory(fork, latestVerified); funcErr != nil {
 						return funcErr
 					}

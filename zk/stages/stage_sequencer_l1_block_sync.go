@@ -50,11 +50,6 @@ func SpawnSequencerL1BlockSyncStage(
 	log.Info(fmt.Sprintf("[%s] Starting L1 block sync stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 block sync stage", logPrefix))
 
-	if !cfg.zkCfg.IsL1Recovery() {
-		log.Info(fmt.Sprintf("[%s] Skipping L1 block sync stage", logPrefix))
-		return nil
-	}
-
 	var err error
 	freshTx := false
 	if tx == nil {
@@ -125,7 +120,7 @@ func SpawnSequencerL1BlockSyncStage(
 		}()
 	}
 
-	logChan := cfg.syncer.GetLogsChan(syncer.LogsModeImmediate)
+	logChan := cfg.syncer.GetLogsChan(syncer.LogsModeOnCompletion)
 	progressChan := cfg.syncer.GetProgressMessageChan()
 	var progress uint64
 
