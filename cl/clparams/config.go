@@ -1071,7 +1071,7 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x05017000
 	cfg.ElectraForkEpoch = 115968
 	cfg.ElectraForkVersion = 0x06017000
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 165120
 	cfg.FuluForkVersion = 0x07017000
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
@@ -1086,6 +1086,11 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.MinPerEpochChurnLimit = 4
 	cfg.ChurnLimitQuotient = 1 << 16
 	cfg.ProposerScoreBoost = 40
+
+	cfg.BlobSchedule = []BlobParameters{
+		{166400, 15},
+		{167936, 21},
+	}
 
 	cfg.InitializeForkSchedule()
 	return cfg
