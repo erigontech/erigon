@@ -153,7 +153,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 
-	payloadSize += rlp.BoolLen()
+	payloadSize += rlp.IntLenExcludingHead(10)
 
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
@@ -248,7 +248,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 	}
 
 	// encode Timeboosted
-	if err := rlp.EncodeBool(tx.Timeboosted, w); err != nil {
+	if err := rlp.EncodeInt(10, w, b); err != nil {
 		return err
 	}
 
@@ -336,12 +336,15 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.S.SetBytes(b)
 
-	boolVal, err := s.Bool()
-	if err != nil {
+	//boolVal, err := s.Bool()
+	//if err != nil {
+	//	return err
+	//}
+	//tx.Timeboosted = boolVal
+
+	if _, err := s.Uint(); err != nil {
 		return err
 	}
-	tx.Timeboosted = boolVal
-
 	return s.ListEnd()
 }
 

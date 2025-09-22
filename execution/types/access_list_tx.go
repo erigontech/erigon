@@ -152,7 +152,8 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 
 	// Timeboosted
-	payloadSize += rlp.BoolLen()
+	//payloadSize += rlp.BoolLen()
+	payloadSize += rlp.IntLenExcludingHead(10)
 
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
@@ -281,7 +282,10 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 	}
 
 	// encode Timeboosted
-	if err := rlp.EncodeBool(tx.Timeboosted, w); err != nil {
+	//if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+	//	return err
+	//}
+	if err := rlp.EncodeInt(10, w, b); err != nil {
 		return err
 	}
 	return nil
@@ -412,11 +416,15 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.S.SetBytes(b)
 
-	boolVal, err := s.Bool()
-	if err != nil {
+	//boolVal, err := s.Bool()
+	//if err != nil {
+	//	return err
+	//}
+	//tx.Timeboosted = boolVal
+
+	if _, err := s.Uint(); err != nil {
 		return err
 	}
-	tx.Timeboosted = boolVal
 
 	return s.ListEnd()
 }

@@ -590,20 +590,17 @@ func Uint256LenExcludingHead(i *uint256.Int) int {
 }
 
 func BoolLen() int {
-	// fewer than 127
-	return 0
+	return IntLenExcludingHead(1)
 }
 
 // EncodeBool writes an RLP-encoded boolean as a fixed 1-byte string:
-func EncodeBool(val bool, w io.Writer) error {
-	var buf [1]byte
+func EncodeBool(val bool, w io.Writer, buffer []byte) error {
+	// one for false, two for true
+	intVal := 1
 	if val {
-		buf[0] = 0x01
-	} else {
-		buf[0] = 0x00
+		intVal = 2
 	}
-	_, err := w.Write(buf[:])
-	return err
+	return EncodeInt(uint64(intVal), w, buffer)
 }
 
 // precondition: len(buffer) >= 9
