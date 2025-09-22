@@ -157,6 +157,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
 			HistoryIdx:         kv.AccountsHistoryIdx,
@@ -177,6 +178,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblStorageHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
 			HistoryIdx:         kv.StorageHistoryIdx,
@@ -198,6 +200,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCodeHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.CodeHistoryIdx,
@@ -220,6 +223,7 @@ var Schema = SchemaGen{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
 			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			HistoryIdx: kv.CommitmentHistoryIdx,
+			Accessors:  AccessorHashMap,
 
 			HistoryLargeValues:            false,
 			HistoryValuesOnCompressedPage: 64,
@@ -244,6 +248,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable:   kv.TblReceiptHistoryVals,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
 			HistoryIdx:         kv.ReceiptHistoryIdx,
@@ -265,6 +270,7 @@ var Schema = SchemaGen{
 		Hist: HistCfg{
 			ValuesTable: kv.TblRCacheHistoryVals,
 			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			Accessors:   AccessorHashMap,
 
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.RCacheHistoryIdx,

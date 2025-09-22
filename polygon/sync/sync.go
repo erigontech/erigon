@@ -29,10 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/p2p"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -1005,6 +1005,14 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 	finalisedTip := syncToTipResult{
 		latestTip: latestTipOnStart,
 	}
+
+	// we need to synchronize spans because syncing from checkpoints and milestones below has a dependency on spans
+	// during pruning, and if the span store is not up to date then this can result in an error
+	if err := s.heimdallSync.SynchronizeSpans(ctx, math.MaxUint64); err != nil {
+		return syncToTipResult{}, err
+	}
+
+	s.logger.Info(syncLogPrefix("spans synchronized"))
 
 	startTime := time.Now()
 	result, ok, err := s.syncToTipUsingCheckpoints(ctx, finalisedTip.latestTip)

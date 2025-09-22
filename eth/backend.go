@@ -638,10 +638,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		heimdallService = heimdall.NewService(heimdall.ServiceConfig{
-			Store:     heimdallStore,
-			BorConfig: borConfig,
-			Client:    heimdallClient,
-			Logger:    logger,
+			Store:       heimdallStore,
+			ChainConfig: chainConfig,
+			BorConfig:   borConfig,
+			Client:      heimdallClient,
+			Logger:      logger,
 		})
 
 		bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
@@ -685,6 +686,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		genesis,
 		backend.config.NetworkID,
 		logger,
+		blockReader,
 	)
 
 	// limit "new block" broadcasts to at most 10 random peers at time
@@ -1036,6 +1038,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		false,
 		config.Miner.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
+		backend.txPoolRpcClient,
 	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
@@ -1204,7 +1207,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
-		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient)
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Debug("[EngineServer] goroutine terminated")
+			err := s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, s.rpcFilters, s.rpcDaemonStateCache, s.engine, s.ethRpcClient, s.miningRpcClient)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("[EngineServer] background goroutine failed", "err", err)
+			}
+			return err
+		})
 	}
 
 	// Register the backend on the node
