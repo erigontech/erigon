@@ -40,7 +40,7 @@ const (
 )
 
 var (
-	protocolToUintMap = map[sentryproto.Protocol]uint{
+	ProtocolToUintMap = map[sentryproto.Protocol]uint{
 		sentryproto.Protocol_ETH67: ETH67,
 		sentryproto.Protocol_ETH68: ETH68,
 		sentryproto.Protocol_ETH69: ETH69,
@@ -87,7 +87,7 @@ func NewSentryClientRemote(client sentryproto.SentryClient) *SentryClientRemote 
 func (c *SentryClientRemote) Protocol() uint {
 	c.RLock()
 	defer c.RUnlock()
-	if version, ok := protocolToUintMap[c.protocol]; ok {
+	if version, ok := ProtocolToUintMap[c.protocol]; ok {
 		return version
 	}
 	return 0
@@ -112,7 +112,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	}
 	c.Lock()
 	defer c.Unlock()
-	if _, ok := protocolToUintMap[reply.Protocol]; !ok {
+	if _, ok := ProtocolToUintMap[reply.Protocol]; !ok {
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
 	c.protocol = reply.Protocol
@@ -179,7 +179,7 @@ func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer,
 }
 
 func (c *SentryClientDirect) Protocol() uint {
-	if version, ok := protocolToUintMap[c.protocol]; ok {
+	if version, ok := ProtocolToUintMap[c.protocol]; ok {
 		return version
 	}
 	return 0
