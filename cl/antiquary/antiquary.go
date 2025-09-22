@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"os"
 	"strings"
@@ -140,7 +141,7 @@ func (a *Antiquary) Loop() error {
 		progress := time.Now()
 
 		// Fist part of the antiquate is to download caplin snapshots
-		for (!time.Now().Add(completionEpoch).Before(progress) || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
+		for !time.Now().Add(completionEpoch).Before(progress) && !a.backfilled.Load() {
 			select {
 			case <-reCheckTicker.C:
 				completedReply, err = a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
@@ -154,6 +155,7 @@ func (a *Antiquary) Loop() error {
 			}
 		}
 	}
+	fmt.Println("via")
 
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
