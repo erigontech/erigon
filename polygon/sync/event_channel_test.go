@@ -62,7 +62,8 @@ func TestEventChannel(t *testing.T) {
 
 	t.Run("ConsumeEvents", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			ctx := t.Context() // cancelled before t.Cleanup()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			ch := NewEventChannel[string](2)
 			eg := errgroup.Group{}
 			eg.Go(func() error {

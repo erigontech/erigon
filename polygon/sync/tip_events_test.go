@@ -53,7 +53,8 @@ func TestTipEventsCompositeChannel(t *testing.T) {
 		heimdallEvents := NewEventChannel[Event](3)
 		p2pEvents := NewEventChannel[Event](2)
 		ch := NewTipEventsCompositeChannel(heimdallEvents, p2pEvents)
-		ctx := t.Context() // cancelled before t.Cleanup()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 		eg := errgroup.Group{}
 		eg.Go(func() error {
 			return ch.Run(ctx)
