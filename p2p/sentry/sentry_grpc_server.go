@@ -218,6 +218,16 @@ func (pi *PeerInfo) MinBlock() uint64 {
 	return pi.height
 }
 
+// SetBlockRange updates minBlock and (monotonically) increases height under a single lock
+func (pi *PeerInfo) SetBlockRange(newMinBlock, newHeight uint64) {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	pi.minBlock = newMinBlock
+	if pi.height < newHeight {
+		pi.height = newHeight
+	}
+}
+
 // SetMinimumBlock updates PeerInfo.minBlock from BlockRangeUpdate message
 func (pi *PeerInfo) SetMinimumBlock(newMinBlock uint64) {
 	pi.lock.Lock()
@@ -724,20 +734,15 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
 			}
 
-			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
-			if err != nil {
-				return err
-			}
-			peerInfo.protocol = protocol
-
+			var minBlock, latestBlock uint64
 			if protocol >= direct.ETH69 {
 				statusPacket69, err := handShake[eth.StatusPacket69](ctx, status, rw, protocol, protocol, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 				if err != nil {
 					return err
 				}
 
-				peerInfo.SetMinimumBlock(statusPacket69.MinimumBlock)
-				peerInfo.SetIncreasedHeight(statusPacket69.LatestBlock)
+				minBlock = statusPacket69.MinimumBlock
+				latestBlock = statusPacket69.LatestBlock
 			} else {
 				statusPacket, err := handShake[eth.StatusPacket](ctx, status, rw, protocol, protocol, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 				if err != nil {
@@ -755,6 +760,16 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
 
+			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			if err != nil {
+				return err
+			}
+
+			if protocol >= direct.ETH69 {
+				peerInfo.SetBlockRange(minBlock, latestBlock)
+			}
+
+			peerInfo.protocol = protocol
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer peerInfo.Close()
@@ -1078,8 +1093,7 @@ func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *sentryproto.Se
 func (ss *GrpcServer) SetPeerBlockRange(_ context.Context, req *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		peerInfo.SetMinimumBlock(req.MinBlockHeight)
-		peerInfo.SetIncreasedHeight(req.LatestBlockHeight)
+		peerInfo.SetBlockRange(req.MinBlockHeight, req.LatestBlockHeight)
 	}
 	return &emptypb.Empty{}, nil
 }
