@@ -1277,19 +1277,16 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 
 func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	reply := &sentryproto.HandShakeReply{}
-	switch ss.Protocols[0].Version {
-	case direct.ETH67:
-		reply.Protocol = sentryproto.Protocol_ETH67
-	case direct.ETH68:
-		reply.Protocol = sentryproto.Protocol_ETH68
-	case direct.ETH69:
-		reply.Protocol = sentryproto.Protocol_ETH69
-	}
+	reply.Protocol = direct.UintToProtocolMap[ss.Protocols[0].Version]
 
-	// Add side protocols if available
-	for _, protocol := range ss.Protocols {
-		if protocol.Name == wit.ProtocolName && protocol.Version == wit.ProtocolVersions[0] {
-			reply.SideProtocols = append(reply.SideProtocols, sentryproto.Protocol_WIT0)
+	for _, protocol := range ss.Protocols[1:] { // noop if no extra protocols
+		v, ok := direct.UintToSideProtocolMap[protocol.Version]
+		if !ok {
+			continue
+		}
+
+		if _, ok = direct.SupportedSideProtocols[v]; ok {
+			reply.SideProtocols = append(reply.SideProtocols, v)
 		}
 	}
 

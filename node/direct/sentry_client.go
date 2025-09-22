@@ -45,13 +45,16 @@ var (
 		sentryproto.Protocol_ETH68: ETH68,
 		sentryproto.Protocol_ETH69: ETH69,
 	}
-	uintToProtocolMap = map[uint]sentryproto.Protocol{
+	UintToProtocolMap = map[uint]sentryproto.Protocol{
 		ETH67: sentryproto.Protocol_ETH67,
 		ETH68: sentryproto.Protocol_ETH68,
 		ETH69: sentryproto.Protocol_ETH69,
 	}
-	supportedSideProtocols = map[sentryproto.Protocol]struct{}{
+	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
 		sentryproto.Protocol_WIT0: {},
+	}
+	UintToSideProtocolMap = map[uint]sentryproto.Protocol{
+		WIT0: sentryproto.Protocol_WIT0,
 	}
 )
 
@@ -115,7 +118,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.protocol = reply.Protocol
 	c.sideProtocols = nil // Reset side protocols
 	for _, s := range reply.SideProtocols {
-		if _, ok := supportedSideProtocols[s]; ok {
+		if _, ok := SupportedSideProtocols[s]; ok {
 			c.sideProtocols = append(c.sideProtocols, s)
 			break
 		}
@@ -158,7 +161,7 @@ type SentryClientDirect struct {
 }
 
 func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer, sideProtocols []sentryproto.Protocol) (*SentryClientDirect, error) {
-	protocolEnum, ok := uintToProtocolMap[protocol]
+	protocolEnum, ok := UintToProtocolMap[protocol]
 	if !ok {
 		return nil, fmt.Errorf("unsupported protocol version: %d", protocol)
 	}
@@ -167,7 +170,7 @@ func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer,
 		protocol: protocolEnum,
 	}
 	for _, s := range sideProtocols {
-		if _, ok := supportedSideProtocols[s]; ok {
+		if _, ok := SupportedSideProtocols[s]; ok {
 			client.sideProtocols = append(client.sideProtocols, s)
 			break
 		}
