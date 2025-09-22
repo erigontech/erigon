@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/zk/contracts"
 	"github.com/erigontech/erigon/zk/hermez_db"
 	"github.com/erigontech/erigon/zk/l1infotree"
+	"github.com/erigontech/erigon/zk/syncer"
 	"github.com/erigontech/erigon/zk/types"
 )
 
@@ -55,12 +56,19 @@ func SpawnL1SequencerSyncStage(
 		defer tx.Rollback()
 	}
 
+	logsRetrieveMode := syncer.LogsModeImmediate
+	if cfg.zkCfg.SequencerHaltOnBatchNumber > 0 || cfg.zkCfg.IsL1Recovery() {
+		logsRetrieveMode = syncer.LogsModeOnCompletion
+	}
+
 	progress, err := stages.GetStageProgress(tx, stages.L1SequencerSync)
 	if err != nil {
 		return err
 	}
 	if progress == 0 {
 		progress = cfg.zkCfg.L1FirstBlock - 1
+		// wait for all logs to be fetched if starting from genesis
+		logsRetrieveMode = syncer.LogsModeOnCompletion
 	}
 
 	// if the flag is set - wait for that block to be finalized on L1 before continuing
@@ -93,9 +101,8 @@ func SpawnL1SequencerSyncStage(
 		}()
 	}
 
-	logChan := cfg.syncer.GetLogsChan()
+	logChan := cfg.syncer.GetLogsChan(logsRetrieveMode)
 	progressChan := cfg.syncer.GetProgressMessageChan()
-	defer cfg.syncer.ClearHeaderCache()
 
 	idleTicker := time.NewTimer(10 * time.Second)
 	latestActivity := time.Now()
@@ -103,14 +110,19 @@ func SpawnL1SequencerSyncStage(
 Loop:
 	for {
 		select {
-		case logs, ok := <-logChan:
+		case logEvent, ok := <-logChan:
 			if !ok {
+				logChan = nil
 				break Loop
+			}
+
+			if logEvent.Done {
+				progress = logEvent.Progress
 			}
 
 			latestActivity = time.Now()
 
-			for _, l := range logs {
+			for _, l := range logEvent.Logs {
 				switch l.Topics[0] {
 				case contracts.InitialSequenceBatchesTopic:
 					if funcErr = HandleInitialSequenceBatches(cfg.syncer, hermezDb, l); funcErr != nil {
@@ -126,10 +138,12 @@ Loop:
 					verifierType := l.Data[96:128] // 4th positioned item in the log data
 					verifierBig := new(big.Int).SetBytes(verifierType)
 					if verifierBig.Uint64() == 0 {
+						log.Info(fmt.Sprintf("Saving rollup type %d for forkId %d", rollupType, forkId))
 						if funcErr = hermezDb.WriteRollupType(rollupType, forkId); funcErr != nil {
 							return funcErr
 						}
 					} else {
+						log.Info(fmt.Sprintf("Saving PP rollup type %d", rollupType))
 						if err := hermezDb.WritePPRollupType(rollupType); err != nil {
 							return err
 						}
@@ -179,6 +193,7 @@ Loop:
 					}
 					latestVerifiedBytes := l.Data[32:64]
 					latestVerified := new(big.Int).SetBytes(latestVerifiedBytes).Uint64()
+					log.Info(fmt.Sprintf("Updating fork history, new fork %d, latest verified %d", fork, latestVerified))
 					if funcErr = hermezDb.WriteNewForkHistory(fork, latestVerified); funcErr != nil {
 						return funcErr
 					}
@@ -202,7 +217,6 @@ Loop:
 		}
 	}
 
-	progress = cfg.syncer.GetLastCheckedL1Block()
 	if progress >= cfg.zkCfg.L1FirstBlock {
 		// do not save progress if progress less than L1FirstBlock
 		if funcErr = stages.SaveStageProgress(tx, stages.L1SequencerSync, progress); funcErr != nil {

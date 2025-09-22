@@ -387,7 +387,7 @@ func TestGetBatchByNumber(t *testing.T) {
 		[]common.Address{},
 		[][]common.Hash{},
 		10,
-		0,
+		1,
 		"latest",
 		0,
 	)
@@ -667,7 +667,7 @@ func TestGetExitRootsByGER(t *testing.T) {
 		[]common.Address{},
 		[][]common.Hash{},
 		10,
-		0,
+		1,
 		"latest",
 		0,
 	)
@@ -743,7 +743,7 @@ func TestLatestGlobalExitRoot(t *testing.T) {
 		[]common.Address{},
 		[][]common.Hash{},
 		10,
-		0,
+		1,
 		"latest",
 		0,
 	)

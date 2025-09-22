@@ -2,6 +2,7 @@ package stages
 
 import (
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/zk/datastream/types"
 )
@@ -114,4 +115,22 @@ func (c *TestDatastreamClient) PrepUnwind() {
 
 func (c *TestDatastreamClient) HandleStart() error {
 	return nil
+}
+
+// waitFor waits until cond() returns true or timeout expires.
+func WaitFor(timeout time.Duration, cond func() bool) bool {
+	deadline := time.After(timeout)
+	tick := time.NewTicker(10 * time.Millisecond) // polling interval
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return false // timeout
+		case <-tick.C:
+			if cond() {
+				return true // condition met
+			}
+		}
+	}
 }

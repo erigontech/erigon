@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	zktx "github.com/erigontech/erigon/zk/tx"
 	"time"
+
+	zktx "github.com/erigontech/erigon/zk/tx"
 
 	"encoding/binary"
 
@@ -48,11 +49,6 @@ func SpawnSequencerL1BlockSyncStage(
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 block sync stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 block sync stage", logPrefix))
-
-	if !cfg.zkCfg.IsL1Recovery() {
-		log.Info(fmt.Sprintf("[%s] Skipping L1 block sync stage", logPrefix))
-		return nil
-	}
 
 	var err error
 	freshTx := false
@@ -124,9 +120,9 @@ func SpawnSequencerL1BlockSyncStage(
 		}()
 	}
 
-	logChan := cfg.syncer.GetLogsChan()
+	logChan := cfg.syncer.GetLogsChan(syncer.LogsModeOnCompletion)
 	progressChan := cfg.syncer.GetProgressMessageChan()
-	defer cfg.syncer.ClearHeaderCache()
+	var progress uint64
 
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
@@ -136,11 +132,17 @@ func SpawnSequencerL1BlockSyncStage(
 LOOP:
 	for {
 		select {
-		case logs, ok := <-logChan:
+		case logEvent, ok := <-logChan:
 			if !ok {
+				logChan = nil
 				break LOOP
 			}
-			for _, l := range logs {
+
+			if logEvent.Done {
+				progress = logEvent.Progress
+			}
+
+			for _, l := range logEvent.Logs {
 				// for some reason some endpoints seem to not have certain transactions available to
 				// them even they are perfectly valid and other RPC nodes return them fine.  So, leaning
 				// on the internals of the syncer which will round-robin through available RPC nodes, we
@@ -224,7 +226,6 @@ LOOP:
 						}
 					}
 				}
-
 			}
 		case msg := <-progressChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, msg))
@@ -235,10 +236,9 @@ LOOP:
 		}
 	}
 
-	lastCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
-	if lastCheckedBlock > l1BlockHeight {
-		log.Info(fmt.Sprintf("[%s] Saving L1 block sync progress", logPrefix), "lastChecked", lastCheckedBlock)
-		if funcErr = stages.SaveStageProgress(tx, stages.L1BlockSync, lastCheckedBlock); funcErr != nil {
+	if progress > l1BlockHeight {
+		log.Info(fmt.Sprintf("[%s] Saving L1 block sync progress", logPrefix), "lastChecked", progress)
+		if funcErr = stages.SaveStageProgress(tx, stages.L1BlockSync, progress); funcErr != nil {
 			return funcErr
 		}
 	}

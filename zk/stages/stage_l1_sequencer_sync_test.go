@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -129,6 +130,7 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 
 				l1InjectedBatch, err := hDB.GetL1InjectedBatch(0)
 				require.NoError(t, err)
+				require.NotNil(t, l1InjectedBatch)
 
 				assert.Equal(t, l1InjectedBatch.L1BlockNumber, latestBlock.NumberU64())
 				assert.Equal(t, l1InjectedBatch.Timestamp, latestBlock.Time())
@@ -260,7 +262,7 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 
 	EthermanMock.EXPECT().FilterLogs(gomock.Any(), filterQuery).Return(filteredLogs, nil).AnyTimes()
 
-	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 0, "latest", 0)
+	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 1, "latest", 0)
 	zkCfg := &ethconfig.Zk{
 		L1RollupId:                  uint64(99999),
 		L1FirstBlock:                l1FirstBlock.Uint64(),
@@ -269,8 +271,15 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 	cfg := StageL1SequencerSyncCfg(db1, zkCfg, l1Syncer)
 
 	// act
-	err = SpawnL1SequencerSyncStage(s, u, tx, cfg, ctx, log.New())
-	require.NoError(t, err)
+	require.True(t, WaitFor(5*time.Second, func() bool {
+		fmt.Printf("Calling SpawnL1SequencerSyncStage with progress %d\n", l1Syncer.GetLastCheckedL1Block())
+		err = SpawnL1SequencerSyncStage(s, u, tx, cfg, ctx, log.New())
+		require.NoError(t, err)
+		progress, err := stages.GetStageProgress(tx, stages.L1SequencerSync)
+		require.NoError(t, err)
+		fmt.Printf("Calling SpawnL1SequencerSyncStage with checked block %d, progress %d\n", l1Syncer.GetLastCheckedL1Block(), progress)
+		return progress >= latestBlockNumber.Uint64()
+	}))
 
 	// assert
 	for _, tc := range testCases {

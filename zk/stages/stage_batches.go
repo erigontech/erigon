@@ -152,8 +152,14 @@ func SpawnStageBatches(
 		finishProg, err := stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 		}
+
 		if finishProg >= cfg.zkCfg.DebugLimit {
 			log.Info(fmt.Sprintf("[%s] Debug limit reached", logPrefix), "finishProg", finishProg, "debugLimit", cfg.zkCfg.DebugLimit)
+			if !freshTx {
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("tx.Commit: %w", err)
+				}
+			}
 			syscall.Kill(os.Getpid(), syscall.SIGINT)
 		}
 

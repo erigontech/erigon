@@ -84,6 +84,7 @@ func SequencerZkStages(
 		{
 			ID:          stages2.L1BlockSync,
 			Description: "L1 Sequencer L1 Block Sync",
+			Disabled:    !sequencerL1BlockSyncCfg.zkCfg.IsL1Recovery(),
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, unwinder stages.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnSequencerL1BlockSyncStage(s, unwinder, ctx, txc.Tx, sequencerL1BlockSyncCfg, logger)
 			},
