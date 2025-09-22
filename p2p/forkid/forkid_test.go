@@ -115,10 +115,12 @@ func TestCreation(t *testing.T) {
 		{
 			chainspec.Hoodi,
 			[]testcase{
-				{0, 174221200, ID{Hash: ChecksumToBytes(0xbef71d30), Activation: 0, Next: 1742999832}},        // First Cancun block
-				{50000, 1742999820, ID{Hash: ChecksumToBytes(0xbef71d30), Activation: 0, Next: 1742999832}},   // Last Cancun block (approx)
-				{50001, 1742999832, ID{Hash: ChecksumToBytes(0x0929e24e), Activation: 1742999832, Next: 0}},   // First Prague block (approx)
-				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0x0929e24e), Activation: 1742999832, Next: 0}}, // Future Prague block (mock)
+				{0, 174221200, ID{Hash: ChecksumToBytes(0xbef71d30), Activation: 0, Next: 1742999832}},                 // First Cancun block
+				{60411, 1742999820, ID{Hash: ChecksumToBytes(0xbef71d30), Activation: 0, Next: 1742999832}},            // Last Cancun block
+				{60412, 1742999832, ID{Hash: ChecksumToBytes(0x0929e24e), Activation: 1742999832, Next: 1761677592}},   // First Prague block
+				{1526774, 1761677592, ID{Hash: ChecksumToBytes(0xe7e0e7ff), Activation: 1761677592, Next: 1762365720}}, // First Osaka block (approx)
+				{1584118, 1762365720, ID{Hash: ChecksumToBytes(0x3893353e), Activation: 1762365720, Next: 1762955544}}, // First BPO1 block (approx)
+				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0x23aa1351), Activation: 1762955544, Next: 0}},          // Future BPO2 block (mock)
 			},
 		},
 		{

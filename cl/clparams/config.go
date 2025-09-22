@@ -1127,7 +1127,7 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x50000910
 	cfg.ElectraForkEpoch = 2048
 	cfg.ElectraForkVersion = 0x60000910
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
@@ -1144,6 +1144,11 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.SlotsPerEpoch = 32
 	cfg.EpochsPerSyncCommitteePeriod = 256
 	cfg.MinPerEpochChurnLimit = 4
+
+	cfg.BlobSchedule = []BlobParameters{
+		{52480, 15},
+		{54016, 21},
+	}
 
 	cfg.InitializeForkSchedule()
 	return cfg
