@@ -36,6 +36,7 @@ type BlobTx struct {
 	DynamicFeeTransaction
 	MaxFeePerBlobGas    *uint256.Int
 	BlobVersionedHashes []common.Hash
+	Timeboosted         bool
 }
 
 func (stx *BlobTx) Type() byte { return BlobTxType }

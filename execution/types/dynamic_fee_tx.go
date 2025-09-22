@@ -34,10 +34,11 @@ import (
 
 type DynamicFeeTransaction struct {
 	CommonTx
-	ChainID    *uint256.Int
-	TipCap     *uint256.Int
-	FeeCap     *uint256.Int
-	AccessList AccessList
+	ChainID     *uint256.Int
+	TipCap      *uint256.Int
+	FeeCap      *uint256.Int
+	AccessList  AccessList
+	Timeboosted bool
 }
 
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
@@ -82,6 +83,7 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 		FeeCap:     new(uint256.Int),
 	}
 	copy(cpy.AccessList, tx.AccessList)
+	cpy.Timeboosted = tx.Timeboosted
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -150,6 +152,9 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	// size of S
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
+
+	payloadSize += rlp.BoolLen()
+
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
@@ -241,6 +246,12 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
+
+	// encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -324,6 +335,13 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.S.SetBytes(b)
+
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
+
 	return s.ListEnd()
 }
 

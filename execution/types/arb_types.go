@@ -71,12 +71,13 @@ type ArbitrumUnsignedTx struct {
 	ChainId *big.Int
 	From    common.Address
 
-	Nonce     uint64          // nonce of sender account
-	GasFeeCap *big.Int        // wei per gas
-	Gas       uint64          // gas limit
-	To        *common.Address `rlp:"nil"` // nil means contract creation
-	Value     *big.Int        // wei amount
-	Data      []byte          // contract invocation input data
+	Nonce       uint64          // nonce of sender account
+	GasFeeCap   *big.Int        // wei per gas
+	Gas         uint64          // gas limit
+	To          *common.Address `rlp:"nil"` // nil means contract creation
+	Value       *big.Int        // wei amount
+	Data        []byte          // contract invocation input data
+	Timeboosted bool
 }
 
 func (tx *ArbitrumUnsignedTx) copy() Transaction {
@@ -461,11 +462,12 @@ type ArbitrumContractTx struct {
 	RequestId common.Hash
 	From      common.Address
 
-	GasFeeCap *big.Int        // wei per gas
-	Gas       uint64          // gas limit
-	To        *common.Address `rlp:"nil"` // nil means contract creation
-	Value     *big.Int        // wei amount
-	Data      []byte          // contract invocation input data
+	GasFeeCap   *big.Int        // wei per gas
+	Gas         uint64          // gas limit
+	To          *common.Address `rlp:"nil"` // nil means contract creation
+	Value       *big.Int        // wei amount
+	Data        []byte          // contract invocation input data
+	Timeboosted bool
 }
 
 func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
@@ -877,6 +879,7 @@ type ArbitrumRetryTx struct {
 	RefundTo            common.Address
 	MaxRefund           *big.Int // the maximum refund sent to RefundTo (the rest goes to From)
 	SubmissionFeeRefund *big.Int // the submission fee to refund if successful (capped by MaxRefund)
+	Timeboosted         bool
 }
 
 func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
@@ -1363,6 +1366,7 @@ type ArbitrumSubmitRetryableTx struct {
 	MaxSubmissionFee *big.Int
 	FeeRefundAddr    common.Address
 	RetryData        []byte // contract invocation input data
+	Timeboosted      bool
 }
 
 func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
@@ -1887,6 +1891,7 @@ type ArbitrumDepositTx struct {
 	From        common.Address
 	To          common.Address
 	Value       *big.Int
+	Timeboosted bool
 }
 
 func (d *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
@@ -2200,14 +2205,16 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 //}
 
 type ArbitrumInternalTx struct {
-	ChainId *uint256.Int
-	Data    []byte
+	ChainId     *uint256.Int
+	Data        []byte
+	Timeboosted bool
 }
 
 func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	return &ArbitrumInternalTx{
 		t.ChainId.Clone(),
 		common.CopyBytes(t.Data),
+		t.Timeboosted,
 	}
 }
 

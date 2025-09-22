@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
-const RUNS = 1000 // for local tests increase this number
+const RUNS = 100000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -245,8 +245,9 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 				CommonTx: commonTx, //nolint
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
-			ChainID:    uint256.NewInt(*tr.RandUint64()),
-			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			ChainID:     uint256.NewInt(*tr.RandUint64()),
+			AccessList:  tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			Timeboosted: tr.RandBoolean(),
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
@@ -550,6 +551,7 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 
 		dec, err := DecodeRLPTransaction(s, false)
 		if err != nil {
+
 			t.Errorf("error: DecodeRLPTransaction: %v", err)
 		}
 		compareTransactions(t, enc, dec)

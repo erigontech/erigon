@@ -53,8 +53,9 @@ func (al AccessList) StorageKeys() int {
 // AccessListTx is the data of EIP-2930 access list transactions.
 type AccessListTx struct {
 	LegacyTx
-	ChainID    *uint256.Int
-	AccessList AccessList // EIP-2930 access list
+	ChainID     *uint256.Int
+	AccessList  AccessList // EIP-2930 access list
+	Timeboosted bool
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -76,6 +77,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 		AccessList: make(AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
+	cpy.Timeboosted = tx.Timeboosted
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -148,6 +150,10 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	// size of S
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
+
+	// Timeboosted
+	payloadSize += rlp.BoolLen()
+
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
@@ -271,6 +277,11 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 	}
 	// encode S
 	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
+		return err
+	}
+
+	// encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w); err != nil {
 		return err
 	}
 	return nil
@@ -400,10 +411,14 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read S: %w", err)
 	}
 	tx.S.SetBytes(b)
-	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close AccessListTx: %w", err)
+
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
 	}
-	return nil
+	tx.Timeboosted = boolVal
+
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.
