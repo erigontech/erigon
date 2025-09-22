@@ -53,7 +53,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	cfg := &p2p.Config{
 		ListenAddr:      ":30307",
 		AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
-		ProtocolVersion: []uint{direct.ETH69, direct.ETH68, direct.ETH67},
+		ProtocolVersion: []uint{direct.ETH69, direct.ETH68},
 		MaxPeers:        32,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
