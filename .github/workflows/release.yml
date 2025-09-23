@@ -90,6 +90,8 @@ jobs:
 
       - name: Create sub-directories, get commit id, etc
         id: getCommitId
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           mkdir \
             $GITHUB_WORKSPACE/build-arm64 \
@@ -99,7 +101,7 @@ jobs:
           cd erigon
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
-          echo "parsed_version=$(echo ${{ inputs.release_version }} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
+          echo "parsed_version=$(echo $RELEASE_VERSION | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
 
       - name: Login to Docker Hub
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
@@ -117,6 +119,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
+          CHECKOUT_REF: ${{ inputs.checkout_ref }}
         run: |
           cd erigon;
           docker buildx build \
@@ -128,7 +131,7 @@ jobs:
             --platform linux/amd64,linux/amd64/v2,linux/arm64 \
             --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
-            --label org.opencontainers.image.url="https://github.com/erigontech/erigon/tree/${{ inputs.checkout_ref }}" \
+            --label org.opencontainers.image.url="https://github.com/erigontech/erigon/tree/$CHECKOUT_REF" \
             --label org.opencontainers.image.documentation="https://docs.erigon.tech/" \
             --label org.opencontainers.image.source="https://github.com/erigontech/erigon" \
             --label org.opencontainers.image.version=$RELEASE_VERSION \
@@ -347,10 +350,11 @@ jobs:
         RELEASE_VERSION: ${{ inputs.release_version }}
         DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         DOCKER_URL_TMP: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
+        PUBLISH_LATEST_TAG: ${{ inputs.publish_latest_tag }}
       run: |
         echo Publishing docker image: 
         skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:$RELEASE_VERSION docker://${{ env.DOCKER_URL }}:$RELEASE_VERSION
-        if [ "x${{ inputs.publish_latest_tag }}" == "xtrue" ]; then
+        if [ "x$PUBLISH_LATEST_TAG" == "xtrue" ]; then
           echo Publishing latest tag:
           skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:$RELEASE_VERSION docker://${{ env.DOCKER_URL }}:latest
         fi
@@ -400,9 +404,9 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
-        DOCKER_TAGS: ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}
-        GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
         RELEASE_VERSION: ${{ inputs.release_version }}
+        DOCKER_TAGS: ${{ env.DOCKERHUB_REPOSITORY }}:$RELEASE_VERSION
+        GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
       run: |
         cd dist
         for archive in *.tar; do gzip $archive; echo Artifact $archive compressed; done
@@ -411,7 +415,7 @@ jobs:
           --target ${GITHUB_RELEASE_TARGET} \
           --draft=true \
           --title "$RELEASE_VERSION" \
-          --notes "**Please generate notes in WEB UI and copy-paste here**<br>**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
+          --notes "**Please generate notes in WEB UI and copy-paste here**<br>**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> $DOCKER_TAGS<br><br>... coming soon<br>" \
           "$RELEASE_VERSION" \
           *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_$RELEASE_VERSION_checksums.txt
 
