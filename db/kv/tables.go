@@ -21,8 +21,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // DBSchemaVersion versions list
