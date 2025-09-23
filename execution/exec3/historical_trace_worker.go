@@ -622,8 +622,6 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
 		getHashFn := func(n uint64) (common.Hash, error) {
@@ -640,7 +638,6 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 				Txs:             txs,
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
-				SkipAnalysis:    skipAnalysis,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
 				Config:          cfg.ChainConfig,

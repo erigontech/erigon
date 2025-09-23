@@ -1191,7 +1191,6 @@ func ExecV3(ctx context.Context,
 
 				txs := b.Transactions()
 				header := b.HeaderNoCopy()
-				skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 				totalGasUsed += b.GasUsed()
 				getHashFnMutex := sync.Mutex{}
 
@@ -1219,7 +1218,6 @@ func ExecV3(ctx context.Context,
 						Header:          header,
 						Uncles:          b.Uncles(),
 						Txs:             txs,
-						SkipAnalysis:    skipAnalysis,
 						EvmBlockContext: blockContext,
 						Withdrawals:     b.Withdrawals(),
 
@@ -1761,6 +1759,14 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
+
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && b != nil {
+		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
+		// However, we should still at the very least report the last block number to it, so it can update its block progress.
+		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
+		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
+		cfg.notifications.Accumulator.StartChange(b.HeaderNoCopy(), nil, false /* unwind */)
+	}
 
 	return execErr
 }
