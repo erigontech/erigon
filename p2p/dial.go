@@ -31,7 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -230,7 +230,7 @@ func (d *dialScheduler) peerRemoved(c *conn) {
 
 // loop is the main loop of the dialer.
 func (d *dialScheduler) loop(it enode.Iterator) {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	var (
 		nodesCh    chan *enode.Node
 		historyExp = make(chan struct{}, 1)
@@ -332,7 +332,7 @@ loop:
 // readNodes runs in its own goroutine and delivers nodes from
 // the input iterator to the nodesIn channel.
 func (d *dialScheduler) readNodes(it enode.Iterator) {
-	defer debug.LogPanic()
+	defer dbg.LogPanic()
 	defer d.wg.Done()
 
 	for it.Next() {
@@ -472,7 +472,7 @@ func (d *dialScheduler) startDial(task *dialTask) {
 	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
 	d.dialing[node.ID()] = task
 	go func() {
-		defer debug.LogPanic()
+		defer dbg.LogPanic()
 		task.run(d)
 		d.doneCh <- task
 	}()

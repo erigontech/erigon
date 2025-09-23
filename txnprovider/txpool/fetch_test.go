@@ -31,28 +31,28 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/node/direct"
 )
 
 func TestFetch(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
-	remoteKvClient := remote.NewMockKVClient(ctrl)
+	remoteKvClient := remoteproto.NewMockKVClient(ctrl)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient := direct.NewSentryClientDirect(direct.ETH67, m)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH67, m, nil)
+	require.NoError(t, err)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
@@ -74,8 +74,7 @@ func TestFetch(t *testing.T) {
 }
 
 func TestSendTxnPropagate(t *testing.T) {
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx := t.Context()
 	t.Run("few remote byHash", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		sentryServer := sentryproto.NewMockSentryServer(ctrl)
@@ -101,7 +100,9 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -131,7 +132,9 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -166,7 +169,9 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -206,7 +211,9 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
@@ -228,23 +235,22 @@ func decodeHex(in string) []byte {
 }
 
 func TestOnNewBlock(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_, db := memdb.NewTestDB(t, kv.ChainDB), memdb.NewTestDB(t, kv.TxPoolDB)
+	ctx := t.Context()
+	_, db := memdb.NewTestDB(t, dbcfg.ChainDB), memdb.NewTestDB(t, dbcfg.TxPoolDB)
 	ctrl := gomock.NewController(t)
 
-	stream := remote.NewMockKV_StateChangesClient[*remote.StateChangeBatch](ctrl)
+	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
 	i := 0
 	stream.EXPECT().
 		Recv().
-		DoAndReturn(func() (*remote.StateChangeBatch, error) {
+		DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
 			if i > 0 {
 				return nil, io.EOF
 			}
 			i++
-			return &remote.StateChangeBatch{
+			return &remoteproto.StateChangeBatch{
 				StateVersionId: 1,
-				ChangeBatch: []*remote.StateChange{
+				ChangeBatch: []*remoteproto.StateChange{
 					{
 						Txs: [][]byte{
 							decodeHex(TxnParseMainnetTests[0].PayloadStr),
@@ -259,11 +265,11 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		AnyTimes()
 
-	stateChanges := remote.NewMockKVClient(ctrl)
+	stateChanges := remoteproto.NewMockKVClient(ctrl)
 	stateChanges.
 		EXPECT().
 		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remote.StateChangeRequest, _ ...grpc.CallOption) (remote.KV_StateChangesClient, error) {
+		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
 			return stream, nil
 		})
 
@@ -279,7 +285,7 @@ func TestOnNewBlock(t *testing.T) {
 	var minedTxns TxnSlots
 	pool.EXPECT().
 		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ TxnSlots, _ TxnSlots, minedTxnsArg TxnSlots) error {
+		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeBatch, _ TxnSlots, _ TxnSlots, minedTxnsArg TxnSlots) error {
 			minedTxns = minedTxnsArg
 			return nil
 		}).
@@ -324,7 +330,7 @@ func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sent
 	return &sentryproto.SetStatusReply{}, nil
 }
 func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
-	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil
+	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	ms.lock.Lock()

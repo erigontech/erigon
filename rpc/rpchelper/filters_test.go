@@ -24,21 +24,21 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/types"
 )
 
-func createLog() *remote.SubscribeLogsReply {
-	return &remote.SubscribeLogsReply{
+func createLog() *remoteproto.SubscribeLogsReply {
+	return &remoteproto.SubscribeLogsReply{
 		Address:          gointerfaces.ConvertAddressToH160([20]byte{}),
 		BlockHash:        gointerfaces.ConvertHashToH256([32]byte{}),
 		BlockNumber:      0,
 		Data:             []byte{},
 		LogIndex:         0,
-		Topics:           []*types2.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
+		Topics:           []*typesproto.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
 		TransactionHash:  gointerfaces.ConvertHashToH256([32]byte{}),
 		TransactionIndex: 0,
 		Removed:          false,
@@ -97,7 +97,7 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 	}
 
 	// now a log that the subscription cares about
-	log.Topics = []*types2.H256{gointerfaces.ConvertHashToH256(subbedTopic)}
+	log.Topics = []*typesproto.H256{gointerfaces.ConvertHashToH256(subbedTopic)}
 
 	f.OnNewLogs(log)
 
@@ -131,7 +131,7 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 	}
 
 	// now a log that the subscription cares about
-	log.Topics = []*types2.H256{gointerfaces.ConvertHashToH256(subbedTopic)}
+	log.Topics = []*typesproto.H256{gointerfaces.ConvertHashToH256(subbedTopic)}
 
 	f.OnNewLogs(log)
 
@@ -169,7 +169,7 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	}
 
 	// now a log that the subscription cares about
-	log.Topics = []*types2.H256{gointerfaces.ConvertHashToH256(topic1)}
+	log.Topics = []*typesproto.H256{gointerfaces.ConvertHashToH256(topic1)}
 
 	f.OnNewLogs(log)
 
@@ -236,7 +236,7 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	}
 
 	log = createLog()
-	log.Topics = []*types2.H256{topic1H256}
+	log.Topics = []*typesproto.H256{topic1H256}
 	f.OnNewLogs(log)
 
 	if len(chan1) != 3 {
@@ -253,8 +253,8 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	t.Parallel()
-	var lastFilterRequest *remote.LogsFilterRequest
-	loadRequester := func(r *remote.LogsFilterRequest) error {
+	var lastFilterRequest *remoteproto.LogsFilterRequest
+	loadRequester := func(r *remoteproto.LogsFilterRequest) error {
 		lastFilterRequest = r
 		return nil
 	}

@@ -26,20 +26,20 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // MiningAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
-var MiningAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
+var MiningAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type MiningServer struct {
-	proto_txpool.UnimplementedMiningServer
+	txpoolproto.UnimplementedMiningServer
 	ctx                 context.Context
 	pendingLogsStreams  PendingLogsStreams
 	pendingBlockStreams PendingBlockStreams
@@ -57,11 +57,11 @@ func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.A
 	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
 }
 
-func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
+func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return MiningAPIVersion, nil
 }
 
-func (s *MiningServer) GetWork(context.Context, *proto_txpool.GetWorkRequest) (*proto_txpool.GetWorkReply, error) {
+func (s *MiningServer) GetWork(context.Context, *txpoolproto.GetWorkRequest) (*txpoolproto.GetWorkReply, error) {
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
@@ -69,42 +69,42 @@ func (s *MiningServer) GetWork(context.Context, *proto_txpool.GetWorkRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	return &proto_txpool.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, nil
+	return &txpoolproto.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, nil
 }
 
-func (s *MiningServer) SubmitWork(_ context.Context, req *proto_txpool.SubmitWorkRequest) (*proto_txpool.SubmitWorkReply, error) {
+func (s *MiningServer) SubmitWork(_ context.Context, req *txpoolproto.SubmitWorkRequest) (*txpoolproto.SubmitWorkReply, error) {
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	var nonce types.BlockNonce
 	copy(nonce[:], req.BlockNonce)
 	ok := s.ethash.SubmitWork(nonce, common.BytesToHash(req.PowHash), common.BytesToHash(req.Digest))
-	return &proto_txpool.SubmitWorkReply{Ok: ok}, nil
+	return &txpoolproto.SubmitWorkReply{Ok: ok}, nil
 }
 
-func (s *MiningServer) SubmitHashRate(_ context.Context, req *proto_txpool.SubmitHashRateRequest) (*proto_txpool.SubmitHashRateReply, error) {
+func (s *MiningServer) SubmitHashRate(_ context.Context, req *txpoolproto.SubmitHashRateRequest) (*txpoolproto.SubmitHashRateReply, error) {
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
 	ok := s.ethash.SubmitHashRate(hexutil.Uint64(req.Rate), common.BytesToHash(req.Id))
-	return &proto_txpool.SubmitHashRateReply{Ok: ok}, nil
+	return &txpoolproto.SubmitHashRateReply{Ok: ok}, nil
 }
 
-func (s *MiningServer) GetHashRate(_ context.Context, req *proto_txpool.HashRateRequest) (*proto_txpool.HashRateReply, error) {
+func (s *MiningServer) GetHashRate(_ context.Context, req *txpoolproto.HashRateRequest) (*txpoolproto.HashRateReply, error) {
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
-	return &proto_txpool.HashRateReply{HashRate: s.ethash.GetHashrate()}, nil
+	return &txpoolproto.HashRateReply{HashRate: s.ethash.GetHashrate()}, nil
 }
 
-func (s *MiningServer) Mining(_ context.Context, req *proto_txpool.MiningRequest) (*proto_txpool.MiningReply, error) {
+func (s *MiningServer) Mining(_ context.Context, req *txpoolproto.MiningRequest) (*txpoolproto.MiningReply, error) {
 	if s.ethash == nil {
 		return nil, errors.New("not supported, consensus engine is not ethash")
 	}
-	return &proto_txpool.MiningReply{Enabled: s.isMining.IsMining(), Running: true}, nil
+	return &txpoolproto.MiningReply{Enabled: s.isMining.IsMining(), Running: true}, nil
 }
 
-func (s *MiningServer) OnPendingLogs(req *proto_txpool.OnPendingLogsRequest, reply proto_txpool.Mining_OnPendingLogsServer) error {
+func (s *MiningServer) OnPendingLogs(req *txpoolproto.OnPendingLogsRequest, reply txpoolproto.Mining_OnPendingLogsServer) error {
 	remove := s.pendingLogsStreams.Add(reply)
 	defer remove()
 	<-reply.Context().Done()
@@ -116,12 +116,12 @@ func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
 	if err != nil {
 		return err
 	}
-	reply := &proto_txpool.OnPendingBlockReply{RplBlock: b}
+	reply := &txpoolproto.OnPendingBlockReply{RplBlock: b}
 	s.pendingBlockStreams.Broadcast(reply, s.logger)
 	return nil
 }
 
-func (s *MiningServer) OnPendingBlock(req *proto_txpool.OnPendingBlockRequest, reply proto_txpool.Mining_OnPendingBlockServer) error {
+func (s *MiningServer) OnPendingBlock(req *txpoolproto.OnPendingBlockRequest, reply txpoolproto.Mining_OnPendingBlockServer) error {
 	remove := s.pendingBlockStreams.Add(reply)
 	defer remove()
 	select {
@@ -137,12 +137,12 @@ func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err
 	}
-	reply := &proto_txpool.OnPendingBlockReply{RplBlock: buf.Bytes()}
+	reply := &txpoolproto.OnPendingBlockReply{RplBlock: buf.Bytes()}
 	s.pendingBlockStreams.Broadcast(reply, s.logger)
 	return nil
 }
 
-func (s *MiningServer) OnMinedBlock(req *proto_txpool.OnMinedBlockRequest, reply proto_txpool.Mining_OnMinedBlockServer) error {
+func (s *MiningServer) OnMinedBlock(req *txpoolproto.OnMinedBlockRequest, reply txpoolproto.Mining_OnMinedBlockServer) error {
 	remove := s.minedBlockStreams.Add(reply)
 	defer remove()
 	<-reply.Context().Done()
@@ -155,24 +155,24 @@ func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err
 	}
-	reply := &proto_txpool.OnMinedBlockReply{RplBlock: buf.Bytes()}
+	reply := &txpoolproto.OnMinedBlockReply{RplBlock: buf.Bytes()}
 	s.minedBlockStreams.Broadcast(reply, s.logger)
 	return nil
 }
 
 // MinedBlockStreams - it's safe to use this class as non-pointer
 type MinedBlockStreams struct {
-	chans  map[uint]proto_txpool.Mining_OnMinedBlockServer
+	chans  map[uint]txpoolproto.Mining_OnMinedBlockServer
 	id     uint
 	mu     sync.Mutex
 	logger log.Logger
 }
 
-func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (remove func()) {
+func (s *MinedBlockStreams) Add(stream txpoolproto.Mining_OnMinedBlockServer) (remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.chans == nil {
-		s.chans = make(map[uint]proto_txpool.Mining_OnMinedBlockServer)
+		s.chans = make(map[uint]txpoolproto.Mining_OnMinedBlockServer)
 	}
 	s.id++
 	id := s.id
@@ -180,7 +180,7 @@ func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (
 	return func() { s.remove(id) }
 }
 
-func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply, logger log.Logger) {
+func (s *MinedBlockStreams) Broadcast(reply *txpoolproto.OnMinedBlockReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
@@ -208,16 +208,16 @@ func (s *MinedBlockStreams) remove(id uint) {
 
 // PendingBlockStreams - it's safe to use this class as non-pointer
 type PendingBlockStreams struct {
-	chans map[uint]proto_txpool.Mining_OnPendingBlockServer
+	chans map[uint]txpoolproto.Mining_OnPendingBlockServer
 	mu    sync.Mutex
 	id    uint
 }
 
-func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServer) (remove func()) {
+func (s *PendingBlockStreams) Add(stream txpoolproto.Mining_OnPendingBlockServer) (remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.chans == nil {
-		s.chans = make(map[uint]proto_txpool.Mining_OnPendingBlockServer)
+		s.chans = make(map[uint]txpoolproto.Mining_OnPendingBlockServer)
 	}
 	s.id++
 	id := s.id
@@ -225,7 +225,7 @@ func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServe
 	return func() { s.remove(id) }
 }
 
-func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply, logger log.Logger) {
+func (s *PendingBlockStreams) Broadcast(reply *txpoolproto.OnPendingBlockReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
@@ -253,16 +253,16 @@ func (s *PendingBlockStreams) remove(id uint) {
 
 // PendingLogsStreams - it's safe to use this class as non-pointer
 type PendingLogsStreams struct {
-	chans map[uint]proto_txpool.Mining_OnPendingLogsServer
+	chans map[uint]txpoolproto.Mining_OnPendingLogsServer
 	mu    sync.Mutex
 	id    uint
 }
 
-func (s *PendingLogsStreams) Add(stream proto_txpool.Mining_OnPendingLogsServer) (remove func()) {
+func (s *PendingLogsStreams) Add(stream txpoolproto.Mining_OnPendingLogsServer) (remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.chans == nil {
-		s.chans = make(map[uint]proto_txpool.Mining_OnPendingLogsServer)
+		s.chans = make(map[uint]txpoolproto.Mining_OnPendingLogsServer)
 	}
 	s.id++
 	id := s.id
@@ -270,7 +270,7 @@ func (s *PendingLogsStreams) Add(stream proto_txpool.Mining_OnPendingLogsServer)
 	return func() { s.remove(id) }
 }
 
-func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply, logger log.Logger) {
+func (s *PendingLogsStreams) Broadcast(reply *txpoolproto.OnPendingLogsReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {

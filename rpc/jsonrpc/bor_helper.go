@@ -25,11 +25,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -123,7 +123,7 @@ func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error
 }
 
 // validatorContains checks for a validator in given validator set
-func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
+func validatorContains(a []*heimdall.Validator, x *heimdall.Validator) (*heimdall.Validator, bool) {
 	for _, n := range a {
 		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
 			return n, true
@@ -132,14 +132,14 @@ func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Vali
 	return nil, false
 }
 
-type ValidatorSet = valset.ValidatorSet
+type ValidatorSet = heimdall.ValidatorSet
 
 // getUpdatedValidatorSet applies changes to a validator set and returns a new validator set
-func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*valset.Validator) *ValidatorSet {
+func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*heimdall.Validator) *ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	changes := make([]*valset.Validator, 0, len(oldVals))
+	changes := make([]*heimdall.Validator, 0, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower

@@ -23,19 +23,19 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var errNotFound = errors.New("notfound")
 
-func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *execution.GetSegmentRequest) (blockHash common.Hash, blockNumber uint64, err error) {
+func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *executionproto.GetSegmentRequest) (blockHash common.Hash, blockNumber uint64, err error) {
 	switch {
 	// Case 1: Only hash is given.
 	case req.BlockHash != nil && req.BlockNumber == nil:
@@ -64,7 +64,7 @@ func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv
 	return
 }
 
-func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetBodyResponse, error) {
+func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetBodyResponse, error) {
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetBody: bad request")
@@ -77,7 +77,7 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if errors.Is(err, errNotFound) {
-		return &execution.GetBodyResponse{Body: nil}, nil
+		return &executionproto.GetBodyResponse{Body: nil}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: parseSegmentRequest error %w", err)
@@ -87,14 +87,14 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: getBody error %w", err)
 	}
 	if body == nil {
-		return &execution.GetBodyResponse{Body: nil}, nil
+		return &executionproto.GetBodyResponse{Body: nil}, nil
 	}
 	rawBody := body.RawBody()
 
-	return &execution.GetBodyResponse{Body: eth1_utils.ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
+	return &executionproto.GetBodyResponse{Body: eth1_utils.ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
 }
 
-func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetHeaderResponse, error) {
+func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetHeader: bad request")
@@ -107,7 +107,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if errors.Is(err, errNotFound) {
-		return &execution.GetHeaderResponse{Header: nil}, nil
+		return &executionproto.GetHeaderResponse{Header: nil}, nil
 	}
 
 	header, err := e.getHeader(ctx, tx, blockHash, blockNumber)
@@ -115,20 +115,20 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: getHeader error %w", err)
 	}
 	if header == nil {
-		return &execution.GetHeaderResponse{Header: nil}, nil
+		return &executionproto.GetHeaderResponse{Header: nil}, nil
 	}
 
-	return &execution.GetHeaderResponse{Header: eth1_utils.HeaderToHeaderRPC(header)}, nil
+	return &executionproto.GetHeaderResponse{Header: eth1_utils.HeaderToHeaderRPC(header)}, nil
 }
 
-func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *execution.GetBodiesByHashesRequest) (*execution.GetBodiesBatchResponse, error) {
+func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *executionproto.GetBodiesByHashesRequest) (*executionproto.GetBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
-	bodies := make([]*execution.BlockBody, 0, len(req.Hashes))
+	bodies := make([]*executionproto.BlockBody, 0, len(req.Hashes))
 
 	for _, hash := range req.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
@@ -153,23 +153,23 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
 		}
 
-		bodies = append(bodies, &execution.BlockBody{
+		bodies = append(bodies, &executionproto.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
 
-	return &execution.GetBodiesBatchResponse{Bodies: bodies}, nil
+	return &executionproto.GetBodiesBatchResponse{Bodies: bodies}, nil
 }
 
-func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *execution.GetBodiesByRangeRequest) (*execution.GetBodiesBatchResponse, error) {
+func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *executionproto.GetBodiesByRangeRequest) (*executionproto.GetBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
-	bodies := make([]*execution.BlockBody, 0, req.Count)
+	bodies := make([]*executionproto.BlockBody, 0, req.Count)
 
 	for i := uint64(0); i < req.Count; i++ {
 		hash, err := e.canonicalHash(ctx, tx, req.Start+i)
@@ -196,7 +196,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
 
-		bodies = append(bodies, &execution.BlockBody{
+		bodies = append(bodies, &executionproto.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
@@ -209,12 +209,12 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		}
 	}
 
-	return &execution.GetBodiesBatchResponse{
+	return &executionproto.GetBodiesBatchResponse{
 		Bodies: bodies,
 	}, nil
 }
 
-func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *types2.H256) (*execution.GetHeaderHashNumberResponse, error) {
+func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *typesproto.H256) (*executionproto.GetHeaderHashNumberResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: could not begin database tx %w", err)
@@ -225,7 +225,7 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: HeaderNumber error %w", err)
 	}
-	return &execution.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
+	return &executionproto.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
 func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.Hash) (bool, error) {
@@ -251,7 +251,7 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 	return expectedHash == hash, nil
 }
 
-func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
+func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *typesproto.H256) (*executionproto.IsCanonicalResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not begin database tx %w", err)
@@ -263,10 +263,10 @@ func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *type
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash %w", err)
 	}
 
-	return &execution.IsCanonicalResponse{Canonical: isCanonical}, nil
+	return &executionproto.IsCanonicalResponse{Canonical: isCanonical}, nil
 }
 
-func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*execution.GetHeaderResponse, error) {
+func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*executionproto.GetHeaderResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: could not begin database tx %w", err)
@@ -287,12 +287,12 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	if h == nil {
 		return nil, errors.New("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
 	}
-	return &execution.GetHeaderResponse{
+	return &executionproto.GetHeaderResponse{
 		Header: eth1_utils.HeaderToHeaderRPC(h),
 	}, nil
 }
 
-func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetTDResponse, error) {
+func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetTDResponse, error) {
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetTD: bad request")
@@ -305,7 +305,7 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetS
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if errors.Is(err, errNotFound) {
-		return &execution.GetTDResponse{Td: nil}, nil
+		return &executionproto.GetTDResponse{Td: nil}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: parseSegmentRequest error %w", err)
@@ -315,26 +315,26 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetS
 		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: getTD error %w", err)
 	}
 	if td == nil {
-		return &execution.GetTDResponse{Td: nil}, nil
+		return &executionproto.GetTDResponse{Td: nil}, nil
 	}
 
-	return &execution.GetTDResponse{Td: eth1_utils.ConvertBigIntToRpc(td)}, nil
+	return &executionproto.GetTDResponse{Td: eth1_utils.ConvertBigIntToRpc(td)}, nil
 }
 
-func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*execution.ForkChoice, error) {
+func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*executionproto.ForkChoice, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
-	return &execution.ForkChoice{
+	return &executionproto.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceHead(tx)),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceFinalized(tx)),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceSafe(tx)),
 	}, nil
 }
 
-func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*execution.FrozenBlocksResponse, error) {
+func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*executionproto.FrozenBlocksResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
@@ -349,7 +349,7 @@ func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.E
 	if ok {
 		gap = e.blockReader.Snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
 	}
-	return &execution.FrozenBlocksResponse{
+	return &executionproto.FrozenBlocksResponse{
 		FrozenBlocks: e.blockReader.FrozenBlocks(),
 		HasGap:       gap,
 	}, nil

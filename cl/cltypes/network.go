@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
@@ -194,7 +195,20 @@ func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *Status) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, s.schema()...)
+	schema := []interface{}{
+		s.ForkDigest[:],
+		s.FinalizedRoot[:],
+		&s.FinalizedEpoch,
+		s.HeadRoot[:],
+		&s.HeadSlot,
+	}
+	if version >= int(clparams.FuluVersion) {
+		if s.EarliestAvailableSlot == nil {
+			s.EarliestAvailableSlot = new(uint64)
+		}
+		schema = append(schema, s.EarliestAvailableSlot)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, schema...)
 }
 
 func (s *Status) schema() []interface{} {

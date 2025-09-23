@@ -19,7 +19,7 @@ package builder
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/assert"
 )
 
