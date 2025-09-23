@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"context"
 	"errors"
 	"math"
 	"testing"
@@ -8,18 +9,28 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func testHandler() (log.Handler, *log.Record) {
+func newLastRecordCaptureTestHandler() (lastRecordCaptureTestHandler, *log.Record) {
 	rec := new(log.Record)
-	return log.FuncHandler(func(r *log.Record) error {
-		*rec = *r
-		return nil
-	}), rec
+	return lastRecordCaptureTestHandler{rec: rec}, rec
+}
+
+type lastRecordCaptureTestHandler struct {
+	rec *log.Record
+}
+
+func (h lastRecordCaptureTestHandler) Log(r *log.Record) error {
+	*h.rec = *r
+	return nil
+}
+
+func (h lastRecordCaptureTestHandler) Enabled(ctx context.Context, lvl log.Lvl) bool {
+	return true
 }
 
 func TestHotSwapHandler(t *testing.T) {
 	t.Parallel()
 
-	h1, r1 := testHandler()
+	h1, r1 := newLastRecordCaptureTestHandler()
 
 	l := log.New()
 	h := HotSwapHandler(h1)
@@ -30,7 +41,7 @@ func TestHotSwapHandler(t *testing.T) {
 		t.Fatalf("didn't get expected message to h1")
 	}
 
-	h2, r2 := testHandler()
+	h2, r2 := newLastRecordCaptureTestHandler()
 	h.Swap(h2)
 	l.Info("to h2")
 	if r2.Msg != "to h2" {
@@ -89,7 +100,7 @@ func TestSpeculativeHandler(t *testing.T) {
 func TestErrorHandler(t *testing.T) {
 	t.Parallel()
 
-	h, r := testHandler()
+	h, r := newLastRecordCaptureTestHandler()
 	lg := log.New()
 	lg.SetHandler(EscalateErrHandler(
 		log.LvlFilterHandler(log.LvlError, h)))

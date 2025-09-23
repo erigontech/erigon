@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
@@ -256,7 +256,7 @@ func TestReplaceAccountReadsWithWrites(t *testing.T) {
 	if sc.readQueuesLen() != 4 {
 		t.Fatalf("Read queue is expected to have 4 elements, got: %d", sc.readQueuesLen())
 	}
-	// Do 4 more delets
+	// Do 4 more deletes
 	for i := 5; i <= 8; i++ {
 		var addr common.Address
 		addr[0] = byte(i)

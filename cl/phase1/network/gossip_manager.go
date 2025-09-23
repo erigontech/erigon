@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -46,7 +46,7 @@ import (
 // Gossip manager is sending all messages to fork choice or others
 type GossipManager struct {
 	forkChoice *forkchoice.ForkChoiceStore
-	sentinel   sentinel.SentinelClient
+	sentinel   sentinelproto.SentinelClient
 	// configs
 	beaconConfig  *clparams.BeaconChainConfig
 	networkConfig *clparams.NetworkConfig
@@ -58,6 +58,7 @@ type GossipManager struct {
 	// Services for processing messages from the network
 	blockService                 services.BlockService
 	blobService                  services.BlobSidecarsService
+	dataColumnSidecarService     services.DataColumnSidecarService
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService
 	syncContributionService      services.SyncContributionService
 	aggregateAndProofService     services.AggregateAndProofService
@@ -69,7 +70,7 @@ type GossipManager struct {
 }
 
 func NewGossipReceiver(
-	s sentinel.SentinelClient,
+	s sentinelproto.SentinelClient,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconConfig *clparams.BeaconChainConfig,
 	networkConfig *clparams.NetworkConfig,
@@ -78,6 +79,7 @@ func NewGossipReceiver(
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 	blockService services.BlockService,
 	blobService services.BlobSidecarsService,
+	dataColumnSidecarService services.DataColumnSidecarService,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionService services.SyncContributionService,
 	aggregateAndProofService services.AggregateAndProofService,
@@ -96,6 +98,7 @@ func NewGossipReceiver(
 		committeeSub:                 comitteeSub,
 		blockService:                 blockService,
 		blobService:                  blobService,
+		dataColumnSidecarService:     dataColumnSidecarService,
 		syncCommitteeMessagesService: syncCommitteeMessagesService,
 		syncContributionService:      syncContributionService,
 		aggregateAndProofService:     aggregateAndProofService,
@@ -107,17 +110,17 @@ func NewGossipReceiver(
 	}
 }
 
-func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
-	// defer func() {
-	// 	r := recover()
-	// 	if r != nil {
-	// 		err = fmt.Errorf("%v", r)
-	// 	}
-	// }()
+func (g *GossipManager) onRecv(ctx context.Context, data *sentinelproto.GossipData, l log.Ctx) (err error) {
+	defer func() {
+		r := recover()
+		if r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
 	// Make a copy of the gossip data so that we the received data is not modified.
 	// 1) When we publish and corrupt the data, the peers bans us.
 	// 2) We decode the block wrong
-	data = &sentinel.GossipData{
+	data = &sentinelproto.GossipData{
 		Name:     data.Name,
 		Peer:     data.Peer,
 		SubnetId: data.SubnetId,
@@ -142,11 +145,11 @@ func (g *GossipManager) isReadyToProcessOperations() bool {
 	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
 }
 
-func copyOfPeerData(in *sentinel.GossipData) *sentinel.Peer {
+func copyOfPeerData(in *sentinelproto.GossipData) *sentinelproto.Peer {
 	if in == nil || in.Peer == nil {
 		return nil
 	}
-	ret := new(sentinel.Peer)
+	ret := new(sentinelproto.Peer)
 	ret.State = in.Peer.State
 	ret.Pid = in.Peer.Pid
 	ret.Enr = in.Peer.Enr
@@ -157,7 +160,7 @@ func copyOfPeerData(in *sentinel.GossipData) *sentinel.Peer {
 	return ret
 }
 
-func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.GossipData) error {
+func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinelproto.GossipData) error {
 	currentEpoch := g.ethClock.GetCurrentEpoch()
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 
@@ -238,6 +241,13 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			defer log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
+		case gossip.IsTopicDataColumnSidecar(data.Name):
+			// decode sidecar
+			dataColumnSidecar := &cltypes.DataColumnSidecar{}
+			if err := dataColumnSidecar.DecodeSSZ(data.Data, int(version)); err != nil {
+				return err
+			}
+			return g.dataColumnSidecarService.ProcessMessage(ctx, data.SubnetId, dataColumnSidecar)
 		case gossip.IsTopicSyncCommittee(data.Name):
 			obj := &services.SyncCommitteeMessageForGossip{
 				Receiver:             copyOfPeerData(data),
@@ -280,19 +290,21 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 }
 
 func (g *GossipManager) Start(ctx context.Context) {
-	attestationCh := make(chan *sentinel.GossipData, 1<<20) // large quantity of attestation messages from gossip
-	operationsCh := make(chan *sentinel.GossipData, 1<<16)
-	blobsCh := make(chan *sentinel.GossipData, 1<<16)
-	blocksCh := make(chan *sentinel.GossipData, 1<<10)
-	syncCommitteesCh := make(chan *sentinel.GossipData, 1<<16)
+	attestationCh := make(chan *sentinelproto.GossipData, 1<<20) // large quantity of attestation messages from gossip
+	operationsCh := make(chan *sentinelproto.GossipData, 1<<16)
+	blobsCh := make(chan *sentinelproto.GossipData, 1<<16)
+	blocksCh := make(chan *sentinelproto.GossipData, 1<<10)
+	syncCommitteesCh := make(chan *sentinelproto.GossipData, 1<<16)
+	dataColumnSidecarCh := make(chan *sentinelproto.GossipData, 1<<16)
 	defer close(operationsCh)
 	defer close(blobsCh)
 	defer close(blocksCh)
 	defer close(syncCommitteesCh)
 	defer close(attestationCh)
+	defer close(dataColumnSidecarCh)
 
 	// Start couple of goroutines that listen for new gossip messages and sends them to the operations processor.
-	goWorker := func(ch <-chan *sentinel.GossipData, workerCount int) {
+	goWorker := func(ch <-chan *sentinelproto.GossipData, workerCount int) {
 		worker := func() {
 			for {
 				select {
@@ -315,10 +327,14 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
 	goWorker(blobsCh, 6)
+	goWorker(dataColumnSidecarCh, 6)
 
-	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
+	sendOrDrop := func(ch chan<- *sentinelproto.GossipData, data *sentinelproto.GossipData) {
 		// Skip processing the received data if the node is not ready to process operations.
-		if !g.isReadyToProcessOperations() && data.Name != gossip.TopicNameBeaconBlock && !gossip.IsTopicBlobSidecar(data.Name) {
+		if !g.isReadyToProcessOperations() &&
+			data.Name != gossip.TopicNameBeaconBlock &&
+			!gossip.IsTopicBlobSidecar(data.Name) &&
+			!gossip.IsTopicDataColumnSidecar(data.Name) {
 			return
 		}
 		select {
@@ -336,7 +352,7 @@ Reconnect:
 		default:
 		}
 
-		subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.SubscriptionData{}, grpc.WaitForReady(true))
+		subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinelproto.SubscriptionData{}, grpc.WaitForReady(true))
 		if err != nil {
 			return
 		}
@@ -357,6 +373,8 @@ Reconnect:
 				sendOrDrop(blocksCh, data)
 			case gossip.IsTopicBlobSidecar(data.Name):
 				sendOrDrop(blobsCh, data)
+			case gossip.IsTopicDataColumnSidecar(data.Name):
+				sendOrDrop(dataColumnSidecarCh, data)
 			case gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof:
 				sendOrDrop(syncCommitteesCh, data)
 			case gossip.IsTopicBeaconAttestation(data.Name):

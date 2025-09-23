@@ -42,41 +42,41 @@ func (m *MockEthereumClock) EXPECT() *MockEthereumClockMockRecorder {
 	return m.recorder
 }
 
-// ComputeForkDigestForVersion mocks base method.
-func (m *MockEthereumClock) ComputeForkDigestForVersion(currentVersion common.Bytes4) (common.Bytes4, error) {
+// ComputeForkDigest mocks base method.
+func (m *MockEthereumClock) ComputeForkDigest(epoch uint64) (common.Bytes4, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ComputeForkDigestForVersion", currentVersion)
+	ret := m.ctrl.Call(m, "ComputeForkDigest", epoch)
 	ret0, _ := ret[0].(common.Bytes4)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// ComputeForkDigestForVersion indicates an expected call of ComputeForkDigestForVersion.
-func (mr *MockEthereumClockMockRecorder) ComputeForkDigestForVersion(currentVersion any) *MockEthereumClockComputeForkDigestForVersionCall {
+// ComputeForkDigest indicates an expected call of ComputeForkDigest.
+func (mr *MockEthereumClockMockRecorder) ComputeForkDigest(epoch any) *MockEthereumClockComputeForkDigestCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ComputeForkDigestForVersion", reflect.TypeOf((*MockEthereumClock)(nil).ComputeForkDigestForVersion), currentVersion)
-	return &MockEthereumClockComputeForkDigestForVersionCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ComputeForkDigest", reflect.TypeOf((*MockEthereumClock)(nil).ComputeForkDigest), epoch)
+	return &MockEthereumClockComputeForkDigestCall{Call: call}
 }
 
-// MockEthereumClockComputeForkDigestForVersionCall wrap *gomock.Call
-type MockEthereumClockComputeForkDigestForVersionCall struct {
+// MockEthereumClockComputeForkDigestCall wrap *gomock.Call
+type MockEthereumClockComputeForkDigestCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockEthereumClockComputeForkDigestForVersionCall) Return(digest common.Bytes4, err error) *MockEthereumClockComputeForkDigestForVersionCall {
+func (c *MockEthereumClockComputeForkDigestCall) Return(digest common.Bytes4, err error) *MockEthereumClockComputeForkDigestCall {
 	c.Call = c.Call.Return(digest, err)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockEthereumClockComputeForkDigestForVersionCall) Do(f func(common.Bytes4) (common.Bytes4, error)) *MockEthereumClockComputeForkDigestForVersionCall {
+func (c *MockEthereumClockComputeForkDigestCall) Do(f func(uint64) (common.Bytes4, error)) *MockEthereumClockComputeForkDigestCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockEthereumClockComputeForkDigestForVersionCall) DoAndReturn(f func(common.Bytes4) (common.Bytes4, error)) *MockEthereumClockComputeForkDigestForVersionCall {
+func (c *MockEthereumClockComputeForkDigestCall) DoAndReturn(f func(uint64) (common.Bytes4, error)) *MockEthereumClockComputeForkDigestCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -350,17 +350,17 @@ func (c *MockEthereumClockGetEpochAtSlotCall) DoAndReturn(f func(uint64) uint64)
 }
 
 // GetSlotByTime mocks base method.
-func (m *MockEthereumClock) GetSlotByTime(time time.Time) uint64 {
+func (m *MockEthereumClock) GetSlotByTime(arg0 time.Time) uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSlotByTime", time)
+	ret := m.ctrl.Call(m, "GetSlotByTime", arg0)
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
 // GetSlotByTime indicates an expected call of GetSlotByTime.
-func (mr *MockEthereumClockMockRecorder) GetSlotByTime(time any) *MockEthereumClockGetSlotByTimeCall {
+func (mr *MockEthereumClockMockRecorder) GetSlotByTime(arg0 any) *MockEthereumClockGetSlotByTimeCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), time)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), arg0)
 	return &MockEthereumClockGetSlotByTimeCall{Call: call}
 }
 
@@ -537,6 +537,44 @@ func (c *MockEthereumClockNextForkDigestCall) Do(f func() (common.Bytes4, error)
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockEthereumClockNextForkDigestCall) DoAndReturn(f func() (common.Bytes4, error)) *MockEthereumClockNextForkDigestCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// NextForkEpochIncludeBPO mocks base method.
+func (m *MockEthereumClock) NextForkEpochIncludeBPO() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NextForkEpochIncludeBPO")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// NextForkEpochIncludeBPO indicates an expected call of NextForkEpochIncludeBPO.
+func (mr *MockEthereumClockMockRecorder) NextForkEpochIncludeBPO() *MockEthereumClockNextForkEpochIncludeBPOCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextForkEpochIncludeBPO", reflect.TypeOf((*MockEthereumClock)(nil).NextForkEpochIncludeBPO))
+	return &MockEthereumClockNextForkEpochIncludeBPOCall{Call: call}
+}
+
+// MockEthereumClockNextForkEpochIncludeBPOCall wrap *gomock.Call
+type MockEthereumClockNextForkEpochIncludeBPOCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEthereumClockNextForkEpochIncludeBPOCall) Return(arg0 uint64) *MockEthereumClockNextForkEpochIncludeBPOCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEthereumClockNextForkEpochIncludeBPOCall) Do(f func() uint64) *MockEthereumClockNextForkEpochIncludeBPOCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEthereumClockNextForkEpochIncludeBPOCall) DoAndReturn(f func() uint64) *MockEthereumClockNextForkEpochIncludeBPOCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

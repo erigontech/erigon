@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -31,11 +33,7 @@ import (
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/cmd/utils"
-
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon/diagnostics/mem"
 	sentinelapp "github.com/erigontech/erigon/turbo/app"
 )
 
@@ -79,7 +77,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = service.StartSentinelService(&sentinel.SentinelConfig{
+	_, _, err = service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:         cfg.Addr,
 		Port:           int(cfg.Port),
 		TCPPort:        cfg.ServerTcpPort,
@@ -88,7 +86,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
 		EnableBlocks:   false,
-	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconCfg), nil, log.Root())
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconCfg), nil, nil, nil, log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err

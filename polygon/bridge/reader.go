@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type Reader struct {
@@ -100,8 +100,10 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 			core.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
-			event, nil, false,
-			true,
+			event, nil,
+			false, // checkNonce
+			false, // checkGas
+			true,  // isFree
 			nil,
 		)
 
@@ -112,25 +114,17 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 }
 
 // Events returns all sync events at blockNum
-func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, ok, err := r.store.BlockEventIdsRange(ctx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-
-	eventsRaw := make([]*types.Message, 0, end-start+1)
-
-	events, err := r.store.Events(ctx, start, end+1)
+func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
+	events, err := r.store.EventsByBlock(ctx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(events) > 0 && dbg.Enabled(ctx) {
-		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end, "len", len(events))
+		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "len", len(events))
 	}
+
+	eventsRaw := make([]*types.Message, 0, len(events))
 
 	// convert to message
 	for _, event := range events {
@@ -141,8 +135,10 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 			core.SysCallGasLimit,
 			u256.Num0,
 			nil, nil,
-			event, nil, false,
-			true,
+			event, nil,
+			false, // checkNonce
+			false, // checkGas
+			true,  // isFree
 			nil,
 		)
 
@@ -161,12 +157,12 @@ func (r *Reader) Close() {
 }
 
 type RemoteReader struct {
-	client  remote.BridgeBackendClient
+	client  remoteproto.BridgeBackendClient
 	logger  log.Logger
 	version gointerfaces.Version
 }
 
-func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
+func NewRemoteReader(client remoteproto.BridgeBackendClient) *RemoteReader {
 	return &RemoteReader{
 		client:  client,
 		logger:  log.New("remote_service", "bridge"),
@@ -174,8 +170,10 @@ func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
 	}
 }
 
-func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockNum: blockNum})
+func (r *RemoteReader) Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error) {
+	reply, err := r.client.BorEvents(ctx, &remoteproto.BorEventsRequest{
+		BlockNum:  blockNum,
+		BlockHash: gointerfaces.ConvertHashToH256(blockHash)})
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +191,7 @@ func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Me
 }
 
 func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
-	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
+	reply, err := r.client.BorTxnLookup(ctx, &remoteproto.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
 	if err != nil {
 		return 0, false, err
 	}
@@ -232,8 +230,10 @@ func messageFromData(to common.Address, data []byte) *types.Message {
 		core.SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil, false,
-		true,
+		data, nil,
+		false, // checkNonce
+		false, // checkGas
+		true,  // isFree
 		nil,
 	)
 
@@ -256,6 +256,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			event,
 			nil,   // accessList
 			false, // checkNonce
+			false, // checkGas
 			true,  // isFree
 			nil,   // maxFeePerBlobGas
 		)

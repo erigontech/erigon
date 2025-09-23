@@ -22,8 +22,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestFiltersDeadlock(t *testing.T) {

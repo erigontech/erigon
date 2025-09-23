@@ -26,11 +26,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	// Force-load native and js packages, to trigger registration
@@ -48,7 +49,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	var buf bytes.Buffer
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 	callTracer := "callTracer"
 	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &callTracer}, stream)
 	if err != nil {
@@ -327,6 +328,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
     {
         "action": {
             "from": "0x000000000000000000000000000000000000bbbb",
+            "creationMethod": "create2",
             "gas": "0xb49d",
             "init": "0x600360035560046004556158ff6000526002601ef3",
             "value": "0x0"

@@ -20,7 +20,7 @@ jobs:
             backend: Polygon
             cgroup_name: constrained_res_64G
             prune_mode: full_node
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -33,7 +33,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Clean Erigon Build Directory
       run: |
@@ -84,6 +84,13 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Upload Downloader Torrent Client Status
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: torrent-client-status-${{ env.CHAIN }}
+        path: torrent-client-status.txt
+
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'
       env:
@@ -116,9 +123,9 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log-${{ env.CHAIN }}
+        name: erigon-logs-${{ env.CHAIN }}
         path: |
-          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/erigon.log
+          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
           ${{ env.ERIGON_REFERENCE_DATA_DIR }}/proc_stat.log
 
     - name: Restore Erigon Chaindata Directory

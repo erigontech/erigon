@@ -21,15 +21,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlockReader) {
+func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br services.FullBlockReader, failFast bool) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
@@ -50,7 +56,10 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlo
 		}
 		if !ok || hash == (common.Hash{}) {
 			err = fmt.Errorf("canonical marker not found: %d", i)
-			panic(err)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
 		}
 		header := rawdb.ReadHeader(tx, hash, i)
 		if header == nil {
@@ -59,16 +68,20 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlo
 		}
 		body, _, _ := rawdb.ReadBody(tx, hash, i)
 		if body == nil {
-			err = fmt.Errorf("header not found: %d", i)
-			panic(err)
+			err = fmt.Errorf("body not found: %d", i)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
 		}
 
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[integrity] NoGapsInCanonicalHeaders", "progress", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(lastBlockNum)))
 		default:
 		}
 	}
+	return nil
 }

@@ -30,12 +30,12 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/jwt"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 const DefaultRPCHTTPTimeout = time.Second * 30
@@ -97,6 +97,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 		engineMethod = rpc_helper.EngineNewPayloadV3
 	case clparams.ElectraVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV4
+	// TODO: Add Fulu case
 	default:
 		return PayloadStatusNone, errors.New("invalid payload version")
 	}
@@ -153,10 +154,10 @@ func (cc *ExecutionClientRpc) NewPayload(
 	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
 }
 
-func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized common.Hash, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
 	forkChoiceRequest := engine_types.ForkChoiceState{
 		HeadHash:           head,
-		SafeBlockHash:      head,
+		SafeBlockHash:      safe,
 		FinalizedBlockHash: finalized,
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
@@ -273,7 +274,7 @@ func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash common.Hash) (b
 
 // Block production
 
-func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	panic("unimplemented")
 }
 

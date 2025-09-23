@@ -23,20 +23,19 @@ Param(
     [ValidateSet(
         "clean",
         "db-tools",
-        "devnet",
         "downloader",
         "erigon",
         "evm",
         "hack",
         "integration",
-        "observer",
         "pics",
         "rpcdaemon",
         "rpctest",
         "sentry",
         "state",
-        "test",
+        "test-short",
         "test-all",
+        "test-all-race",
         "txpool",
         "all"
     )]
@@ -71,13 +70,11 @@ if ($BuildTargets.Count -gt 1) {
 
 if ($BuildTargets[0] -eq "all") {
     $BuildTargets = @(
-        "devnet",
         "downloader",
         "erigon",
         "evm",
         "hack",
         "integration",
-        "observer",
         "pics",
         "rpcdaemon",
         "rpctest",
@@ -397,7 +394,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
   Error !
   Directory $MyContext.Directory does not seem to be a properly cloned Erigon repository
   Please clone it using 
-  git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
+  git clone -j8 https://github.com/erigontech/erigon.git
 
 "@
     exit 1
@@ -419,7 +416,7 @@ $Erigon.BuildTags = "nosqlite,noboltdb"
 $Erigon.Package = "github.com/erigontech/erigon"
 
 $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"
-$Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/params.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/params.GitTag=$($Erigon.Tag)"""
+$Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/db/version.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/db/version.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/db/version.GitTag=$($Erigon.Tag)"""
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:CGO_CFLAGS = "-g -O2 -D__BLST_PORTABLE__"
@@ -519,10 +516,11 @@ if ($BuildTarget -eq "db-tools") {
     # Clear go cache
     go.exe clean -cache
 
-} elseif ($BuildTarget -eq "test") {
+} elseif ($BuildTarget -eq "test-short") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -short -p 2 -tags=e4 ./..."
+    $env:GOEXPERIMENT = "synctest"
+    $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -536,7 +534,8 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-all") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -p 2 --timeout 130m -tags=e4 ./..."
+    $env:GOEXPERIMENT = "synctest"
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -544,10 +543,20 @@ if ($BuildTarget -eq "db-tools") {
     } else {
         Write-Host "`n Tests completed"
     }
-
+} elseif ($BuildTarget -eq "test-all-race") {
+    Write-Host " Running all tests ..."
+    $env:GODEBUG = "cgocheck=0"
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m -race ./..."
+    Invoke-Expression -Command $TestCommand | Out-Host
+    if (!($?)) {
+        Write-Host " ERROR : Tests failed"
+        exit 1
+    } else {
+        Write-Host "`n Tests completed"
+    }
 } else {
 
-    # This has a naive assumption every target has a compilation unit wih same name
+    # This has a naive assumption every target has a compilation unit with the same name
 
     Write-Host "`n Building $BuildTarget"
     $outExecutable = [string](Join-Path $Erigon.BinPath "$BuildTarget.exe")

@@ -4,7 +4,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type EventStream struct {
@@ -23,6 +23,7 @@ const (
 	OpBlsToExecution    EventTopic = "bls_to_execution_change"
 	OpContributionProof EventTopic = "contribution_and_proof"
 	OpBlobSidecar       EventTopic = "blob_sidecar"
+	OpDataColumnSidecar EventTopic = "data_column_sidecar"
 )
 
 type (
@@ -35,6 +36,7 @@ type (
 	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
 	ContributionAndProofData  = cltypes.SignedContributionAndProof
 	BlobSidecarData           = cltypes.BlobSidecar
+	DataColumnSidecarData     = cltypes.DataColumnSidecar
 )
 
 // State event topics

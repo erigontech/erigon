@@ -21,7 +21,6 @@ package runtime
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/types"
 	"math"
 	"math/big"
 	"os"
@@ -30,19 +29,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -57,14 +55,13 @@ type Config struct {
 	GasLimit    uint64
 	GasPrice    *uint256.Int
 	Value       *uint256.Int
-	Debug       bool
 	EVMConfig   vm.Config
 	BaseFee     *uint256.Int
 
-	State     *state.IntraBlockState
-	r         state.StateReader
-	w         state.StateWriter
-	GetHashFn func(n uint64) common.Hash
+	State *state.IntraBlockState
+
+	evm       *vm.EVM
+	GetHashFn func(n uint64) (common.Hash, error)
 }
 
 // sets defaults on the config
@@ -110,8 +107,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) common.Hash {
-			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
+			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 		}
 	}
 }
@@ -128,39 +125,23 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 
 	externalState := cfg.State != nil
-	var tx kv.TemporalRwTx
-	var err error
 	if !externalState {
-		db := memdb.NewStateDB(tempdir)
-		defer db.Close()
 		dirs := datadir.New(tempdir)
-		logger := log.New()
-		salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		agg, err := state3.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, nil, err
-		}
-		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		db := temporaltest.NewTestDB(nil, dirs)
+		defer db.Close()
+
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := dbstate.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(cfg.r)
+		//cfg.w = state.NewWriter(sd, nil)
+		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	}
 	var (
 		address = common.BytesToAddress([]byte("contract"))
@@ -199,36 +180,25 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	setDefaults(cfg)
 
 	externalState := cfg.State != nil
-	var tx kv.TemporalRwTx
-	var err error
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer os.RemoveAll(tmp) //nolint
+		defer dir.RemoveAll(tmp) //nolint
 
-		db := memdb.NewStateDB(tmp)
+		dirs := datadir.New(tmp)
+		db := temporaltest.NewTestDB(nil, dirs)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		defer agg.Close()
-		_db, err := temporal.New(db, agg)
-		if err != nil {
-			return nil, [20]byte{}, 0, err
-		}
-		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := dbstate.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(cfg.r)
+		//cfg.w = state.NewWriter(sd, nil)
+		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	}
 	var (
 		vmenv  = NewEnv(cfg)

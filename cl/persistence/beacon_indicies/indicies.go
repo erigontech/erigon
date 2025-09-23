@@ -25,14 +25,12 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
-
-	_ "modernc.org/sqlite"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
 // make a buffer pool
@@ -51,6 +49,11 @@ var zstdWriterPool = &sync.Pool{
 		}
 		return encoder
 	},
+}
+
+func putWriter(v *zstd.Encoder) {
+	v.Reset(nil)
+	zstdWriterPool.Put(v)
 }
 
 func WriteHighestFinalized(tx kv.RwTx, slot uint64) error {
@@ -318,7 +321,7 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 	buf := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(buf)
 	encoder := zstdWriterPool.Get().(*zstd.Encoder)
-	defer zstdWriterPool.Put(encoder)
+	defer putWriter(encoder)
 	buf.Reset()
 	encoder.Reset(buf)
 	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)

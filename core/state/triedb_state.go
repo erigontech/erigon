@@ -4,18 +4,20 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"maps"
 	"sort"
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types/accounts"
-	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
@@ -107,9 +109,7 @@ func (b *Buffer) merge(other *Buffer) {
 			m = make(map[common.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		for keyHash, v := range om {
-			m[keyHash] = v
-		}
+		maps.Copy(m, om)
 	}
 	for addrHash, incarnation := range other.storageIncarnation {
 		b.storageIncarnation[addrHash] = incarnation
@@ -657,24 +657,24 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	return account, nil
 }
 
-func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (tds *TrieDbState) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
 	if tds.currentBuffer != nil {
 		if _, ok := tds.currentBuffer.deleted[addrHash]; ok {
-			return nil, nil
+			return uint256.Int{}, false, nil
 		}
 	}
 	if tds.aggregateBuffer != nil {
 		if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
-			return nil, nil
+			return uint256.Int{}, false, nil
 		}
 	}
 	seckey, err := common.HashData(key.Bytes())
 	if err != nil {
-		return nil, err
+		return uint256.Int{}, false, err
 	}
 
-	storagePlainKey := dbutils.GenerateStoragePlainKey(address, *key)
+	storagePlainKey := dbutils.GenerateStoragePlainKey(address, key)
 
 	if tds.resolveReads {
 		var storageKey common.StorageKey
@@ -686,14 +686,28 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 	defer tds.tMu.Unlock()
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if !ok {
-		enc, err := tds.StateReader.ReadAccountStorage(address, key)
+		enc, ok, err := tds.StateReader.ReadAccountStorage(address, key)
 		if err != nil {
-			return nil, err
+			return uint256.Int{}, false, err
 		}
-		return enc, nil
+		return enc, ok, nil
 	}
 
-	return enc, nil
+	var res uint256.Int
+	(&res).SetBytes(enc)
+	return res, true, nil
+}
+
+func (tds *TrieDbState) HasStorage(address common.Address) (bool, error) {
+	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
+	// check if we know about any storage updates with non-empty values
+	for _, v := range tds.currentBuffer.storageUpdates[addrHash] {
+		if len(v) > 0 {
+			return true, nil
+		}
+	}
+	// fallback to underlying state reader if we don't know of non-empty storage slots yet
+	return tds.StateReader.HasStorage(address)
 }
 
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {
@@ -825,7 +839,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(address common.Address, incarnatio
 	return nil
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
 
 	v := value.Bytes()
@@ -842,7 +856,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnat
 	var storageKey common.StorageKey
 	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 
-	storagePlainKey := dbutils.GenerateStoragePlainKey(address, *key)
+	storagePlainKey := dbutils.GenerateStoragePlainKey(address, key)
 	tsw.tds.currentBuffer.storageReads[storageKey] = storagePlainKey
 	if len(v) > 0 {
 		m[seckey] = v

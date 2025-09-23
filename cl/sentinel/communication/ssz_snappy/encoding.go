@@ -95,6 +95,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	sr := snappy.NewReader(r)
 	raw := make([]byte, encodedLn)
 	if _, err := io.ReadFull(sr, raw); err != nil {
+		// fetch struct name of val
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 
@@ -116,12 +117,16 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 		b := uint64(currByte[0])
 		x |= (b & 0x7F) << shift
 		if (b & 0x80) == 0 {
+			// Check for overflow on the last byte
+			if shift == 63 && b > 1 {
+				return 0, n, errors.New("varint overflows a 64-bit integer")
+			}
 			return x, n, nil
 		}
 	}
 
 	// The number is too large to represent in a 64-bit value.
-	return 0, n, nil
+	return 0, n, errors.New("varint overflows a 64-bit integer")
 }
 
 func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
@@ -141,7 +146,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clpara
 	// Read varint for length of message.
 	encodedLn, bytesCount, err := ReadUvarint(r)
 	if err != nil {
-		return fmt.Errorf("unable to read varint from message prefix: %v", err)
+		return fmt.Errorf("failed to decode listSSZ. Unable to read varint: %v", err)
 	}
 	pos := 4 + bytesCount
 	if len(list) != int(count) {

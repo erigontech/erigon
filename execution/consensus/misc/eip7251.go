@@ -19,10 +19,10 @@ package misc
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // See https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md#system-call

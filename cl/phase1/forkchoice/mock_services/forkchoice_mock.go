@@ -25,6 +25,9 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/das/mock_services"
+	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -65,6 +68,9 @@ type ForkChoiceStorageMock struct {
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
+
+	// Mock for PeerDas
+	MockPeerDas *mock_services.MockPeerDas
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
@@ -119,6 +125,49 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 }
 
 func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
+	ctrl := gomock.NewController(t)
+	mockPeerDas := mock_services.NewMockPeerDas(ctrl)
+	mockPeerDasStateReader := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
+
+	// Set up default expectations for the mock
+	mockPeerDas.EXPECT().
+		DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
+		Return(nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		IsDataAvailable(gomock.Any(), gomock.Any()).
+		Return(true, nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		Prune(gomock.Any()).
+		Return(nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		UpdateValidatorsCustody(gomock.Any()).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		TryScheduleRecover(gomock.Any(), gomock.Any()).
+		Return(nil).
+		AnyTimes()
+	mockPeerDas.EXPECT().
+		StateReader().
+		Return(mockPeerDasStateReader).
+		AnyTimes()
+
+	// Set up default expectations for the PeerDasStateReader mock
+	mockPeerDasStateReader.EXPECT().
+		GetEarliestAvailableSlot().
+		Return(uint64(0)).
+		AnyTimes()
+	mockPeerDasStateReader.EXPECT().
+		GetRealCgc().
+		Return(uint64(0)).
+		AnyTimes()
+	mockPeerDasStateReader.EXPECT().
+		GetAdvertisedCgc().
+		Return(uint64(0)).
+		AnyTimes()
+
 	return &ForkChoiceStorageMock{
 		Ancestors:                 make(map[uint64]common.Hash),
 		AnchorSlotVal:             0,
@@ -140,7 +189,12 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
 		GetBeaconCommitteeMock:    nil,
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
+		MockPeerDas:               mockPeerDas,
 	}
+}
+
+func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
+	return f.MockPeerDas
 }
 
 func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) common.Hash {
@@ -365,4 +419,20 @@ func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
 
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
 	return false
+}
+
+func (f *ForkChoiceStorageMock) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {
+	return nil, false
+}
+
+func (f *ForkChoiceStorageMock) GetPendingDeposits(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingDeposit], bool) {
+	return nil, false
+}
+
+func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool) {
+	return nil, false
+}
+
+func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
+	return nil, false
 }

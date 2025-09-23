@@ -17,20 +17,20 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"net/http"
 	"os"
 
+	"github.com/anacrolix/envpprof"
+	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
-	"github.com/erigontech/erigon/eth/tracers"
-	"github.com/erigontech/erigon/params"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -38,40 +38,33 @@ import (
 )
 
 func main() {
-	defer func() {
-		panicResult := recover()
-		if panicResult == nil {
-			return
-		}
-
-		log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
-		os.Exit(1)
-	}()
-
+	defer envpprof.Stop()
+	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
 	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			log.Warn("Fprintln error", "err", printErr)
 		}
+		envpprof.Stop()
 		os.Exit(1)
 	}
 }
 
-func runErigon(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var tracer *tracers.Tracer
-	var err error
-	var metricsMux *http.ServeMux
-	var pprofMux *http.ServeMux
-
-	if logger, tracer, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
-		return err
+func runErigon(cliCtx *cli.Context) (err error) {
+	logger, tracer, metricsMux, pprofMux, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return
 	}
+
+	debugMux := cmp.Or(metricsMux, pprofMux)
+
+	// Log the full command used to start the program (with sensitive info like URLs and IP addresses redacted)
+	logger.Info("Startup command", "cmd", log.RedactArgs(os.Args))
 
 	// initializing the node and providing the current git commit there
 
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 	if version.Major == 3 {
 		logger.Info(`
 	########b          oo                               d####b. 
@@ -84,10 +77,10 @@ func runErigon(cliCtx *cli.Context) error {
 	                       d####P                               
 		`)
 	}
-	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
 	if err != nil {
 		return err
 	}

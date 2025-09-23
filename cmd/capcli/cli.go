@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/snaptype"
 	"io"
 	"math"
 	"net/http"
@@ -36,19 +37,16 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/estimate"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/metrics"
-
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
@@ -59,13 +57,16 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var CLI struct {
@@ -83,6 +84,7 @@ var CLI struct {
 	CheckBlobsSnapshotsCount  CheckBlobsSnapshotsCount  `cmd:"" help:"check blobs snapshots count"`
 	DumpBlobsSnapshotsToStore DumpBlobsSnapshotsToStore `cmd:"" help:"dump blobs snapshots to store"`
 	DumpStateSnapshots        DumpStateSnapshots        `cmd:"" help:"dump state snapshots"`
+	MakeDepositArgs           MakeDepositArgs           `cmd:"" help:"make deposit args"`
 }
 
 type chainCfg struct {
@@ -112,13 +114,13 @@ func (w *withPPROF) withProfile() {
 	}
 }
 
-func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
+func (w *withSentinel) connectSentinel() (sentinelproto.SentinelClient, error) {
 	// YOLO message size
 	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt)))
 	if err != nil {
 		return nil, err
 	}
-	return sentinel.NewSentinelClient(gconn), nil
+	return sentinelproto.NewSentinelClient(gconn), nil
 }
 
 func openFs(fsName string, path string) (afero.Fs, error) {
@@ -161,7 +163,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 	defer db.Close()
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock)
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock, nil)
 
 	bRoot, err := bs.BlockRoot()
 	if err != nil {
@@ -184,7 +186,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -392,7 +394,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -571,7 +573,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
-	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -579,7 +581,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
@@ -1036,7 +1038,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -1270,7 +1272,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -1292,5 +1294,119 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	r, _ = stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
+	return nil
+}
+
+type MakeDepositArgs struct {
+	PrivateKey         string `name:"private-key" help:"private key to use for signing deposit" default:""`
+	WithdrawalAddress  string `name:"withdrawal-address" help:"withdrawal address to use for deposit" default:""`
+	AmountEth          uint64 `name:"amount-eth" help:"amount of ETH to deposit" default:"32"`                                     // in ETH
+	DomainDeposit      string `name:"domain-deposit" help:"domain for deposit signature" default:"0x03000000"`                     // 0x03000000 for mainnet
+	GenesisForkVersion string `name:"genesis-fork-version" help:"genesis fork version for deposit signature" default:"0x00000000"` // 0x00000000 for mainnet
+}
+
+func (m *MakeDepositArgs) Run(ctx *Context) error {
+
+	var privateKeyBls *bls.PrivateKey
+	if m.PrivateKey == "" {
+		var err error
+		privateKeyBls, err = bls.GenerateKey()
+		if err != nil {
+			return fmt.Errorf("failed to generate private key: %w", err)
+		}
+	} else {
+		var err error
+		privateKeyBls, err = bls.NewPrivateKeyFromBytes(common.Hex2Bytes(m.PrivateKey))
+		if err != nil {
+			return fmt.Errorf("failed to create private key from bytes: %w", err)
+		}
+	}
+	withdrawalAddress := common.HexToAddress(m.WithdrawalAddress)
+	if withdrawalAddress == (common.Address{}) {
+		return fmt.Errorf("invalid withdrawal address: %s", m.WithdrawalAddress)
+	}
+
+	publicKey := privateKeyBls.PublicKey()
+	if publicKey == nil {
+		return errors.New("failed to get public key from private key")
+	}
+	// get the public key in compressed bytes format
+	publicKey48 := common.Bytes48(bls.CompressPublicKey(publicKey))
+	// amount in gwei
+	amountGwei := m.AmountEth * 1_000_000_000
+
+	var credentials common.Hash
+	credentials[0] = 0x2
+	copy(credentials[1:], make([]byte, 11))
+	copy(credentials[12:], withdrawalAddress[:])
+
+	var genesisForkVersion clparams.ConfigForkVersion
+	var genesisForkVersion4 common.Bytes4
+
+	if err := genesisForkVersion4.UnmarshalText([]byte(m.GenesisForkVersion)); err != nil {
+		return fmt.Errorf("failed to parse genesis fork version: %w", err)
+	}
+	genesisForkVersion = clparams.ConfigForkVersion(utils.Bytes4ToUint32(genesisForkVersion4))
+
+	deposit := &cltypes.DepositData{
+		PubKey:                publicKey48,
+		WithdrawalCredentials: credentials,
+		Amount:                amountGwei,
+		// Signature:             nil, // will be set later
+	}
+
+	// trim 0x prefix if present
+	if len(m.DomainDeposit) > 2 && m.DomainDeposit[:2] == "0x" {
+		m.DomainDeposit = m.DomainDeposit[2:]
+	}
+
+	domainDeposit := common.Hex2Bytes(m.DomainDeposit)
+
+	domain, err := fork.ComputeDomain(
+		domainDeposit,
+		utils.Uint32ToBytes4(uint32(genesisForkVersion)),
+		[32]byte{},
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to compute domain: %w", err)
+	}
+
+	depositMessageRootForSigning, err := deposit.MessageHash()
+	if err != nil {
+		return err
+	}
+
+	messageToSign := utils.Sha256(depositMessageRootForSigning[:], domain)
+
+	signature := privateKeyBls.Sign(messageToSign[:])
+	signatureBytes := signature.Bytes()
+
+	var signature96 common.Bytes96
+	if len(signatureBytes) != 96 {
+		return fmt.Errorf("signature length is not 96 bytes, got %d bytes", len(signatureBytes))
+	}
+	copy(signature96[:], signatureBytes)
+	deposit.Signature = signature96
+
+	depositTreeRoot, err := deposit.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("failed to compute deposit tree root: %w", err)
+	}
+
+	privateKey := privateKeyBls.Bytes()
+
+	// Print all the details in json format
+	depositDetails := map[string]interface{}{
+		"deposit":           deposit,
+		"deposit_tree_root": common.Hash(depositTreeRoot),
+		"private_key":       "0x" + common.Bytes2Hex(privateKey),
+	}
+
+	depositJSON, err := json.MarshalIndent(depositDetails, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal deposit details to JSON: %w", err)
+	}
+	fmt.Println(string(depositJSON))
 	return nil
 }

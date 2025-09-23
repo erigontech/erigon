@@ -22,15 +22,14 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	borrawdb "github.com/erigontech/erigon/polygon/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -48,7 +47,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
@@ -57,12 +56,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	// Private API returns 0 if transaction is not found.
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 	if isBorStateSyncTx {
-		if api.useBridgeReader {
-			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		} else {
-			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
-		}
-
+		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 		if err != nil {
 			return nil, err
 		}
@@ -119,12 +113,12 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
-	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(txnHash)}})
+	reply, err := api.txPool.Transactions(ctx, &txpoolproto.TransactionsRequest{Hashes: []*typesproto.H256{gointerfaces.ConvertHashToH256(txnHash)}})
 	if err != nil {
 		return nil, err
 	}
 	if len(reply.RlpTxs[0]) > 0 {
-		txn, err := types2.DecodeWrappedTransaction(reply.RlpTxs[0])
+		txn, err := types.DecodeWrappedTransaction(reply.RlpTxs[0])
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +143,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
 	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -164,7 +158,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	if block == nil {
 		return nil, nil
 	}
-	var txn types2.Transaction
+	var txn types.Transaction
 	for _, transaction := range block.Transactions() {
 		if transaction.Hash() == hash {
 			txn = transaction
@@ -179,7 +173,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
-	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(hash)}})
+	reply, err := api.txPool.Transactions(ctx, &txpoolproto.TransactionsRequest{Hashes: []*typesproto.H256{gointerfaces.ConvertHashToH256(hash)}})
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +195,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockHashAndIndex
 	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
@@ -217,19 +211,16 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		var borTx types2.Transaction
-		if api.useBridgeReader {
-			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				borTx = bortypes.NewBorTransaction()
-			}
-		} else {
-			borTx = borrawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
+		var borTx types.Transaction
+		possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		if err != nil {
+			return nil, err
 		}
+		if ok {
+			borTx = bortypes.NewBorTransaction()
+		}
+
 		if borTx == nil {
 			return nil, nil // not error
 		}
@@ -248,7 +239,6 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockHashAndIndex
 	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
@@ -272,7 +262,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockNumberAndIndex
+	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
@@ -293,19 +283,16 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		var borTx types2.Transaction
-		if api.useBridgeReader {
-			possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
-			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				borTx = bortypes.NewBorTransaction()
-			}
-		} else {
-			borTx = borrawdb.ReadBorTransactionForBlock(tx, blockNum)
+		var borTx types.Transaction
+		possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
+		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		if err != nil {
+			return nil, err
 		}
+		if ok {
+			borTx = bortypes.NewBorTransaction()
+		}
+
 		if borTx == nil {
 			return nil, nil
 		}
@@ -324,7 +311,6 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 	}
 	defer tx.Rollback()
 
-	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockNumberAndIndex
 	block, err := api.blockByRPCNumber(ctx, blockNr, tx)
 	if err != nil {
 		return nil, err

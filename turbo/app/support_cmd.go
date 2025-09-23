@@ -35,8 +35,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/urfave/cli/v2"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -62,7 +62,7 @@ var (
 
 	debugURLsFlag = cli.StringSliceFlag{
 		Name:     "debug.addrs",
-		Usage:    "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
+		Usage:    "Comma separated list of URLs to the debug endpoints that are being diagnosed",
 		Required: false,
 		Value:    cli.NewStringSlice("localhost:6062"),
 	}
@@ -114,10 +114,10 @@ type tunnelInfo struct {
 }
 
 type tunnelEnode struct {
-	Enode        string               `json:"enode,omitempty"`
-	Enr          string               `json:"enr,omitempty"`
-	Ports        *types.NodeInfoPorts `json:"ports,omitempty"`
-	ListenerAddr string               `json:"listener_addr,omitempty"`
+	Enode        string                    `json:"enode,omitempty"`
+	Enr          string                    `json:"enr,omitempty"`
+	Ports        *typesproto.NodeInfoPorts `json:"ports,omitempty"`
+	ListenerAddr string                    `json:"listener_addr,omitempty"`
 }
 
 type requestAction struct {
@@ -353,7 +353,7 @@ func createConnections(ctx context.Context, codec rpc.ServerCodec, metricsClient
 // Attempt to query nodes specified by flag debug.addrs and return the response.
 // If the request fails, an error is returned, as we expect all nodes to be reachable.
 // TODO: maybe it make sense to think about allowing some nodes to be unreachable
-func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoReply, error) {
+func queryNode(metricsClient *http.Client, debugURL string) (*remoteproto.NodesInfoReply, error) {
 	debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
 
 	if err != nil {
@@ -364,7 +364,7 @@ func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoRe
 		return nil, fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
 	}
 
-	var reply remote.NodesInfoReply
+	var reply remoteproto.NodesInfoReply
 
 	err = json.NewDecoder(debugResponse.Body).Decode(&reply)
 
@@ -608,8 +608,8 @@ func (nc *nodeConnection) processResponses() {
 	}
 }
 
-// detect is the method is a txpool subscription
-// TODO: implementation of othere subscribtions (e.g. downloader)
+// detect if the method is a txpool subscription
+// TODO: implementation of other subscriptions (e.g. downloader)
 // TODO: change subscribe from plain string to something more structured
 func isSubscribe(method string) bool {
 	return method == "subscribe/txpool"

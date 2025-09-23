@@ -1,13 +1,20 @@
 name: QA - Sync with external CL
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: "0 8 * * 0" # Run on Sunday at 08:00 AM UTC
   workflow_dispatch: # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sync-with-externalcl:
-    runs-on: [self-hosted, qa, linux, X64]
+    runs-on: [self-hosted, qa, linux, X64, long-running]
     timeout-minutes: 1440 # 24 hours
     strategy:
       fail-fast: false
@@ -22,11 +29,12 @@ jobs:
       CL_DATA_DIR: ${{ github.workspace }}/consensus
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 3600 # 1 hour
-      TOTAL_TIME_SECONDS: 25200 # 7 hours
+      TOTAL_TIME_SECONDS: 28800 # 8 hours
+      ERIGON_ASSERT: true
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Clean Erigon Build & Data Directories
         run: |
@@ -37,9 +45,9 @@ jobs:
         run: |
           mkdir -p $CL_DATA_DIR
           if [ "${{ matrix.client }}" == "lighthouse" ]; then
-            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.1/lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
-            tar -xvf lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
-            rm lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
+            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.1.0/lighthouse-v7.1.0-x86_64-unknown-linux-gnu.tar.gz
+            tar -xvf lighthouse-v7.1.0-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
+            rm lighthouse-v7.1.0-x86_64-unknown-linux-gnu.tar.gz
           elif [ "${{ matrix.client }}" == "prysm" ]; then
             curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
             chmod +x $CL_DATA_DIR/prysm.sh
@@ -68,7 +76,7 @@ jobs:
           test_exit_status=$?
 
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
+          echo "test_executed=true" >> $GITHUB_OUTPUT
 
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
@@ -101,7 +109,7 @@ jobs:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
-            ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ github.workspace }}/erigon_data/logs/
             ${{ github.workspace }}/consensus/data/beacon/logs/beacon.log
 
       - name: Upload test results (Prysm)
@@ -111,7 +119,7 @@ jobs:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
-            ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ github.workspace }}/erigon_data/logs/
             ${{ github.workspace }}/consensus/data/beacon.log
 
       - name: Clean up Erigon data directory

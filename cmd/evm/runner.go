@@ -35,29 +35,26 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	common2 "github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/runtime"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var runCommand = cli.Command{
@@ -95,36 +92,49 @@ func readGenesis(genesisPath string) *types.Genesis {
 }
 
 type execStats struct {
-	time           time.Duration // The execution time.
-	allocs         int64         // The number of heap allocations during execution.
-	bytesAllocated int64         // The cumulative number of bytes allocated during execution.
+	Time           time.Duration `json:"time"`           // The execution time.
+	Allocs         int64         `json:"allocs"`         // The number of heap allocations during execution.
+	BytesAllocated int64         `json:"bytesAllocated"` // The cumulative number of bytes allocated during execution.
+	GasUsed        uint64        `json:"gasUsed"`        // the amount of gas used during execution
 }
 
-func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []byte, gasLeft uint64, stats execStats, err error) {
+func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []byte, stats execStats, err error) {
 	if bench {
+		// Do one warm-up run
+		output, gasUsed, err := execFunc()
 		result := testing.Benchmark(func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				output, gasLeft, err = execFunc()
+				haveOutput, haveGasUsed, haveErr := execFunc()
+				if !bytes.Equal(haveOutput, output) {
+					panic(fmt.Sprintf("output differs\nhave %x\nwant %x\n", haveOutput, output))
+				}
+				if haveGasUsed != gasUsed {
+					panic(fmt.Sprintf("gas differs, have %v want %v", haveGasUsed, gasUsed))
+				}
+				if haveErr != err {
+					panic(fmt.Sprintf("err differs, have %v want %v", haveErr, err))
+				}
 			}
 		})
 
 		// Get the average execution time from the benchmarking result.
 		// There are other useful stats here that could be reported.
-		stats.time = time.Duration(result.NsPerOp())
-		stats.allocs = result.AllocsPerOp()
-		stats.bytesAllocated = result.AllocedBytesPerOp()
+		stats.Time = time.Duration(result.NsPerOp())
+		stats.Allocs = result.AllocsPerOp()
+		stats.BytesAllocated = result.AllocedBytesPerOp()
+		stats.GasUsed = gasUsed
 	} else {
 		var memStatsBefore, memStatsAfter goruntime.MemStats
-		common2.ReadMemStats(&memStatsBefore)
+		dbg.ReadMemStats(&memStatsBefore)
 		startTime := time.Now()
-		output, gasLeft, err = execFunc()
-		stats.time = time.Since(startTime)
-		common2.ReadMemStats(&memStatsAfter)
-		stats.allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
-		stats.bytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
+		output, stats.GasUsed, err = execFunc()
+		stats.Time = time.Since(startTime)
+		dbg.ReadMemStats(&memStatsAfter)
+		stats.Allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
+		stats.BytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}
 
-	return output, gasLeft, stats, err
+	return output, stats, err
 }
 
 func runCmd(ctx *cli.Context) error {
@@ -159,37 +169,29 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New(os.TempDir(), kv.ChainDB)
+	db := temporaltest.NewTestDB(nil, datadir.New(os.TempDir()))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
+		genesiswrite.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		return err
-	}
-	tx, err := tdb.BeginTemporalRw(context.Background())
+
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	sd, err := state2.NewSharedDomains(tx, log.Root())
+	sd, err := dbstate.NewSharedDomains(tx, log.Root())
 	if err != nil {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd)
+	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
@@ -263,8 +265,9 @@ func runCmd(ctx *cli.Context) error {
 	}
 
 	if tracer != nil {
-		runtimeConfig.EVMConfig = vm.Config{Tracer: tracer.Hooks}
+		runtimeConfig.EVMConfig.Tracer = tracer.Hooks
 	}
+	runtimeConfig.EVMConfig.JumpDestCache = vm.NewJumpDestCache(16)
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
@@ -282,7 +285,7 @@ func runCmd(ctx *cli.Context) error {
 	if chainConfig != nil {
 		runtimeConfig.ChainConfig = chainConfig
 	} else {
-		runtimeConfig.ChainConfig = params.AllProtocolChanges
+		runtimeConfig.ChainConfig = chain.AllProtocolChanges
 	}
 
 	var hexInput []byte
@@ -309,17 +312,22 @@ func runCmd(ctx *cli.Context) error {
 			statedb.SetCode(receiver, code)
 		}
 		execFunc = func() ([]byte, uint64, error) {
-			return runtime.Call(receiver, input, &runtimeConfig)
+			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
+			return output, initialGas - gasLeft, err
 		}
 	}
 
 	bench := ctx.Bool(BenchFlag.Name)
-	output, leftOverGas, stats, err := timedExec(bench, execFunc)
+	output, stats, err := timedExec(bench, execFunc)
 
 	if ctx.Bool(DumpFlag.Name) {
 		rules := &chain.Rules{}
 		if chainConfig != nil {
-			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64())
+			blockContext := evmtypes.BlockContext{
+				BlockNumber: runtimeConfig.BlockNumber.Uint64(),
+				Time:        runtimeConfig.Time.Uint64(),
+			}
+			rules = blockContext.Rules(chainConfig)
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
@@ -364,7 +372,7 @@ func runCmd(ctx *cli.Context) error {
 execution time:  %v
 allocations:     %d
 allocated bytes: %d
-`, initialGas-leftOverGas, stats.time, stats.allocs, stats.bytesAllocated)
+`, stats.GasUsed, stats.Time, stats.Allocs, stats.BytesAllocated)
 		if printErr != nil {
 			log.Warn("Failed to print to stderr", "err", printErr)
 		}

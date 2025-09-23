@@ -18,6 +18,7 @@ tasks:
     prefundMinBalance: 10000000000000000000 # ensure 10 ETH
     walletAddressResultVar: "eoaAddress"
     walletPrivateKeyResultVar: "eoaPrivateKey"
+    randomSeed: true
   configVars:
     privateKey: "walletPrivkey"
 - name: sleep

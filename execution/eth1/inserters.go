@@ -21,17 +21,18 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/metrics"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/execution/types"
 )
 
-func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
+func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executionproto.InsertBlocksRequest) (*executionproto.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
-		return &execution.InsertionResult{
-			Result: execution.ExecutionStatus_Busy,
+		return &executionproto.InsertionResult{
+			Result: executionproto.ExecutionStatus_Busy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
@@ -57,6 +58,11 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
 		}
+		rawBlock := types.RawBlock{Header: header, Body: body}
+		err = rawBlock.ValidateMaxRlpSize(e.config)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
+		}
 		var parentTd *big.Int
 		height := header.Number.Uint64()
 		if height > 0 {
@@ -75,10 +81,10 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeHeader: %s", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}
 		if err := rawdb.WriteTd(tx, header.Hash(), height, td); err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: writeTd: %s", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
 		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
@@ -86,10 +92,10 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not commit: %s", err)
 	}
 
-	return &execution.InsertionResult{
-		Result: execution.ExecutionStatus_Success,
+	return &executionproto.InsertionResult{
+		Result: executionproto.ExecutionStatus_Success,
 	}, nil
 }

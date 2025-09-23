@@ -22,7 +22,7 @@ package core
 import (
 	"errors"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
@@ -50,6 +50,10 @@ var (
 	// ErrFeeCapVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the fee cap field.
 	ErrFeeCapVeryHigh = errors.New("fee cap higher than 2^256-1")
+
+	// ErrTooManyBlobs is returned when a transaction has more than 6 blobs
+	// (introduced by EIP-7594).
+	ErrTooManyBlobs = errors.New("blob transaction has too many blobs")
 
 	// ErrInternalFailure is returned when an unexpected internal error condition
 	// prevents execution.
@@ -110,4 +114,8 @@ var (
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	// See EIP-3607: Reject transactions from senders with deployed code.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
+
+	// ErrGasLimitTooHigh is returned if the gas limit of a transaction exceeds MaxTxnGasLimit.
+	// See EIP-7825: Transaction Gas Limit Cap.
+	ErrGasLimitTooHigh = errors.New("gas limit too high")
 )

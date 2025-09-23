@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
@@ -73,9 +74,16 @@ type ForkChoiceStorageReader interface {
 	GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error)
 	GetCurrentParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error)
 
+	// New stuff added for ssz queues in the beacon state.
+	GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool)
+	GetPendingDeposits(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingDeposit], bool)
+	GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool)
+	GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool)
+
 	ValidateOnAttestation(attestation *solid.Attestation) error
 	IsRootOptimistic(root common.Hash) bool
 	IsHeadOptimistic() bool
+	GetPeerDas() das.PeerDas
 }
 
 type ForkChoiceStorageWriter interface {

@@ -20,20 +20,21 @@ type Check string
 
 const (
 	Blocks             Check = "Blocks"
+	HeaderNoGaps       Check = "HeaderNoGaps"
 	BlocksTxnID        Check = "BlocksTxnID"
 	InvertedIndex      Check = "InvertedIndex"
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 	ReceiptsNoDups     Check = "ReceiptsNoDups"
+	RCacheNoDups       Check = "RCacheNoDups"
 	BorEvents          Check = "BorEvents"
 	BorSpans           Check = "BorSpans"
 	BorCheckpoints     Check = "BorCheckpoints"
-	BorMilestones      Check = "BorMilestones" // this check is informational, and we don't run it by default (e.g. gaps may exist but that is ok)
+	Publishable        Check = "Publishable"
 )
 
 var AllChecks = []Check{
-	Blocks, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents, BorSpans, BorCheckpoints,
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents,
+	BorSpans, BorCheckpoints, RCacheNoDups, Publishable,
 }
 
-var NonDefaultChecks = []Check{
-	BorMilestones,
-}
+var NonDefaultChecks = []Check{}

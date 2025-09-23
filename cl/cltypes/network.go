@@ -25,26 +25,39 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 type Metadata struct {
-	SeqNumber uint64
-	Attnets   [8]byte
-	Syncnets  *[1]byte
+	SeqNumber         uint64
+	Attnets           [8]byte
+	Syncnets          *[1]byte
+	CustodyGroupCount *uint64
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
-	if m.Syncnets == nil {
-		return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:])
+	schema := []interface{}{
+		m.SeqNumber,
+		m.Attnets[:],
 	}
-	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:], m.Syncnets[:])
+	if m.Syncnets != nil {
+		schema = append(schema, m.Syncnets[:])
+	}
+	if m.CustodyGroupCount != nil {
+		schema = append(schema, m.CustodyGroupCount)
+	}
+
+	return ssz2.MarshalSSZ(buf, schema...)
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
 	ret = 8 * 2
 	if m.Syncnets != nil {
 		ret += 1
+	}
+	if m.CustodyGroupCount != nil {
+		ret += 8
 	}
 	return
 }
@@ -60,6 +73,13 @@ func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 	}
 	m.Syncnets = new([1]byte)
 	copy(m.Syncnets[:], buf[16:17])
+
+	if len(buf) < 25 {
+		// less than fulu
+		return nil
+	}
+	m.CustodyGroupCount = new(uint64)
+	*m.CustodyGroupCount = ssz.UnmarshalUint64SSZ(buf[17:25])
 	return nil
 }
 
@@ -71,6 +91,10 @@ func (m *Metadata) MarshalJSON() ([]byte, error) {
 	if m.Syncnets != nil {
 		out["syncnets"] = hexutil.Bytes(m.Syncnets[:])
 	}
+	if m.CustodyGroupCount != nil {
+		out["custody_group_count"] = *m.CustodyGroupCount
+	}
+
 	// Attnets and syncnets are hex encoded
 	return json.Marshal(out)
 }
@@ -158,23 +182,55 @@ func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {
  * It contains network information about the other peer and if mismatching we drop it.
  */
 type Status struct {
-	ForkDigest     [4]byte
-	FinalizedRoot  [32]byte
-	FinalizedEpoch uint64
-	HeadRoot       [32]byte
-	HeadSlot       uint64
+	ForkDigest            [4]byte
+	FinalizedRoot         [32]byte
+	FinalizedEpoch        uint64
+	HeadRoot              [32]byte
+	HeadSlot              uint64
+	EarliestAvailableSlot *uint64 // Fulu:EIP7594
 }
 
 func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.ForkDigest[:], s.FinalizedRoot[:], s.FinalizedEpoch, s.HeadRoot[:], s.HeadSlot)
+	return ssz2.MarshalSSZ(buf, s.schema()...)
 }
 
 func (s *Status) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, s.ForkDigest[:], s.FinalizedRoot[:], &s.FinalizedEpoch, s.HeadRoot[:], &s.HeadSlot)
+	schema := []interface{}{
+		s.ForkDigest[:],
+		s.FinalizedRoot[:],
+		&s.FinalizedEpoch,
+		s.HeadRoot[:],
+		&s.HeadSlot,
+	}
+	if version >= int(clparams.FuluVersion) {
+		if s.EarliestAvailableSlot == nil {
+			s.EarliestAvailableSlot = new(uint64)
+		}
+		schema = append(schema, s.EarliestAvailableSlot)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, schema...)
+}
+
+func (s *Status) schema() []interface{} {
+	schema := []interface{}{
+		s.ForkDigest[:],
+		s.FinalizedRoot[:],
+		&s.FinalizedEpoch,
+		s.HeadRoot[:],
+		&s.HeadSlot,
+	}
+	if s.EarliestAvailableSlot != nil {
+		schema = append(schema, s.EarliestAvailableSlot)
+	}
+	return schema
 }
 
 func (s *Status) EncodingSizeSSZ() int {
-	return 84
+	size := 84
+	if s.EarliestAvailableSlot != nil {
+		size += 8
+	}
+	return size
 }
 
 type BlobsByRangeRequest struct {

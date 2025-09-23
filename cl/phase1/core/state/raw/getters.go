@@ -351,6 +351,10 @@ func (b *BeaconState) PendingConsolidations() *solid.ListSSZ[*solid.PendingConso
 	return b.pendingConsolidations
 }
 
+func (b *BeaconState) ProposerLookahead() solid.Uint64VectorSSZ {
+	return b.proposerLookahead
+}
+
 // more compluicated ones
 
 // GetBlockRootAtSlot returns the block root at a given slot

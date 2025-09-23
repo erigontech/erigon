@@ -25,11 +25,11 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type bridgeReader interface {
-	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 }
 
@@ -66,7 +66,7 @@ func (b *BackendServer) BorTxnLookup(ctx context.Context, in *remoteproto.BorTxn
 }
 
 func (b *BackendServer) BorEvents(ctx context.Context, in *remoteproto.BorEventsRequest) (*remoteproto.BorEventsReply, error) {
-	events, err := b.bridgeReader.Events(ctx, in.BlockNum)
+	events, err := b.bridgeReader.Events(ctx, gointerfaces.ConvertH256ToHash(in.BlockHash), in.BlockNum)
 	if err != nil {
 		return nil, err
 	}

@@ -21,63 +21,35 @@ package runtime
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/abi"
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	stateLib "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/asm"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/program"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
-
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggregator) {
-	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
-	tb.Cleanup(db.Close)
-
-	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := stateLib.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-
-	agg, err := stateLib.NewAggregator2(context.Background(), dirs, 16, salt, db, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return _db, tx, agg
-}
 
 func TestDefaults(t *testing.T) {
 	t.Parallel()
@@ -151,11 +123,10 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx, _ := NewTestTemporalDb(t)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains))
+	db := testTemporalDB(t)
+	tx, domains := testTemporalTxSD(t, db)
+
+	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	address := common.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -177,26 +148,16 @@ func TestCall(t *testing.T) {
 	}
 }
 
-func testTemporalDB(t testing.TB) *temporal.DB {
-	db := memdb.NewStateDB(t.TempDir())
-
-	t.Cleanup(db.Close)
-
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	return _db
+func testTemporalDB(t testing.TB) kv.TemporalRwDB {
+	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 }
 
-func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *dbstate.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := stateLib.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -228,13 +189,11 @@ func BenchmarkCall(b *testing.B) {
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
-	defer tx.Rollback()
-	cfg.r = state.NewReaderV3(sd)
-	cfg.w = state.NewWriter(sd, nil)
-	cfg.State = state.New(cfg.r)
+	//cfg.w = state.NewWriter(sd, nil)
+	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
-	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
@@ -247,20 +206,13 @@ func BenchmarkCall(b *testing.B) {
 
 func benchmarkEVM_Create(b *testing.B, code string) {
 	db := testTemporalDB(b)
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	tx, domains := testTemporalTxSD(b, db)
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
 	var (
-		statedb  = state.New(state.NewReaderV3(domains))
+		statedb  = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -283,7 +235,9 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			TangerineWhistleBlock: new(big.Int),
 			SpuriousDragonBlock:   new(big.Int),
 		},
-		EVMConfig: vm.Config{},
+		EVMConfig: vm.Config{
+			JumpDestCache: vm.NewJumpDestCache(128),
+		},
 	}
 	// Warm up the intpools and stuff
 	b.ResetTimer()
@@ -308,6 +262,44 @@ func BenchmarkEVM_CREATE_1200(bench *testing.B) {
 func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 	// initcode size 1200K, repeatedly calls CREATE2 and then modifies the mem contents
 	benchmarkEVM_Create(bench, "5b5862124f80600080f5600152600056")
+}
+
+func BenchmarkEVM_RETURN(b *testing.B) {
+	// returns a contract that returns a zero-byte slice of len size
+	returnContract := func(size uint64) []byte {
+		contract := []byte{
+			byte(vm.PUSH8), 0, 0, 0, 0, 0, 0, 0, 0, // PUSH8 0xXXXXXXXXXXXXXXXX
+			byte(vm.PUSH0),  // PUSH0
+			byte(vm.RETURN), // RETURN
+		}
+		binary.BigEndian.PutUint64(contract[1:], size)
+		return contract
+	}
+
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
+
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	contractAddr := common.BytesToAddress([]byte("contract"))
+
+	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
+		b.Run(strconv.FormatUint(n, 10), func(b *testing.B) {
+			b.ReportAllocs()
+
+			contractCode := returnContract(n)
+			statedb.SetCode(contractAddr, contractCode)
+
+			for i := 0; i < b.N; i++ {
+				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if uint64(len(ret)) != n {
+					b.Fatalf("expected return size %d, got %d", n, len(ret))
+				}
+			}
+		})
+	}
 }
 
 func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
@@ -357,13 +349,6 @@ func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool 
 func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
 func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
 func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
-func (cr *FakeChainHeaderReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
-	return nil
-}
-func (cr *FakeChainHeaderReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
-	return 0
-}
-func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }
 
 type dummyChain struct {
 	counter int
@@ -375,7 +360,7 @@ func (d *dummyChain) Engine() consensus.Engine {
 }
 
 // GetHeader returns the hash corresponding to their hash.
-func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
+func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, error) {
 	d.counter++
 	parentHash := common.Hash{}
 	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
@@ -383,7 +368,7 @@ func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
 
 	//parentHash := common.Hash{byte(n - 1)}
 	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
-	return fakeHeader(n, parentHash)
+	return fakeHeader(n, parentHash), nil
 }
 
 // TestBlockhash tests the blockhash operation. It's a bit special, since it internally
@@ -468,23 +453,28 @@ func TestBlockhash(t *testing.T) {
 
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
-func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name string) { //nolint:unparam
+func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
+	b.Helper()
 	cfg := new(Config)
 	setDefaults(cfg)
 	db := testTemporalDB(b)
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
+	tx, domains := testTemporalTxSD(b, db)
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV3(domains))
+	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	cfg.GasLimit = gas
+	//if len(tracerCode) > 0 {
+	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
+	//	if err != nil {
+	//		b.Fatal(err)
+	//	}
+	//	cfg.EVMConfig = vm.Config{
+	//		Tracer: tracer.Hooks,
+	//	}
+	//}
+
 	var (
 		destination = common.BytesToAddress([]byte("contract"))
 		vmenv       = NewEnv(cfg)
@@ -521,115 +511,66 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 
 // BenchmarkSimpleLoop test a pretty simple loop which loops until OOG
 // 55 ms
+//
+// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > old.txt
+// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > new.txt
+// benchstat old.txt new.txt
 func BenchmarkSimpleLoop(b *testing.B) {
+	p, lbl := program.New().Jumpdest()
+	// Call identity, and pop return value
+	staticCallIdentity := p.
+		StaticCall(nil, 0x4, 0, 0, 0, 0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	staticCallIdentity := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),       // out offset
-		byte(vm.DUP1),       // out insize
-		byte(vm.DUP1),       // in offset
-		byte(vm.PUSH1), 0x4, // address of identity
-		byte(vm.GAS), // gas
-		byte(vm.STATICCALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	callIdentity := p.
+		Call(nil, 0x4, 0, 0, 0, 0, 0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	callIdentity := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),       // out offset
-		byte(vm.DUP1),       // out insize
-		byte(vm.DUP1),       // in offset
-		byte(vm.DUP1),       // value
-		byte(vm.PUSH1), 0x4, // address of identity
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	callInexistant := p.
+		Call(nil, 0xff, 0, 0, 0, 0, 0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	callInexistant := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),        // out offset
-		byte(vm.DUP1),        // out insize
-		byte(vm.DUP1),        // in offset
-		byte(vm.DUP1),        // value
-		byte(vm.PUSH1), 0xff, // address of existing contract
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	// call addr of EOA
+	// pop return value and jump to label
+	callEOA := p.Call(nil, 0xE0, 0, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 
-	callEOA := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),        // out offset
-		byte(vm.DUP1),        // out insize
-		byte(vm.DUP1),        // in offset
-		byte(vm.DUP1),        // value
-		byte(vm.PUSH1), 0xE0, // address of EOA
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	// Push as if we were making call, then pop it off again, and loop
+	loopingCode := p.Push(0).
+		Op(vm.DUP1, vm.DUP1, vm.DUP1).
+		Push(0x4).
+		Op(vm.GAS, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP).
+		Jump(lbl).Bytes()
 
-	loopingCode := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),       // out offset
-		byte(vm.DUP1),       // out insize
-		byte(vm.DUP1),       // in offset
-		byte(vm.PUSH1), 0x4, // address of identity
-		byte(vm.GAS), // gas
+	p, lbl = program.New().Jumpdest()
+	loopingCode2 := p.
+		Push(0x01020304).Push(uint64(0x0102030405)).
+		Op(vm.POP, vm.POP).
+		Op(vm.PUSH6).Append(make([]byte, 6)).Op(vm.JUMP). // Jumpdest zero expressed in 6 bytes
+		Jump(lbl).Bytes()
 
-		byte(vm.POP), byte(vm.POP), byte(vm.POP), byte(vm.POP), byte(vm.POP), byte(vm.POP),
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	callRevertingContractWithInput := p.
+		Call(nil, 0xee, 0, 0, 0x20, 0x0, 0x0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	calllRevertingContractWithInput := []byte{
-		byte(vm.JUMPDEST), //
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),        // out offset
-		byte(vm.PUSH1), 0x20, // in size
-		byte(vm.PUSH1), 0x00, // in offset
-		byte(vm.PUSH1), 0x00, // value
-		byte(vm.PUSH1), 0xEE, // address of reverting contract
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
-
-	//tracer := vm.NewJSONLogger(nil, os.Stdout)
+	//tracer := logger.NewJSONLogger(nil, os.Stdout)
 	//Execute(loopingCode, nil, &Config{
 	//	EVMConfig: vm.Config{
 	//		Debug:  true,
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(b, 100000000, staticCallIdentity, "staticcall-identity-100M")
-	benchmarkNonModifyingCode(b, 100000000, callIdentity, "call-identity-100M")
-	benchmarkNonModifyingCode(b, 100000000, loopingCode, "loop-100M")
-	benchmarkNonModifyingCode(b, 100000000, callInexistant, "call-nonexist-100M")
-	benchmarkNonModifyingCode(b, 100000000, callEOA, "call-EOA-100M")
-	benchmarkNonModifyingCode(b, 100000000, calllRevertingContractWithInput, "call-reverting-100M")
+	benchmarkNonModifyingCode(100_000_000, staticCallIdentity, "staticcall-identity-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callIdentity, "call-identity-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, loopingCode, "loop-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, loopingCode2, "loop2-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callInexistant, "call-nonexist-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callEOA, "call-EOA-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callRevertingContractWithInput, "call-reverting-100M", "", b)
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
@@ -652,11 +593,12 @@ func TestEip2929Cases(t *testing.T) {
 			}
 		}
 		ops := strings.Join(instrs, ", ")
-		fmt.Printf("### Case %d\n\n", id)
+		//fmt.Printf("### Case %d\n\n", id)
+		//fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
+		//	comment,
+		//	code, ops)
+		_ = ops
 		id++
-		fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
-			comment,
-			code, ops)
 		cfg := &Config{
 			EVMConfig: vm.Config{
 				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),
@@ -747,4 +689,35 @@ func TestEip2929Cases(t *testing.T) {
 		prettyPrint("This calls the `identity`-precompile (cheap), then calls an account (expensive) and `staticcall`s the same"+
 			"account (cheap)", code)
 	}
+}
+
+func BenchmarkEVM_SWAP1(b *testing.B) {
+	// returns a contract that does n swaps (SWAP1)
+	swapContract := func(n uint64) []byte {
+		contract := []byte{
+			byte(vm.PUSH0), // PUSH0
+			byte(vm.PUSH0), // PUSH0
+		}
+		for i := uint64(0); i < n; i++ {
+			contract = append(contract, byte(vm.SWAP1))
+		}
+		return contract
+	}
+
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
+	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	contractAddr := common.BytesToAddress([]byte("contract"))
+
+	b.Run("10k", func(b *testing.B) {
+		contractCode := swapContract(10_000)
+		state.SetCode(contractAddr, contractCode)
+
+		for i := 0; i < b.N; i++ {
+			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

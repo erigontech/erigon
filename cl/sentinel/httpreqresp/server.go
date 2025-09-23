@@ -45,21 +45,21 @@ the following headers have meaning when passed in to the request:
 		REQRESP-TOPIC - the topic to request with
 		REQRESP-EXPECTED-CHUNKS - this is an integer, which will be multiplied by 10 to calculate the amount of seconds the peer has to respond with all the data
 */
-func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
+func Do(handler http.Handler, r *http.Request) (resp *http.Response, err error) {
 	// TODO: there potentially extra alloc here (responses are bufferd)
 	// is that a big deal? not sure. maybe can reuse these buffers since they are read once (and known when close) if so
-	ans := make(chan *http.Response)
+	ok := make(chan struct{})
 	go func() {
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, r)
 		// linter does not know we are passing the resposne through channel.
 		// nolint: bodyclose
-		resp := res.Result()
-		ans <- resp
+		resp = res.Result()
+		close(ok)
 	}()
 	select {
-	case res := <-ans:
-		return res, nil
+	case <-ok:
+		return resp, nil
 	case <-r.Context().Done():
 		return nil, r.Context().Err()
 	}
@@ -90,7 +90,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		//  we can't connect to the peer - so we should disconnect them. send a code 4xx
 		stream, err := host.NewStream(r.Context(), peerId, protocol.ID(topic))
 		if err != nil {
-			http.Error(w, "Can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
+			http.Error(w, "can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer stream.Close()
@@ -99,7 +99,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		if r.Body != nil && r.ContentLength > 0 {
 			_, err := io.Copy(stream, r.Body)
 			if err != nil {
-				http.Error(w, "Processing Stream: "+err.Error(), http.StatusBadRequest)
+				http.Error(w, "processing Stream: "+err.Error(), http.StatusBadRequest)
 				return
 			}
 		}

@@ -33,30 +33,31 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/tests"
 )
 
 const (
@@ -200,9 +201,9 @@ func Main(ctx *cli.Context) error {
 	}
 	// Construct the chainconfig
 	var chainConfig *chain.Config
-	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
+	if cConf, extraEips, err1 := testutil.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
 		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
-	} else { //nolint:golint
+	} else {
 		chainConfig = cConf
 		vmConfig.ExtraEips = extraEips
 	}
@@ -284,17 +285,15 @@ func Main(ctx *cli.Context) error {
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
-	var hashError error
-	getHash := func(num uint64) common.Hash {
+	getHash := func(num uint64) (common.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
-			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
-			return common.Hash{}
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
-			hashError = fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
+			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
 		}
-		return h
+		return h, nil
 	}
 
 	db := temporaltest.NewTestDB(nil, datadir.New(""))
@@ -306,13 +305,20 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, log.New())
+	sd, err := dbstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return err
 	}
 	defer sd.Close()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
+	blockNum, txNum := uint64(0), uint64(0)
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(blockNum)
+	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
+	blockNum, txNum = uint64(1), uint64(2)
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(blockNum)
+
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
@@ -320,16 +326,13 @@ func Main(ctx *cli.Context) error {
 	t8logger := log.New("t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-	if hashError != nil {
-		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
-	}
 
 	if err != nil {
 		return fmt.Errorf("error on EBE: %w", err)
 	}
 
 	// state root calculation
-	root, err := CalculateStateRoot(tx)
+	root, err := CalculateStateRoot(tx, blockNum, txNum)
 	if err != nil {
 		return err
 	}
@@ -423,19 +426,30 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	commonTx.R.SetFromBig(txJson.R.ToInt())
 	commonTx.S.SetFromBig(txJson.S.ToInt())
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
-		legacyTx := types.LegacyTx{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			CommonTx: commonTx, //nolint
-			GasPrice: gasPrice,
-		}
-
 		if txJson.Type == types.LegacyTxType {
-			return &legacyTx, nil
+			return &types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				GasPrice: gasPrice,
+			}, nil
 		}
 
 		return &types.AccessListTx{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			LegacyTx:   legacyTx, //nolint
+			LegacyTx: types.LegacyTx{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				GasPrice: gasPrice,
+			},
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
@@ -456,17 +470,20 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			}
 		}
 
-		dynamicFeeTx := types.DynamicFeeTransaction{
-			//it's ok to copy here - because it's constructor of object - no parallel access yet
-			CommonTx:   commonTx, //nolint
-			ChainID:    chainId,
-			TipCap:     tipCap,
-			FeeCap:     feeCap,
-			AccessList: *txJson.Accesses,
-		}
-
 		if txJson.Type == types.DynamicFeeTxType {
-			return &dynamicFeeTx, nil
+			return &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				ChainID:    chainId,
+				TipCap:     tipCap,
+				FeeCap:     feeCap,
+				AccessList: *txJson.Accesses,
+			}, nil
 		}
 
 		auths := make([]types.Authorization, 0)
@@ -480,8 +497,20 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 
 		return &types.SetCodeTransaction{
 			// it's ok to copy here - because it's constructor of object - no parallel access yet
-			DynamicFeeTransaction: dynamicFeeTx, //nolint
-			Authorizations:        auths,
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    uint64(txJson.Nonce),
+					To:       txJson.To,
+					Value:    value,
+					GasLimit: uint64(txJson.Gas),
+					Data:     txJson.Input,
+				},
+				ChainID:    chainId,
+				TipCap:     tipCap,
+				FeeCap:     feeCap,
+				AccessList: *txJson.Accesses,
+			},
+			Authorizations: auths,
 		}, nil
 	} else {
 		return nil, nil
@@ -620,7 +649,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
+func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
@@ -629,7 +658,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
 	defer c.Close()
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	domains, err := libstate.NewSharedDomains(tx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}
@@ -667,7 +696,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	if err != nil {
 		return nil, err
 	}

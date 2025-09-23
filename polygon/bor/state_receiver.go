@@ -17,9 +17,9 @@
 package bor
 
 import (
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 //go:generate mockgen -typed=true -destination=./state_receiver_mock.go -package=bor . StateReceiver

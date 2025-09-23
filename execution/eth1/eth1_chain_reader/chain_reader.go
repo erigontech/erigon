@@ -25,29 +25,29 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type ChainReaderWriterEth1 struct {
 	cfg             *chain.Config
-	executionModule execution.ExecutionClient
+	executionModule executionproto.ExecutionClient
 
 	fcuTimeoutMillis uint64
 }
 
-func NewChainReaderEth1(cfg *chain.Config, executionModule execution.ExecutionClient, fcuTimeoutMillis uint64) ChainReaderWriterEth1 {
+func NewChainReaderEth1(cfg *chain.Config, executionModule executionproto.ExecutionClient, fcuTimeoutMillis uint64) ChainReaderWriterEth1 {
 	return ChainReaderWriterEth1{
 		cfg:              cfg,
 		executionModule:  executionModule,
@@ -77,7 +77,7 @@ func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header 
 }
 
 func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash common.Hash, number uint64) *types.Header {
-	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetHeader(ctx, &executionproto.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -103,7 +103,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.H
 	}
 
 	number := header.Number.Uint64()
-	resp, err := c.executionModule.GetBody(ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetBody(ctx, &executionproto.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -133,7 +133,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		return nil
 	}
 
-	resp, err := c.executionModule.GetBody(ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetBody(ctx, &executionproto.GetSegmentRequest{
 		BlockNumber: &number,
 	})
 	if err != nil {
@@ -157,7 +157,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
-	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetHeader(ctx, &executionproto.GetSegmentRequest{
 		BlockNumber: nil,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -177,7 +177,7 @@ func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uint64) *types.Header {
-	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetHeader(ctx, &executionproto.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   nil,
 	})
@@ -197,7 +197,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 }
 
 func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *big.Int {
-	resp, err := c.executionModule.GetTD(ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetTD(ctx, &executionproto.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -212,11 +212,11 @@ func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, numb
 }
 
 func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
-	grpcHashes := make([]*types2.H256, len(hashes))
+	grpcHashes := make([]*typesproto.H256, len(hashes))
 	for i := range grpcHashes {
 		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
 	}
-	resp, err := c.executionModule.GetBodiesByHashes(ctx, &execution.GetBodiesByHashesRequest{
+	resp, err := c.executionModule.GetBodiesByHashes(ctx, &executionproto.GetBodiesByHashesRequest{
 		Hashes: grpcHashes,
 	})
 	if err != nil {
@@ -233,7 +233,7 @@ func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []c
 }
 
 func (c ChainReaderWriterEth1) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
-	resp, err := c.executionModule.GetBodiesByRange(ctx, &execution.GetBodiesByRangeRequest{
+	resp, err := c.executionModule.GetBodiesByRange(ctx, &executionproto.GetBodiesByRangeRequest{
 		Start: start,
 		Count: count,
 	})
@@ -289,7 +289,7 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 }
 
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
-	request := &execution.InsertBlocksRequest{
+	request := &executionproto.InsertBlocksRequest{
 		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
@@ -297,7 +297,7 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 		return err
 	}
 
-	for response.Result == execution.ExecutionStatus_Busy {
+	for response.Result == executionproto.ExecutionStatus_Busy {
 		const retryDelay = 100 * time.Millisecond
 		select {
 		case <-time.After(retryDelay):
@@ -310,14 +310,14 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 			return err
 		}
 	}
-	if response.Result != execution.ExecutionStatus_Success {
+	if response.Result != executionproto.ExecutionStatus_Success {
 		return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", response.Result.String())
 	}
 	return nil
 }
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	request := &execution.InsertBlocksRequest{
+	request := &executionproto.InsertBlocksRequest{
 		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
@@ -325,11 +325,11 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 		return err
 	}
 
-	if response.Result == execution.ExecutionStatus_Busy {
+	if response.Result == executionproto.ExecutionStatus_Busy {
 		return context.DeadlineExceeded
 	}
-	if response.Result != execution.ExecutionStatus_Success {
-		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
+	if response.Result != executionproto.ExecutionStatus_Success {
+		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", response.Result.String())
 	}
 	return nil
 }
@@ -339,8 +339,8 @@ func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *ty
 	return c.InsertBlocksAndWait(ctx, blocks)
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execution.ExecutionStatus, *string, common.Hash, error) {
-	resp, err := c.executionModule.ValidateChain(ctx, &execution.ValidationRequest{
+func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (executionproto.ExecutionStatus, *string, common.Hash, error) {
+	resp, err := c.executionModule.ValidateChain(ctx, &executionproto.ValidationRequest{
 		Hash:   gointerfaces.ConvertHashToH256(hash),
 		Number: number,
 	})
@@ -354,12 +354,16 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 	return resp.ValidationStatus, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash) (execution.ExecutionStatus, *string, common.Hash, error) {
-	resp, err := c.executionModule.UpdateForkChoice(ctx, &execution.ForkChoice{
+func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (executionproto.ExecutionStatus, *string, common.Hash, error) {
+	timeout := c.fcuTimeoutMillis
+	if len(timeoutOverride) > 0 {
+		timeout = timeoutOverride[0]
+	}
+	resp, err := c.executionModule.UpdateForkChoice(ctx, &executionproto.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizeHash),
-		Timeout:            c.fcuTimeoutMillis,
+		Timeout:            timeout,
 	})
 	if err != nil {
 		return 0, nil, common.Hash{}, err
@@ -372,7 +376,7 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 }
 
 func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash common.Hash, err error) {
-	var resp *execution.ForkChoice
+	var resp *executionproto.ForkChoice
 	resp, err = c.executionModule.GetForkChoice(ctx, &emptypb.Empty{})
 	if err != nil {
 		log.Warn("[engine] GetForkChoice", "err", err)
@@ -383,7 +387,7 @@ func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, fin
 }
 
 func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
-	resp, err := c.executionModule.HasBlock(ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.HasBlock(ctx, &executionproto.GetSegmentRequest{
 		BlockHash: gointerfaces.ConvertHashToH256(hash),
 	})
 	if err != nil {
@@ -393,7 +397,7 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 }
 
 func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
-	request := &execution.AssembleBlockRequest{
+	request := &executionproto.AssembleBlockRequest{
 		Timestamp:             uint64(attributes.Timestamp),
 		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
@@ -413,8 +417,8 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 	return resp.Id, nil
 }
 
-func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *types2.RequestsBundle, *big.Int, error) {
-	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &execution.GetAssembledBlockRequest{
+func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &executionproto.GetAssembledBlockRequest{
 		Id: id,
 	})
 	if err != nil {

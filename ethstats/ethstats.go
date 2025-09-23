@@ -36,14 +36,14 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/turbo/services"
@@ -53,6 +53,11 @@ const (
 	// historyUpdateRange is the number of blocks a node should report upon login or
 	// history request.
 	historyUpdateRange = 50
+)
+
+var (
+	// urlRegex is a regular expression for parsing netstats connection URL
+	urlRegex = regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 )
 
 // Service implements an Ethereum netstats reporting daemon that pushes local
@@ -74,7 +79,7 @@ type Service struct {
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
 	blockReader services.FullBlockReader
-	txPool      txpool.TxpoolClient
+	txPool      txpoolproto.TxpoolClient
 }
 
 // connWrapper is a wrapper to prevent concurrent-write or concurrent-read on the
@@ -128,10 +133,9 @@ func (w *connWrapper) Close() error {
 
 // New returns a monitoring service ready for stats reporting.
 func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader,
-	engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpool.TxpoolClient) error {
+	engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient) error {
 	// Parse the netstats connection url
-	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
-	parts := re.FindStringSubmatch(url)
+	parts := urlRegex.FindStringSubmatch(url)
 	if len(parts) != 5 {
 		return fmt.Errorf("invalid netstats url: \"%s\", should be nodename:secret@host:port", url)
 	}
@@ -650,7 +654,7 @@ type pendStats struct {
 // reportPending retrieves the current number of pending transactions and reports
 // it to the stats server.
 func (s *Service) reportPending(conn *connWrapper) error {
-	in := new(txpool.StatusRequest)
+	in := new(txpoolproto.StatusRequest)
 	status, err := s.txPool.Status(context.Background(), in)
 	if err != nil {
 		return err

@@ -3,10 +3,12 @@
 package gdbme
 
 import (
+	"context"
 	"fmt"
-	"github.com/erigontech/erigon/cmd/utils"
 	"os"
 	"os/exec"
+
+	"github.com/erigontech/erigon/cmd/utils"
 )
 
 const gdbPath = "/usr/bin/gdb"
@@ -69,7 +71,7 @@ func RestartUnderGDB() {
 	gdbArgs = append(gdbArgs, filteredArgs...)
 
 	fmt.Fprintln(os.Stderr, "Restarting under GDB for crash diagnostics...")
-	cmd := exec.Command(gdbPath, gdbArgs...)
+	cmd := exec.CommandContext(context.Background(), gdbPath, gdbArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

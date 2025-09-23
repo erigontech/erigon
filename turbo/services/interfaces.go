@@ -18,17 +18,17 @@ package services
 
 import (
 	"context"
-
-	"github.com/erigontech/erigon-lib/log/v3"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type All struct {
@@ -41,6 +41,7 @@ type BlockReader interface {
 	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
 	IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error
+	MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error)
 }
 
 type HeaderReader interface {
@@ -55,31 +56,6 @@ type HeaderReader interface {
 	Integrity(ctx context.Context) error
 }
 
-type BorEventReader interface {
-	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error)
-	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
-	LastFrozenEventId() uint64
-	LastFrozenEventBlockNum() uint64
-}
-
-type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error)
-	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	LastFrozenSpanId() uint64
-}
-
-type BorMilestoneReader interface {
-	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error)
-}
-
-type BorCheckpointReader interface {
-	LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error)
-}
-
 type CanonicalReader interface {
 	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (h common.Hash, ok bool, err error)
 	IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
@@ -92,6 +68,7 @@ type BodyReader interface {
 	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
 	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
+	BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error)
 }
 
 type TxnReader interface {
@@ -111,19 +88,21 @@ type BlockAndTxnReader interface {
 	TxnReader
 }
 
+type HeaderAndBodyReader interface {
+	BlockReader
+	BodyReader
+	HeaderReader
+}
+
 type FullBlockReader interface {
 	BlockReader
 	BodyReader
 	HeaderReader
-	BorEventReader
-	BorSpanReader
-	BorMilestoneReader
-	BorCheckpointReader
 	TxnReader
 	CanonicalReader
 
 	FrozenBlocks() uint64
-	FrozenBorBlocks() uint64
+	FrozenBorBlocks(align bool) uint64
 	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
@@ -134,12 +113,22 @@ type FullBlockReader interface {
 	Ready(ctx context.Context) <-chan error
 
 	AllTypes() []snaptype.Type
+
+	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
-	PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error)
-	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
+	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
+	RetireBlocksInBackground(
+		ctx context.Context,
+		miBlockNum uint64,
+		maxBlockNum uint64,
+		lvl log.Lvl,
+		seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error,
+		onDelete func(l []string) error,
+		onFinishRetire func() error,
+		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int

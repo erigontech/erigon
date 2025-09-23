@@ -35,29 +35,31 @@ import (
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/types"
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
+	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var (
@@ -136,7 +138,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, "", 0, log.New()), nil, nil, nil)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, "", log.New()), nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -282,7 +284,7 @@ func extractBodies(datadir string) error {
 	cc := tool.ChainConfigFromDB(db)
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = cc.ChainName
-	snaps := freezeblocks.NewRoSnapshots(freezeCfg, filepath.Join(datadir, "snapshots"), 0, log.New())
+	snaps := freezeblocks.NewRoSnapshots(freezeCfg, filepath.Join(datadir, "snapshots"), log.New())
 	snaps.OpenFolder()
 
 	/* method Iterate was removed, need re-implement
@@ -665,9 +667,9 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	chainConfig := params.ChainConfigByChainName(name)
-	if chainConfig == nil {
-		return fmt.Errorf("unknown name: %s", name)
+	spec, err := chainspec.ChainSpecByName(name)
+	if err != nil {
+		return err
 	}
 	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {
@@ -676,7 +678,7 @@ func chainConfig(name string) error {
 	w := bufio.NewWriter(f)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if err = encoder.Encode(chainConfig); err != nil {
+	if err = encoder.Encode(spec.Config); err != nil {
 		return err
 	}
 	if err = w.Flush(); err != nil {

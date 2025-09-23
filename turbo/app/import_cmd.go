@@ -30,23 +30,20 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/direct"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/turbo/debug"
-	turboNode "github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages"
 )
 
 const (
@@ -61,6 +58,7 @@ var importCommand = cli.Command{
 	Flags: []cli.Flag{
 		&utils.DataDirFlag,
 		&utils.ChainFlag,
+		&utils.NetworkIdFlag,
 	},
 	//Category: "BLOCKCHAIN COMMANDS",
 	Description: `
@@ -80,12 +78,14 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, nil, logger)
 	if err != nil {
 		return err
 	}
-	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg.Snapshot.NoDownloader = true // no need to run this for import chain (also used in hive eest/consume-rlp tests)
+	ethCfg.InternalCL = false           // no need to run this for import chain (also used in hive eest/consume-rlp tests)
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
@@ -190,7 +190,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			TopBlock: missing[len(missing)-1],
 		}
 
-		if err := InsertChain(ethereum, missingChain, logger); err != nil {
+		if err := InsertChain(ethereum, missingChain, true); err != nil {
 			return err
 		}
 	}
@@ -232,40 +232,9 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 	return nil
 }
 
-func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
-	sentryControlServer := ethereum.SentryControlServer()
-	initialCycle, firstCycle := false, false
-	for _, b := range chain.Blocks {
-		sentryControlServer.Hd.AddMinedHeader(b.Header())
-		sentryControlServer.Bd.AddToPrefetch(b.Header(), b.RawBody())
-	}
-	sentryControlServer.Hd.MarkAllVerified()
-	blockReader, _ := ethereum.BlockIO()
-
-	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.SetStatus)
-	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), wrap.NewTxContainer(nil, nil), ethereum.StagedSync(), initialCycle, firstCycle, logger, blockReader, hook)
-	if err != nil {
-		return err
-	}
-
-	return insertPosChain(ethereum, chain, logger)
-}
-
-func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
-	posBlockStart := 0
-	for i, b := range chain.Blocks {
-		if b.Header().Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
-			posBlockStart = i
-			break
-		}
-	}
-
-	if posBlockStart == chain.Length() {
-		return nil
-	}
-
-	for i := posBlockStart; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(true); err != nil {
+func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, setHead bool) error {
+	for _, block := range chain.Blocks {
+		if err := block.HashCheck(true); err != nil {
 			return err
 		}
 	}
@@ -277,19 +246,24 @@ func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Lo
 		return err
 	}
 
+	if !setHead {
+		return nil
+	}
+
 	tipHash := chain.TopBlock.Hash()
-
 	status, _, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
-
 	if err != nil {
 		return err
 	}
 
-	ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
+	err = ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)
 		return nil
 	})
-	if status != execution.ExecutionStatus_Success {
+	if err != nil {
+		return err
+	}
+	if status != executionproto.ExecutionStatus_Success {
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 

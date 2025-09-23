@@ -176,7 +176,7 @@ func checkNumber(input string) (raw string, err error) {
 	return input, nil
 }
 
-// ignore these errors to keep compatiblity with go ethereum
+// ignore these errors to keep compatibility with go ethereum
 // nolint:errorlint
 func mapError(err error) error {
 	if err, ok := err.(*strconv.NumError); ok {

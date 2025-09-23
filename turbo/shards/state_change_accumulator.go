@@ -21,15 +21,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
 type Accumulator struct {
 	plainStateID       uint64
-	changes            []*remote.StateChange
-	latestChange       *remote.StateChange
+	changes            []*remoteproto.StateChange
+	latestChange       *remoteproto.StateChange
 	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
@@ -39,7 +39,7 @@ func NewAccumulator() *Accumulator {
 }
 
 type StateChangeConsumer interface {
-	SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch)
+	SendStateChanges(ctx context.Context, sc *remoteproto.StateChangeBatch)
 }
 
 func (a *Accumulator) Reset(plainStateID uint64) {
@@ -54,7 +54,7 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
-	sc := &remote.StateChangeBatch{StateVersionId: a.plainStateID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit, FinalizedBlock: finalizedBlock, PendingBlobFeePerGas: pendingBlobFee}
+	sc := &remoteproto.StateChangeBatch{StateVersionId: a.plainStateID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit, FinalizedBlock: finalizedBlock, PendingBlobFeePerGas: pendingBlobFee}
 	c.SendStateChanges(ctx, sc)
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
 }
@@ -65,15 +65,15 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 
 // StartChange begins accumulation of changes for a new block
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
-	a.changes = append(a.changes, &remote.StateChange{})
+	a.changes = append(a.changes, &remoteproto.StateChange{})
 	a.latestChange = a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = h.Number.Uint64()
 	a.latestChange.BlockHash = gointerfaces.ConvertHashToH256(h.Hash())
 	a.latestChange.BlockTime = h.Time
 	if unwind {
-		a.latestChange.Direction = remote.Direction_UNWIND
+		a.latestChange.Direction = remoteproto.Direction_UNWIND
 	} else {
-		a.latestChange.Direction = remote.Direction_FORWARD
+		a.latestChange.Direction = remoteproto.Direction_FORWARD
 	}
 	a.accountChangeIndex = make(map[common.Address]int)
 	a.storageChangeIndex = make(map[common.Address]map[common.Hash]int)
@@ -91,17 +91,17 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
-	case remote.Action_STORAGE:
-		accountChange.Action = remote.Action_UPSERT
-	case remote.Action_CODE:
-		accountChange.Action = remote.Action_UPSERT_CODE
-	case remote.Action_REMOVE:
+	case remoteproto.Action_STORAGE:
+		accountChange.Action = remoteproto.Action_UPSERT
+	case remoteproto.Action_CODE:
+		accountChange.Action = remoteproto.Action_UPSERT_CODE
+	case remoteproto.Action_REMOVE:
 		//panic("")
 	}
 	accountChange.Incarnation = incarnation
@@ -114,17 +114,17 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 	if !ok {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
-	if accountChange.Action != remote.Action_STORAGE {
+	if accountChange.Action != remoteproto.Action_STORAGE {
 		panic("")
 	}
 	accountChange.Data = nil
 	accountChange.Code = nil
 	accountChange.StorageChanges = nil
-	accountChange.Action = remote.Action_REMOVE
+	accountChange.Action = remoteproto.Action_REMOVE
 	delete(a.storageChangeIndex, address)
 }
 
@@ -134,17 +134,17 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_CODE})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_CODE})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
-	case remote.Action_STORAGE:
-		accountChange.Action = remote.Action_CODE
-	case remote.Action_UPSERT:
-		accountChange.Action = remote.Action_UPSERT_CODE
-	case remote.Action_REMOVE:
+	case remoteproto.Action_STORAGE:
+		accountChange.Action = remoteproto.Action_CODE
+	case remoteproto.Action_UPSERT:
+		accountChange.Action = remoteproto.Action_UPSERT_CODE
+	case remoteproto.Action_REMOVE:
 		//panic("")
 	}
 	accountChange.Incarnation = incarnation
@@ -156,12 +156,12 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_STORAGE})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remoteproto.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_STORAGE})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	//if accountChange.Action == remote.Action_REMOVE {
+	//if accountChange.Action == remoteproto.Action_REMOVE {
 	//	panic("")
 	//}
 	accountChange.Incarnation = incarnation
@@ -173,7 +173,7 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	j, ok2 := si[location]
 	if !ok2 {
 		j = len(accountChange.StorageChanges)
-		accountChange.StorageChanges = append(accountChange.StorageChanges, &remote.StorageChange{})
+		accountChange.StorageChanges = append(accountChange.StorageChanges, &remoteproto.StorageChange{})
 		si[location] = j
 	}
 	storageChange := accountChange.StorageChanges[j]

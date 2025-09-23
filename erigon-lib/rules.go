@@ -101,6 +101,9 @@ func closeCollector(m dsl.Matcher) {
 	m.Match(`$c := etl.NewCollector($*_); $close`).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		Report(`Add "defer $c.Close()" right after collector creation`)
+	m.Match(`$c := etl.NewCollectorWithAllocator($*_); $close`).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		Report(`Add "defer $c.Close()" right after collector creation`)
 }
 
 func closeLockedDir(m dsl.Matcher) {
@@ -135,4 +138,8 @@ func mismatchingUnlock(m dsl.Matcher) {
 		At(m["unlock"]).
 		Report(`maybe $mu.RUnlock() was intended?
 			Rules are in ./rules.go file.`)
+}
+
+func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
+	m.Match(`filepath.Walk($dir, $cb)`).Report(`report("Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls")`)
 }

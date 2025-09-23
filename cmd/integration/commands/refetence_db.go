@@ -31,13 +31,13 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/backup"
-	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
-
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
@@ -45,9 +45,6 @@ var stateBuckets = []string{
 	kv.HashedAccountsDeprecated,
 	kv.HashedStorageDeprecated,
 	kv.PlainState,
-	kv.PlainContractCode,
-	kv.IncarnationMap,
-	kv.Code,
 	kv.E2AccountsHistory,
 	kv.E2StorageHistory,
 	kv.TxLookup,
@@ -111,7 +108,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
-		from, to := backup.OpenPair(chaindata, toChaindata, kv.ChainDB, 0, logger)
+		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
 		err := backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads, logger)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !errors.Is(err, context.Canceled) {
@@ -171,7 +168,7 @@ func init() {
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.New(kv.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+	dbOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
 		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()
@@ -339,7 +336,7 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	}
 	defer file.Close()
 
-	dstOpts := mdbx2.New(kv.ChainDB, logger).Path(to).WriteMap(dbWriteMap)
+	dstOpts := mdbx2.New(dbcfg.ChainDB, logger).Path(to).WriteMap(dbWriteMap)
 	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
@@ -436,12 +433,12 @@ MainLoop:
 }
 
 func CheckSaltFilesExist(dirs datadir.Dirs) error {
-	ok, err := ee.CheckSaltFilesExist(dirs)
+	ok, err := state.CheckSaltFilesExist(dirs)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return ee.ErrCannotStartWithoutSaltFiles
+		return state.ErrCannotStartWithoutSaltFiles
 	}
 	return nil
 }

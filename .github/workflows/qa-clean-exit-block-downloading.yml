@@ -8,9 +8,13 @@ on:
     - cron: '0 8 * * 1-6'  # Run every day at 08:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   clean-exit-bd-test:
-    runs-on: [self-hosted, qa, Erigon3]
+    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -20,7 +24,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Clean Erigon Build Directory
       run: |

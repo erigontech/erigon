@@ -4,6 +4,7 @@ run:
     - nosqlite
     - noboltdb
     - nosilkworm
+    - goexperiment.synctest
 linters:
   enable:
     - asasalint
@@ -18,7 +19,6 @@ linters:
     - gochecksumtype
     - gocritic
     - gosmopolitan
-    - loggercheck
     - nilerr
     - nilnesserr
     - noctx
@@ -27,8 +27,6 @@ linters:
     - reassign
     - spancheck
     - thelper
-    - unconvert
-    - wastedassign
     - govet
   disable:
     - testifylint
@@ -44,9 +42,13 @@ linters:
     - protogetter
     - unparam
     - wrapcheck
-    - rowserrcheck
-    - sqlclosecheck
-    - zerologlint
+    - sqlclosecheck # we don't use SQL
+    - rowserrcheck # we don't use SQL
+    - zerologlint # not don't use Zerolog
+    - wastedassign # `ineffassign` linter is enabled by default
+    - spancheck # we don't use OpenTelemetry
+    - loggercheck # we don't use Zap
+    - unconvert # not enough profit from always enabling
   settings:
     goconst:
       min-len: 2
@@ -55,6 +57,8 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
+        - unnecessaryDefer
+        - appendAssign
         - rangeValCopy
         - exitAfterDefer
         - elseif
@@ -64,7 +68,6 @@ linters:
         - captLocal
         - commentFormatting
         - ifElseChain
-        - appendAssign
         - preferFprint
         - sloppyReassign
         - sprintfQuotedString
@@ -75,7 +78,6 @@ linters:
         - returnAfterHttpError
         - weakCond
         - builtinShadowDecl
-        - unnecessaryDefer
         - uncheckedInlineErr
         - preferStringWriter
       enabled-tags:
@@ -95,6 +97,8 @@ linters:
       excludes:
         - G115
     govet:
+      enable:
+        - nilness
       disable:
         - deepequalerrors
         - shadow
@@ -112,9 +116,6 @@ linters:
           - predeclared
           - thelper
         path: rlp/.*\.go
-      - linters:
-          - golint
-        text: should be
       - linters:
           - recvcheck
         text: the methods of
@@ -144,10 +145,6 @@ linters:
           - gocritic
           - gosec
         path: metrics/sample\.go
-      - linters:
-          - gocritic
-          - gosec
-        path: p2p/simulations
     paths:
       - third_party$
       - builtin$

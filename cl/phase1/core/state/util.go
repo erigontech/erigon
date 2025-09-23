@@ -17,7 +17,7 @@
 package state
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
@@ -43,9 +43,7 @@ func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *l
 
 func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
 	// Sort the attestation indicies.
-	sort.Slice(attestingIndicies, func(i, j int) bool {
-		return attestingIndicies[i] < attestingIndicies[j]
-	})
+	slices.Sort(attestingIndicies)
 	return &cltypes.IndexedAttestation{
 		AttestingIndices: solid.NewRawUint64List(2048*64, attestingIndicies),
 		Data:             attestation.Data,
@@ -176,4 +174,21 @@ func QueueExcessActiveBalance(s abstract.BeaconState, vindex uint64, validator *
 		})
 	}
 	return nil
+}
+
+func GetValidatorsCustodyRequirement(s abstract.BeaconState, validatorIndices []uint64) uint64 {
+	totalNodeBalance := uint64(0)
+	for _, index := range validatorIndices {
+		effectiveBalance, err := s.ValidatorEffectiveBalance(int(index))
+		if err != nil {
+			continue
+		}
+		totalNodeBalance += effectiveBalance
+	}
+
+	count := totalNodeBalance / s.BeaconConfig().BalancePerAdditionalCustodyGroup
+	return min(
+		max(count, s.BeaconConfig().ValidatorCustodyRequirement),
+		s.BeaconConfig().NumberOfCustodyGroups,
+	)
 }

@@ -23,16 +23,16 @@ import (
 	"context"
 	"testing"
 
-	libchain "github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/db/kv"
+	libchain "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Tests that simple header verification works, for both good and bad blocks.
@@ -44,8 +44,7 @@ func TestHeaderVerification(t *testing.T) {
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
@@ -56,7 +55,7 @@ func TestHeaderVerification(t *testing.T) {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         *libchain.TestChainConfig,
+					Cfg:         libchain.TestChainConfig,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,
@@ -93,8 +92,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
-	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
@@ -106,7 +104,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         *libchain.TestChainAuraConfig,
+					Cfg:         libchain.TestChainAuraConfig,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,

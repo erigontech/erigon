@@ -24,9 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
@@ -40,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // pool for buffers
@@ -250,11 +250,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	var prevValSet []byte
 	events := state_accessors.NewStateEvents()
-	slashingOccured := false
+	slashingOccurred := false
 	// setup the events handler for historical states replay.
 	s.currentState.SetEvents(raw.Events{
 		OnNewSlashingSegment: func(index int, segment uint64) error {
-			slashingOccured = true
+			slashingOccurred = true
 			return nil
 		},
 		OnRandaoMixChange: func(index int, mix [32]byte) error {
@@ -350,7 +350,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	startLoop := time.Now()
 
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
-		slashingOccured = false // Set this to false at the beginning of each slot.
+		slashingOccurred = false // Set this to false at the beginning of each slot.
 
 		isDumpSlot := slot%clparams.SlotsPerDump == 0
 		block, err := s.snReader.ReadBlockBySlot(ctx, tx, slot)
@@ -411,8 +411,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 		first = false
 
-		// dump the whole slashings vector, if the slashing actually occured.
-		if slashingOccured {
+		// dump the whole slashings vector, if the slashing actually occurred.
+		if slashingOccurred {
 			if err := stateAntiquaryCollector.collectSlashings(slot, s.currentState.RawSlashings()); err != nil {
 				return err
 			}
@@ -568,15 +568,15 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		paths := s.stateSn.SegFileNames(from, to)
-		downloadItems := make([]*proto_downloader.AddItem, len(paths))
+		downloadItems := make([]*downloaderproto.AddItem, len(paths))
 		for i, path := range paths {
-			downloadItems[i] = &proto_downloader.AddItem{
+			downloadItems[i] = &downloaderproto.AddItem{
 				Path: path,
 			}
 		}
 		if s.downloader != nil {
 			// Notify bittorent to seed the new snapshots
-			if _, err := s.downloader.Add(s.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+			if _, err := s.downloader.Add(s.ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
 		}

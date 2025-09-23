@@ -36,14 +36,13 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // TxPoolAPIVersion
@@ -52,55 +51,55 @@ var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
+	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
-	GetBlobs(blobhashes []common.Hash) (blobs [][]byte, proofs [][]byte)
+	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
 
-var _ txpool_proto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
-var _ txpool_proto.TxpoolServer = (*GrpcDisabled)(nil) // compile-time interface check
+var _ txpoolproto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
+var _ txpoolproto.TxpoolServer = (*GrpcDisabled)(nil) // compile-time interface check
 
 var ErrPoolDisabled = errors.New("TxPool Disabled")
 
 type GrpcDisabled struct {
-	txpool_proto.UnimplementedTxpoolServer
+	txpoolproto.UnimplementedTxpoolServer
 }
 
 func (*GrpcDisabled) Version(ctx context.Context, empty *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return nil, ErrPoolDisabled
 }
-func (*GrpcDisabled) FindUnknown(ctx context.Context, hashes *txpool_proto.TxHashes) (*txpool_proto.TxHashes, error) {
+func (*GrpcDisabled) FindUnknown(ctx context.Context, hashes *txpoolproto.TxHashes) (*txpoolproto.TxHashes, error) {
 	return nil, ErrPoolDisabled
 }
-func (*GrpcDisabled) Add(ctx context.Context, request *txpool_proto.AddRequest) (*txpool_proto.AddReply, error) {
+func (*GrpcDisabled) Add(ctx context.Context, request *txpoolproto.AddRequest) (*txpoolproto.AddReply, error) {
 	return nil, ErrPoolDisabled
 }
-func (*GrpcDisabled) Transactions(ctx context.Context, request *txpool_proto.TransactionsRequest) (*txpool_proto.TransactionsReply, error) {
+func (*GrpcDisabled) Transactions(ctx context.Context, request *txpoolproto.TransactionsRequest) (*txpoolproto.TransactionsReply, error) {
 	return nil, ErrPoolDisabled
 }
-func (*GrpcDisabled) All(ctx context.Context, request *txpool_proto.AllRequest) (*txpool_proto.AllReply, error) {
+func (*GrpcDisabled) All(ctx context.Context, request *txpoolproto.AllRequest) (*txpoolproto.AllReply, error) {
 	return nil, ErrPoolDisabled
 }
-func (*GrpcDisabled) Pending(ctx context.Context, empty *emptypb.Empty) (*txpool_proto.PendingReply, error) {
+func (*GrpcDisabled) Pending(ctx context.Context, empty *emptypb.Empty) (*txpoolproto.PendingReply, error) {
 	return nil, ErrPoolDisabled
 }
-func (*GrpcDisabled) OnAdd(request *txpool_proto.OnAddRequest, server txpool_proto.Txpool_OnAddServer) error {
+func (*GrpcDisabled) OnAdd(request *txpoolproto.OnAddRequest, server txpoolproto.Txpool_OnAddServer) error {
 	return ErrPoolDisabled
 }
-func (*GrpcDisabled) Status(ctx context.Context, request *txpool_proto.StatusRequest) (*txpool_proto.StatusReply, error) {
+func (*GrpcDisabled) Status(ctx context.Context, request *txpoolproto.StatusRequest) (*txpoolproto.StatusReply, error) {
 	return nil, ErrPoolDisabled
 }
-func (*GrpcDisabled) Nonce(ctx context.Context, request *txpool_proto.NonceRequest) (*txpool_proto.NonceReply, error) {
+func (*GrpcDisabled) Nonce(ctx context.Context, request *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	return nil, ErrPoolDisabled
 }
 
 type GrpcServer struct {
-	txpool_proto.UnimplementedTxpoolServer
+	txpoolproto.UnimplementedTxpoolServer
 	ctx             context.Context
 	txPool          txPool
 	db              kv.RoDB
@@ -117,28 +116,28 @@ func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, newSlotsStrea
 func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return TxPoolAPIVersion, nil
 }
-func convertSubPoolType(t SubPoolType) txpool_proto.AllReply_TxnType {
+func convertSubPoolType(t SubPoolType) txpoolproto.AllReply_TxnType {
 	switch t {
 	case PendingSubPool:
-		return txpool_proto.AllReply_PENDING
+		return txpoolproto.AllReply_PENDING
 	case BaseFeeSubPool:
-		return txpool_proto.AllReply_BASE_FEE
+		return txpoolproto.AllReply_BASE_FEE
 	case QueuedSubPool:
-		return txpool_proto.AllReply_QUEUED
+		return txpoolproto.AllReply_QUEUED
 	default:
 		panic("unknown")
 	}
 }
-func (s *GrpcServer) All(ctx context.Context, _ *txpool_proto.AllRequest) (*txpool_proto.AllReply, error) {
+func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoolproto.AllReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	reply := &txpool_proto.AllReply{}
-	reply.Txs = make([]*txpool_proto.AllReply_Tx, 0, 32)
+	reply := &txpoolproto.AllReply{}
+	reply.Txs = make([]*txpoolproto.AllReply_Tx, 0, 32)
 	s.txPool.deprecatedForEach(ctx, func(rlp []byte, sender common.Address, t SubPoolType) {
-		reply.Txs = append(reply.Txs, &txpool_proto.AllReply_Tx{
+		reply.Txs = append(reply.Txs, &txpoolproto.AllReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			TxnType: convertSubPoolType(t),
 			RlpTx:   common.Copy(rlp),
@@ -147,17 +146,17 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpool_proto.AllRequest) (*txpo
 	return reply, nil
 }
 
-func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_proto.PendingReply, error) {
-	reply := &txpool_proto.PendingReply{}
-	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
+func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpoolproto.PendingReply, error) {
+	reply := &txpoolproto.PendingReply{}
+	reply.Txs = make([]*txpoolproto.PendingReply_Tx, 0, 32)
 	txnsRlp := TxnsRlp{}
-	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */); err != nil {
+	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */, math.MaxInt /* availableRlpSpace */); err != nil {
 		return nil, err
 	}
 	var senderArr [20]byte
 	for i := range txnsRlp.Txns {
 		copy(senderArr[:], txnsRlp.Senders.At(i)) // TODO: optimize
-		reply.Txs = append(reply.Txs, &txpool_proto.PendingReply_Tx{
+		reply.Txs = append(reply.Txs, &txpoolproto.PendingReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(senderArr),
 			RlpTx:   txnsRlp.Txns[i],
 			IsLocal: txnsRlp.IsLocal[i],
@@ -166,11 +165,11 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	return reply, nil
 }
 
-func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpool_proto.TxHashes) (*txpool_proto.TxHashes, error) {
+func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpoolproto.TxHashes) (*txpoolproto.TxHashes, error) {
 	return nil, errors.New("unimplemented")
 }
 
-func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txpool_proto.AddReply, error) {
+func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpoolproto.AddReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -181,7 +180,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired()
 	parseCtx.ValidateRLP(s.txPool.ValidateSerializedTxn)
 
-	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
+	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
 	for i := 0; i < len(in.RlpTxs); i++ {
 		j := len(slots.Txns) // some incoming txns may be rejected, so - need second index
@@ -197,13 +196,13 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 			slots.Resize(uint(j))                // remove erroneous transaction
 			if errors.Is(err, ErrAlreadyKnown) { // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
-				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
+				reply.Imported[i] = txpoolproto.ImportResult_ALREADY_EXISTS
 			} else if errors.Is(err, ErrRlpTooBig) { // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
-				reply.Imported[i] = txpool_proto.ImportResult_INVALID
+				reply.Imported[i] = txpoolproto.ImportResult_INVALID
 			} else {
 				reply.Errors[i] = err.Error()
-				reply.Imported[i] = txpool_proto.ImportResult_INTERNAL_ERROR
+				reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR
 			}
 		}
 	}
@@ -215,7 +214,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 
 	j := 0
 	for i := range reply.Imported {
-		if reply.Imported[i] != txpool_proto.ImportResult_SUCCESS {
+		if reply.Imported[i] != txpoolproto.ImportResult_SUCCESS {
 			j++
 			continue
 		}
@@ -227,7 +226,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	return reply, nil
 }
 
-func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequest) (*txpool_proto.GetBlobsReply, error) {
+func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsRequest) (*txpoolproto.GetBlobsReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -238,31 +237,41 @@ func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequ
 	for i := range in.BlobHashes {
 		hashes[i] = gointerfaces.ConvertH256ToHash(in.BlobHashes[i])
 	}
-	blobs, proofs := s.txPool.GetBlobs(hashes)
-	reply := &txpool_proto.GetBlobsReply{Blobs: blobs, Proofs: proofs}
-	return reply, nil
+	blobBundles := s.txPool.GetBlobs(hashes)
+	reply := make([]*txpoolproto.BlobAndProof, len(blobBundles))
+	for i, bb := range blobBundles {
+		var proofs [][]byte
+		for _, p := range bb.Proofs {
+			proofs = append(proofs, p[:])
+		}
+		reply[i] = &txpoolproto.BlobAndProof{
+			Blob:   bb.Blob,
+			Proofs: proofs,
+		}
+	}
+	return &txpoolproto.GetBlobsReply{BlobsWithProofs: reply}, nil
 }
 
-func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpool_proto.ImportResult {
+func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportResult {
 	switch reason {
 	case txpoolcfg.Success:
-		return txpool_proto.ImportResult_SUCCESS
+		return txpoolproto.ImportResult_SUCCESS
 	case txpoolcfg.AlreadyKnown:
-		return txpool_proto.ImportResult_ALREADY_EXISTS
+		return txpoolproto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.FeeTooLow:
-		return txpool_proto.ImportResult_FEE_TOO_LOW
+		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.NegativeValue, txpoolcfg.OversizedData, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail,
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations:
 		// TODO(EIP-7702) TypeNotActivated may be transient (e.g. a set code transaction is submitted 1 sec prior to the Pectra activation)
-		return txpool_proto.ImportResult_INVALID
+		return txpoolproto.ImportResult_INVALID
 	default:
-		return txpool_proto.ImportResult_INTERNAL_ERROR
+		return txpoolproto.ImportResult_INTERNAL_ERROR
 	}
 }
 
-func (s *GrpcServer) OnAdd(req *txpool_proto.OnAddRequest, stream txpool_proto.Txpool_OnAddServer) error {
+func (s *GrpcServer) OnAdd(req *txpoolproto.OnAddRequest, stream txpoolproto.Txpool_OnAddServer) error {
 	s.logger.Info("New txns subscriber joined")
 	//txpool.Loop does send messages to this streams
 	remove := s.newSlotsStreams.Add(stream)
@@ -275,14 +284,14 @@ func (s *GrpcServer) OnAdd(req *txpool_proto.OnAddRequest, stream txpool_proto.T
 	}
 }
 
-func (s *GrpcServer) Transactions(ctx context.Context, in *txpool_proto.TransactionsRequest) (*txpool_proto.TransactionsReply, error) {
+func (s *GrpcServer) Transactions(ctx context.Context, in *txpoolproto.TransactionsRequest) (*txpoolproto.TransactionsReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	reply := &txpool_proto.TransactionsReply{RlpTxs: make([][]byte, len(in.Hashes))}
+	reply := &txpoolproto.TransactionsReply{RlpTxs: make([][]byte, len(in.Hashes))}
 	for i := range in.Hashes {
 		h := gointerfaces.ConvertH256ToHash(in.Hashes[i])
 		txnRlp, err := s.txPool.GetRlp(tx, h[:])
@@ -299,9 +308,9 @@ func (s *GrpcServer) Transactions(ctx context.Context, in *txpool_proto.Transact
 	return reply, nil
 }
 
-func (s *GrpcServer) Status(_ context.Context, _ *txpool_proto.StatusRequest) (*txpool_proto.StatusReply, error) {
+func (s *GrpcServer) Status(_ context.Context, _ *txpoolproto.StatusRequest) (*txpoolproto.StatusReply, error) {
 	pending, baseFee, queued := s.txPool.CountContent()
-	return &txpool_proto.StatusReply{
+	return &txpoolproto.StatusReply{
 		PendingCount: uint32(pending),
 		QueuedCount:  uint32(queued),
 		BaseFeeCount: uint32(baseFee),
@@ -309,10 +318,10 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpool_proto.StatusRequest) (*
 }
 
 // returns nonce for address
-func (s *GrpcServer) Nonce(ctx context.Context, in *txpool_proto.NonceRequest) (*txpool_proto.NonceReply, error) {
+func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	addr := gointerfaces.ConvertH160toAddress(in.Address)
 	nonce, inPool := s.txPool.NonceFromAddress(addr)
-	return &txpool_proto.NonceReply{
+	return &txpoolproto.NonceReply{
 		Nonce: nonce,
 		Found: inPool,
 	}, nil
@@ -320,16 +329,16 @@ func (s *GrpcServer) Nonce(ctx context.Context, in *txpool_proto.NonceRequest) (
 
 // NewSlotsStreams - it's safe to use this class as non-pointer
 type NewSlotsStreams struct {
-	chans map[uint]txpool_proto.Txpool_OnAddServer
+	chans map[uint]txpoolproto.Txpool_OnAddServer
 	mu    sync.Mutex
 	id    uint
 }
 
-func (s *NewSlotsStreams) Add(stream txpool_proto.Txpool_OnAddServer) (remove func()) {
+func (s *NewSlotsStreams) Add(stream txpoolproto.Txpool_OnAddServer) (remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.chans == nil {
-		s.chans = make(map[uint]txpool_proto.Txpool_OnAddServer)
+		s.chans = make(map[uint]txpoolproto.Txpool_OnAddServer)
 	}
 	s.id++
 	id := s.id
@@ -337,7 +346,7 @@ func (s *NewSlotsStreams) Add(stream txpool_proto.Txpool_OnAddServer) (remove fu
 	return func() { s.remove(id) }
 }
 
-func (s *NewSlotsStreams) Broadcast(reply *txpool_proto.OnAddReply, logger log.Logger) {
+func (s *NewSlotsStreams) Broadcast(reply *txpoolproto.OnAddReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
@@ -363,7 +372,7 @@ func (s *NewSlotsStreams) remove(id uint) {
 	delete(s.chans, id)
 }
 
-func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
@@ -403,10 +412,10 @@ func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto
 	grpcServer := grpc.NewServer(opts...)
 	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	if txPoolServer != nil {
-		txpool_proto.RegisterTxpoolServer(grpcServer, txPoolServer)
+		txpoolproto.RegisterTxpoolServer(grpcServer, txPoolServer)
 	}
 	if miningServer != nil {
-		txpool_proto.RegisterMiningServer(grpcServer, miningServer)
+		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
 
 	//if metrics.Enabled {

@@ -27,10 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -39,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -46,6 +45,11 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/spectest"
 )
 
@@ -78,7 +82,7 @@ type ForkChoiceStep struct {
 	Tick             *int                     `yaml:"tick,omitempty"`
 	Valid            *bool                    `yaml:"valid,omitempty"`
 	Attestation      *string                  `yaml:"attestation,omitempty"`
-	Block            *string                  `yaml:"block,omitempty"`
+	Block            *BlockData               `yaml:",inline"`
 	Blobs            *string                  `yaml:"blobs,omitempty"`
 	Proofs           []string                 `yaml:"proofs,omitempty"`
 	PowBlock         *string                  `yaml:"pow_block,omitempty"`
@@ -86,6 +90,18 @@ type ForkChoiceStep struct {
 	BlockHash        *string                  `yaml:"block_hash,omitempty"`
 	PayloadStatus    *ForkChoicePayloadStatus `yaml:"payload_status,omitempty"`
 	Checks           *ForkChoiceChecks        `yaml:"checks,omitempty"`
+}
+
+type BlockData struct {
+	Block   string   `yaml:"block"`
+	Columns []string `yaml:"columns,omitempty"`
+}
+
+func (f *ForkChoiceStep) GetColumns() []string {
+	if f.Block == nil || f.Block.Columns == nil {
+		return nil
+	}
+	return f.Block.Columns
 }
 
 func (f *ForkChoiceStep) GetTick() int {
@@ -100,6 +116,7 @@ func (f *ForkChoiceStep) GetValid() bool {
 	}
 	return *f.Valid
 }
+
 func (f *ForkChoiceStep) GetAttestation() string {
 	if f.Attestation == nil {
 		return ""
@@ -110,7 +127,7 @@ func (f *ForkChoiceStep) GetBlock() string {
 	if f.Block == nil {
 		return ""
 	}
-	return *f.Block
+	return f.Block.Block
 }
 
 func (f *ForkChoiceStep) GetBlobs() string {
@@ -195,20 +212,26 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	genesisState, err := initial_state.GetGenesisState(networkid.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEventEmitter()
-	_, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
+	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(memdb.New(t, "/tmp", dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 1000, &clparams.MainnetBeaconConfig, ethClock, emitters)
+	peerDasState := peerdasstate.NewPeerDasState(&clparams.MainnetBeaconConfig, &clparams.NetworkConfig{})
+	peerDas := das.NewPeerDas(context.TODO(), nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState)
+	localValidators := validator_params.NewValidatorParams()
 
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
-		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
+		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		localValidators, false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
+	forkStore.InitPeerDas(peerDas)
 
 	var steps []ForkChoiceStep
 	err = spectest.ReadYml(root, "steps.yaml", &steps)
@@ -263,7 +286,28 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 					})
 					return true
 				})
-
+			}
+			if step.GetColumns() != nil {
+				allok := true
+				for _, filename := range step.GetColumns() {
+					column := cltypes.NewDataColumnSidecar()
+					err := spectest.ReadSsz(root, c.Version(), filename+".ssz_snappy", column)
+					require.NoError(t, err, stepstr)
+					if das.VerifyDataColumnSidecar(column) && das.VerifyDataColumnSidecarInclusionProof(column) && das.VerifyDataColumnSidecarKZGProofs(column) {
+						// write to columnStorage
+						blockRoot, err := blk.Block.HashSSZ()
+						require.NoError(t, err)
+						err = columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(column.Index), column)
+						require.NoError(t, err)
+					} else {
+						allok = false
+					}
+				}
+				if !allok {
+					// check if the test is invalid
+					require.Equal(t, step.GetValid(), allok, stepstr)
+					continue
+				}
 			}
 
 			err = forkStore.OnBlock(ctx, blk, true, true, true)

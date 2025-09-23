@@ -20,28 +20,27 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clstages"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 type Cfg struct {
@@ -61,6 +60,7 @@ type Cfg struct {
 	blockCollector          block_collector.BlockCollector
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
+	peerDas                 das.PeerDas
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
@@ -94,22 +94,23 @@ func ClStagesCfg(
 	emitters *beaconevents.EventEmitter,
 	blobStore blob_storage.BlobStorage,
 	attestationDataProducer attestation_producer.AttestationDataProducer,
+	peerDas das.PeerDas,
 ) *Cfg {
 	return &Cfg{
-		rpc:             rpc,
-		antiquary:       antiquary,
-		ethClock:        ethClock,
-		caplinConfig:    caplinConfig,
-		beaconCfg:       beaconCfg,
-		state:           state,
-		executionClient: executionClient,
-		gossipManager:   gossipManager,
-		forkChoice:      forkChoice,
-		dirs:            dirs,
-		indiciesDB:      indiciesDB,
-		sn:              sn,
-		blockReader:     blockReader,
-
+		rpc:                     rpc,
+		antiquary:               antiquary,
+		ethClock:                ethClock,
+		caplinConfig:            caplinConfig,
+		beaconCfg:               beaconCfg,
+		state:                   state,
+		executionClient:         executionClient,
+		gossipManager:           gossipManager,
+		forkChoice:              forkChoice,
+		dirs:                    dirs,
+		indiciesDB:              indiciesDB,
+		sn:                      sn,
+		blockReader:             blockReader,
+		peerDas:                 peerDas,
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
@@ -249,7 +250,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

@@ -21,12 +21,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func MarshalReceipt(
@@ -36,6 +36,7 @@ func MarshalReceipt(
 	header *types.Header,
 	txnHash common.Hash,
 	signed bool,
+	withBlockTimestamp bool,
 ) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
@@ -53,6 +54,26 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
+	var logsToMarshal interface{}
+
+	if withBlockTimestamp {
+		if receipt.Logs != nil {
+			rpcLogs := []*types.RPCLog{}
+			for _, l := range receipt.Logs {
+				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
+			}
+			logsToMarshal = rpcLogs
+		} else {
+			logsToMarshal = make([]*types.RPCLog, 0)
+		}
+	} else {
+		if receipt.Logs == nil {
+			logsToMarshal = make([]*types.Log, 0)
+		} else {
+			logsToMarshal = receipt.Logs
+		}
+	}
+
 	fields := map[string]interface{}{
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
@@ -64,7 +85,7 @@ func MarshalReceipt(
 		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
-		"logs":              receipt.Logs,
+		"logs":              logsToMarshal,
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
@@ -78,9 +99,6 @@ func MarshalReceipt(
 
 	// Assign receipt status.
 	fields["status"] = hexutil.Uint64(receipt.Status)
-	if receipt.Logs == nil {
-		fields["logs"] = [][]*types.Log{}
-	}
 
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {

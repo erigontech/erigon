@@ -4,6 +4,7 @@ run:
     - nosqlite
     - noboltdb
     - nosilkworm
+    - goexperiment.synctest
 linters:
   enable:
     - asasalint
@@ -15,14 +16,9 @@ linters:
     - gochecksumtype
     - gocritic
     - gosmopolitan
-    - loggercheck
     - nilnesserr
-    - perfsprint
     - prealloc
     - reassign
-    - spancheck
-    - unconvert
-    - wastedassign
     - govet
   disable:
     - testifylint
@@ -43,9 +39,13 @@ linters:
     - recvcheck
     - unparam
     - wrapcheck
-    - sqlclosecheck
-    - zerologlint
-    - rowserrcheck
+    - sqlclosecheck # we don't use SQL
+    - rowserrcheck # we don't use SQL
+    - zerologlint # not don't use Zerolog
+    - wastedassign # `ineffassign` linter is enabled by default
+    - spancheck # we don't use OpenTelemetry
+    - loggercheck # we don't use Zap
+    - unconvert # not enough profit from always enabling
   settings:
     goconst:
       min-len: 2
@@ -54,8 +54,9 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - regexpMust
+        - unnecessaryDefer
         - appendAssign
+        - regexpMust
         - rangeValCopy
         - exitAfterDefer
         - elseif
@@ -74,7 +75,6 @@ linters:
         - returnAfterHttpError
         - weakCond
         - builtinShadowDecl
-        - unnecessaryDefer
         - uncheckedInlineErr
         - preferStringWriter
         - commentedOutCode
@@ -109,9 +109,6 @@ linters:
       - std-error-handling
     rules:
       - linters:
-          - golint
-        text: should be
-      - linters:
           - errcheck
         text: not checked
       - linters:
@@ -137,10 +134,6 @@ linters:
           - gocritic
           - gosec
         path: metrics/sample\.go
-      - linters:
-          - gocritic
-          - gosec
-        path: p2p/simulations
       - linters:
           - gocritic
           - gosec

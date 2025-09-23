@@ -26,9 +26,8 @@ import (
 	"github.com/urfave/cli/v2"
 	"gopkg.in/natefinch/lumberjack.v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // Determine the log dir path based on the given urfave context
@@ -54,8 +53,13 @@ func LogDirPath(ctx *cli.Context) string {
 // This function which is used in Erigon itself.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
-	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
+func SetupLoggerCtx(
+	filePrefix string,
+	ctx *cli.Context,
+	consoleDefaultLevel log.Lvl,
+	dirDefaultLevel log.Lvl,
+	rootHandler bool,
+) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 
@@ -166,7 +170,7 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 	return log.Root()
 }
 
-// SetupLoggerCmd perform the logging using parametrs specifying by `flag` package, and sets it to the root logger
+// SetupLoggerCmd performs the logging using parameters specified by the `flag` package and sets it on the root logger
 // This is the function which is NOT used by Erigon itself, but instead by utility commands
 func SetupLogger(filePrefix string) log.Logger {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
