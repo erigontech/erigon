@@ -53,8 +53,8 @@ func (p *ConsolidationRequest) Static() bool {
 }
 
 type PendingConsolidation struct {
-	SourceIndex uint64 // validator index
-	TargetIndex uint64 // validator index
+	SourceIndex uint64 `json:"source_index"` // validator index
+	TargetIndex uint64 `json:"target_index"` // validator index
 }
 
 func (p *PendingConsolidation) EncodingSizeSSZ() int {

@@ -24,8 +24,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.
@@ -35,7 +35,7 @@ func (api *APIImpl) Coinbase(ctx context.Context) (common.Address, error) {
 
 // Hashrate implements eth_hashrate. Returns the number of hashes per second that the node is mining with.
 func (api *APIImpl) Hashrate(ctx context.Context) (uint64, error) {
-	repl, err := api.mining.HashRate(ctx, &txpool.HashRateRequest{})
+	repl, err := api.mining.HashRate(ctx, &txpoolproto.HashRateRequest{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return 0, errors.New(s.Message())
@@ -47,7 +47,7 @@ func (api *APIImpl) Hashrate(ctx context.Context) (uint64, error) {
 
 // Mining returns an indication if this node is currently mining.
 func (api *APIImpl) Mining(ctx context.Context) (bool, error) {
-	repl, err := api.mining.Mining(ctx, &txpool.MiningRequest{})
+	repl, err := api.mining.Mining(ctx, &txpoolproto.MiningRequest{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return false, errors.New(s.Message())
@@ -67,7 +67,7 @@ func (api *APIImpl) Mining(ctx context.Context) (bool, error) {
 //	result[3] - hex encoded block number
 func (api *APIImpl) GetWork(ctx context.Context) ([4]string, error) {
 	var res [4]string
-	repl, err := api.mining.GetWork(ctx, &txpool.GetWorkRequest{})
+	repl, err := api.mining.GetWork(ctx, &txpoolproto.GetWorkRequest{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return res, errors.New(s.Message())
@@ -85,7 +85,7 @@ func (api *APIImpl) GetWork(ctx context.Context) ([4]string, error) {
 // It returns an indication if the work was accepted.
 // Note either an invalid solution, a stale work a non-existent work will return false.
 func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error) {
-	repl, err := api.mining.SubmitWork(ctx, &txpool.SubmitWorkRequest{BlockNonce: nonce[:], PowHash: powHash.Bytes(), Digest: digest.Bytes()})
+	repl, err := api.mining.SubmitWork(ctx, &txpoolproto.SubmitWorkRequest{BlockNonce: nonce[:], PowHash: powHash.Bytes(), Digest: digest.Bytes()})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return false, errors.New(s.Message())
@@ -101,7 +101,7 @@ func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powH
 //
 // It accepts the miner hash rate and an identifier which must be unique
 func (api *APIImpl) SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error) {
-	repl, err := api.mining.SubmitHashRate(ctx, &txpool.SubmitHashRateRequest{Rate: uint64(hashRate), Id: id.Bytes()})
+	repl, err := api.mining.SubmitHashRate(ctx, &txpoolproto.SubmitHashRateRequest{Rate: uint64(hashRate), Id: id.Bytes()})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return false, errors.New(s.Message())

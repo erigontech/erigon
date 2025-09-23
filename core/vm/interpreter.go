@@ -20,19 +20,19 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"hash"
 	"slices"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // Config are the configuration options for the Interpreter
@@ -399,7 +399,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		_pc++
 	}
 
-	if err == errStopToken {
+	if errors.Is(err, errStopToken) {
 		err = nil // clear stop token error
 	}
 

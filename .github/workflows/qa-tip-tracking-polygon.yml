@@ -3,9 +3,7 @@ name: QA - Tip tracking (Polygon)
 on:
   push:
     branches:
-      - 'release/3.*'
-  schedule:
-    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
+      - 'release/3.1'
   workflow_dispatch:      # Run manually
 
 concurrency:
@@ -26,7 +24,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Clean Erigon Build Directory
       run: |
@@ -114,12 +112,12 @@ jobs:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
-    - name: Upload erigon log
+    - name: Upload erigon logs
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log
-        path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/erigon.log
+        name: erigon-logs
+        path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: steps.test_step.outputs.test_executed == 'true'

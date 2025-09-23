@@ -4,8 +4,7 @@ on:
   push:
     branches:
         - main
-        - release/*
-        - docker_pectra
+        - 'release/**'
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
@@ -16,16 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Hive
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ethereum/hive
           # ref: master
           path: hive
 
       - name: Setup go env and cache
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '>=1.23'
+          go-version: '>=1.24'
           go-version-file: 'hive/go.mod'
 
       - name: Login to Docker Hub
@@ -53,10 +52,16 @@ jobs:
         run: |
           cd hive
           run_suite() {
+            if [ $# -ne 3 ]; then
+              echo "Error: run_suite requires exactly 3 parameters"
+              echo "Usage: run_suite <sim> <sim.limit> <max_allowed_failures>"
+              echo "Provided: $# parameters"
+              exit 1
+            fi
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            ./hive --sim ethereum/"${1}" --sim.limit="${2}" --client erigon 2>&1 | tee output.log || {
+            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -80,28 +85,48 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed*10 > tests )); then
+            max_allowed_failures="${3}"
+            if (( failed > max_allowed_failures )); then
               echo "Too many failures for suite ${1}-${2} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1
             fi
           }
-          run_suite engine exchange-capabilities 
-          run_suite engine withdrawals
-          run_suite engine cancun
-          run_suite engine api
-          # run_suite engine auth
-          # run_suite rpc compat
+          run_suite engine exchange-capabilities 0
+          run_suite engine withdrawals 2
+          run_suite engine cancun 0
+          run_suite engine api 0
+          # run_suite engine auth 0
+          # run_suite rpc compat 0
         continue-on-error: true
+
       - name: Upload output log
         uses: actions/upload-artifact@v4
         with:
           name: hive-workspace-log
           path: hive/workspace/logs
         continue-on-error: true
+
       - name: Check for failures
         run: |
           if grep -q "failed" hive/failed.log; then
             echo "One or more tests failed."
             exit 1
           fi
+          echo "All tests passed successfully."
+
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
+      - name: Remove Hive directory
+        run: |
+          echo "Removing the Hive directory..."
+          rm -rf hive
+        if: always()
+
+      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
+      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
+      - name: Prune docker
+        run: |
+          echo "Pruning docker..."
+          docker system prune -af --volumes
+        if: always()

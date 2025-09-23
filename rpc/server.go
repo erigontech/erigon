@@ -28,8 +28,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 
-	"github.com/erigontech/erigon-lib/jsonstream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const MetadataApi = "rpc"
@@ -110,7 +110,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClient(codec, s.idgen, &s.services, s.logger)
+	c := initClient(codec, s.idgen, &s.services, s.batchLimit, s.logger)
 	<-codec.closed()
 	c.Close()
 }

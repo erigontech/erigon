@@ -20,14 +20,10 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"sync"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -36,22 +32,9 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
 )
-
-var stateAntiquaryBufSz = etl.BufferOptimalSize / 16 // 18 collectors * 256mb / 16 = 256mb in worst case
-
-const EnabledPreAllocate = true
-
-var etlBufferPool = &sync.Pool{
-	New: func() interface{} {
-		buf := etl.NewSortableBuffer(stateAntiquaryBufSz)
-		// preallocate 20_000 items with a 2MB overflow buffer
-		if EnabledPreAllocate {
-			buf.Prealloc(20_000, int(stateAntiquaryBufSz+2*datasize.MB))
-		}
-		return buf
-	},
-}
 
 // RATIONALE: MDBX locks the entire database when writing to it, so we need to minimize the time spent in the write lock.
 // so instead of writing the historical states on write transactions, we accumulate them in memory and write them in a single  write transaction.
@@ -88,8 +71,6 @@ type beaconStatesCollector struct {
 	pendingConsolidationsWriter *base_encoding.SSZQueueEncoder[*solid.PendingConsolidation]
 	pendingWithdrawalsWriter    *base_encoding.SSZQueueEncoder[*solid.PendingPartialWithdrawal]
 
-	buffers []etl.Buffer
-
 	buf        *bytes.Buffer
 	compressor *zstd.Encoder
 
@@ -104,39 +85,32 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		panic(err)
 	}
 
-	var buffers []etl.Buffer
-	makeETLBuffer := func() etl.Buffer {
-		b := etlBufferPool.Get().(etl.Buffer)
-		b.Reset()
-		buffers = append(buffers, b)
-		return b
-	}
-
+	// 18 collectors * 256mb / 8 = 512mb in worst case
 	return &beaconStatesCollector{
-		effectiveBalanceCollector:        etl.NewCollector(kv.ValidatorEffectiveBalance, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		intraRandaoMixesCollector:        etl.NewCollector(kv.IntraRandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		slashingsCollector:               etl.NewCollector(kv.ValidatorSlashings, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		blockRootsCollector:              etl.NewCollector(kv.BlockRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		stateRootsCollector:              etl.NewCollector(kv.StateRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		slotDataCollector:                etl.NewCollector(kv.SlotData, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		epochDataCollector:               etl.NewCollector(kv.EpochData, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		inactivityScoresCollector:        etl.NewCollector(kv.InactivityScores, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		nextSyncCommitteeCollector:       etl.NewCollector(kv.NextSyncCommittee, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		currentSyncCommitteeCollector:    etl.NewCollector(kv.CurrentSyncCommittee, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		eth1DataVotesCollector:           etl.NewCollector(kv.Eth1DataVotes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		stateEventsCollector:             etl.NewCollector(kv.StateEvents, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		activeValidatorIndiciesCollector: etl.NewCollector(kv.ActiveValidatorIndicies, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
+		effectiveBalanceCollector:        etl.NewCollectorWithAllocator(kv.ValidatorEffectiveBalance, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		balancesCollector:                etl.NewCollectorWithAllocator(kv.ValidatorBalance, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		randaoMixesCollector:             etl.NewCollectorWithAllocator(kv.RandaoMixes, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		intraRandaoMixesCollector:        etl.NewCollectorWithAllocator(kv.IntraRandaoMixes, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		slashingsCollector:               etl.NewCollectorWithAllocator(kv.ValidatorSlashings, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		blockRootsCollector:              etl.NewCollectorWithAllocator(kv.BlockRoot, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		stateRootsCollector:              etl.NewCollectorWithAllocator(kv.StateRoot, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		slotDataCollector:                etl.NewCollectorWithAllocator(kv.SlotData, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		epochDataCollector:               etl.NewCollectorWithAllocator(kv.EpochData, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		inactivityScoresCollector:        etl.NewCollectorWithAllocator(kv.InactivityScores, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		nextSyncCommitteeCollector:       etl.NewCollectorWithAllocator(kv.NextSyncCommittee, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		currentSyncCommitteeCollector:    etl.NewCollectorWithAllocator(kv.CurrentSyncCommittee, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		eth1DataVotesCollector:           etl.NewCollectorWithAllocator(kv.Eth1DataVotes, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		stateEventsCollector:             etl.NewCollectorWithAllocator(kv.StateEvents, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		activeValidatorIndiciesCollector: etl.NewCollectorWithAllocator(kv.ActiveValidatorIndicies, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		balancesDumpsCollector:           etl.NewCollectorWithAllocator(kv.BalancesDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
+		effectiveBalancesDumpCollector:   etl.NewCollectorWithAllocator(kv.EffectiveBalancesDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlTrace),
 		// electra
-		pendingDepositsCollector:           etl.NewCollector(kv.PendingDeposits, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
-		pendingConsolidationsCollector:     etl.NewCollector(kv.PendingConsolidations, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
-		pendingWithdrawalsCollector:        etl.NewCollector(kv.PendingPartialWithdrawals, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
-		pendingDepositsCollectorDump:       etl.NewCollector(kv.PendingDepositsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
-		pendingConsolidationsCollectorDump: etl.NewCollector(kv.PendingConsolidationsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
-		pendingWithdrawalsCollectorDump:    etl.NewCollector(kv.PendingPartialWithdrawalsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingDepositsCollector:           etl.NewCollectorWithAllocator(kv.PendingDeposits, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		pendingConsolidationsCollector:     etl.NewCollectorWithAllocator(kv.PendingConsolidations, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		pendingWithdrawalsCollector:        etl.NewCollectorWithAllocator(kv.PendingPartialWithdrawals, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		pendingDepositsCollectorDump:       etl.NewCollectorWithAllocator(kv.PendingDepositsDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		pendingConsolidationsCollectorDump: etl.NewCollectorWithAllocator(kv.PendingConsolidationsDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		pendingWithdrawalsCollectorDump:    etl.NewCollectorWithAllocator(kv.PendingPartialWithdrawalsDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 
 		pendingDepositsWriter:       base_encoding.NewSSZQueueEncoder[*solid.PendingDeposit](func(a, b *solid.PendingDeposit) bool { return *a == *b }),
 		pendingConsolidationsWriter: base_encoding.NewSSZQueueEncoder[*solid.PendingConsolidation](func(a, b *solid.PendingConsolidation) bool { return *a == *b }),
@@ -147,7 +121,6 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 
 		buf:        buf,
 		compressor: compressor,
-		buffers:    buffers,
 	}
 }
 
@@ -482,13 +455,6 @@ func (i *beaconStatesCollector) close() {
 	i.pendingConsolidationsCollectorDump.Close()
 	i.pendingDepositsCollectorDump.Close()
 	i.pendingWithdrawalsCollectorDump.Close()
-
-	for _, b := range i.buffers {
-		b.Reset()
-	}
-	for _, b := range i.buffers {
-		etlBufferPool.Put(b)
-	}
 }
 
 // antiquateFullUint64List goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.

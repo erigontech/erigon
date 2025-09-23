@@ -20,7 +20,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
 

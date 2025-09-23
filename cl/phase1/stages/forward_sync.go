@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -20,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // shouldProcessBlobs checks if any block in the given list of blocks
@@ -110,10 +109,15 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 }
 
 func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (err error) {
-	var denebBlocks, fuluBlocks []*cltypes.SignedBeaconBlock
+	fuluBlocks := []*cltypes.SignedBlindedBeaconBlock{}
+	denebBlocks := []*cltypes.SignedBeaconBlock{}
 	for _, block := range blocks {
-		if block.Version() >= clparams.FuluVersion {
-			fuluBlocks = append(fuluBlocks, block)
+		blindedBlock, err := block.Blinded()
+		if err != nil {
+			return err
+		}
+		if blindedBlock.Version() >= clparams.FuluVersion {
+			fuluBlocks = append(fuluBlocks, blindedBlock)
 		} else if block.Version() >= clparams.DenebVersion {
 			denebBlocks = append(denebBlocks, block)
 		}
@@ -128,30 +132,21 @@ func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBloc
 	}
 
 	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
-		wg := sync.WaitGroup{} // TODO: remove this bad fix
-		for i := 0; i < len(fuluBlocks); i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				blocks := []*cltypes.SignedBeaconBlock{fuluBlocks[i]}
-				if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
-					if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
-						logger.Warn("[Caplin] Failed to download columns and recover blobs", "err", err)
-					}
-				} else {
-					if err = cfg.peerDas.DownloadOnlyCustodyColumns(ctx, blocks); err != nil {
-						logger.Warn("[Caplin] Failed to download custody columns", "err", err)
-					}
-				}
-			}()
+		if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
+			if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
+				logger.Warn("[Caplin] Failed to download columns and recover blobs", "err", err)
+			}
+		} else {
+			if err = cfg.peerDas.DownloadOnlyCustodyColumns(ctx, fuluBlocks); err != nil {
+				logger.Warn("[Caplin] Failed to download custody columns", "err", err)
+			}
 		}
-		wg.Wait()
 	}
 
 	return nil
 }
 
-func canDownloadColumnData(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
+func canDownloadColumnData(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *Cfg) bool {
 	return cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling
 
 	// todo: comment out for now
@@ -282,19 +277,23 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
-		shouldInsert = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
-		secsPerLog   = 30                                                                   // Interval in seconds for logging progress
-		logTicker    = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
-		downloader   = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
-		currentSlot  atomic.Uint64                                                          // Atomic variable to track the current slot
-		startSlot    = cfg.forkChoice.HighestSeen()
+		shouldInsert  = cfg.executionClient != nil && cfg.executionClient.SupportInsertion() // Check if the execution client supports insertion
+		secsPerLog    = 30                                                                   // Interval in seconds for logging progress
+		logTicker     = time.NewTicker(time.Duration(secsPerLog) * time.Second)              // Ticker for logging progress
+		downloader    = network2.NewForwardBeaconDownloader(ctx, cfg.rpc)                    // Initialize a new forward beacon downloader
+		currentSlot   atomic.Uint64                                                          // Atomic variable to track the current slot
+		startSlot     = cfg.forkChoice.HighestSeen()
+		maxReorgRange = uint64(300) // if node falls too much out of sync, we allow a maximum reorg range of 300 slots
 	)
 	// Start forwardsync a little bit behind the highest seen slot (account for potential reorgs)
-	if startSlot < 8 {
+	if startSlot < maxReorgRange {
 		startSlot = 0
 	} else {
-		startSlot = startSlot - 8
+		startSlot = startSlot - maxReorgRange
 	}
+
+	finalizedSlot := cfg.forkChoice.FinalizedCheckpoint().Epoch * cfg.beaconCfg.SlotsPerEpoch
+	startSlot = max(startSlot, finalizedSlot, cfg.forkChoice.AnchorSlot()) // we cap how low we go with the finalized slot and anchor slot
 
 	// Initialize the slot to download from the finalized checkpoint
 	currentSlot.Store(startSlot)
