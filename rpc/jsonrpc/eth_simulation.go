@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -107,6 +109,13 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	if err != nil {
 		return nil, err
 	}
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if latestBlockNumber < blockNumber {
+		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlockNumber, blockNumber)
+	}
 
 	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
@@ -114,12 +123,6 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	}
 	if block == nil {
 		return nil, errors.New("header not found")
-	}
-
-	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber - 1))
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNumberOrHash, 0, api.filters, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
 	}
 
 	simulatedBlockResults := make([]SimulatedBlockResult, 0, len(req.BlockStateCalls))
@@ -135,13 +138,16 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
+	sharedDomains, err := dbstate.NewSharedDomains(tx, api.logger)
+	if err != nil {
+		return nil, err
+	}
+	defer sharedDomains.Close()
+
 	// Iterate over each given SimulatedBlock
-	intraBlockState := state.New(stateReader)
 	parent := sim.base
 	for index, bsc := range simulatedBlocks {
-		header := headers[index]
-		header.ParentHash = parent.Hash()
-		blockResult, current, err := sim.simulateBlock(ctx, tx, intraBlockState, &bsc, header)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, api._txNumReader, sharedDomains, &bsc, headers[index], parent, blockNumber == latestBlockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -254,7 +260,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 // Some fields will be filled post-execution.
 // Note: this assumes blocks are in order and numbers have been validated, i.e. sanitizeSimulatedBlocks has been called.
 func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error) {
-	parent := s.base
+	header := s.base
 	headers := make([]*types.Header, len(blocks))
 	for bi, block := range blocks {
 		if block.BlockOverrides == nil || block.BlockOverrides.BlockNumber == nil {
@@ -266,42 +272,24 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
-		header := overrides.OverrideHeader(&types.Header{
-			ParentHash:      parent.Hash(),
-			UncleHash:       empty.UncleHash,
-			ReceiptHash:     empty.ReceiptsHash,
-			TxHash:          empty.TxsHash,
-			Coinbase:        parent.Coinbase,
-			Difficulty:      parent.Difficulty,
-			GasLimit:        parent.GasLimit,
-			WithdrawalsHash: withdrawalsHash,
-		})
-		if s.chainConfig.IsLondon(header.Number.Uint64()) {
-			// In non-validation mode base fee is set to 0 if it is not overridden.
-			// This is because it creates an edge case in EVM where gasPrice < baseFee.
-			// Base fee could have been overridden.
-			if header.BaseFee == nil {
-				if s.validation {
-					header.BaseFee = misc.CalcBaseFee(s.chainConfig, parent)
-				} else {
-					header.BaseFee = big.NewInt(0)
-				}
-			}
-		}
-		if s.chainConfig.IsCancun(header.Time) {
-			var excess uint64
-			if s.chainConfig.IsCancun(parent.Time) {
-				excess = misc.CalcExcessBlobGas(s.chainConfig, parent, header.Time)
-			}
-			header.ExcessBlobGas = &excess
-			parentBeaconRoot := &common.Hash{}
+		var parentBeaconRoot *common.Hash
+		if s.chainConfig.IsCancun((uint64)(*overrides.Timestamp)) {
+			parentBeaconRoot = &common.Hash{}
 			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
 			}
-			header.ParentBeaconBlockRoot = parentBeaconRoot
 		}
+		header = overrides.OverrideHeader(&types.Header{
+			UncleHash:             empty.UncleHash,
+			ReceiptHash:           empty.ReceiptsHash,
+			TxHash:                empty.TxsHash,
+			Coinbase:              header.Coinbase,
+			Difficulty:            header.Difficulty,
+			GasLimit:              header.GasLimit,
+			WithdrawalsHash:       withdrawalsHash,
+			ParentBeaconBlockRoot: parentBeaconRoot,
+		})
 		headers[bi] = header
-		parent = header
 	}
 	return headers, nil
 }
@@ -371,16 +359,50 @@ func (s *simulator) sanitizeCall(
 func (s *simulator) simulateBlock(
 	ctx context.Context,
 	tx kv.TemporalTx,
-	intraBlockState *state.IntraBlockState,
+	txNumReader rawdbv3.TxNumsReader,
+	sharedDomains *dbstate.SharedDomains,
 	bsc *SimulatedBlock,
 	header *types.Header,
+	parent *types.Header,
+	latest bool,
 ) (SimulatedBlockResult, *types.Block, error) {
+	header.ParentHash = parent.Hash()
+	if s.chainConfig.IsLondon(header.Number.Uint64()) {
+		// In non-validation mode base fee is set to 0 if not overridden to avoid an edge case in EVM where gasPrice < baseFee.
+		if header.BaseFee == nil {
+			if s.validation {
+				header.BaseFee = misc.CalcBaseFee(s.chainConfig, parent)
+			} else {
+				header.BaseFee = big.NewInt(0)
+			}
+		}
+	}
+	if s.chainConfig.IsCancun(header.Time) {
+		var excess uint64
+		if s.chainConfig.IsCancun(parent.Time) {
+			excess = misc.CalcExcessBlobGas(s.chainConfig, parent, header.Time)
+		}
+		header.ExcessBlobGas = &excess
+	}
+
 	blockHashOverrides := transactions.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers, header.Number.Uint64(), common.Hash{}, common.Hash{}, 0)
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
+
+	var stateReader state.StateReader
+	if latest {
+		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
+	} else {
+		var err error
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, s.base.Number.Uint64(), 0, txNumReader)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	intraBlockState := state.New(stateReader)
 
 	// Override the state before execution.
 	stateOverrides := bsc.StateOverrides
@@ -395,21 +417,60 @@ func (s *simulator) simulateBlock(
 		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
 		vmConfig.Tracer = tracer.Hooks()
 	}
+
+	// Create a custom block context and apply any custom block overrides
+	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.canonicalReader, s.chainConfig,
+		bsc.BlockOverrides, blockHashOverrides)
+
+	minTxNum, err := txNumReader.Min(tx, header.Number.Uint64())
+	if err != nil {
+		return nil, nil, err
+	}
+	txNum := minTxNum
+
+	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+	txNumIncrement := func() {
+		txNum++
+		stateWriter.SetTxNum(txNum)
+		sharedDomains.SetTxNum(txNum)
+	}
+
+	txNumIncrement()
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
-		callResult, txn, receipt, err := s.simulateCall(ctx, tx, intraBlockState, callIndex, &call, bsc.BlockOverrides,
-			blockHashOverrides, header, &cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig)
+		txNumIncrement()
+		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
+			&cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig)
 		if err != nil {
 			return nil, nil, err
 		}
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
+		err = intraBlockState.FinalizeTx(blockCtx.Rules(s.chainConfig), stateWriter)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
+	txNumIncrement()
 	header.GasUsed = cumulativeGasUsed
 	if s.chainConfig.IsCancun(header.Time) {
 		header.BlobGasUsed = &cumulativeBlobGasUsed
 	}
+
+	if err := intraBlockState.CommitBlock(blockCtx.Rules(s.chainConfig), stateWriter); err != nil {
+		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+	}
+
+	// Compute the state root only for the latest state.
+	if latest {
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, false, header.Number.Uint64(), txNum, "eth_simulateV1")
+		if err != nil {
+			return nil, nil, err
+		}
+		header.Root = common.BytesToHash(stateRoot)
+	}
+
 	var withdrawals types.Withdrawals
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
@@ -438,12 +499,10 @@ func (s *simulator) simulateBlock(
 
 func (s *simulator) simulateCall(
 	ctx context.Context,
-	tx kv.TemporalTx,
+	blockCtx evmtypes.BlockContext,
 	intraBlockState *state.IntraBlockState,
 	callIndex int,
 	call *ethapi.CallArgs,
-	blockOverrides *transactions.BlockOverrides,
-	blockHashOverrides transactions.BlockHashOverrides,
 	header *types.Header,
 	cumulativeGasUsed *uint64,
 	cumulativeBlobGasUsed *uint64,
@@ -458,10 +517,6 @@ func (s *simulator) simulateCall(
 		ctx, cancel = context.WithCancel(ctx)
 	}
 	defer cancel()
-
-	// Create a custom block context and apply any custom block overrides
-	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.canonicalReader, s.chainConfig,
-		blockOverrides, blockHashOverrides)
 
 	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasCap)
 	if err != nil {
