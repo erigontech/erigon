@@ -216,7 +216,6 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
-	txType = DynamicFeeTxType
 	var to *common.Address
 	if tr.RandIntInRange(0, 10)%2 == 0 {
 		_to := tr.RandAddress()

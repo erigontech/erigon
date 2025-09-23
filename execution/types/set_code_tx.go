@@ -289,6 +289,13 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.S.SetBytes(b)
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
 	return s.ListEnd()
 }
 
@@ -357,6 +364,11 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
+	//encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+		return err
+	}
+
 	return nil
 
 }

@@ -222,6 +222,10 @@ func (tx *ArbitrumUnsignedTx) payloadSize() (payloadSize int, nonceLen, gasLen i
 	// Data (includes its own header)
 	payloadSize += rlp.StringLen(tx.Data)
 
+	// Timeboosted
+	payloadSize++
+	payloadSize += rlp.BoolLen()
+
 	return payloadSize, nonceLen, gasLen
 }
 
@@ -292,6 +296,11 @@ func (tx *ArbitrumUnsignedTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 	}
 
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+
+	//encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
 		return err
 	}
 
@@ -391,6 +400,13 @@ func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
 
 	// End the RLP list.
 	if err := s.ListEnd(); err != nil {
@@ -607,6 +623,10 @@ func (tx *ArbitrumContractTx) payloadSize() (payloadSize int, gasLen int) {
 	// 8. Data ([]byte): rlp.StringLen returns full encoded length (header + data).
 	payloadSize += rlp.StringLen(tx.Data)
 
+	// Timeboosted
+	payloadSize++
+	payloadSize += rlp.BoolLen()
+
 	return payloadSize, gasLen
 }
 
@@ -687,6 +707,11 @@ func (tx *ArbitrumContractTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 
 	// 8. Data ([]byte)
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+
+	//encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
 		return err
 	}
 
@@ -790,6 +815,13 @@ func (tx *ArbitrumContractTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
 
 	// End the RLP list.
 	if err := s.ListEnd(); err != nil {
@@ -1097,6 +1129,11 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 		return err
 	}
 
+	//encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1151,6 +1188,10 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 	// SubmissionFeeRefund (big.Int)
 	payloadSize++ // header
 	payloadSize += rlp.BigIntLenExcludingHead(tx.SubmissionFeeRefund)
+
+	// Timeboosted (bool)
+	payloadSize++
+	payloadSize += rlp.BoolLen()
 
 	return payloadSize, nonceLen, gasLen
 }
@@ -1276,6 +1317,13 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read SubmissionFeeRefund: %w", err)
 	}
 	tx.SubmissionFeeRefund = new(big.Int).SetBytes(b)
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
 
 	// End list decoding.
 	if err := s.ListEnd(); err != nil {
@@ -1407,6 +1455,7 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	if tx.MaxSubmissionFee != nil {
 		cpy.MaxSubmissionFee.Set(tx.MaxSubmissionFee)
 	}
+	cpy.Timeboosted = tx.Timeboosted
 	return cpy
 }
 
@@ -1502,6 +1551,9 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize() (payloadSize int, gasLen int)
 	size++
 	size += 20
 	size += rlp.StringLen(tx.RetryData)
+	size++
+	size += rlp.BoolLen()
+
 	return size, gasLen
 }
 
@@ -1600,6 +1652,11 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 
 	// RetryData ([]byte)
 	if err := rlp.EncodeString(tx.RetryData, w, b); err != nil {
+		return err
+	}
+
+	//encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
 		return err
 	}
 
@@ -1813,6 +1870,13 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.RetryData, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read RetryData: %w", err)
 	}
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
 
 	// End the RLP list.
 	if err := s.ListEnd(); err != nil {
@@ -2051,6 +2115,9 @@ func (tx *ArbitrumDepositTx) payloadSize() int {
 	size++ // header for Value
 	size += rlp.BigIntLenExcludingHead(tx.Value)
 
+	size++
+	size += rlp.BoolLen()
+
 	return size
 }
 
@@ -2094,6 +2161,11 @@ func (tx *ArbitrumDepositTx) encodePayload(w io.Writer, b []byte, payloadSize in
 
 	// Encode Value.
 	if err := rlp.EncodeBigInt(tx.Value, w, b); err != nil {
+		return err
+	}
+
+	//encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
 		return err
 	}
 
@@ -2147,6 +2219,13 @@ func (tx *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Value: %w", err)
 	}
 	tx.Value = new(big.Int).SetBytes(b)
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
 
 	// End the RLP list.
 	if err := s.ListEnd(); err != nil {
@@ -2315,6 +2394,9 @@ func (tx *ArbitrumInternalTx) payloadSize() int {
 	// Data: rlp.StringLen returns the full encoded length (header + payload)
 	size += rlp.StringLen(tx.Data)
 
+	size++
+	size += rlp.BoolLen()
+
 	return size
 }
 
@@ -2331,6 +2413,11 @@ func (tx *ArbitrumInternalTx) encodePayload(w io.Writer, b []byte, payloadSize i
 
 	// Encode Data
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+
+	//encode Timeboosted
+	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
 		return err
 	}
 
@@ -2371,6 +2458,14 @@ func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	tx.Timeboosted = boolVal
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close ArbitrumInternalTx: %w", err)
 	}

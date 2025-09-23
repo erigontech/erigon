@@ -593,12 +593,11 @@ func BoolLen() int {
 	return IntLenExcludingHead(1)
 }
 
-// EncodeBool writes an RLP-encoded boolean as a fixed 1-byte string:
 func EncodeBool(val bool, w io.Writer, buffer []byte) error {
-	// one for false, two for true
-	intVal := 1
+	// zero for false, one for true
+	intVal := 0
 	if val {
-		intVal = 2
+		intVal = 1
 	}
 	return EncodeInt(uint64(intVal), w, buffer)
 }

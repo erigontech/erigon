@@ -36,7 +36,6 @@ type BlobTx struct {
 	DynamicFeeTransaction
 	MaxFeePerBlobGas    *uint256.Int
 	BlobVersionedHashes []common.Hash
-	Timeboosted         bool
 }
 
 func (stx *BlobTx) Type() byte { return BlobTxType }
@@ -248,6 +247,11 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := rlp.EncodeUint256(&stx.S, w, b); err != nil {
 		return err
 	}
+	//encode Timeboosted
+	if err := rlp.EncodeBool(stx.Timeboosted, w, b); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -374,6 +378,14 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	stx.S.SetBytes(b)
+
+	// decode timeboosted
+	boolVal, err := s.Bool()
+	if err != nil {
+		return err
+	}
+	stx.Timeboosted = boolVal
+
 	return s.ListEnd()
 }
 
