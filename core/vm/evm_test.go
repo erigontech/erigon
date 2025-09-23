@@ -69,7 +69,6 @@ func TestInterpreterReadonly(t *testing.T) {
 			common.Address{},
 			new(uint256.Int),
 			0,
-			false,
 			c,
 		)
 
@@ -327,7 +326,6 @@ func TestReadonlyBasicCases(t *testing.T) {
 					common.Address{},
 					new(uint256.Int),
 					0,
-					false,
 					c,
 				)
 
@@ -420,7 +418,6 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 		common.Address{},
 		new(uint256.Int),
 		0,
-		false,
 		c,
 	)
 
