@@ -17,7 +17,10 @@ type Zk struct {
 	L2DataStreamerTimeout                  time.Duration
 	L2ShortCircuitToVerifiedBatch          bool
 	L1SyncStartBlock                       uint64
-	L1SyncStopBatch                        uint64
+	BlobRecovery                           bool
+	BlobDAUrl                              string
+	BlobRecoveryBlobLimit                  uint64
+	RecoveryStopBatch                      uint64
 	L1ChainId                              uint64
 	L1RpcUrl                               string
 	AddressSequencer                       common.Address
@@ -156,6 +159,10 @@ func (c *Zk) ShouldImportInitialBatch() bool {
 
 func (c *Zk) IsL1Recovery() bool {
 	return c.L1SyncStartBlock > 0
+}
+
+func (c *Zk) IsBlobRecovery() bool {
+	return c.BlobRecovery
 }
 
 type L1InfoTreeOffset struct {
