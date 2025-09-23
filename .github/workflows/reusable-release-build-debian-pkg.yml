@@ -100,7 +100,7 @@ jobs:
           echo "debug end"
           install -v -p ${APPLICATION}_v${VERSION}_linux_${ARCH}/* \
                       deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin
-          dpkg-deb --build --root-owner-group deb-pkg/$APPLICATION_$VERSION_$ARCH
+          dpkg-deb --build --root-owner-group deb-pkg/${APPLICATION}_${VERSION}_${ARCH}
 
       - name: Debug output
         env:
