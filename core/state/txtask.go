@@ -54,7 +54,6 @@ type TxTask struct {
 	Withdrawals     types.Withdrawals
 	BlockHash       common.Hash
 	sender          *common.Address
-	SkipAnalysis    bool
 	TxIndex         int // -1 for block initialisation
 	Final           bool
 	Failed          bool

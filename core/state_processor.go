@@ -122,11 +122,6 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
-
-	// Add addresses to access list if applicable
-	// about the transaction and calling mechanisms.
-	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
-
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
@@ -135,11 +130,6 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 
 func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader, author *common.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
 	// Create a new context to be used in the EVM environment
-
-	// Add addresses to access list if applicable
-	// about the transaction and calling mechanisms.
-	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
-
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 }
@@ -224,7 +214,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 		receipt.GasUsed = result.GasUsed
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
-			receipt.ContractAddress = crypto.CreateAddress(evm.Origin, txn.GetNonce())
+			receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash())
@@ -254,7 +244,7 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (com
 
 	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
-	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
+	// cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs.(*state.IntraBlockState), config, cfg)
@@ -304,6 +294,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 		common.Num0,
 		prevHash[:],
 		types.AccessList{},
+		false,
 		false,
 		false,
 		common.Num0,

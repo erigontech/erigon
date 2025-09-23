@@ -97,7 +97,6 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.header = header
 	e.rules = blockCtx.Rules(e.chainConfig)
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
-	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
 func (e *TraceWorker) GetRawLogs(txIdx int) types.Logs { return e.ibs.GetRawLogs(txIdx) }

@@ -495,8 +495,6 @@ Loop:
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-
 		// TODO add check on arbitrum at all
 		arbosv := types.GetArbOSVersion(header, chainConfig)
 		signer := *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
@@ -551,7 +549,6 @@ Loop:
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
-				SkipAnalysis:    skipAnalysis,
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
