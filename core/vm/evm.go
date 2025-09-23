@@ -255,11 +255,11 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 		var contract *Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.JumpDestCache)
 		} else if typ == DELEGATECALL {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache).AsDelegate()
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.JumpDestCache).AsDelegate()
 		} else {
-			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.JumpDestCache)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
@@ -416,7 +416,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+	contract := NewContract(caller, address, value, gasRemaining, evm.config.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.NoRecursion && depth > 0 {
