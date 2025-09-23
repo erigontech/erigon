@@ -18,7 +18,6 @@ package antiquary
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"os"
 	"strings"
