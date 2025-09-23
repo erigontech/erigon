@@ -7,13 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/services"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
@@ -36,27 +36,11 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 	fromBlock := uint64(1)
 	toBlock, _, _ := txNumsReader.FindBlockNum(tx, rcacheDomainProgress)
 
-	{
-		log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
-		accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
-		if accProgress != rcacheDomainProgress {
-			var execProgressBlock, execStartTxNum, execEndTxNum uint64
-			if execProgressBlock, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-				return err
-			}
-			if execStartTxNum, err = txNumsReader.Min(tx, execProgressBlock); err != nil {
-				return nil
-			}
-			if execEndTxNum, err = txNumsReader.Max(tx, execProgressBlock); err != nil {
-				return nil
-			}
-			err := fmt.Errorf("[integrity] RCacheDomain=%d (block=%d) not equal AccountDomain=%d, while execBlockProgress(block=%d, startTxNum=%d, endTxNum=%d)", rcacheDomainProgress, toBlock, accProgress, execProgressBlock, execStartTxNum, execEndTxNum)
-			log.Warn(err.Error())
-			return err
-		}
+	if err := ValidateDomainProgress(db, kv.RCacheDomain, txNumsReader); err != nil {
+		return err
 	}
 
-	tx.Rollback()
+	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)

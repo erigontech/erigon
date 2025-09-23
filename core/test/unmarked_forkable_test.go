@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type BorSpanRootRelation struct{}

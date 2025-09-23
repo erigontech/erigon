@@ -22,10 +22,11 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/chainspec"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/clique"
@@ -43,7 +44,7 @@ import (
 )
 
 func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
-	heimdallClient heimdall.Client, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
+	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) consensus.Engine {
 	var eng consensus.Engine
@@ -87,7 +88,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "clique", readonly, logger)
+			db, err = node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "clique", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -100,7 +101,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "aura", readonly, logger)
+			db, err = node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "aura", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -118,15 +119,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
 			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
 			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
-
-			var err error
-			var db kv.RwDB
-			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
-			if err != nil {
-				panic(err)
-			}
-
-			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService)
+			eng = bor.New(chainConfig, blockReader, spanner, stateReceiver, logger, polygonBridge, heimdallService)
 		}
 	}
 
@@ -157,5 +150,5 @@ func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Conf
 	}
 
 	return CreateConsensusEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
+		true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
 }

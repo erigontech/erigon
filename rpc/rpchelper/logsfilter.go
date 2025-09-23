@@ -22,8 +22,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type LogsFilterAggregator struct {
@@ -106,10 +106,10 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 
 // createFilterRequest creates a LogsFilterRequest from the current state of the LogsFilterAggregator.
 // It generates a request that represents the union of all current log filters.
-func (a *LogsFilterAggregator) createFilterRequest() *remote.LogsFilterRequest {
+func (a *LogsFilterAggregator) createFilterRequest() *remoteproto.LogsFilterRequest {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
-	return &remote.LogsFilterRequest{
+	return &remoteproto.LogsFilterRequest{
 		AllAddresses: a.aggLogsFilter.allAddrs >= 1,
 		AllTopics:    a.aggLogsFilter.allTopics >= 1,
 	}
@@ -215,7 +215,7 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
-func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) error {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 

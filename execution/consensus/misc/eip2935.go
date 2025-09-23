@@ -19,13 +19,12 @@ package misc
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState, config *chain.Config, headerReader consensus.ChainHeaderReader) error {
@@ -34,7 +33,7 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 		return err
 	}
 	if codeSize == 0 {
-		log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
+		// log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
 		return nil
 	}
 	headerNum := header.Number.Uint64()

@@ -35,12 +35,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -71,7 +71,7 @@ type Filters struct {
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
-func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -235,8 +235,8 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 
 // subscribeToPendingTransactions subscribes to pending transactions using the given transaction pool client.
 // It listens for new transactions and processes them as they arrive.
-func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
-	subscription, err := txPool.OnAdd(ctx, &txpool.OnAddRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpoolproto.TxpoolClient) error {
+	subscription, err := txPool.OnAdd(ctx, &txpoolproto.OnAddRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -257,8 +257,8 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 
 // subscribeToPendingBlocks subscribes to pending blocks using the given mining client.
 // It listens for new pending blocks and processes them as they arrive.
-func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.MiningClient) error {
-	subscription, err := mining.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpoolproto.MiningClient) error {
+	subscription, err := mining.OnPendingBlock(ctx, &txpoolproto.OnPendingBlockRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -285,7 +285,7 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 
 // HandlePendingBlock handles a new pending block received from the mining client.
 // It updates the internal state and notifies subscribers about the new block.
-func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
+func (ff *Filters) HandlePendingBlock(reply *txpoolproto.OnPendingBlockReply) {
 	b := &types.Block{}
 	if reply == nil || len(reply.RplBlock) == 0 {
 		return
@@ -306,8 +306,8 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 
 // subscribeToPendingLogs subscribes to pending logs using the given mining client.
 // It listens for new pending logs and processes them as they arrive.
-func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.MiningClient) error {
-	subscription, err := mining.OnPendingLogs(ctx, &txpool.OnPendingLogsRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpoolproto.MiningClient) error {
+	subscription, err := mining.OnPendingLogs(ctx, &txpoolproto.OnPendingLogsRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -333,7 +333,7 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 
 // HandlePendingLogs handles new pending logs received from the mining client.
 // It updates the internal state and notifies subscribers about the new logs.
-func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
+func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 	if len(reply.RplLogs) == 0 {
 		return
 	}
@@ -501,7 +501,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
-		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
+		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
 			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			ff.logsSubs.removeLogsFilter(id)
 		}
@@ -535,7 +535,7 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	}
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
-		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
+		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
 			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			return isDeleted || ff.logsSubs.removeLogsFilter(id)
 		}
@@ -552,7 +552,7 @@ func (ff *Filters) deleteLogStore(id LogsSubID) {
 }
 
 // OnNewEvent is called when there is a new event from the remote and processes it.
-func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
+func (ff *Filters) OnNewEvent(event *remoteproto.SubscribeReply) {
 	err := ff.onNewEvent(event)
 	if err != nil {
 		ff.logger.Warn("OnNewEvent Filters", "event", event.Type, "err", err)
@@ -560,16 +560,16 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 }
 
 // onNewEvent processes the given event from the remote and updates the internal state.
-func (ff *Filters) onNewEvent(event *remote.SubscribeReply) error {
+func (ff *Filters) onNewEvent(event *remoteproto.SubscribeReply) error {
 	switch event.Type {
-	case remote.Event_HEADER:
+	case remoteproto.Event_HEADER:
 		return ff.onNewHeader(event)
-	case remote.Event_NEW_SNAPSHOT:
+	case remoteproto.Event_NEW_SNAPSHOT:
 		ff.onNewSnapshot()
 		return nil
-	case remote.Event_PENDING_LOGS:
+	case remoteproto.Event_PENDING_LOGS:
 		return ff.onPendingLog(event)
-	case remote.Event_PENDING_BLOCK:
+	case remoteproto.Event_PENDING_BLOCK:
 		return ff.onPendingBlock(event)
 	default:
 		return errors.New("unsupported event type")
@@ -578,7 +578,7 @@ func (ff *Filters) onNewEvent(event *remote.SubscribeReply) error {
 
 // TODO: implement?
 // onPendingLog handles a new pending log event from the remote.
-func (ff *Filters) onPendingLog(event *remote.SubscribeReply) error {
+func (ff *Filters) onPendingLog(event *remoteproto.SubscribeReply) error {
 	//	payload := event.Data
 	//	var logs types.Logs
 	//	err := rlp.Decode(bytes.NewReader(payload), &logs)
@@ -595,7 +595,7 @@ func (ff *Filters) onPendingLog(event *remote.SubscribeReply) error {
 
 // TODO: implement?
 // onPendingBlock handles a new pending block event from the remote.
-func (ff *Filters) onPendingBlock(event *remote.SubscribeReply) error {
+func (ff *Filters) onPendingBlock(event *remoteproto.SubscribeReply) error {
 	//	payload := event.Data
 	//	var block types.Block
 	//	err := rlp.Decode(bytes.NewReader(payload), &block)
@@ -611,7 +611,7 @@ func (ff *Filters) onPendingBlock(event *remote.SubscribeReply) error {
 }
 
 // onNewHeader handles a new block header event from the remote and updates the internal state.
-func (ff *Filters) onNewHeader(event *remote.SubscribeReply) error {
+func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	payload := event.Data
 	var header types.Header
 	if len(payload) == 0 {
@@ -628,7 +628,7 @@ func (ff *Filters) onNewHeader(event *remote.SubscribeReply) error {
 }
 
 // OnNewTx handles a new transaction event from the transaction pool and processes it.
-func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
+func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 	txs := make([]types.Transaction, len(reply.RplTxs))
 	for i, rlpTx := range reply.RplTxs {
 		var decodeErr error
@@ -649,7 +649,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 }
 
 // OnNewLogs handles a new log event from the remote and processes it.
-func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
+func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 	ff.logsSubs.distributeLog(reply)
 }
 

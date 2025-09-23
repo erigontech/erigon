@@ -19,10 +19,12 @@ package sync
 import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/jellydator/ttlcache/v3"
 )
 
 const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
@@ -32,19 +34,27 @@ type CanonicalChainBuilderFactory func(root *types.Header) *CanonicalChainBuilde
 func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
-	blockProducersReader blockProducersReader,
+	blockProducersTracker blockProducersTracker,
 	signaturesCache *lru.ARCCache[common.Hash, common.Address],
+	logger log.Logger,
 ) CanonicalChainBuilderFactory {
+	recentVerifiedHeaders := ttlcache.New[common.Hash, *types.Header](
+		ttlcache.WithTTL[common.Hash, *types.Header](VeBlopBlockTimeout),
+		ttlcache.WithCapacity[common.Hash, *types.Header](DefaultRecentHeadersCapacity),
+		ttlcache.WithDisableTouchOnHit[common.Hash, *types.Header](),
+	)
 	difficultyCalculator := &DifficultyCalculator{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,
-		blockProducersReader: blockProducersReader,
+		blockProducersReader: blockProducersTracker,
 	}
 
 	headerTimeValidator := &HeaderTimeValidator{
-		borConfig:            borConfig,
-		signaturesCache:      signaturesCache,
-		blockProducersReader: blockProducersReader,
+		borConfig:             borConfig,
+		signaturesCache:       signaturesCache,
+		recentVerifiedHeaders: recentVerifiedHeaders,
+		blockProducersTracker: blockProducersTracker,
+		logger:                logger,
 	}
 
 	headerValidator := &HeaderValidator{

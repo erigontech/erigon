@@ -18,6 +18,8 @@ package eth_clock
 
 import (
 	"encoding/binary"
+	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -36,8 +38,9 @@ type EthereumClock interface {
 	IsSlotCurrentSlotWithMaximumClockDisparity(slot uint64) bool
 	GetSlotByTime(time time.Time) uint64
 	GetCurrentEpoch() uint64
-	CurrentForkDigest() (common.Bytes4, error)                             // ComputeForkDigest
-	NextForkDigest() (common.Bytes4, error)                                // ComputeForkDigest
+	CurrentForkDigest() (common.Bytes4, error) // ComputeForkDigest
+	NextForkDigest() (common.Bytes4, error)    // ComputeForkDigest
+	NextForkEpochIncludeBPO() uint64
 	ForkId() ([]byte, error)                                               // ComputeForkId
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
@@ -138,21 +141,11 @@ func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 }
 
 func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
-	currentEpoch := t.GetCurrentEpoch()
-	// Retrieve next fork version.
-	nextForkIndex := 0
-	forkList := forkList(t.beaconCfg.ForkVersionSchedule)
-	for _, fork := range forkList {
-		if currentEpoch >= fork.epoch {
-			nextForkIndex++
-			continue
-		}
-		break
-	}
-	if nextForkIndex-1 == len(forkList)-1 {
+	nextForkEpoch := t.NextForkEpochIncludeBPO()
+	if nextForkEpoch == t.beaconCfg.FarFutureEpoch {
 		return [4]byte{}, nil
 	}
-	return t.computeForkDigestForVersion(forkList[nextForkIndex].version)
+	return t.ComputeForkDigest(nextForkEpoch)
 }
 
 func (t *ethereumClockImpl) ForkId() ([]byte, error) {
@@ -168,22 +161,45 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 	}
 
 	var nextForkVersion [4]byte
-	nextForkEpoch := uint64(0)
 	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
 		if currentEpoch < fork.epoch {
 			nextForkVersion = fork.version
-			nextForkEpoch = fork.epoch
 			break
 		}
 		nextForkVersion = fork.version
 	}
 
 	enrForkId := make([]byte, 16)
-	copy(enrForkId, digest[:])
-	copy(enrForkId[4:], nextForkVersion[:])
-	binary.BigEndian.PutUint64(enrForkId[8:], nextForkEpoch)
-
+	copy(enrForkId, digest[:])                                             // current fork digest
+	copy(enrForkId[4:], nextForkVersion[:])                                // next fork version
+	binary.BigEndian.PutUint64(enrForkId[8:], t.NextForkEpochIncludeBPO()) // next fork epoch
 	return enrForkId, nil
+}
+
+func (t *ethereumClockImpl) NextForkEpochIncludeBPO() uint64 {
+	// collect all fork epochs
+	forkEpochs := make([]uint64, 0)
+	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+		forkEpochs = append(forkEpochs, fork.epoch)
+	}
+	// collect all BPO epochs
+	for _, blobSchedule := range t.beaconCfg.BlobSchedule {
+		forkEpochs = append(forkEpochs, blobSchedule.Epoch)
+	}
+	slices.Sort(forkEpochs)
+	// find the next fork epoch
+	currentEpoch := t.GetCurrentEpoch()
+	nextForkEpoch := t.beaconCfg.FarFutureEpoch
+	for _, forkEpoch := range forkEpochs {
+		if forkEpoch > currentEpoch {
+			nextForkEpoch = forkEpoch
+			break
+		}
+	}
+	if nextForkEpoch == math.MaxUint64 {
+		nextForkEpoch = t.beaconCfg.FarFutureEpoch
+	}
+	return nextForkEpoch
 }
 
 func (t *ethereumClockImpl) LastFork() (common.Bytes4, error) {

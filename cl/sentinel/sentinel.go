@@ -40,8 +40,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
@@ -53,10 +52,11 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 const (
@@ -134,6 +134,7 @@ func (s *Sentinel) createLocalNode(
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
 	s.setupENR(localNode)
+	go s.updateENR(localNode)
 
 	return localNode, nil
 }
@@ -260,7 +261,7 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	s.peers = peers.NewPool()
+	s.peers = peers.NewPool(host)
 
 	mux := chi.NewRouter()
 	//	mux := httpreqresp.NewRequestHandler(host)
@@ -281,27 +282,32 @@ func New(
 func (s *Sentinel) observeBandwidth(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
-		countSubnetsSubscribed := func() int {
-			count := 0
+		countAttSubnetsSubscribed, countColumnSidecarSubscribed := func() (attCount int, columnSidecarCount int) {
 			if s.subManager == nil {
-				return count
+				return
 			}
 			s.GossipManager().subscriptions.Range(func(key, value any) bool {
 				sub := value.(*GossipSubscription)
+				sub.lock.Lock()
+				defer sub.lock.Unlock()
 				if sub.topic == nil {
 					return true
 				}
 				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
-					count++
+					attCount++
+				}
+				if strings.Contains(sub.topic.String(), "data_column_sidecar") && sub.subscribed.Load() {
+					columnSidecarCount++
 				}
 				return true
 			})
-			return count
+			return
 		}()
 
 		multiplierForAdaptableTraffic := 1.0
 		if s.cfg.AdaptableTrafficRequirements {
-			multiplierForAdaptableTraffic = ((float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+			multiplierForAdaptableTraffic = ((float64(countAttSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+			multiplierForAdaptableTraffic += ((float64(countColumnSidecarSubscribed) / float64(s.cfg.BeaconConfig.NumberOfColumns)) * 16)
 		}
 		select {
 		case <-ctx.Done():
@@ -498,13 +504,13 @@ func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int)
 	return
 }
 
-func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
+func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 	peers := s.host.Network().Peers()
 
-	out := &sentinelrpc.PeersInfoResponse{Peers: make([]*sentinelrpc.Peer, 0, len(peers))}
+	out := &sentinelproto.PeersInfoResponse{Peers: make([]*sentinelproto.Peer, 0, len(peers))}
 
 	for _, p := range peers {
-		entry := &sentinelrpc.Peer{}
+		entry := &sentinelproto.Peer{}
 		peerInfo := s.host.Network().Peerstore().PeerInfo(p)
 		if len(peerInfo.Addrs) == 0 {
 			continue
