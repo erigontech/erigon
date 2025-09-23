@@ -298,6 +298,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		var applyReceipts []*types.Receipt
 		if txTask.TxIndex >= 0 && txTask.TxIndex < len(blockReceipts) {
 			applyReceipts = blockReceipts[txTask.TxIndex : txTask.TxIndex+1]
+		} else {
+			applyReceipts = []*types.Receipt{nil}
 		}
 
 		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
