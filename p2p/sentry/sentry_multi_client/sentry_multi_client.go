@@ -87,8 +87,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []sentryproto.MessageId{
-		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
-		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH68][eth.GetBlockBodiesMsg],
+		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
 		eth.ToProto[direct.ETH69][eth.GetReceiptsMsg],
 		wit.ToProto[direct.WIT0][wit.GetWitnessMsg],
 	}
@@ -105,7 +105,7 @@ func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []sentryproto.MessageId{
-		eth.ToProto[direct.ETH67][eth.GetBlockHeadersMsg],
+		eth.ToProto[direct.ETH68][eth.GetBlockHeadersMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -120,10 +120,10 @@ func (cs *MultiClient) RecvMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []sentryproto.MessageId{
-		eth.ToProto[direct.ETH67][eth.BlockHeadersMsg],
-		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
-		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
-		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
+		eth.ToProto[direct.ETH68][eth.BlockHeadersMsg],
+		eth.ToProto[direct.ETH68][eth.BlockBodiesMsg],
+		eth.ToProto[direct.ETH68][eth.NewBlockHashesMsg],
+		eth.ToProto[direct.ETH68][eth.NewBlockMsg],
 		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
 		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 		eth.ToProto[direct.ETH69][eth.BlockRangeUpdateMsg],

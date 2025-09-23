@@ -33,7 +33,7 @@ import (
 )
 
 func TestCheckPeerStatusCompatibility(t *testing.T) {
-	var version uint = direct.ETH67
+	var version uint = direct.ETH68
 	networkID := chainspec.Mainnet.Config.ChainID.Uint64()
 	heightForks, timeForks := forkid.GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	goodReply := eth.StatusPacket{
@@ -69,14 +69,14 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = direct.ETH67 - 1
+		reply.ProtocolVersion = direct.ETH68 - 1
 		err := compatStatusPacket(reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = direct.ETH67 + 1
+		reply.ProtocolVersion = direct.ETH68 + 1
 		err := compatStatusPacket(reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is more")

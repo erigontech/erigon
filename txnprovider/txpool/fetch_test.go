@@ -51,7 +51,7 @@ func TestFetch(t *testing.T) {
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH67, m, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
