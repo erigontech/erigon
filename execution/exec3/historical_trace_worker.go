@@ -203,7 +203,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
 			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
-			rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
 			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()

@@ -209,7 +209,6 @@ type TxTask struct {
 	Txs                types.Transactions
 	Uncles             []*types.Header
 	Withdrawals        types.Withdrawals
-	SkipAnalysis       bool
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[common.Address]uint256.Int
@@ -434,7 +433,6 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 		if callTracer != nil {
 			vmCfg.Tracer = callTracer.Tracer().Hooks
 		}
-		vmCfg.SkipAnalysis = t.SkipAnalysis
 		msg, err := t.TxMessage()
 
 		if err != nil {

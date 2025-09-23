@@ -520,7 +520,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
-			skipAnalysis := core.SkipAnalysis(te.cfg.chainConfig, blockNum)
 			getHashFnMutex := sync.Mutex{}
 
 			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
@@ -553,7 +552,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 					Header:          header,
 					Uncles:          b.Uncles(),
 					Txs:             txs,
-					SkipAnalysis:    skipAnalysis,
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
 					// use history reader instead of state reader to catch up to the tx where we left off
