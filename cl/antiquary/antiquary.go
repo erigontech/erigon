@@ -151,7 +151,6 @@ func (a *Antiquary) Loop() error {
 			}
 		}
 	}
-	fmt.Println("via")
 
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
