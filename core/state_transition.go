@@ -109,7 +109,6 @@ type Message interface {
 	FeeCap() *uint256.Int
 	TipCap() *uint256.Int
 	Gas() uint64
-	CheckGas() bool
 	BlobGas() uint64
 	MaxFeePerBlobGas() *uint256.Int
 	Value() *uint256.Int
@@ -340,7 +339,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
 	}
 
@@ -362,7 +361,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	msg := st.msg
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
-	sender := vm.AccountRef(msg.From())
+	sender := msg.From()
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -471,7 +470,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	msg := st.msg
-	sender := vm.AccountRef(msg.From())
+	sender := msg.From()
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -480,7 +479,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
-		nonce, err := st.state.GetNonce(sender.Address())
+		nonce, err := st.state.GetNonce(sender)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
