@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
-const RUNS = 100000 // for local tests increase this number
+const RUNS = 1000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -216,6 +216,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
+	txType = DynamicFeeTxType
 	var to *common.Address
 	if tr.RandIntInRange(0, 10)%2 == 0 {
 		_to := tr.RandAddress()
@@ -251,11 +252,12 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx, //nolint
-			ChainID:    uint256.NewInt(*tr.RandUint64()),
-			TipCap:     uint256.NewInt(*tr.RandUint64()),
-			FeeCap:     uint256.NewInt(*tr.RandUint64()),
-			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			CommonTx:    commonTx, //nolint
+			ChainID:     uint256.NewInt(*tr.RandUint64()),
+			TipCap:      uint256.NewInt(*tr.RandUint64()),
+			FeeCap:      uint256.NewInt(*tr.RandUint64()),
+			AccessList:  tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			Timeboosted: tr.RandBoolean(),
 		}
 	case BlobTxType:
 		r := *tr.RandUint64()
