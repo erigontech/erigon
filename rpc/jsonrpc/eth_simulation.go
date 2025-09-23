@@ -515,7 +515,8 @@ func (s *simulator) simulateCall(
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
-			Log: *l,
+			Log:            *l,
+			BlockTimestamp: header.Time,
 		}
 		callResult.Logs = append(callResult.Logs, rpcLog)
 	}
