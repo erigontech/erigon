@@ -288,6 +288,8 @@ func (s *Sentinel) observeBandwidth(ctx context.Context) {
 			}
 			s.GossipManager().subscriptions.Range(func(key, value any) bool {
 				sub := value.(*GossipSubscription)
+				sub.lock.Lock()
+				defer sub.lock.Unlock()
 				if sub.topic == nil {
 					return true
 				}

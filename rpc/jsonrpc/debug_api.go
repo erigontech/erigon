@@ -367,7 +367,7 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 		return nil, err
 	}
 	if header == nil {
-		return nil, errors.New("header not found")
+		return nil, nil
 	}
 	return rlp.EncodeToBytes(header)
 }
@@ -388,7 +388,7 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		return nil, err
 	}
 	if block == nil {
-		return nil, errors.New("block not found")
+		return nil, nil
 	}
 	return rlp.EncodeToBytes(block)
 }

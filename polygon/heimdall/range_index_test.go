@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 type rangeIndexTest struct {
@@ -50,7 +50,7 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 
 	require.NoError(t, err)
 
-	index := NewRangeIndex(polygoncommon.AsDatabase(db), "RangeIndex")
+	index := NewRangeIndex(polygondb.AsDatabase(db), "RangeIndex")
 
 	t.Cleanup(db.Close)
 
