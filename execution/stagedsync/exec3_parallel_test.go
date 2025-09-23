@@ -1,5 +1,4 @@
-//go:build !windows
-//go:build integration
+//go:build integration && !windows
 
 // these tests have cleanup issues for mdbx on windows
 package stagedsync
