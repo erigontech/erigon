@@ -455,7 +455,8 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interfa
 
 	blocks, err := rawdb.GetLatestBadBlocks(tx)
 	if err != nil || len(blocks) == 0 {
-		return nil, err
+		// Return empty array if no bad blocks found to align with other clients and spec
+		return []map[string]interface{}{}, err
 	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
