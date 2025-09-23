@@ -579,7 +579,7 @@ func (s *Sync) asyncBackwardDownloadBlockBatches(
 	go func() {
 		err := s.backwardDownloadBlockBatches(ctx, fromHash, fromNum, fromPeerId, eventSource, ccb)
 		if err != nil {
-			s.logger.Error(
+			s.logger.Warn(
 				syncLogPrefix("failed to backward download blocks"),
 				"blockNum", fromNum,
 				"blockHash", fromHash,
