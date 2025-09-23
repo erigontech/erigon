@@ -206,6 +206,7 @@ type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer common.Address, number uint64) (int, error)
 }
 
+//go:generate mockgen -typed=true -destination=./span_reader_mock.go -package=bor . spanReader
 type spanReader interface {
 	Span(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
 	Producers(ctx context.Context, blockNum uint64) (*heimdall.ValidatorSet, error)

@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -194,12 +193,12 @@ Loop:
 		"rcache", tx.Debug().DomainProgress(kv.RCacheDomain))
 
 	if cfg.Produce.ReceiptDomain {
-		if err := AssertNotBehindAccounts(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
+		if err := integrity.ValidateDomainProgress(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
 			return err
 		}
 	}
 	if cfg.Produce.RCacheDomain {
-		if err := AssertNotBehindAccounts(cfg.db, kv.RCacheDomain, txNumsReader); err != nil {
+		if err := integrity.ValidateDomainProgress(cfg.db, kv.RCacheDomain, txNumsReader); err != nil {
 			return err
 		}
 	}
@@ -281,26 +280,6 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		return err
 	}
 
-	return nil
-}
-
-func AssertNotBehindAccounts(db kv.TemporalRoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
-	tx, err := db.BeginTemporalRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	receiptProgress := tx.Debug().DomainProgress(domain)
-	accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
-	if accProgress != receiptProgress {
-		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
-		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
-
-		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
-		log.Warn(err.Error())
-		return nil
-	}
 	return nil
 }
 

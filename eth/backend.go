@@ -537,7 +537,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
 			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
-			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
+			var sideProtocols []sentryproto.Protocol
+			if stack.Config().P2P.EnableWitProtocol {
+				sideProtocols = append(sideProtocols, sentryproto.Protocol_WIT0)
+			}
+			sentryClient, err := direct.NewSentryClientDirect(protocol, server, sideProtocols)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create sentry client: %w", err)
+			}
+			sentries = append(sentries, sentryClient)
 		}
 
 		go func() {
@@ -1082,6 +1090,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.notifications,
 			backend.engineBackendRPC,
 			backend,
+			config.Dirs.Tmp,
 		)
 
 		// we need to initiate download before the heimdall services start rather than
