@@ -22,12 +22,12 @@ package vm
 import (
 	"fmt"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/core/tracing"
 )
 
@@ -52,6 +52,7 @@ type Contract struct {
 	self          common.Address
 	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
+	skipAnalysis  bool
 
 	Code     []byte
 	CodeHash common.Hash
@@ -114,6 +115,9 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	if OpCode(c.Code[udest]) != JUMPDEST {
 		return false, false
 	}
+	if c.skipAnalysis {
+		return true, false
+	}
 	return c.isCode(udest), true
 }
 
@@ -156,8 +160,8 @@ func (c *Contract) isCode(udest uint64) bool {
 func (c *Contract) AsDelegate() *Contract {
 	// For delegate calls, we need to use the caller's caller address
 	// and inherit the value from the parent call
-	// Since we removed ContractRef, we need to handle this differently
-	// The caller address and value should be set by the caller of this method
+	// Since we removed ContractRef, the caller address should be set by the caller
+	// of this method before calling AsDelegate()
 	return c
 }
 
