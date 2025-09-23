@@ -84,7 +84,7 @@ type EVM struct {
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
-		if txCtx.GasPrice.IsZero() {
+		if txCtx.GasPrice != nil && txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
 		}
 	}
@@ -259,7 +259,7 @@ func (evm *EVM) call(typ OpCode, caller common.Address, addr common.Address, inp
 			// The caller address should remain the same as the current contract's caller
 			contract = NewContract(caller, caller, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 		} else {
-			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.JumpDestCache)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
@@ -416,7 +416,7 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+	contract := NewContract(caller, address, value, gasRemaining, evm.config.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.NoRecursion && depth > 0 {

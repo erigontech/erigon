@@ -29,6 +29,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -188,13 +189,22 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 	}
 
 	for _, s := range sentries {
-		_, err := s.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
-			Id:   sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
-			Data: data,
-		})
+		handshake, err := s.HandShake(ctx, &emptypb.Empty{})
 		if err != nil {
 			cs.logger.Error("blockRangeUpdate", "err", err)
 			continue // continue sending message to other sentries
+		}
+
+		version := direct.ProtocolToUintMap[handshake.Protocol]
+		if version >= direct.ETH69 {
+			_, err := s.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
+				Id:   sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
+				Data: data,
+			})
+			if err != nil {
+				cs.logger.Error("blockRangeUpdate", "err", err)
+				continue // continue sending message to other sentries
+			}
 		}
 	}
 }

@@ -239,7 +239,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 	return msg, nil
 }
 
@@ -576,8 +576,15 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
-				// TODO: error handling
-				cpy, _ := tracers.GetMemoryCopyPadded(memory, int64(ot.lastMemOff), int64(ot.lastMemLen))
+				cpy, err := tracers.GetMemoryCopyPadded(memory, int64(ot.lastMemOff), int64(ot.lastMemLen))
+				if err != nil {
+					log.Warn("Failed to copy memory for trace output; this may happen with invalid offset/length",
+						"off", ot.lastMemOff,
+						"len", ot.lastMemLen,
+						"err", err,
+						"hint", "May affect trace completeness; consider enabling debug logs for deeper insight")
+					cpy = make([]byte, ot.lastMemLen)
+				}
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
