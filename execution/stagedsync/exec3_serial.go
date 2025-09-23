@@ -285,6 +285,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				}
 			}
 		}
+
 		if !txTask.HistoryExecution {
 			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
 				logIndexAfterTx -= uint32(len(result.Logs))
@@ -294,8 +295,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 		}
 
+		var applyReceipts []*types.Receipt
+		if txTask.TxIndex >= 0 && txTask.TxIndex < len(blockReceipts) {
+			applyReceipts = blockReceipts[txTask.TxIndex : txTask.TxIndex+1]
+		}
+
 		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
-			txTask.BalanceIncreaseSet, blockReceipts, result.Logs, result.TraceFroms, result.TraceTos,
+			txTask.BalanceIncreaseSet, applyReceipts, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
 			return false, err
 		}
