@@ -244,11 +244,11 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) {
 		}
 
 		if resettable, ok := rw.stateReader.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))
+			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
 		}
 
 		if resettable, ok := rw.stateWriter.(resettable); ok {
-			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx.(kv.TemporalTx)))
+			resettable.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -350,7 +350,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 	}
 
 	if rw.background && rw.chainTx == nil {
-		chainTx, err := rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx)
+		chainTx, err := rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx) //nolint
 
 		if err != nil {
 			return &exec.TxResult{

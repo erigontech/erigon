@@ -79,7 +79,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 		if applyTx != nil {
 			se.applyTx = applyTx
 		} else {
-			applyTx, err := se.cfg.db.BeginRo(ctx)
+			applyTx, err := se.cfg.db.BeginRo(ctx) //nolint
 			if err != nil {
 				applyTx.Rollback()
 				return err

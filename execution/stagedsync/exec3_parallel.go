@@ -613,8 +613,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 		}
 
 		t2 = time.Since(tt)
-		dbtx, err := te.cfg.db.BeginRw(ctx)
-
+		dbtx, err := te.cfg.db.BeginRw(ctx) //nolint
 		if err != nil {
 			return nil, t2, err
 		}
@@ -1336,7 +1335,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if !ok {
 					return errors.New("pe.cfg.db is not a temporal db")
 				}
-				pe.applyTx, err = temporalDb.BeginTemporalRo(ctx)
+				pe.applyTx, err = temporalDb.BeginTemporalRo(ctx) //nolint
 
 				if err != nil {
 					return err
