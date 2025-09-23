@@ -41,3 +41,7 @@ const ArbosVersion_StylusFixes = ArbosVersion_31
 const ArbosVersion_StylusChargingFixes = ArbosVersion_32
 const MaxArbosVersionSupported = ArbosVersion_32
 const MaxDebugArbosVersionSupported = ArbosVersion_32
+
+func IsStylus(arbosVersion uint64) bool {
+	return arbosVersion >= ArbosVersion_Stylus
+}
