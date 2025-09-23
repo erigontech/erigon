@@ -1,9 +1,8 @@
 //go:build !windows
+//go:build integration
 
 // these tests have cleanup issues for mdbx on windows
 package stagedsync
-
-///go:build integration
 
 import (
 	"context"
