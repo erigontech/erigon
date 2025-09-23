@@ -1227,7 +1227,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 			panic(genesisErr)
 		}
 	}
-	//logger.Info("Initialised chain configuration", "config", chainConfig)
+
+	logger.Info("Initialised chain configuration", "config", chainConfig)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
