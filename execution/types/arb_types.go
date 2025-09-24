@@ -456,6 +456,10 @@ func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
 	panic("implement me")
 }
 
+func (t *ArbitrumUnsignedTx) IsTimeBoosted() bool {
+	return t.Timeboosted
+}
+
 // func (tx *ArbitrumUnsignedTx) gas() uint64         {  }
 // func (tx *ArbitrumUnsignedTx) gasPrice() *big.Int  { return tx.GasFeeCap }
 // func (tx *ArbitrumUnsignedTx) gasTipCap() *big.Int { return bigZero }
@@ -897,6 +901,10 @@ func (tx *ArbitrumContractTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	}
 //	return dst.Set(baseFee)
 //}
+
+func (t *ArbitrumContractTx) IsTimeBoosted() bool {
+	return t.Timeboosted
+}
 
 type ArbitrumRetryTx struct {
 	ChainId             *big.Int
@@ -1371,6 +1379,10 @@ func (tx *ArbitrumRetryTx) IsContractDeploy() bool {
 
 func (tx *ArbitrumRetryTx) Unwrap() Transaction {
 	return tx
+}
+
+func (t *ArbitrumRetryTx) IsTimeBoosted() bool {
+	return t.Timeboosted
 }
 
 // func (tx *ArbitrumRetryTx) chainID() *big.Int            { return tx.ChainId }
@@ -1924,6 +1936,10 @@ func (tx *ArbitrumSubmitRetryableTx) Unwrap() Transaction {
 	return tx
 }
 
+func (t *ArbitrumSubmitRetryableTx) IsTimeBoosted() bool {
+	return t.Timeboosted
+}
+
 // func (tx *ArbitrumSubmitRetryableTx) chainID() *big.Int            { return tx.ChainId }
 // func (tx *ArbitrumSubmitRetryableTx) accessList() types.AccessList { return nil }
 // func (tx *ArbitrumSubmitRetryableTx) gas() uint64                  { return tx.Gas }
@@ -2279,6 +2295,10 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, d)
 }
 
+func (d *ArbitrumDepositTx) IsTimeBoosted() bool {
+	return d.Timeboosted
+}
+
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)
 //}
@@ -2515,6 +2535,10 @@ func (t *ArbitrumInternalTx) encode(b *bytes.Buffer) error {
 }
 func (t *ArbitrumInternalTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, t)
+}
+
+func (t *ArbitrumInternalTx) IsTimeBoosted() bool {
+	return t.Timeboosted
 }
 
 //func (tx *ArbitrumInternalTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {

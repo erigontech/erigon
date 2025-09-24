@@ -178,6 +178,10 @@ func (tx *ArbitrumLegacyTxData) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
+func (t *ArbitrumLegacyTxData) IsTimeBoosted() bool {
+	return false
+}
+
 type arbitrumLegacyTxJSON struct {
 	Type              hexutil.Uint64  `json:"type"`
 	Hash              common.Hash     `json:"hash"`

@@ -105,6 +105,10 @@ func (tx *AccessListTx) Unwrap() Transaction {
 	return tx
 }
 
+func (tx *AccessListTx) IsTimeBoosted() bool {
+	return tx.Timeboosted
+}
+
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx *AccessListTx) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
@@ -154,7 +158,7 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	// Timeboosted
 	payloadSize++
 	payloadSize += rlp.BoolLen()
-	
+
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 

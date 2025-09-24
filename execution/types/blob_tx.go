@@ -389,6 +389,10 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
+func (tx *BlobTx) IsTimeBoosted() bool {
+	return tx.Timeboosted
+}
+
 func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {

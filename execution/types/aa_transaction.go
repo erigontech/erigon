@@ -91,6 +91,10 @@ func (tx *AccountAbstractionTransaction) Unwrap() Transaction {
 	return tx
 }
 
+func (tx *AccountAbstractionTransaction) IsTimeBoosted() bool {
+	return false
+}
+
 func (tx *AccountAbstractionTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }

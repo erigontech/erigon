@@ -103,6 +103,7 @@ type Transaction interface {
 	SetSender(common.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
+	IsTimeBoosted() bool
 }
 
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
