@@ -2077,7 +2077,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	// }()
 
 	defer logEvery.Stop()
-	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
+	var tries []*trie.Trie = make([]*trie.Trie, 0, 1000) // slice of tries, i.e the witness for each key, these will be all merged into single trie
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
