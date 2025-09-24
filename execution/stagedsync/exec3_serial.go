@@ -270,9 +270,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 						if result.Err != nil {
 							return false, fmt.Errorf("error while finding last receipt: %w", result.Err)
 						}
-						cumulativeGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-1)
-						if err != nil {
-							return false, err
+						var cumulativeGasUsed uint64
+						var logIndexAfterTx uint32
+						if txTask.TxIndex > 1 {
+							cumulativeGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2)
+							if err != nil {
+								return false, err
+							}
 						}
 						lastReceipt, err = result.CreateReceipt(txTask.TxIndex-1,
 							cumulativeGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
