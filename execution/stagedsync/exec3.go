@@ -483,6 +483,7 @@ type Progress struct {
 func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevExecTime)
+	seconds := interval.Seconds()
 
 	var suffix string
 	var execVals []interface{}
@@ -562,10 +563,10 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		}
 
 		avgTaskGas = curTaskGas / curActivations
-		avgTaskGasPerSec = int64(float64(avgTaskGas) / interval.Seconds())
+		avgTaskGasPerSec = int64(float64(avgTaskGas) / seconds)
 	}
 
-	curTaskGasPerSec := int64(float64(curTaskGas) / interval.Seconds())
+	curTaskGasPerSec := int64(float64(curTaskGas) / seconds)
 
 	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas)
 	sizeEstimate := rs.SizeEstimate()
@@ -611,14 +612,14 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		curReadCount := int64(readCount - p.prevReadCount)
 		curWriteCount := int64(writeCount - p.prevWriteCount)
 
-		curReadRate := uint64(float64(curReadCount) / interval.Seconds())
-		curWriteRate := uint64(float64(curWriteCount) / interval.Seconds())
+		curReadRate := uint64(float64(curReadCount) / seconds)
+		curWriteRate := uint64(float64(curWriteCount) / seconds)
 
 		mxExecReadRate.SetUint64(curReadRate)
 		mxExecWriteRate.SetUint64(curWriteRate)
-		mxExecAccountReadRate.Set(float64(curAccountReadCount) / interval.Seconds())
-		mxExecStorageReadRate.Set(float64(curStorageReadCount) / interval.Seconds())
-		mxExecCodeReadRate.Set(float64(curCodeReadCount) / interval.Seconds())
+		mxExecAccountReadRate.Set(float64(curAccountReadCount) / seconds)
+		mxExecStorageReadRate.Set(float64(curStorageReadCount) / seconds)
+		mxExecCodeReadRate.Set(float64(curCodeReadCount) / seconds)
 
 		mxExecGasPerTxn.Set(float64(avgTaskGas))
 		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
@@ -660,15 +661,15 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		execVals = []interface{}{
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
-			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"tdur", common.Round(avgTaskDur, 0),
+			"trdur", fmt.Sprintf("%v(%.2f%%)", common.Round(avgReadDur, 0), readRatio),
 			"rd", common.PrettyCounter(curReadCount),
-			"rd/s", common.PrettyCounter(uint64(float64(curReadCount) / interval.Seconds())),
+			"rd/s", common.PrettyCounter(uint64(float64(curReadCount) / seconds)),
 			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
 		}
 	}
 
-	executedGasSec := uint64(float64(te.executedGas.Load()-p.prevExecutedGas) / interval.Seconds())
+	executedGasSec := uint64(float64(te.executedGas.Load()-p.prevExecutedGas) / seconds)
 
 	if executedGas := te.executedGas.Load(); executedGas > 0 {
 		mxExecMGasSec.Set((float64(executedGasSec) / 1e6))
@@ -677,13 +678,13 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	var executedTxSec uint64
 
 	if uint64(te.lastExecutedTxNum.Load()) > p.prevExecutedTxNum {
-		executedTxSec = uint64(float64(uint64(te.lastExecutedTxNum.Load())-p.prevExecutedTxNum) / interval.Seconds())
+		executedTxSec = uint64(float64(uint64(te.lastExecutedTxNum.Load())-p.prevExecutedTxNum) / seconds)
 	}
 	executedDiffBlocks := max(te.lastExecutedBlockNum.Load()-int64(p.prevExecutedBlockNum), 0)
 	executedDiffTxs := uint64(max(te.lastExecutedTxNum.Load()-int64(p.prevExecutedTxNum), 0))
 
 	mxExecBlocks.Add(float64(executedDiffBlocks))
-	mxExecTransactions.Set(float64(executedDiffTxs) / interval.Seconds())
+	mxExecTransactions.Set(float64(executedDiffTxs) / seconds)
 	mxExecTxnPerBlock.Set(float64(executedDiffBlocks) / float64(executedDiffTxs))
 
 	p.log("executed", suffix, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,

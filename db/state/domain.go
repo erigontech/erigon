@@ -1712,38 +1712,12 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found {
-		domainMetrics.Lock()
-		domainMetrics.DbReadCount++
-		readDuration := time.Since(start)
-		domainMetrics.DbReadDuration += readDuration
-		if dm, ok := domainMetrics.Domains[dt.name]; ok {
-			dm.DbReadCount++
-			dm.DbReadDuration += readDuration
-		} else {
-			domainMetrics.Domains[dt.name] = &DomainIOMetrics{
-				DbReadCount:    1,
-				DbReadDuration: readDuration,
-			}
-		}
-		domainMetrics.Unlock()
+		domainMetrics.updateDbReads(dt, start)
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	domainMetrics.Lock()
-	domainMetrics.DbReadCount++
-	readDuration := time.Since(start)
-	domainMetrics.DbReadDuration += readDuration
-	if dm, ok := domainMetrics.Domains[dt.name]; ok {
-		dm.DbReadCount++
-		dm.DbReadDuration += readDuration
-	} else {
-		domainMetrics.Domains[dt.name] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
-	domainMetrics.Unlock()
+	domainMetrics.updateFileReads(dt, start)
 
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)

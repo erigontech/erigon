@@ -65,6 +65,57 @@ type DomainMetrics struct {
 	Domains map[kv.Domain]*DomainIOMetrics
 }
 
+func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	domainMetrics.CacheReadCount++
+	readDuration := time.Since(start)
+	dm.CacheReadDuration += readDuration
+	if d, ok := domainMetrics.Domains[domain]; ok {
+		d.CacheReadCount++
+		d.CacheReadDuration += readDuration
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			CacheReadCount:    1,
+			CacheReadDuration: readDuration,
+		}
+	}
+}
+
+func (dm *DomainMetrics) updateDbReads(dt *DomainRoTx, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.DbReadCount++
+	readDuration := time.Since(start)
+	dm.DbReadDuration += readDuration
+	if d, ok := dm.Domains[dt.name]; ok {
+		d.DbReadCount++
+		d.DbReadDuration += readDuration
+	} else {
+		dm.Domains[dt.name] = &DomainIOMetrics{
+			DbReadCount:    1,
+			DbReadDuration: readDuration,
+		}
+	}
+}
+
+func (dm *DomainMetrics) updateFileReads(dt *DomainRoTx, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.FileReadCount++
+	readDuration := time.Since(start)
+	dm.FileReadDuration += readDuration
+	if dm, ok := dm.Domains[dt.name]; ok {
+		dm.FileReadCount++
+		dm.FileReadDuration += readDuration
+	} else {
+		domainMetrics.Domains[dt.name] = &DomainIOMetrics{
+			FileReadCount:    1,
+			FileReadDuration: readDuration,
+		}
+	}
+}
+
 var domainMetrics = DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}}
 
 type DomainIOMetrics struct {
@@ -270,20 +321,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	start := time.Now()
 	if v, prevStep, ok := sd.mem.GetLatest(domain, k); ok {
-		domainMetrics.Lock()
-		domainMetrics.CacheReadCount++
-		readDuration := time.Since(start)
-		domainMetrics.CacheReadDuration += readDuration
-		if dm, ok := domainMetrics.Domains[domain]; ok {
-			dm.CacheReadCount++
-			dm.CacheReadDuration += readDuration
-		} else {
-			domainMetrics.Domains[domain] = &DomainIOMetrics{
-				CacheReadCount:    1,
-				CacheReadDuration: readDuration,
-			}
-		}
-		domainMetrics.Unlock()
+		domainMetrics.updateCacheReads(domain, start)
 		return v, prevStep, nil
 	}
 	v, step, err = tx.GetLatest(domain, k)
