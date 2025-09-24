@@ -576,7 +576,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
 		//cachedWriter := noop
 
-		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
 		ot.config, err = parseOeTracerConfig(traceConfig)

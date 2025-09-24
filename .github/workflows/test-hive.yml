@@ -93,11 +93,13 @@ jobs:
             fi
           }
           run_suite engine exchange-capabilities 0
-          run_suite engine withdrawals 2
+          run_suite engine withdrawals 0
           run_suite engine cancun 0
           run_suite engine api 0
-          # run_suite engine auth 0
-          # run_suite rpc compat 0
+          # 3 failures out of 8 tests at time of writing
+          run_suite engine auth 3
+          # 100 failures out of 190 tests at time of writing
+          run_suite rpc compat 100
         continue-on-error: true
 
       - name: Upload output log
