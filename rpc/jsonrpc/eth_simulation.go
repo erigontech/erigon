@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -54,7 +55,7 @@ const (
 	timestampIncrement = 12
 )
 
-// SimulationRequest represents the parameters for an eth_simulateV1 call.
+// SimulationRequest represents the parameters for an eth_simulateV1 request.
 type SimulationRequest struct {
 	BlockStateCalls        []SimulatedBlock `json:"blockStateCalls"`
 	TraceTransfers         bool             `json:"traceTransfers"`
@@ -78,13 +79,14 @@ type CallResult struct {
 	Error      interface{}     `json:"error,omitempty"`
 }
 
-type RPCBlock map[string]interface{}
-
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
 type SimulatedBlockResult map[string]interface{}
 
+// SimulationResult represents the result contained in an eth_simulateV1 response.
+type SimulationResult []SimulatedBlockResult
+
 // SimulateV1 implements the eth_simulateV1 JSON-RPC method.
-func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) ([]SimulatedBlockResult, error) {
+func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error) {
 	if len(req.BlockStateCalls) == 0 {
 		return nil, errors.New("empty input")
 	}
@@ -105,7 +107,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, blockParameter, tx, api._blockReader, api.filters)
+	blockNumber, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockParameter, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlockNumber, blockNumber)
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -125,10 +127,16 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, errors.New("header not found")
 	}
 
-	simulatedBlockResults := make([]SimulatedBlockResult, 0, len(req.BlockStateCalls))
+	simulatedBlockResults := make(SimulationResult, 0, len(req.BlockStateCalls))
 
-	// Create a simulator instance to help with sanitization
-	sim := newSimulator(&req, block.Header(), chainConfig, api.engine(), api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout)
+	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
+	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a simulator instance to help with input sanitisation and execution of the simulated blocks.
+	sim := newSimulator(&req, block.Header(), chainConfig, api.engine(), api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, commitmentHistory)
 	simulatedBlocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
 	if err != nil {
 		return nil, err
@@ -159,17 +167,18 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 }
 
 type simulator struct {
-	base             *types.Header
-	chainConfig      *chain.Config
-	engine           consensus.EngineReader
-	canonicalReader  services.CanonicalReader
-	logger           log.Logger
-	gasCap           uint64
-	returnDataLimit  int
-	evmCallTimeout   time.Duration
-	traceTransfers   bool
-	validation       bool
-	fullTransactions bool
+	base              *types.Header
+	chainConfig       *chain.Config
+	engine            consensus.EngineReader
+	canonicalReader   services.CanonicalReader
+	logger            log.Logger
+	gasCap            uint64
+	returnDataLimit   int
+	evmCallTimeout    time.Duration
+	commitmentHistory bool
+	traceTransfers    bool
+	validation        bool
+	fullTransactions  bool
 }
 
 func newSimulator(
@@ -182,19 +191,21 @@ func newSimulator(
 	gasCap uint64,
 	returnDataLimit int,
 	evmCallTimeout time.Duration,
+	commitmentHistory bool,
 ) *simulator {
 	return &simulator{
-		base:             header,
-		chainConfig:      chainConfig,
-		engine:           engine,
-		canonicalReader:  canonicalReader,
-		logger:           logger,
-		gasCap:           gasCap,
-		returnDataLimit:  returnDataLimit,
-		evmCallTimeout:   evmCallTimeout,
-		traceTransfers:   req.TraceTransfers,
-		validation:       req.Validation,
-		fullTransactions: req.ReturnFullTransactions,
+		base:              header,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		canonicalReader:   canonicalReader,
+		logger:            logger,
+		gasCap:            gasCap,
+		returnDataLimit:   returnDataLimit,
+		evmCallTimeout:    evmCallTimeout,
+		commitmentHistory: commitmentHistory,
+		traceTransfers:    req.TraceTransfers,
+		validation:        req.Validation,
+		fullTransactions:  req.ReturnFullTransactions,
 	}
 }
 
@@ -256,8 +267,9 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 	return sanitizedBlocks, nil
 }
 
-// makeHeaders makes Header objects with preliminary fields based on a simulated blocks.
-// Some fields will be filled post-execution.
+// makeHeaders makes Header objects with preliminary fields based on simulated blocks. Not all header fields are filled here:
+// some of them will be filled post-simulation because dependent on the execution result, some others post-simulation of
+// the parent header.
 // Note: this assumes blocks are in order and numbers have been validated, i.e. sanitizeSimulatedBlocks has been called.
 func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error) {
 	header := s.base
@@ -294,6 +306,7 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 	return headers, nil
 }
 
+// sanitizeCall checks and fills missing fields in call arguments, returning an error if it cannot fix them.
 func (s *simulator) sanitizeCall(
 	args *ethapi.CallArgs,
 	intraBlockState *state.IntraBlockState,
@@ -385,20 +398,42 @@ func (s *simulator) simulateBlock(
 		header.ExcessBlobGas = &excess
 	}
 
+	blockNumber := header.Number.Uint64()
+
 	blockHashOverrides := transactions.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
-	tracer := rpchelper.NewLogTracer(s.traceTransfers, header.Number.Uint64(), common.Hash{}, common.Hash{}, 0)
+	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
+
+	minTxNum, err := txNumReader.Min(tx, blockNumber)
+	if err != nil {
+		return nil, nil, err
+	}
+	txnIndex := len(bsc.Calls)
+	txNum := minTxNum + 1 + uint64(txnIndex)
+	sharedDomains.SetBlockNum(blockNumber)
+	sharedDomains.SetTxNum(txNum)
+	sharedDomains.GetCommitmentContext().SetTxNum(txNum)
 
 	var stateReader state.StateReader
 	if latest {
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
 	} else {
 		var err error
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, s.base.Number.Uint64(), 0, txNumReader)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber, txnIndex, txNumReader)
 		if err != nil {
+			return nil, nil, err
+		}
+
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if txNum < commitmentStartingTxNum {
+			return nil, nil, state.PrunedError
+		}
+
+		sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum, false)
+		if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -422,23 +457,9 @@ func (s *simulator) simulateBlock(
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.canonicalReader, s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
 
-	minTxNum, err := txNumReader.Min(tx, header.Number.Uint64())
-	if err != nil {
-		return nil, nil, err
-	}
-	txNum := minTxNum
-
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
-	txNumIncrement := func() {
-		txNum++
-		stateWriter.SetTxNum(txNum)
-		sharedDomains.SetTxNum(txNum)
-	}
-
-	txNumIncrement()
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
-		txNumIncrement()
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
 			&cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig)
 		if err != nil {
@@ -452,7 +473,6 @@ func (s *simulator) simulateBlock(
 			return nil, nil, err
 		}
 	}
-	txNumIncrement()
 	header.GasUsed = cumulativeGasUsed
 	if s.chainConfig.IsCancun(header.Time) {
 		header.BlobGasUsed = &cumulativeBlobGasUsed
@@ -462,13 +482,15 @@ func (s *simulator) simulateBlock(
 		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 	}
 
-	// Compute the state root only for the latest state.
-	if latest {
+	// Compute the state root for execution on the latest state and also on the historical state if commitment history is present.
+	if latest || s.commitmentHistory {
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, false, header.Number.Uint64(), txNum, "eth_simulateV1")
 		if err != nil {
 			return nil, nil, err
 		}
 		header.Root = common.BytesToHash(stateRoot)
+	} else {
+		// We cannot compute the state root for historical state w/o commitment history, so we just use the zero hash (default value).
 	}
 
 	var withdrawals types.Withdrawals
@@ -487,6 +509,7 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
+	// Marshal the block in RPC format including the call results in a custom field.
 	additionalFields := make(map[string]interface{})
 	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
 	if err != nil {
@@ -497,6 +520,7 @@ func (s *simulator) simulateBlock(
 	return blockResult, block, nil
 }
 
+// simulateCall simulates a single call in the EVM using the given intra-block state and possibly tracing transfers.
 func (s *simulator) simulateCall(
 	ctx context.Context,
 	blockCtx evmtypes.BlockContext,
@@ -598,7 +622,7 @@ func (s *simulator) simulateCall(
 			callResult.ReturnData = fmt.Sprintf("0x%x", result.ReturnData)
 		}
 	}
-	// Set the sender just to make it appear in the result in case it was provided in the request.
+	// Set the sender just to make it appear in the result if it was provided in the request.
 	if call.From != nil {
 		txn.SetSender(*call.From)
 	}
@@ -615,6 +639,7 @@ func repairLogs(calls []CallResult, hash common.Hash) {
 	}
 }
 
+// txValidationError maps errors from core.ApplyMessage to appropriate JSON-RPC errors.
 func txValidationError(err error) error {
 	if err == nil {
 		return nil
