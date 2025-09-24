@@ -305,10 +305,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 
 	var fromBlock uint64
 	var toBlock uint64
+	var err error
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		fromBlock = uint64(*req.FromBlock)
+		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, api.filters)
+		if err != nil {
+			return err
+		}
 	}
 
 	if req.ToBlock == nil {
@@ -318,7 +322,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		}
 		toBlock = *headNumber
 	} else {
-		toBlock = uint64(*req.ToBlock)
+		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, api.filters)
+		if err != nil {
+			return err
+		}
 	}
 	if fromBlock > toBlock {
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
@@ -921,13 +928,13 @@ func (api *TraceAPIImpl) callTransaction(
 
 // TraceFilterRequest represents the arguments for trace_filter
 type TraceFilterRequest struct {
-	FromBlock   *hexutil.Uint64   `json:"fromBlock"`
-	ToBlock     *hexutil.Uint64   `json:"toBlock"`
-	FromAddress []*common.Address `json:"fromAddress"`
-	ToAddress   []*common.Address `json:"toAddress"`
-	Mode        TraceFilterMode   `json:"mode"`
-	After       *uint64           `json:"after"`
-	Count       *uint64           `json:"count"`
+	FromBlock   *rpc.BlockNumberOrHash `json:"fromBlock"`
+	ToBlock     *rpc.BlockNumberOrHash `json:"toBlock"`
+	FromAddress []*common.Address      `json:"fromAddress"`
+	ToAddress   []*common.Address      `json:"toAddress"`
+	Mode        TraceFilterMode        `json:"mode"`
+	After       *uint64                `json:"after"`
+	Count       *uint64                `json:"count"`
 }
 
 type TraceFilterMode string
