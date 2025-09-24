@@ -124,10 +124,9 @@ type blockResult struct {
 
 type txResult struct {
 	blockNum     uint64
-	txCount      uint64
 	txNum        uint64
 	gasUsed      int64
-	receipts     []*types.Receipt
+	receipt      *types.Receipt
 	logs         []*types.Log
 	traceFroms   map[common.Address]struct{}
 	traceTos     map[common.Address]struct{}
@@ -143,6 +142,7 @@ type execTask struct {
 
 type execResult struct {
 	*exec.TxResult
+	stateUpdates *state.StateUpdates
 }
 
 func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
@@ -739,7 +739,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
-	be.results[tx] = &execResult{res}
+	be.results[tx] = &execResult{res, nil}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(core.ErrExecAbortError); ok {
 			if execErr.OriginError != nil && be.skipCheck[tx] {
@@ -873,7 +873,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	cntInvalid := 0
 	var stateReader state.StateReader
-	var stateWriter *state.BufferedWriter
 
 	for i := 0; i < len(toValidate); i++ {
 
@@ -925,13 +924,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txResult := be.results[tx]
 
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
-					fmt.Println("Gas Limit Reached", be.blockNum, txVersion.TxIndex, txResult.ExecutionResult.GasUsed)
-					for _, result := range be.results {
-						if result != nil {
-							fmt.Println(be.blockNum, fmt.Sprintf("%d.%d", result.Version().TxIndex, result.Version().Incarnation),
-								"gas", result.ExecutionResult.GasUsed)
-						}
-					}
 					return nil, err
 				}
 
@@ -949,15 +941,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
 				}
 
-				if stateWriter == nil {
-					stateWriter = state.NewBufferedWriter(pe.rs, nil)
-				}
+				stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
 				_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
 
 				if err != nil {
 					return nil, err
 				}
+
+				stateUpdates := stateWriter.WriteSet()
+				txResult.stateUpdates = &stateUpdates
 
 				be.publishTasks.pushPending(tx)
 			}
@@ -984,52 +977,47 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	be.scheduleExecution(ctx, pe)
 
 	if be.publishTasks.minPending() != -1 {
-		toFinalize := make(sort.IntSlice, 0, 2)
+		toPublish := make(sort.IntSlice, 0, 2)
 
 		for be.publishTasks.minPending() <= maxValidated && be.publishTasks.minPending() >= 0 {
-			toFinalize = append(toFinalize, be.publishTasks.takeNextPending())
+			toPublish = append(toPublish, be.publishTasks.takeNextPending())
 		}
 
-		applyResult := txResult{
-			blockNum:   be.blockNum,
-			traceFroms: map[common.Address]struct{}{},
-			traceTos:   map[common.Address]struct{}{},
-		}
+		for i := 0; i < len(toPublish); i++ {
+			tx := toPublish[i]
+			task := be.tasks[tx].Task
+			result := be.results[tx]
 
-		for i := 0; i < len(toFinalize); i++ {
-			tx := toFinalize[i]
-			txTask := be.tasks[tx].Task
-			txResult := be.results[tx]
-
-			applyResult.txCount++
-			applyResult.txNum = txTask.Version().TxNum
-			if txResult.Receipt != nil {
-				applyResult.gasUsed += int64(txResult.Receipt.GasUsed)
-				be.gasUsed += txResult.Receipt.GasUsed
-				applyResult.receipts = append(applyResult.receipts, txResult.Receipt)
+			applyResult := txResult{
+				blockNum:   be.blockNum,
+				traceFroms: map[common.Address]struct{}{},
+				traceTos:   map[common.Address]struct{}{},
+				txNum:      task.Version().TxNum,
+				rules:      task.Rules(),
 			}
 
-			applyResult.rules = txTask.Rules()
-			applyResult.logs = append(applyResult.logs, txResult.Logs...)
-			maps.Copy(applyResult.traceFroms, txResult.TraceFroms)
-			maps.Copy(applyResult.traceTos, txResult.TraceTos)
+			if result.Receipt != nil {
+				applyResult.gasUsed += int64(result.Receipt.GasUsed)
+				be.gasUsed += result.Receipt.GasUsed
+				applyResult.receipt = result.Receipt
+			}
+
+			applyResult.logs = append(applyResult.logs, result.Logs...)
+			maps.Copy(applyResult.traceFroms, result.TraceFroms)
+			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
-		}
 
-		if applyResult.txCount > 0 {
 			pe.executedGas.Add(int64(applyResult.gasUsed))
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-			if stateWriter != nil {
-				applyResult.stateUpdates = stateWriter.WriteSet()
-
+			if result.stateUpdates != nil {
+				applyResult.stateUpdates = *result.stateUpdates
 				if applyResult.stateUpdates.BTreeG != nil {
 					be.applyCount += applyResult.stateUpdates.UpdateCount()
 					if dbg.TraceApply {
 						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, dbg.TraceBlock(applyResult.blockNum))
 					}
 				}
-				stateWriter = nil
 			}
 
 			be.applyResults <- &applyResult

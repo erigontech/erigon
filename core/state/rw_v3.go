@@ -179,13 +179,13 @@ func (rs *StateV3) SetTxNum(blockNum, txNum uint64) {
 	rs.domains.SetBlockNum(blockNum)
 }
 
-func (rs *StateV3) ApplyState4(ctx context.Context,
+func (rs *StateV3) ApplyTxState(ctx context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
 	txNum uint64,
 	accountUpdates StateUpdates,
 	balanceIncreases map[common.Address]uint256.Int,
-	receipts []*types.Receipt,
+	receipt *types.Receipt,
 	logs []*types.Log,
 	traceFroms map[common.Address]struct{},
 	traceTos map[common.Address]struct{},
@@ -201,7 +201,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 
-	if err := rs.applyLogsAndTraces4(roTx, txNum, receipts, logs, traceFroms, traceTos); err != nil {
+	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, logs, traceFroms, traceTos); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -218,7 +218,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}) error {
 	domains := rs.domains
 	for addr := range traceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txNum); err != nil {
@@ -244,10 +244,8 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipts 
 	}
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
-		for _, receipt := range receipts {
-			if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
-				return err
-			}
+		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
+			return err
 		}
 	}
 
@@ -578,10 +576,6 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 }
 
 func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
-
-func (w *Writer) WriteSet() map[string]*dbstate.KvList {
-	return nil
-}
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil

@@ -1496,15 +1496,15 @@ func ExecV3(ctx context.Context,
 					switch applyResult := applyResult.(type) {
 					case *txResult:
 						uncommittedGas += applyResult.gasUsed
-						uncommittedTransactions += applyResult.txCount
+						uncommittedTransactions++
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 							pe.rs.SetTrace(true)
 							fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
 						}
 						blockUpdateCount += applyResult.stateUpdates.UpdateCount()
-						err := pe.rs.ApplyState4(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
-							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+						err := pe.rs.ApplyTxState(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
+							nil, applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, applyResult.rules, false)
 						blockApplyCount += applyResult.stateUpdates.UpdateCount()
 						pe.rs.SetTrace(false)

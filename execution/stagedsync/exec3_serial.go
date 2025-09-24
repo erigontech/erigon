@@ -295,15 +295,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 		}
 
-		var applyReceipts []*types.Receipt
+		var applyReceipt *types.Receipt
 		if txTask.TxIndex >= 0 && txTask.TxIndex < len(blockReceipts) {
-			applyReceipts = blockReceipts[txTask.TxIndex : txTask.TxIndex+1]
-		} else {
-			applyReceipts = []*types.Receipt{nil}
+			applyReceipt = blockReceipts[txTask.TxIndex]
 		}
 
-		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
-			txTask.BalanceIncreaseSet, applyReceipts, result.Logs, result.TraceFroms, result.TraceTos,
+		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
+			txTask.BalanceIncreaseSet, applyReceipt, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
 			return false, err
 		}
