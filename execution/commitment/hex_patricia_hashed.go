@@ -2079,21 +2079,23 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		select {
-		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		if ki%1024 == 0 {
+			select {
+			case <-logEvery.C:
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
+					"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
-		default:
+			default:
+			}
 		}
 
-		var tr *trie.Trie
 		if hph.trace {
 			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 
+		var tr *trie.Trie
 		var update *Update
 		if len(plainKey) == hph.accountKeyLen { // account
 			update, err = hph.ctx.Account(plainKey)
