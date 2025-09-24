@@ -495,7 +495,6 @@ Loop:
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		getHashFnMute := &sync.Mutex{}
@@ -548,7 +547,6 @@ Loop:
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
-				SkipAnalysis:    skipAnalysis,
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
@@ -827,6 +825,14 @@ Loop:
 		// special err allows the loop to continue, caller will call us again to continue from where we left off
 		// only return it if we haven't reached the maxBlockNum
 		return errExhausted
+	}
+
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && b != nil {
+		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
+		// However, we should still at the very least report the last block number to it, so it can update its block progress.
+		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
+		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
+		cfg.notifications.Accumulator.StartChange(b.HeaderNoCopy(), nil, false /* unwind */)
 	}
 
 	return nil
