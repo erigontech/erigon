@@ -172,12 +172,21 @@ func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sent
 func (ms *MockSentry) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-func (ms *MockSentry) PeerMinBlock(context.Context, *sentryproto.PeerMinBlockRequest) (*emptypb.Empty, error) {
+
+func (ms *MockSentry) SetPeerMinimumBlock(context.Context, *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+
+func (ms *MockSentry) SetPeerLatestBlock(context.Context, *sentryproto.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+
+func (ms *MockSentry) SetPeerBlockRange(context.Context, *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
 func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
-	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil
+	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
 func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
@@ -347,7 +356,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
-	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
+	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
+	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
@@ -414,6 +424,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		mock.Genesis,
 		mock.ChainConfig.ChainID.Uint64(),
 		logger,
+		mock.BlockReader,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }

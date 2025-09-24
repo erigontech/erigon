@@ -57,7 +57,7 @@ func (htv *HeaderTimeValidator) ValidateHeaderTime(
 	if err != nil {
 		return err
 	}
-	htv.logger.Debug("validating header time:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers.ValidatorAddresses())
+	htv.logger.Debug("validating header time:", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "parentHash", parent.Hash(), "signer", signer, "producers", producers)
 
 	// Rio/VeBlop checks for new span if block signer is different from producer
 	if htv.borConfig.IsRio(header.Number.Uint64()) {

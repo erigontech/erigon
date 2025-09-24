@@ -67,7 +67,6 @@ var (
 )
 
 const (
-	changesetSafeRange     = 32   // Safety net for long-sync, keep last 32 changesets
 	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind
 )
 
@@ -294,11 +293,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
-	if blockNum < cfg.blockReader.FrozenBlocks() {
-		shouldGenerateChangesets = false
-	}
-
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
@@ -372,24 +366,26 @@ func ExecV3(ctx context.Context,
 				accumulator:    accumulator,
 				isMining:       isMining,
 				inMemExec:      inMemExec,
+				initialCycle:   initialCycle,
 				applyTx:        applyTx,
 				applyWorker:    applyWorker,
+				inputBlockNum:  inputBlockNum,
+				maxBlockNum:    maxBlockNum,
 				outputTxNum:    &outputTxNum,
 				outputBlockNum: stages.SyncMetrics[stages.Execution],
 				logger:         logger,
 			},
-			shouldGenerateChangesets: shouldGenerateChangesets,
-			workerCount:              workerCount,
-			pruneEvery:               pruneEvery,
-			logEvery:                 logEvery,
-			progress:                 progress,
+			workerCount: workerCount,
+			pruneEvery:  pruneEvery,
+			logEvery:    logEvery,
+			progress:    progress,
 		}
 
 		executorCancel := pe.run(ctx, maxTxNum, logger)
 		defer executorCancel()
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			progress.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangeSets(), inMemExec)
 		}()
 
 		executor = pe
@@ -406,8 +402,11 @@ func ExecV3(ctx context.Context,
 				u:              u,
 				isMining:       isMining,
 				inMemExec:      inMemExec,
+				initialCycle:   initialCycle,
 				applyTx:        applyTx,
 				applyWorker:    applyWorker,
+				inputBlockNum:  inputBlockNum,
+				maxBlockNum:    maxBlockNum,
 				outputTxNum:    &outputTxNum,
 				outputBlockNum: stages.SyncMetrics[stages.Execution],
 				logger:         logger,
@@ -415,7 +414,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs, inMemExec)
+			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, se.shouldGenerateChangeSets() || cfg.syncCfg.KeepExecutionProofs, inMemExec)
 		}()
 
 		executor = se
@@ -450,27 +449,13 @@ func ExecV3(ctx context.Context,
 	}
 
 	var b *types.Block
-
-	// Only needed by bor chains
-	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 	var errExhausted *ErrLoopExhausted
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
-		// where during initial sync we can expect bogus blocks to be imported.
-		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
-			start := time.Now()
-			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
-			// First compute and commit the progress done so far
-			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix()); err != nil {
-				return err
-			}
-			computeCommitmentDuration += time.Since(start)
-			shouldGenerateChangesets = true // now we can generate changesets for the safety net
-		}
+		shouldGenerateChangesets := shouldGenerateChangeSets(cfg, blockNum, maxBlockNum, initialCycle)
 		changeSet := &changeset2.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
 			executor.domains().SetChangesetAccumulator(changeSet)
@@ -510,7 +495,6 @@ Loop:
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		getHashFnMute := &sync.Mutex{}
@@ -563,7 +547,6 @@ Loop:
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
-				SkipAnalysis:    skipAnalysis,
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
@@ -844,6 +827,14 @@ Loop:
 		return errExhausted
 	}
 
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && b != nil {
+		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
+		// However, we should still at the very least report the last block number to it, so it can update its block progress.
+		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
+		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
+		cfg.notifications.Accumulator.StartChange(b.HeaderNoCopy(), nil, false /* unwind */)
+	}
+
 	return nil
 }
 
@@ -1010,4 +1001,18 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 		return nil, nil
 	}
 	return b, err
+}
+
+func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+	if cfg.syncCfg.AlwaysGenerateChangesets {
+		return true
+	}
+	if blockNum < cfg.blockReader.FrozenBlocks() {
+		return false
+	}
+	if initialCycle {
+		return false
+	}
+	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
+	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
 }
