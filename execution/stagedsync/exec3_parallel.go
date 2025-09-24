@@ -1276,7 +1276,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 	defer pe.Unlock()
 
 	for _, worker := range pe.execWorkers {
-		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		worker.ResetState(rs, applyTx, nil, state.NewNoopWriter(), nil)
 	}
 
 	return nil

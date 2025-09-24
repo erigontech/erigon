@@ -1736,7 +1736,9 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	executor.wait(ctx)
+	if err := executor.wait(ctx); err != nil {
+		return fmt.Errorf("executer wait failed: %w", err)
+	}
 
 	if false && !inMemExec {
 		dumpPlainStateDebug(applyTx, executor.domains())
