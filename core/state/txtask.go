@@ -146,11 +146,9 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 	}
 
 	cumulativeGasUsed += t.GasUsed
-	if !t.Rules.IsArbitrum {
-		if t.GasUsed == 0 {
-			msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
-			panic(msg)
-		}
+	if t.GasUsed == 0  && !t.Rules.IsArbitrum {
+		msg := fmt.Sprintf("assert: no gas used, bn=%d, tn=%d, ti=%d", t.BlockNum, t.TxNum, t.TxIndex)
+		panic(msg)
 	}
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
