@@ -68,10 +68,10 @@ type DomainMetrics struct {
 func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
-	domainMetrics.CacheReadCount++
+	dm.CacheReadCount++
 	readDuration := time.Since(start)
 	dm.CacheReadDuration += readDuration
-	if d, ok := domainMetrics.Domains[domain]; ok {
+	if d, ok := dm.Domains[domain]; ok {
 		d.CacheReadCount++
 		d.CacheReadDuration += readDuration
 	} else {
@@ -82,41 +82,39 @@ func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
 	}
 }
 
-func (dm *DomainMetrics) updateDbReads(dt *DomainRoTx, start time.Time) {
+func (dm *DomainMetrics) updateDbReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.DbReadCount++
 	readDuration := time.Since(start)
 	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[dt.name]; ok {
+	if d, ok := dm.Domains[domain]; ok {
 		d.DbReadCount++
 		d.DbReadDuration += readDuration
 	} else {
-		dm.Domains[dt.name] = &DomainIOMetrics{
+		dm.Domains[domain] = &DomainIOMetrics{
 			DbReadCount:    1,
 			DbReadDuration: readDuration,
 		}
 	}
 }
 
-func (dm *DomainMetrics) updateFileReads(dt *DomainRoTx, start time.Time) {
+func (dm *DomainMetrics) updateFileReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
 	dm.FileReadCount++
 	readDuration := time.Since(start)
 	dm.FileReadDuration += readDuration
-	if dm, ok := dm.Domains[dt.name]; ok {
-		dm.FileReadCount++
-		dm.FileReadDuration += readDuration
+	if d, ok := dm.Domains[domain]; ok {
+		d.FileReadCount++
+		d.FileReadDuration += readDuration
 	} else {
-		domainMetrics.Domains[dt.name] = &DomainIOMetrics{
+		dm.Domains[domain] = &DomainIOMetrics{
 			FileReadCount:    1,
 			FileReadDuration: readDuration,
 		}
 	}
 }
-
-var domainMetrics = DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}}
 
 type DomainIOMetrics struct {
 	CacheReadCount    int64
@@ -143,6 +141,7 @@ type SharedDomains struct {
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               *TemporalMemBatch
+	metrics           DomainMetrics
 }
 
 type HasAgg interface {
@@ -153,9 +152,10 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		mem: newTemporalMemBatch(tx),
+		metrics:  DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}},
+		stepSize: tx.Debug().StepSize(),
 	}
-	sd.stepSize = tx.Debug().StepSize()
+	sd.mem = newTemporalMemBatch(tx, &sd.metrics)
 
 	tv := commitment.VariantHexPatriciaTrie
 	if statecfg.ExperimentalConcurrentCommitment {
@@ -241,6 +241,12 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
+	sd.metrics.Lock()
+	defer sd.metrics.Unlock()
+	sd.metrics.CachePutSize -= sd.mem.putCacheSize
+	if sd.metrics.CachePutSize < 0 {
+		sd.metrics.CachePutSize = 0
+	}
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
@@ -321,10 +327,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	start := time.Now()
 	if v, prevStep, ok := sd.mem.GetLatest(domain, k); ok {
-		domainMetrics.updateCacheReads(domain, start)
+		sd.metrics.updateCacheReads(domain, start)
 		return v, prevStep, nil
 	}
-	v, step, err = tx.GetLatest(domain, k)
+	if aggTx, ok := tx.AggTx().(*AggregatorRoTx); ok {
+		v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
+	} else {
+		v, step, err = tx.GetLatest(domain, k)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -333,28 +343,28 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 }
 
 func (sd *SharedDomains) Metrics() *DomainMetrics {
-	return &domainMetrics
+	return &sd.metrics
 }
 
 func (sd *SharedDomains) LogMetrics() []any {
 	var metrics []any
 
-	domainMetrics.RLock()
-	defer domainMetrics.RUnlock()
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
 
-	if readCount := domainMetrics.CacheReadCount; readCount > 0 {
+	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
-			"puts", common.PrettyCounter(domainMetrics.CachePutCount), "size", common.PrettyCounter(domainMetrics.CachePutSize),
-			"gets", common.PrettyCounter(domainMetrics.CacheGetCount), "size", common.PrettyCounter(domainMetrics.CacheGetSize),
-			"cdur", common.Round(domainMetrics.CacheReadDuration/time.Duration(readCount), 0))
+			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
+			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
-	if readCount := domainMetrics.DbReadCount; readCount > 0 {
-		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(domainMetrics.DbReadDuration/time.Duration(readCount), 0))
+	if readCount := sd.metrics.DbReadCount; readCount > 0 {
+		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
 	}
 
-	if readCount := domainMetrics.FileReadCount; readCount > 0 {
-		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(domainMetrics.DbReadDuration/time.Duration(readCount), 0))
+	if readCount := sd.metrics.FileReadCount; readCount > 0 {
+		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
 	}
 
 	return metrics
@@ -363,10 +373,10 @@ func (sd *SharedDomains) LogMetrics() []any {
 func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	var logMetrics = map[kv.Domain][]any{}
 
-	domainMetrics.RLock()
-	defer domainMetrics.RUnlock()
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
 
-	for domain, dm := range domainMetrics.Domains {
+	for domain, dm := range sd.metrics.Domains {
 		var metrics []any
 
 		if readCount := dm.CacheReadCount; readCount > 0 {

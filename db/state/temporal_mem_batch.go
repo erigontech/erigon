@@ -60,11 +60,13 @@ type TemporalMemBatch struct {
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
+	metrics                   *DomainMetrics
 }
 
-func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
+func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
+		metrics: metrics,
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -113,9 +115,9 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		}
 
 		sd.putCacheSize += putSize
-		domainMetrics.Lock()
-		domainMetrics.CachePutSize += putSize
-		domainMetrics.Unlock()
+		sd.metrics.Lock()
+		sd.metrics.CachePutSize += putSize
+		sd.metrics.Unlock()
 		return
 	}
 
@@ -128,9 +130,9 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 
 	sd.putCacheSize += putSize
 
-	domainMetrics.Lock()
-	domainMetrics.CachePutSize += putSize
-	domainMetrics.Unlock()
+	sd.metrics.Lock()
+	sd.metrics.CachePutSize += putSize
+	sd.metrics.Unlock()
 }
 
 func (sd *TemporalMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
@@ -166,12 +168,6 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	domainMetrics.Lock()
-	defer domainMetrics.Unlock()
-	domainMetrics.CachePutSize -= sd.putCacheSize
-	if domainMetrics.CachePutSize < 0 {
-		domainMetrics.CachePutSize = 0
-	}
 	sd.putCacheSize = 0
 }
 

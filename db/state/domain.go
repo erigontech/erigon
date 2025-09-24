@@ -1689,11 +1689,13 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
+	return dt.getLatest(key, roTx, nil, time.Time{})
+}
+
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
-
-	start := time.Now()
 
 	var v []byte
 	var foundStep kv.Step
@@ -1712,12 +1714,16 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found {
-		domainMetrics.updateDbReads(dt, start)
+		if metrics != nil {
+			metrics.updateDbReads(dt.name, start)
+		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	domainMetrics.updateFileReads(dt, start)
+	if metrics != nil {
+		metrics.updateFileReads(dt.name, start)
+	}
 
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
