@@ -120,7 +120,7 @@ func (r *TxResult) isNil() bool {
 	return r == nil
 }
 
-func (r *TxResult) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
+func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error) {
 	txIndex := r.Task.Version().TxIndex
 
 	if txIndex < 0 || r.IsBlockEnd() {
@@ -139,11 +139,11 @@ func (r *TxResult) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
 	cumulativeGasUsed += r.ExecutionResult.GasUsed
 
 	var err error
-	r.Receipt, err = r.createReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
+	r.Receipt, err = r.CreateReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
 	return r.Receipt, err
 }
 
-func (r *TxResult) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
+func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
 		r.Logs[i].Index = uint(logIndex)

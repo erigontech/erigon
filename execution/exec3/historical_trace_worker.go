@@ -465,7 +465,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			// TODO get the previous reciept from the DB
 		}
 
-		receipt, err := result.CreateReceipt(prev)
+		receipt, err := result.CreateNextReceipt(prev)
 
 		if hooks != nil && hooks.OnTxEnd != nil {
 			hooks.OnTxEnd(receipt, err)

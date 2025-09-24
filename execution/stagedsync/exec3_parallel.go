@@ -248,7 +248,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
 	}
 
-	receipt, err := result.CreateReceipt(prevReceipt)
+	receipt, err := result.CreateNextReceipt(prevReceipt)
 
 	if err != nil {
 		return nil, err
