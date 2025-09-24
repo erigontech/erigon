@@ -95,12 +95,21 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 				Version:   "1.0",
 			})
 		case "net":
-			list = append(list, rpc.API{
-				Namespace: "net",
-				Public:    true,
-				Service:   NetAPI(netImpl),
-				Version:   "1.0",
-			})
+			if !cfg.IsArbitrum {
+				list = append(list, rpc.API{
+					Namespace: "net",
+					Public:    true,
+					Service:   NetAPI(netImpl),
+					Version:   "1.0",
+				})
+			} else {
+				list = append(list, rpc.API{
+					Namespace: "net",
+					Public:    true,
+					Service:   NetAPIArb(NewNetAPIArbImpl(eth)),
+					Version:   "1.0",
+				})
+			}
 		case "txpool":
 			list = append(list, rpc.API{
 				Namespace: "txpool",
