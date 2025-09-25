@@ -683,6 +683,7 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
 
+		// Arbitrum specific behaviour
 		// Get transaction hash
 		txHash, ok = rawTx["hash"].(string)
 		if !ok {
