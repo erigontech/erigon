@@ -182,6 +182,10 @@ func (t *ArbitrumLegacyTxData) IsTimeBoosted() bool {
 	return false
 }
 
+func (t *ArbitrumLegacyTxData) SetTimeboosted(bool) {
+	// not supported
+}
+
 type arbitrumLegacyTxJSON struct {
 	Type              hexutil.Uint64  `json:"type"`
 	Hash              common.Hash     `json:"hash"`

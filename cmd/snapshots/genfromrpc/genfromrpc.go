@@ -623,7 +623,7 @@ func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{
 }
 
 // unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
-func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (types.Transactions, error) {
+func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, arbitrum bool) (types.Transactions, error) {
 	var txs types.Transactions
 
 	for _, rawTx := range rawTxs {
@@ -637,6 +637,12 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 		typeTx, ok := rawTx["type"].(string)
 		if !ok {
 			return nil, errors.New("missing tx type")
+		}
+
+		// Get transaction hash
+		txHash, ok := rawTx["hash"].(string)
+		if !ok {
+			return nil, errors.New("missing transaction hash")
 		}
 
 		switch typeTx {
@@ -676,8 +682,26 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 		default:
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
-		txs = append(txs, tx)
 
+		// Get transaction hash
+		txHash, ok = rawTx["hash"].(string)
+		if !ok {
+			return nil, errors.New("missing transaction hash")
+		}
+
+		// Query receipt
+		var receipt map[string]interface{}
+		err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", txHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get receipt for tx %s: %w", txHash, err)
+		}
+
+		// Get timeboosted field from receipt, default to false if not present
+		if timeboosted, ok := receipt["timeboosted"].(bool); ok && timeboosted {
+			tx.SetTimeboosted(timeboosted)
+		}
+
+		txs = append(txs, tx)
 	}
 	return txs, nil
 }
@@ -690,7 +714,7 @@ func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(block.Transactions, verify)
+	txs, err := unMarshalTransactions(client, block.Transactions, verify)
 	if err != nil {
 		return nil, err
 	}

@@ -133,6 +133,10 @@ func (tx *LegacyTx) IsTimeBoosted() bool {
 	return tx.Timeboosted
 }
 
+func (tx *LegacyTx) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
+}
+
 // NewTransaction creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
 func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
@@ -221,7 +225,7 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	// size of Timeboosted
 	payloadSize++
 	payloadSize += rlp.BoolLen()
-	
+
 	return payloadSize, nonceLen, gasLen
 }
 

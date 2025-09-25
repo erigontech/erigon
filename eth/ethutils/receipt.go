@@ -127,6 +127,7 @@ func MarshalReceipt(
 		if chainConfig.IsArbitrumNitro(header.Number) {
 			fields["effectiveGasPrice"] = hexutil.Uint64(header.BaseFee.Uint64())
 			fields["l1BlockNumber"] = hexutil.Uint64(types.DeserializeHeaderExtraInformation(header).L1BlockNumber)
+			fields["timeboosted"] = txn.IsTimeBoosted()
 		} else {
 			arbTx, ok := txn.(*types.ArbitrumLegacyTxData)
 			if !ok {
@@ -136,8 +137,6 @@ func MarshalReceipt(
 				fields["l1BlockNumber"] = hexutil.Uint64(arbTx.L1BlockNumber)
 			}
 		}
-
-		fields["timeboosted"] = txn.IsTimeBoosted()
 	}
 	return fields
 }

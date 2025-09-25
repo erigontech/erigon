@@ -393,6 +393,10 @@ func (tx *BlobTx) IsTimeBoosted() bool {
 	return tx.Timeboosted
 }
 
+func (tx *BlobTx) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
+}
+
 func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {

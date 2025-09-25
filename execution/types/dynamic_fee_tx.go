@@ -452,6 +452,10 @@ func (tx *DynamicFeeTransaction) IsTimeBoosted() bool {
 	return tx.Timeboosted
 }
 
+func (tx *DynamicFeeTransaction) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
+}
+
 // NewEIP1559Transaction creates an unsigned eip1559 transaction.
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{

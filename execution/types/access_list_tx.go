@@ -109,6 +109,10 @@ func (tx *AccessListTx) IsTimeBoosted() bool {
 	return tx.Timeboosted
 }
 
+func (tx *AccessListTx) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
+}
+
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx *AccessListTx) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
