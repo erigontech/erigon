@@ -48,7 +48,6 @@ type dataWithPrevStep struct {
 type TemporalMemBatch struct {
 	stepSize uint64
 
-	putCacheSize int
 	getCacheSize int
 
 	latestStateLock sync.RWMutex
@@ -114,10 +113,18 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			putSize += len(key) + len(val)
 		}
 
-		sd.putCacheSize += putSize
 		sd.metrics.Lock()
 		sd.metrics.CachePutCount++
 		sd.metrics.CachePutSize += putSize
+		if dm, ok := sd.metrics.Domains[domain]; ok {
+			dm.CachePutCount++
+			dm.CachePutSize += putSize
+		} else {
+			sd.metrics.Domains[domain] = &DomainIOMetrics{
+				CachePutCount: 1,
+				CachePutSize:  putSize,
+			}
+		}
 		sd.metrics.Unlock()
 		return
 	}
@@ -129,8 +136,15 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 	sd.domains[domain][key] = valWithPrevStep
 
-	sd.putCacheSize += putSize
-
+	if dm, ok := sd.metrics.Domains[domain]; ok {
+		dm.CachePutCount++
+		dm.CachePutSize += putSize
+	} else {
+		sd.metrics.Domains[domain] = &DomainIOMetrics{
+			CachePutCount: 1,
+			CachePutSize:  putSize,
+		}
+	}
 	sd.metrics.Lock()
 	sd.metrics.CachePutCount++
 	sd.metrics.CachePutSize += putSize
@@ -159,7 +173,7 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.putCacheSize) * 4
+	return uint64(sd.metrics.CachePutSize) * 4
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
@@ -170,7 +184,14 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	sd.putCacheSize = 0
+	sd.metrics.Lock()
+	defer sd.metrics.Unlock()
+	sd.metrics.CachePutSize = 0
+	sd.metrics.CachePutCount = 0
+	for _, dm := range sd.metrics.Domains {
+		dm.CachePutCount = 0
+		dm.CachePutSize = 0
+	}
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {

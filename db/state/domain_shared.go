@@ -241,13 +241,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
-	sd.metrics.Lock()
-	defer sd.metrics.Unlock()
-	sd.metrics.CachePutSize -= sd.mem.putCacheSize
-	if sd.metrics.CachePutSize < 0 {
-		sd.metrics.CachePutSize = 0
-	}
-	sd.metrics.CachePutCount = 0
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
