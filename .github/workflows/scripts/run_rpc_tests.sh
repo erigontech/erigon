@@ -91,7 +91,7 @@ set +e # Disable exit on error for test run
 
 retries=0
 while true; do
-   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff "$OPTIONAL_FLAGS" --exclude-api-list "$DISABLED_TESTS"
+   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS"
    RUN_TESTS_EXIT_CODE=$?
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then
