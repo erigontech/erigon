@@ -1271,12 +1271,13 @@ func (pe *parallelExecutor) resume() {
 	}
 }
 
-func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) error {
+func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, _ kv.TemporalTx) error {
 	pe.Lock()
 	defer pe.Unlock()
 
 	for _, worker := range pe.execWorkers {
-		worker.ResetState(rs, applyTx, nil, state.NewNoopWriter(), nil)
+		// parallel workers hold thier own tx don't pass in an externals tx
+		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
 	}
 
 	return nil
@@ -1640,7 +1641,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case err := <-doneCh:
 			return err
 		}
