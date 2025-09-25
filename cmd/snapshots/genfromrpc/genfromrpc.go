@@ -639,12 +639,6 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 			return nil, errors.New("missing tx type")
 		}
 
-		// Get transaction hash
-		txHash, ok := rawTx["hash"].(string)
-		if !ok {
-			return nil, errors.New("missing transaction hash")
-		}
-
 		switch typeTx {
 		case "0x0": // Legacy
 			tx = makeLegacyTx(commonTx, rawTx)
