@@ -89,6 +89,8 @@ var (
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
 	mxExecDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="all"}`)
 	mxExecDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="all"}`)
+	mxExecDomainPutCount          = metrics.NewGauge(`exec_domain_cache_put_count{domain="all"}`)
+	mxExecDomainPutSize           = metrics.NewGauge(`exec_domain_cache_put_size{domain="all"}`)
 	mxExecDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="all"}`)
 	mxExecDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="all"}`)
 	mxExecDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="all"}`)
@@ -98,6 +100,8 @@ var (
 	mxExecAccountDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="account"}`)
 	mxExecAccountDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="account"}`)
 	mxExecAccountDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="account"}`)
+	mxExecAccountDomainPutCount          = metrics.NewGauge(`exec_domain_cache_put_count{domain="account"}`)
+	mxExecAccountDomainPutSize           = metrics.NewGauge(`exec_domain_cache_put_size{domain="account"}`)
 	mxExecAccountDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="account"}`)
 	mxExecAccountDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="account"}`)
 	mxExecAccountDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="account"}`)
@@ -107,6 +111,8 @@ var (
 	mxExecStorageDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="storage"}`)
 	mxExexStorageDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="storage"}`)
 	mxExecStorageDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="storage"}`)
+	mxExecStorageDomainPutCount          = metrics.NewGauge(`exec_domain_cache_put_count{domain="storage"}`)
+	mxExecStorageDomainPutSize           = metrics.NewGauge(`exec_domain_cache_put_size{domain="storage"}`)
 	mxExecStorageDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="storage"}`)
 	mxExecStorageDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="storage"}`)
 	mxExecStorageDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="storage"}`)
@@ -116,33 +122,37 @@ var (
 	mxExecCodeDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="code"}`)
 	mxExexCodeDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="code"}`)
 	mxExecCodeDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="code"}`)
+	mxExecCodeDomainPutCount          = metrics.NewGauge(`exec_domain_cache_put_count{domain="code"}`)
+	mxExecCodeDomainPutSize           = metrics.NewGauge(`exec_domain_cache_put_size{domain="code"}`)
 	mxExecCodeDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="code"}`)
 	mxExecCodeDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="code"}`)
 	mxExecCodeDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="code"}`)
 	mxExecCodeDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="code"}`)
 
-	mxCommitmentTransactions                = metrics.NewGauge(`commit_txns`)
-	mxCommitmentBlocks                      = metrics.NewGauge("commit_blocks")
-	mxCommitmentMGasSec                     = metrics.NewGauge(`commit_mgas_sec`)
-	mxCommitmentBlockDuration               = metrics.NewGauge("commit_block_dur")
-	mxCommitmentReadRate                    = metrics.NewGauge("commit_read_rate")
-	mxCommitmentAccountReadRate             = metrics.NewGauge("commit_account_read_rate")
-	mxCommitmentStorageReadRate             = metrics.NewGauge("commit_storage_read_rate")
-	mxCommitmentmentBranchReadRate          = metrics.NewGauge("commit_branch_read_rate")
-	mxCommitmentmentBrancgWriteRate         = metrics.NewGauge("commit_branch_write_rate")
-	mxCommitmentKeyRate                     = metrics.NewGauge("commit_key_rate")
-	mxCommitmentAccountKeyRate              = metrics.NewGauge("commit_account_key_rate")
-	mxCommitmentStorageKeyRate              = metrics.NewGauge("commit_storage_key_rate")
-	mxCommitmentFoldRate                    = metrics.NewGauge("commit_fold_rate")
-	mxCommitmentUnfoldRate                  = metrics.NewGauge("commit_unfold_rate")
-	mxCommitmentmentDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="commitment"}`)
-	mxCommitmentmentDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="commitment"}`)
-	mxCommitmentmentDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="commitment"}`)
-	mxCommitmentmentDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="commitment"}`)
-	mxCommitmentmentDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="commitment"}`)
-	mxCommitmentmentDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="commitment"}`)
-	mxCommitmentmentDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="commitment"}`)
-	mxCommitmentmentDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="commitment"}`)
+	mxCommitmentTransactions            = metrics.NewGauge(`commit_txns`)
+	mxCommitmentBlocks                  = metrics.NewGauge("commit_blocks")
+	mxCommitmentMGasSec                 = metrics.NewGauge(`commit_mgas_sec`)
+	mxCommitmentBlockDuration           = metrics.NewGauge("commit_block_dur")
+	mxCommitmentReadRate                = metrics.NewGauge("commit_read_rate")
+	mxCommitmentAccountReadRate         = metrics.NewGauge("commit_account_read_rate")
+	mxCommitmentStorageReadRate         = metrics.NewGauge("commit_storage_read_rate")
+	mxCommitmentBranchReadRate          = metrics.NewGauge("commit_branch_read_rate")
+	mxCommitmentBrancgWriteRate         = metrics.NewGauge("commit_branch_write_rate")
+	mxCommitmentKeyRate                 = metrics.NewGauge("commit_key_rate")
+	mxCommitmentAccountKeyRate          = metrics.NewGauge("commit_account_key_rate")
+	mxCommitmentStorageKeyRate          = metrics.NewGauge("commit_storage_key_rate")
+	mxCommitmentFoldRate                = metrics.NewGauge("commit_fold_rate")
+	mxCommitmentUnfoldRate              = metrics.NewGauge("commit_unfold_rate")
+	mxCommitmentDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="commitment"}`)
+	mxCommitmentDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="commitment"}`)
+	mxCommitmentDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="commitment"}`)
+	mxCommitmentDomainCacheReadDuration = metrics.NewGauge(`exec_domain_cache_read_dur{domain="commitment"}`)
+	mxCommitmentDomainPutCount          = metrics.NewGauge(`exec_domain_cache_put_count{domain="commitment"}`)
+	mxCommitmentDomainPutSize           = metrics.NewGauge(`exec_domain_cache_put_size{domain="commitment"}`)
+	mxCommitmentDomainDbReads           = metrics.NewGauge(`exec_domain_db_read_rate{domain="commitment"}`)
+	mxCommitmentDomainDbReadDuration    = metrics.NewGauge(`exec_domain_db_read_dur{domain="commitment"}`)
+	mxCommitmentDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="commitment"}`)
+	mxCommitmentDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="commitment"}`)
 )
 
 var ErrWrongTrieRoot = fmt.Errorf("%w: wrong trie root", consensus.ErrInvalidBlock)
@@ -219,7 +229,9 @@ func resetExecGauges(ctx context.Context) {
 				mxExexStorageDomainCacheReads, mxExecStorageDomainCacheReadDuration, mxExecStorageDomainDbReads, mxExecStorageDomainDbReadDuration,
 				mxExecStorageDomainFileReads, mxExecStorageDomainFileReadDuration, mxExecCodeDomainReads, mxExecCodeDomainReadDuration,
 				mxExexCodeDomainCacheReads, mxExecCodeDomainCacheReadDuration, mxExecCodeDomainDbReads, mxExecCodeDomainDbReadDuration,
-				mxExecCodeDomainFileReads, mxExecCodeDomainFileReadDuration},
+				mxExecCodeDomainFileReads, mxExecCodeDomainFileReadDuration, mxExecDomainPutCount, mxExecDomainPutSize,
+				mxExecAccountDomainPutCount, mxExecAccountDomainPutSize, mxExecStorageDomainPutCount, mxExecStorageDomainPutSize,
+				mxExecCodeDomainPutCount, mxExecCodeDomainPutSize},
 		}
 		execResetTask.run(ctx)
 	}
@@ -240,11 +252,11 @@ func resetCommitGauges(ctx context.Context) {
 			gauges: []metrics.Gauge{
 				mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentMGasSec, mxCommitmentBlockDuration,
 				mxCommitmentReadRate, mxCommitmentAccountReadRate,
-				mxCommitmentStorageReadRate, mxCommitmentmentBranchReadRate, mxCommitmentmentBrancgWriteRate,
+				mxCommitmentStorageReadRate, mxCommitmentBranchReadRate, mxCommitmentBrancgWriteRate,
 				mxCommitmentKeyRate, mxCommitmentAccountKeyRate, mxCommitmentStorageKeyRate, mxCommitmentFoldRate,
-				mxCommitmentUnfoldRate, mxCommitmentmentDomainReads, mxCommitmentmentDomainReadDuration, mxCommitmentmentDomainCacheReads,
-				mxCommitmentmentDomainCacheReadDuration, mxCommitmentmentDomainDbReads, mxCommitmentmentDomainDbReadDuration, mxCommitmentmentDomainFileReads,
-				mxCommitmentmentDomainFileReadDuration,
+				mxCommitmentUnfoldRate, mxCommitmentDomainReads, mxCommitmentDomainReadDuration, mxCommitmentDomainCacheReads,
+				mxCommitmentDomainCacheReadDuration, mxCommitmentDomainDbReads, mxCommitmentDomainDbReadDuration, mxCommitmentDomainFileReads,
+				mxCommitmentDomainFileReadDuration, mxCommitmentDomainPutCount, mxCommitmentDomainPutSize,
 			},
 		}
 		commitResetTask.run(ctx)
@@ -261,17 +273,25 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		}
 	}
 
+	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; ok {
+		prevMetrics.Domains[kv.CommitmentDomain] = commitmentMetrics
+	}
+
 	cacheReads := metrics.CacheReadCount - prevMetrics.CacheReadCount
 	cacheDuration := metrics.CacheReadDuration - prevMetrics.CacheReadDuration
 	dbReads := metrics.DbReadCount - prevMetrics.DbReadCount
 	dbDuration := metrics.DbReadDuration - prevMetrics.DbReadDuration
 	fileReads := metrics.FileReadCount - prevMetrics.FileReadCount
 	fileDuration := metrics.FileReadDuration - prevMetrics.FileReadDuration
+	cachePutCount := metrics.CachePutCount - prevMetrics.CachePutCount
+	cachePutSize := metrics.CachePutSize - prevMetrics.CachePutSize
 
 	mxExecDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
 	mxExecDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 	mxExecDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
 	mxExecDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+	mxExecDomainPutCount.Set(float64(cachePutCount))
+	mxExecDomainPutSize.Set(float64(cachePutSize))
 	mxExecDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
 	mxExecDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 	mxExecDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
@@ -292,11 +312,15 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		dbDuration := accountMetrics.DbReadDuration - prevAccountMetrics.DbReadDuration
 		fileReads := accountMetrics.FileReadCount - prevAccountMetrics.FileReadCount
 		fileDuration := accountMetrics.FileReadDuration - prevAccountMetrics.FileReadDuration
+		cachePutCount := accountMetrics.CachePutCount - prevAccountMetrics.CachePutCount
+		cachePutSize := accountMetrics.CachePutSize - prevAccountMetrics.CachePutSize
 
 		mxExecAccountDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
 		mxExecAccountDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxExecAccountDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
 		mxExecAccountDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+		mxExecAccountDomainPutCount.Set(float64(cachePutCount))
+		mxExecAccountDomainPutSize.Set(float64(cachePutSize))
 		mxExecAccountDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
 		mxExecAccountDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxExecAccountDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
@@ -319,11 +343,15 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		dbDuration := storageMetrics.DbReadDuration - prevStorageMetrics.DbReadDuration
 		fileReads := storageMetrics.FileReadCount - prevStorageMetrics.FileReadCount
 		fileDuration := storageMetrics.FileReadDuration - prevStorageMetrics.FileReadDuration
+		cachePutCount := storageMetrics.CachePutCount - storageMetrics.CachePutCount
+		cachePutSize := storageMetrics.CachePutSize - storageMetrics.CachePutSize
 
 		mxExecStorageDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
 		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxExexStorageDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
 		mxExecStorageDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+		mxExecStorageDomainPutCount.Set(float64(cachePutCount))
+		mxExecStorageDomainPutSize.Set(float64(cachePutSize))
 		mxExecStorageDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
 		mxExecStorageDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxExecStorageDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
@@ -333,62 +361,36 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		prevMetrics.Domains[kv.StorageDomain] = &prevStorageMetrics
 	}
 
-	if storageMetrics, ok := metrics.Domains[kv.StorageDomain]; ok {
-		var prevStorageMetrics dbstate.DomainIOMetrics
+	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok {
+		var prevCodeMetrics dbstate.DomainIOMetrics
 
-		if prev, ok := prevMetrics.Domains[kv.StorageDomain]; ok {
-			prevStorageMetrics = *prev
+		if prev, ok := prevMetrics.Domains[kv.CodeDomain]; ok {
+			prevCodeMetrics = *prev
 		}
 
-		cacheReads := storageMetrics.CacheReadCount - prevStorageMetrics.CacheReadCount
-		cacheDuration := storageMetrics.CacheReadDuration - prevStorageMetrics.CacheReadDuration
-		dbReads := storageMetrics.DbReadCount - prevStorageMetrics.DbReadCount
-		dbDuration := storageMetrics.DbReadDuration - prevStorageMetrics.DbReadDuration
-		fileReads := storageMetrics.FileReadCount - prevStorageMetrics.FileReadCount
-		fileDuration := storageMetrics.FileReadDuration - prevStorageMetrics.FileReadDuration
+		cacheReads := codeMetrics.CacheReadCount - prevCodeMetrics.CacheReadCount
+		cacheDuration := codeMetrics.CacheReadDuration - prevCodeMetrics.CacheReadDuration
+		dbReads := codeMetrics.DbReadCount - prevCodeMetrics.DbReadCount
+		dbDuration := codeMetrics.DbReadDuration - prevCodeMetrics.DbReadDuration
+		fileReads := codeMetrics.FileReadCount - prevCodeMetrics.FileReadCount
+		fileDuration := codeMetrics.FileReadDuration - prevCodeMetrics.FileReadDuration
+		cachePutCount := codeMetrics.CachePutCount - codeMetrics.CachePutCount
+		cachePutSize := codeMetrics.CachePutSize - codeMetrics.CachePutSize
 
-		mxExecStorageDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
-		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
-		mxExexStorageDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
-		mxExecStorageDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxExecStorageDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
-		mxExecStorageDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
-		mxExecStorageDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
-		mxExecStorageDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
+		mxExecCodeDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
+		mxExecCodeDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
+		mxExexCodeDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxExecCodeDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+		mxExecCodeDomainPutCount.Set(float64(cachePutCount))
+		mxExecCodeDomainPutSize.Set(float64(cachePutSize))
+		mxExecCodeDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
+		mxExecCodeDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
+		mxExecCodeDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
+		mxExecCodeDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
-		prevStorageMetrics = *storageMetrics
-		prevMetrics.Domains[kv.StorageDomain] = &prevStorageMetrics
+		prevCodeMetrics = *codeMetrics
+		prevMetrics.Domains[kv.CodeDomain] = &prevCodeMetrics
 	}
-
-	return prevMetrics
-}
-func updateCommitmentDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstate.DomainMetrics, interval time.Duration) *dbstate.DomainMetrics {
-	metrics.RLock()
-	defer metrics.RUnlock()
-
-	if prevMetrics == nil {
-		prevMetrics = &dbstate.DomainMetrics{
-			Domains: map[kv.Domain]*dbstate.DomainIOMetrics{},
-		}
-	}
-
-	cacheReads := metrics.CacheReadCount - prevMetrics.CacheReadCount
-	cacheDuration := metrics.CacheReadDuration - prevMetrics.CacheReadDuration
-	dbReads := metrics.DbReadCount - prevMetrics.DbReadCount
-	dbDuration := metrics.DbReadDuration - prevMetrics.DbReadDuration
-	fileReads := metrics.FileReadCount - prevMetrics.FileReadCount
-	fileDuration := metrics.FileReadDuration - prevMetrics.FileReadDuration
-
-	mxExecDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
-	mxExecDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
-	mxExecDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
-	mxExecDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-	mxExecDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
-	mxExecDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
-	mxExecDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
-	mxExecDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
-
-	prevMetrics.DomainIOMetrics = metrics.DomainIOMetrics
 
 	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; ok {
 		var prevCommitmentMetrics dbstate.DomainIOMetrics
@@ -403,15 +405,19 @@ func updateCommitmentDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *
 		dbDuration := commitmentMetrics.DbReadDuration - prevCommitmentMetrics.DbReadDuration
 		fileReads := commitmentMetrics.FileReadCount - prevCommitmentMetrics.FileReadCount
 		fileDuration := commitmentMetrics.FileReadDuration - prevCommitmentMetrics.FileReadDuration
+		cachePutCount := commitmentMetrics.CachePutCount - commitmentMetrics.CachePutCount
+		cachePutSize := commitmentMetrics.CachePutSize - commitmentMetrics.CachePutSize
 
-		mxCommitmentmentDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
-		mxCommitmentmentDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
-		mxCommitmentmentDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
-		mxCommitmentmentDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxCommitmentmentDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
-		mxCommitmentmentDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
-		mxCommitmentmentDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
-		mxCommitmentmentDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
+		mxCommitmentDomainReads.Set(float64(cacheReads+dbReads+fileReads) / float64(interval.Seconds()))
+		mxCommitmentDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
+		mxCommitmentDomainCacheReads.Set(float64(cacheReads) / float64(interval.Seconds()))
+		mxCommitmentDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
+		mxCommitmentDomainPutCount.Set(float64(cachePutCount))
+		mxCommitmentDomainPutSize.Set(float64(cachePutSize))
+		mxCommitmentDomainDbReads.Set(float64(dbReads) / float64(interval.Seconds()))
+		mxCommitmentDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
+		mxCommitmentDomainFileReads.Set(float64(fileReads) / float64(interval.Seconds()))
+		mxCommitmentDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
 		prevCommitmentMetrics = *commitmentMetrics
 		prevMetrics.Domains[kv.CommitmentDomain] = &prevCommitmentMetrics
@@ -765,8 +771,8 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 	mxCommitmentReadRate.SetUint64(curReadRate)
 	mxCommitmentAccountReadRate.Set(float64(curAccountReadCount) / interval.Seconds())
 	mxCommitmentStorageReadRate.Set(float64(curStorageReadCount) / interval.Seconds())
-	mxCommitmentmentBranchReadRate.Set(float64(curBranchReadCount) / interval.Seconds())
-	mxCommitmentmentBrancgWriteRate.SetUint64(curBranchWriteRate)
+	mxCommitmentBranchReadRate.Set(float64(curBranchReadCount) / interval.Seconds())
+	mxCommitmentBrancgWriteRate.SetUint64(curBranchWriteRate)
 
 	mxCommitmentTransactions.Set(float64(committedTxSec))
 	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
@@ -779,6 +785,8 @@ func (p *Progress) LogCommitted(rs *state.StateV3, ex executor, commitStart time
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
 		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
+
+	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval)
 
 	p.prevCommitTime = currentTime
 
