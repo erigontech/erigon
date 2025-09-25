@@ -461,7 +461,7 @@ func ParseEnum(s string) (Enum, bool) {
 }
 
 // Idx - iterate over segment and building .idx file
-func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Versions, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
@@ -496,7 +496,26 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(fileVer, info.From, info.To))
+	idxFName := info.Type.IdxFileName(fileVer, info.From, info.To)
+	idxPath := filepath.Join(info.Dir(), idxFName)
+
+	idxFPathMask, err := version.ReplaceVersionWithMask(idxPath)
+	if err != nil {
+		return fmt.Errorf("[build index] can't replace idx with mask in file %s: %w", idxFName, err)
+	}
+	idxFPath, idxVer, ok, err := version.FindFilesWithVersionsByPattern(idxFPathMask)
+	if err != nil {
+		_, fName := filepath.Split(fPath)
+		return fmt.Errorf("build index err %w fname %s", err, fName)
+	}
+	if !ok {
+		_, fName := filepath.Split(fPath)
+		idxVer = indexVersion.Current
+		return fmt.Errorf("build index err %w fname %s", os.ErrNotExist, fName)
+	} else if idxVer.Less(indexVersion.MinSupported) {
+		version.VersionTooLowPanic(idxFPath, indexVersion)
+	}
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err

@@ -80,10 +80,10 @@ var Indexes = struct {
 	TxnHash,
 	TxnHash2BlockNum snaptype.Index
 }{
-	HeaderHash:       snaptype.Index{Name: "headers", Version: version.V1_0_standart},
-	BodyHash:         snaptype.Index{Name: "bodies", Version: version.V1_0_standart},
-	TxnHash:          snaptype.Index{Name: "transactions", Version: version.V1_0_standart},
-	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Version: version.V1_0_standart, Offset: 1},
+	HeaderHash:       snaptype.Index{Name: "headers", Version: version.V2_1_standart},
+	BodyHash:         snaptype.Index{Name: "bodies", Version: version.V2_1_standart},
+	TxnHash:          snaptype.Index{Name: "transactions", Version: version.V2_0_standart},
+	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Version: version.V2_0_standart, Offset: 1},
 }
 
 var (
@@ -119,7 +119,7 @@ var (
 					BaseDataID:         info.From,
 					LessFalsePositives: true,
 				}
-				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, Indexes.HeaderHash.Version, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -157,7 +157,7 @@ var (
 					Salt:       &salt,
 					BaseDataID: info.From,
 				}
-				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, Indexes.BodyHash.Version, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
