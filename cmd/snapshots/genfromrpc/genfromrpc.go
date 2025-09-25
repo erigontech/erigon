@@ -679,7 +679,7 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 
 		// Arbitrum specific behaviour
 		// Get transaction hash
-		txHash, ok = rawTx["hash"].(string)
+		txHash, ok := rawTx["hash"].(string)
 		if !ok {
 			return nil, errors.New("missing transaction hash")
 		}
