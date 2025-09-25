@@ -88,7 +88,6 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 		}
 	}
 
-	se.worker.ResetTx(se.applyTx)
 	se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
 
 	return nil
