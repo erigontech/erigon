@@ -365,7 +365,7 @@ func (sd *SharedDomains) LogMetrics() []any {
 	}
 
 	if readCount := sd.metrics.FileReadCount; readCount > 0 {
-		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
+		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.FileReadDuration/time.Duration(readCount), 0))
 	}
 
 	return metrics
