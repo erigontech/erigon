@@ -116,6 +116,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 
 		sd.putCacheSize += putSize
 		sd.metrics.Lock()
+		sd.metrics.CachePutCount++
 		sd.metrics.CachePutSize += putSize
 		sd.metrics.Unlock()
 		return
@@ -131,6 +132,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.putCacheSize += putSize
 
 	sd.metrics.Lock()
+	sd.metrics.CachePutCount++
 	sd.metrics.CachePutSize += putSize
 	sd.metrics.Unlock()
 }
