@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/core"
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
@@ -623,7 +625,7 @@ func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{
 }
 
 // unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
-func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, arbitrum bool) (types.Transactions, error) {
+func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	var txs types.Transactions
 
 	for _, rawTx := range rawTxs {
@@ -677,23 +679,18 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
 
-		// Arbitrum specific behaviour
-		// Get transaction hash
-		txHash, ok := rawTx["hash"].(string)
-		if !ok {
-			return nil, errors.New("missing transaction hash")
-		}
+		if isArbitrum {
+			// Query receipt
+			var receipt map[string]interface{}
+			err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", tx.Hash())
+			if err != nil {
+				return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
+			}
 
-		// Query receipt
-		var receipt map[string]interface{}
-		err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", txHash)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get receipt for tx %s: %w", txHash, err)
-		}
-
-		// Get timeboosted field from receipt, default to false if not present
-		if timeboosted, ok := receipt["timeboosted"].(bool); ok && timeboosted {
-			tx.SetTimeboosted(timeboosted)
+			// Get timeboosted field from receipt, default to false if not present
+			if timeboosted, ok := receipt["timeboosted"].(bool); ok && timeboosted {
+				tx.SetTimeboosted(timeboosted)
+			}
 		}
 
 		txs = append(txs, tx)
@@ -702,14 +699,14 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 }
 
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
+func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool, isArbitrum bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(client, block.Transactions, verify)
+	txs, err := unMarshalTransactions(client, block.Transactions, verify, isArbitrum)
 	if err != nil {
 		return nil, err
 	}
@@ -806,6 +803,25 @@ func genFromRPc(cliCtx *cli.Context) error {
 	latestBlock.SetString(latestBlockHex[2:], 16)
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
+	var chainConfig *chain.Config
+	{
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
+			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+			if err != nil {
+				return err
+			}
+			chainConfig, err = core.ReadChainConfig(tx, genesisHash)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
+	isArbitrum := chainConfig.IsArbitrum()
+
 	var blockNumber big.Int
 	// Process blocks from the starting block up to the latest.
 	for i := start; i < latestBlock.Uint64(); {
@@ -815,7 +831,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := GetBlockByNumber(client, &blockNumber, verification)
+				blk, err := GetBlockByNumber(client, &blockNumber, verification, isArbitrum)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}

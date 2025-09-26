@@ -290,12 +290,17 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.S.SetBytes(b)
 
-	// decode timeboosted
-	boolVal, err := s.Bool()
-	if err != nil {
-		return err
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = boolVal
+		// After reading the optional field, ensure list end.
+		return s.ListEnd()
 	}
-	tx.Timeboosted = boolVal
+	// List already completed, set default.
+	tx.Timeboosted = false
 	return s.ListEnd()
 }
 
@@ -364,9 +369,12 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
-	//encode Timeboosted
-	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
-		return err
+
+	if tx.Timeboosted {
+		//encode Timeboosted
+		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+			return err
+		}
 	}
 
 	return nil

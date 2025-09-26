@@ -1111,9 +1111,11 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 		return err
 	}
 
-	//encode Timeboosted
-	if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
-		return err
+	if tx.Timeboosted {
+		//encode Timeboosted
+		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1171,9 +1173,11 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 	payloadSize++ // header
 	payloadSize += rlp.BigIntLenExcludingHead(tx.SubmissionFeeRefund)
 
-	// Timeboosted (bool)
-	payloadSize++
-	payloadSize += rlp.BoolLen()
+	if tx.Timeboosted {
+		// Timeboosted (bool)
+		payloadSize++
+		payloadSize += rlp.BoolLen()
+	}
 
 	return payloadSize, nonceLen, gasLen
 }
@@ -1300,18 +1304,18 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.SubmissionFeeRefund = new(big.Int).SetBytes(b)
 
-	// decode timeboosted
-	boolVal, err := s.Bool()
-	if err != nil {
-		return err
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = boolVal
+		// After reading the optional field, ensure list end.
+		return s.ListEnd()
 	}
-	tx.Timeboosted = boolVal
-
-	// End list decoding.
-	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close ArbitrumRetryTx: %w", err)
-	}
-	return nil
+	// List already completed, set default.
+	tx.Timeboosted = false
+	return s.ListEnd()
 }
 
 func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {

@@ -570,14 +570,6 @@ func (s ArbTxs) EncodeIndex(i int, w *bytes.Buffer) {
 	}
 }
 
-func (s *ArbTxs) IsTimeBoosted() bool {
-	return false
-}
-
-func (s *ArbTxs) SetTimeboosted(bool) {
-	// Not supported for array of Txns
-}
-
 // TxDifference returns a new set which is the difference between a and b.
 // func TxDifference(a, b ArbTxs) ArbTxs {
 // 	keep := make(ArbTxs, 0, len(a))
