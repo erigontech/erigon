@@ -341,8 +341,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		dbDuration := storageMetrics.DbReadDuration - prevStorageMetrics.DbReadDuration
 		fileReads := storageMetrics.FileReadCount - prevStorageMetrics.FileReadCount
 		fileDuration := storageMetrics.FileReadDuration - prevStorageMetrics.FileReadDuration
-		cachePutCount := storageMetrics.CachePutCount - storageMetrics.CachePutCount
-		cachePutSize := storageMetrics.CachePutSize - storageMetrics.CachePutSize
+		cachePutCount := storageMetrics.CachePutCount - prevStorageMetrics.CachePutCount
+		cachePutSize := storageMetrics.CachePutSize - prevStorageMetrics.CachePutSize
 
 		mxExecStorageDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
@@ -372,8 +372,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		dbDuration := codeMetrics.DbReadDuration - prevCodeMetrics.DbReadDuration
 		fileReads := codeMetrics.FileReadCount - prevCodeMetrics.FileReadCount
 		fileDuration := codeMetrics.FileReadDuration - prevCodeMetrics.FileReadDuration
-		cachePutCount := codeMetrics.CachePutCount - codeMetrics.CachePutCount
-		cachePutSize := codeMetrics.CachePutSize - codeMetrics.CachePutSize
+		cachePutCount := codeMetrics.CachePutCount - prevCodeMetrics.CachePutCount
+		cachePutSize := codeMetrics.CachePutSize - prevCodeMetrics.CachePutSize
 
 		mxExecCodeDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecCodeDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
