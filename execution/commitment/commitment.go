@@ -1225,8 +1225,8 @@ func (uf UpdateFlags) String() string {
 }
 
 type Update struct {
-	CodeHash   [length.Hash]byte
-	Storage    [length.Hash]byte
+	CodeHash   common.Hash
+	Storage    common.Hash
 	StorageLen int
 	Flags      UpdateFlags
 	Balance    uint256.Int
