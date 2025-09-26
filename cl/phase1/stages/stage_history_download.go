@@ -200,6 +200,25 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			case <-logInterval.C:
 				logTime := logIntervalTime
 
+				logArgs := []interface{}{}
+				currProgress := cfg.downloader.Progress()
+				blockProgress := float64(prevProgress - currProgress)
+				ratio := float64(logTime / time.Second)
+				speed := blockProgress / ratio
+				prevProgress = currProgress
+
+				pivot := 30.0 // pivot for the speed calculation (if above, we try to increase the block request rate)
+				absoluteDifferenceFromPivot := int64(math.Abs(speed-pivot) / 5.0)
+				if speed > pivot {
+					cfg.downloader.IncrementBlocksPerRequest(absoluteDifferenceFromPivot)
+				} else {
+					cfg.downloader.DecrementBlocksPerRequest(absoluteDifferenceFromPivot)
+				}
+
+				if speed == 0 || initialBeaconBlock == nil {
+					continue
+				}
+
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					if ready, err := cfg.engine.Ready(ctx); !ready {
 						if err != nil {
@@ -208,16 +227,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 						continue
 					}
 
-				}
-				logArgs := []interface{}{}
-				currProgress := cfg.downloader.Progress()
-				blockProgress := float64(prevProgress - currProgress)
-				ratio := float64(logTime / time.Second)
-				speed := blockProgress / ratio
-				prevProgress = currProgress
-
-				if speed == 0 || initialBeaconBlock == nil {
-					continue
 				}
 
 				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
@@ -260,9 +269,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					remaining := float64(highestBlockSeen - lowestBlockToReach)
+					blocksProcessed := highestBlockSeen - uint64(currEth1Progress.Load())
+					totalBlocksToProcess := highestBlockSeen - lowestBlockToReach
+					remaining := float64(totalBlocksToProcess - blocksProcessed)
 					log.Info("Downloading Execution History", "progress",
-						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
+						fmt.Sprintf("%d/%d", blocksProcessed, totalBlocksToProcess),
 						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {
