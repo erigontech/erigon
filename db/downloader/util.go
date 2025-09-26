@@ -202,7 +202,6 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	var createdAmount atomic.Int32
 
 	for _, file := range files {
-		file := file
 
 		if ignore.Contains(file) {
 			i.Add(1)

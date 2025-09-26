@@ -51,7 +51,6 @@ func TestSequence(t *testing.T) {
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
-		db := db
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -114,7 +113,6 @@ func TestManagedTx(t *testing.T) {
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
-		db := db
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -142,7 +140,6 @@ func TestManagedTx(t *testing.T) {
 	}
 
 	for _, db := range readDBs {
-		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
 		case *remotedb.DB:

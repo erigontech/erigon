@@ -141,7 +141,6 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 	if err = second.View(context.Background(), func(readTx kv.Tx) error {
 		return first.View(context.Background(), func(firstTx kv.Tx) error {
 			for bucketName := range bucketLabels {
-				bucketName := bucketName
 				if err := readTx.ForEach(bucketName, nil, func(k, v []byte) error {
 					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db

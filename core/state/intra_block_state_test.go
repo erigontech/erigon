@@ -275,7 +275,6 @@ func (test *snapshotTest) run(t *testing.T) bool {
 // checkEqual checks that methods of state and checkstate return the same values.
 func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 	for _, addr := range test.addrs {
-		addr := addr // pin
 		var err error
 		checkeq := func(op string, a, b interface{}) bool {
 			if err == nil && !reflect.DeepEqual(a, b) {
