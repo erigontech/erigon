@@ -1,0 +1,176 @@
+accounts:
+    domain:
+        bt:
+            current: v1.1
+            min: v1.0
+        kv:
+            current: v1.1
+            min: v1.0
+        kvei:
+            current: v1.1
+            min: v1.0
+    hist:
+        v:
+            current: v1.1
+            min: v1.0
+        vi:
+            current: v1.1
+            min: v1.0
+    ii:
+        ef:
+            current: v2.0
+            min: v1.0
+        efi:
+            current: v2.0
+            min: v1.0
+code:
+    domain:
+        bt:
+            current: v1.1
+            min: v1.0
+        kv:
+            current: v1.1
+            min: v1.0
+        kvei:
+            current: v1.1
+            min: v1.0
+    hist:
+        v:
+            current: v1.1
+            min: v1.0
+        vi:
+            current: v1.1
+            min: v1.0
+    ii:
+        ef:
+            current: v2.0
+            min: v1.0
+        efi:
+            current: v2.0
+            min: v1.0
+commitment:
+    domain:
+        kv:
+            current: v1.1
+            min: v1.0
+        kvi:
+            current: v2.0
+            min: v1.0
+    hist:
+        v:
+            current: v1.1
+            min: v1.0
+        vi:
+            current: v1.1
+            min: v1.0
+    ii:
+        ef:
+            current: v2.0
+            min: v1.0
+        efi:
+            current: v2.0
+            min: v1.0
+logaddrs:
+    ii:
+        ef:
+            current: v2.1
+            min: v1.0
+        efi:
+            current: v2.1
+            min: v1.0
+logtopics:
+    ii:
+        ef:
+            current: v2.1
+            min: v1.0
+        efi:
+            current: v2.1
+            min: v1.0
+rcache:
+    domain:
+        kv:
+            current: v2.0
+            min: v1.0
+        kvi:
+            current: v2.0
+            min: v1.0
+    hist:
+        v:
+            current: v2.0
+            min: v1.0
+        vi:
+            current: v1.1
+            min: v1.0
+    ii:
+        ef:
+            current: v2.0
+            min: v1.0
+        efi:
+            current: v2.0
+            min: v1.0
+receipt:
+    domain:
+        bt:
+            current: v1.2
+            min: v1.0
+        kv:
+            current: v2.1
+            min: v1.0
+        kvei:
+            current: v1.2
+            min: v1.0
+    hist:
+        v:
+            current: v2.1
+            min: v1.0
+        vi:
+            current: v1.2
+            min: v1.0
+    ii:
+        ef:
+            current: v2.1
+            min: v1.0
+        efi:
+            current: v2.1
+            min: v1.0
+storage:
+    domain:
+        bt:
+            current: v1.1
+            min: v1.0
+        kv:
+            current: v1.1
+            min: v1.0
+        kvei:
+            current: v1.1
+            min: v1.0
+    hist:
+        v:
+            current: v1.1
+            min: v1.0
+        vi:
+            current: v1.1
+            min: v1.0
+    ii:
+        ef:
+            current: v2.0
+            min: v1.0
+        efi:
+            current: v2.0
+            min: v1.0
+tracesfrom:
+    ii:
+        ef:
+            current: v2.1
+            min: v1.0
+        efi:
+            current: v2.1
+            min: v1.0
+tracesto:
+    ii:
+        ef:
+            current: v2.1
+            min: v1.0
+        efi:
+            current: v2.1
+            min: v1.0

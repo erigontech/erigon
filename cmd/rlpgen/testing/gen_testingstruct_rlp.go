@@ -4,12 +4,14 @@ package testing
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/holiman/uint256"
 	"io"
 	"math/big"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func (obj *TestingStruct) EncodingSize() (size int) {

@@ -287,14 +287,14 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 		result := struct {
 			Version string `json:"version"`
 			Data    struct {
-				ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
-				BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+				ExecutionPayload *cltypes.Eth1Block        `json:"execution_payload"`
+				BlobsBundle      *engine_types.BlobsBundle `json:"blobs_bundle"`
 			} `json:"data"`
 		}{
 			Version: "deneb",
 			Data: struct {
-				ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
-				BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+				ExecutionPayload *cltypes.Eth1Block        `json:"execution_payload"`
+				BlobsBundle      *engine_types.BlobsBundle `json:"blobs_bundle"`
 			}{
 				ExecutionPayload: block,
 				BlobsBundle:      bundle,

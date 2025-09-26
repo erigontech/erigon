@@ -43,7 +43,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 const SizeLimit = 300 // maximum encoded size of a node record in bytes
@@ -222,13 +222,13 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 	for i := 0; ; i++ {
 		var kv pair
 		if err := s.Decode(&kv.k); err != nil {
-			if err == rlp.EOL {
+			if errors.Is(err, rlp.EOL) {
 				break
 			}
 			return dec, raw, err
 		}
 		if err := s.Decode(&kv.v); err != nil {
-			if err == rlp.EOL {
+			if errors.Is(err, rlp.EOL) {
 				return dec, raw, errIncompletePair
 			}
 			return dec, raw, err

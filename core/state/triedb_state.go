@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"maps"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -13,10 +14,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types/accounts"
-	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
@@ -108,9 +109,7 @@ func (b *Buffer) merge(other *Buffer) {
 			m = make(map[common.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		for keyHash, v := range om {
-			m[keyHash] = v
-		}
+		maps.Copy(m, om)
 	}
 	for addrHash, incarnation := range other.storageIncarnation {
 		b.storageIncarnation[addrHash] = incarnation

@@ -20,21 +20,20 @@
 package t8ntool
 
 import (
-	"encoding/binary"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/kv"
-	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/db/kv"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -81,7 +80,7 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *dbstate.SharedDomains, accounts types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
 	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
@@ -98,9 +97,6 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.Shared
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			tx.Put(kv.IncarnationMap, addr[:], b[:])
 		}
 	}
 	// Commit and re-open to start with a clean state.

@@ -20,19 +20,19 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"hash"
 	"slices"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 // Config are the configuration options for the Interpreter
@@ -41,7 +41,6 @@ type Config struct {
 	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	SkipAnalysis  bool // Whether we can skip jumpdest analysis based on the checked history
 	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool // Do not calculate receipts
 	ReadOnly      bool // Do no perform any block finalisation
@@ -399,7 +398,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		_pc++
 	}
 
-	if err == errStopToken {
+	if errors.Is(err, errStopToken) {
 		err = nil // clear stop token error
 	}
 

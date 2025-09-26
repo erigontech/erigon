@@ -32,17 +32,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/db/snaptype"
+
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/estimate"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/snaptype"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -56,21 +55,19 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/network"
-	"github.com/erigontech/erigon/cl/phase1/stages"
-	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var CLI struct {
-	Chain                     Chain                     `cmd:"" help:"download the entire chain from reqresp network"`
 	DumpSnapshots             DumpSnapshots             `cmd:"" help:"generate caplin snapshots"`
 	CheckSnapshots            CheckSnapshots            `cmd:"" help:"check snapshot folder against content of chain data"`
 	LoopSnapshots             LoopSnapshots             `cmd:"" help:"loop over snapshots"`
@@ -114,82 +111,17 @@ func (w *withPPROF) withProfile() {
 	}
 }
 
-func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
+func (w *withSentinel) connectSentinel() (sentinelproto.SentinelClient, error) {
 	// YOLO message size
 	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt)))
 	if err != nil {
 		return nil, err
 	}
-	return sentinel.NewSentinelClient(gconn), nil
+	return sentinelproto.NewSentinelClient(gconn), nil
 }
 
 func openFs(fsName string, path string) (afero.Fs, error) {
 	return afero.NewBasePathFs(afero.NewBasePathFs(afero.NewOsFs(), fsName), path), nil
-}
-
-type Chain struct {
-	chainCfg
-	withSentinel
-	outputFolder
-}
-
-func (c *Chain) Run(ctx *Context) error {
-	s, err := c.withSentinel.connectSentinel()
-	if err != nil {
-		return err
-	}
-
-	_, beaconConfig, networkType, err := clparams.GetConfigsByNetworkName(c.Chain)
-	if err != nil {
-		return err
-	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	log.Info("Started chain download", "chain", c.Chain)
-
-	dirs := datadir.New(c.Datadir)
-
-	freezingCfg := ethconfig.Defaults.Snapshot
-	freezingCfg.ChainName = c.Chain
-	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
-	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
-	if err != nil {
-		return err
-	}
-
-	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock)
-
-	bRoot, err := bs.BlockRoot()
-	if err != nil {
-		return err
-	}
-
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteHighestFinalized(tx, bs.Slot())
-	}); err != nil {
-		return err
-	}
-
-	err = beacon.SetStatus(
-		ethClock.GenesisValidatorsRoot(),
-		beaconConfig.GenesisEpoch,
-		ethClock.GenesisValidatorsRoot(),
-		beaconConfig.GenesisSlot)
-	if err != nil {
-		return err
-	}
-
-	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	defer downloader.Close()
-
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
-	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
 type ChainEndpoint struct {
@@ -396,7 +328,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -575,7 +507,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
-	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -583,7 +515,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
@@ -1040,7 +972,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err
@@ -1274,7 +1206,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
 	if err != nil {
 		return err

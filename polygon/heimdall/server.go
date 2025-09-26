@@ -8,11 +8,10 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type spanProducersReader interface {
-	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Producers(ctx context.Context, blockNum uint64) (*ValidatorSet, error)
 }
 
 var APIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
@@ -52,7 +51,7 @@ func (b *BackendServer) Producers(ctx context.Context, in *remoteproto.BorProduc
 	}, nil
 }
 
-func encodeValidator(v *valset.Validator) *remoteproto.Validator {
+func encodeValidator(v *Validator) *remoteproto.Validator {
 	return &remoteproto.Validator{
 		Id:               v.ID,
 		Address:          gointerfaces.ConvertAddressToH160(v.Address),

@@ -20,7 +20,7 @@ import (
 	"bytes"
 	_ "embed"
 
-	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon/execution/abi"
 )
 
 //go:embed block_reward.json
