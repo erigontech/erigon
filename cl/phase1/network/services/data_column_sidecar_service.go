@@ -90,7 +90,6 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err != nil {
 		return fmt.Errorf("failed to get block root: %v", err)
 	}
-	s.seenSidecar.Add(seenKey, struct{}{})
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
 		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
@@ -104,8 +103,6 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 			return fmt.Errorf("failed to get my custody columns: %v", err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
-			// not my custody column
-			log.Debug("not my custody column")
 			return ErrIgnore
 		}
 	}
@@ -172,6 +169,8 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
+	s.seenSidecar.Add(seenKey, struct{}{})
+
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
 	}
