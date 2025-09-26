@@ -107,6 +107,12 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		}
 	}
 
+	blobParameters := s.cfg.GetBlobParameters(blockHeader.Slot / s.cfg.SlotsPerEpoch)
+	if msg.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
+		log.Warn("invalid column sidecar length", "blockRoot", blockRoot, "columnIndex", msg.Index, "columnLen", msg.Column.Len())
+		return errors.New("invalid column sidecar length")
+	}
+
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
 	if !verifyDataColumnSidecar(msg) {
 		return errors.New("invalid data column sidecar")
