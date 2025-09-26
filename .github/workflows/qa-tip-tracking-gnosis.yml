@@ -3,7 +3,7 @@ name: QA - Tip tracking & migration (Gnosis)
 on:
   push:
     branches:
-      - 'release/3.1'
+      - 'release/3.*'
   workflow_dispatch: # Run manually
     inputs:
       explicit_upgrade:
