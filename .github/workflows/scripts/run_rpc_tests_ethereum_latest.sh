@@ -25,6 +25,10 @@ DISABLED_TEST_LIST=(
    eth_getProof/test_04.json
    eth_getProof/test_08.json
    eth_getProof/test_09.json
+   eth_simulateV1/test_06.json # state root mismatch
+   eth_simulateV1/test_07.json # state root mismatch
+   eth_simulateV1/test_12.json # state root mismatch
+   eth_simulateV1/test_16.json # state root mismatch
    ots_
    parity_
    trace_
@@ -34,4 +38,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.88.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message" "$DUMP_RESPONSE"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.89.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message"

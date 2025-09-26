@@ -544,8 +544,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	stream.WriteArrayStart()
 	for bundleIndex, bundle := range bundles {
 		stream.WriteArrayStart()
-		// first change blockContext
-		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
+		// first change block context
+		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
 		// do not reset ibs, because we want to keep the overrides and state change
 		// ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {
