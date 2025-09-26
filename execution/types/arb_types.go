@@ -439,6 +439,14 @@ func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
 	panic("implement me")
 }
 
+func (t *ArbitrumUnsignedTx) IsTimeBoosted() bool {
+	return false
+}
+
+func (tx *ArbitrumUnsignedTx) SetTimeboosted(bool) {
+	// not supported
+}
+
 // func (tx *ArbitrumUnsignedTx) gas() uint64         {  }
 // func (tx *ArbitrumUnsignedTx) gasPrice() *big.Int  { return tx.GasFeeCap }
 // func (tx *ArbitrumUnsignedTx) gasTipCap() *big.Int { return bigZero }
@@ -864,6 +872,14 @@ func (tx *ArbitrumContractTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	return dst.Set(baseFee)
 //}
 
+func (t *ArbitrumContractTx) IsTimeBoosted() bool {
+	return false
+}
+
+func (tx *ArbitrumContractTx) SetTimeboosted(bool) {
+	// not supported
+}
+
 type ArbitrumRetryTx struct {
 	ChainId             *big.Int
 	Nonce               uint64
@@ -877,6 +893,7 @@ type ArbitrumRetryTx struct {
 	RefundTo            common.Address
 	MaxRefund           *big.Int // the maximum refund sent to RefundTo (the rest goes to From)
 	SubmissionFeeRefund *big.Int // the submission fee to refund if successful (capped by MaxRefund)
+	Timeboosted         bool
 }
 
 func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
@@ -1094,6 +1111,13 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 		return err
 	}
 
+	if tx.Timeboosted {
+		//encode Timeboosted
+		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -1148,6 +1172,12 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 	// SubmissionFeeRefund (big.Int)
 	payloadSize++ // header
 	payloadSize += rlp.BigIntLenExcludingHead(tx.SubmissionFeeRefund)
+
+	if tx.Timeboosted {
+		// Timeboosted (bool)
+		payloadSize++
+		payloadSize += rlp.BoolLen()
+	}
 
 	return payloadSize, nonceLen, gasLen
 }
@@ -1274,11 +1304,18 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.SubmissionFeeRefund = new(big.Int).SetBytes(b)
 
-	// End list decoding.
-	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close ArbitrumRetryTx: %w", err)
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = boolVal
+		// After reading the optional field, ensure list end.
+		return s.ListEnd()
 	}
-	return nil
+	// List already completed, set default.
+	tx.Timeboosted = false
+	return s.ListEnd()
 }
 
 func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
@@ -1320,6 +1357,14 @@ func (tx *ArbitrumRetryTx) IsContractDeploy() bool {
 
 func (tx *ArbitrumRetryTx) Unwrap() Transaction {
 	return tx
+}
+
+func (t *ArbitrumRetryTx) IsTimeBoosted() bool {
+	return t.Timeboosted
+}
+
+func (tx *ArbitrumRetryTx) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
 }
 
 // func (tx *ArbitrumRetryTx) chainID() *big.Int            { return tx.ChainId }
@@ -1403,6 +1448,7 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	if tx.MaxSubmissionFee != nil {
 		cpy.MaxSubmissionFee.Set(tx.MaxSubmissionFee)
 	}
+
 	return cpy
 }
 
@@ -1498,6 +1544,7 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize() (payloadSize int, gasLen int)
 	size++
 	size += 20
 	size += rlp.StringLen(tx.RetryData)
+
 	return size, gasLen
 }
 
@@ -1856,6 +1903,14 @@ func (tx *ArbitrumSubmitRetryableTx) Unwrap() Transaction {
 	return tx
 }
 
+func (tx *ArbitrumSubmitRetryableTx) IsTimeBoosted() bool {
+	return false
+}
+
+func (tx *ArbitrumSubmitRetryableTx) SetTimeboosted(bool) {
+	// not supported
+}
+
 // func (tx *ArbitrumSubmitRetryableTx) chainID() *big.Int            { return tx.ChainId }
 // func (tx *ArbitrumSubmitRetryableTx) accessList() types.AccessList { return nil }
 // func (tx *ArbitrumSubmitRetryableTx) gas() uint64                  { return tx.Gas }
@@ -2195,6 +2250,14 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, d)
 }
 
+func (d *ArbitrumDepositTx) IsTimeBoosted() bool {
+	return false
+}
+
+func (d *ArbitrumDepositTx) SetTimeboosted(bool) {
+	// not supported
+}
+
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)
 //}
@@ -2364,6 +2427,7 @@ func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close ArbitrumInternalTx: %w", err)
 	}
@@ -2413,6 +2477,14 @@ func (t *ArbitrumInternalTx) encode(b *bytes.Buffer) error {
 }
 func (t *ArbitrumInternalTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, t)
+}
+
+func (t *ArbitrumInternalTx) IsTimeBoosted() bool {
+	return false
+}
+
+func (t *ArbitrumInternalTx) SetTimeboosted(bool) {
+	// not supported in ArbitrumInternalTx
 }
 
 //func (tx *ArbitrumInternalTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {

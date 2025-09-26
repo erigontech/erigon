@@ -247,6 +247,13 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := rlp.EncodeUint256(&stx.S, w, b); err != nil {
 		return err
 	}
+	//encode Timeboosted
+	if stx.Timeboosted {
+		if err := rlp.EncodeBool(stx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -373,7 +380,27 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	stx.S.SetBytes(b)
+
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		stx.Timeboosted = boolVal
+		// After reading the optional field, ensure list end.
+		return s.ListEnd()
+	}
+	// List already completed, set default.
+	stx.Timeboosted = false
 	return s.ListEnd()
+}
+
+func (tx *BlobTx) IsTimeBoosted() bool {
+	return tx.Timeboosted
+}
+
+func (tx *BlobTx) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
 }
 
 func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
