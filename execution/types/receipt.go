@@ -67,6 +67,7 @@ type Receipt struct {
 	TxHash          common.Hash    `json:"transactionHash" gencodec:"required"`
 	ContractAddress common.Address `json:"contractAddress"`
 	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
+	BlobGasUsed     uint64         `json:"blobGasUsed,omitempty"`
 
 	GasUsedForL1      uint64   `json:"gasUsedForL1"`      // Arbitrum L1 specific field, different from GasUsed (?)
 	EffectiveGasPrice *big.Int `json:"effectiveGasPrice"` // Arbitrum required, but tag omitted for backwards compatibility
