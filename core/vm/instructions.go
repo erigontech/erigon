@@ -214,7 +214,7 @@ func opSgt(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 
 func stSgt(_ uint64, scope *ScopeContext) string {
 	x, y := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
-	return fmt.Sprintf("%s %d %d", SLT, &x, &y)
+	return fmt.Sprintf("%s %d %d", SGT, &x, &y)
 }
 
 func opEq(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
