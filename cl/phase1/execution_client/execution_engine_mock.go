@@ -16,10 +16,10 @@ import (
 
 	common "github.com/erigontech/erigon-lib/common"
 	hexutil "github.com/erigontech/erigon-lib/common/hexutil"
-	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	engine_types "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	types "github.com/erigontech/erigon/execution/types"
+	typesproto "github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -17,7 +17,7 @@
 package libsentry
 
 import (
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
 func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {

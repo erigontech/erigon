@@ -19,7 +19,7 @@ package txpool
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 type PeerID *typesproto.H512
