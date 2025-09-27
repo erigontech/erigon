@@ -498,7 +498,6 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 	invalidFileItemsLock := sync.Mutex{}
 	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			item := item
 			fromStep, toStep := kv.Step(item.startTxNum/ii.stepSize), kv.Step(item.endTxNum/ii.stepSize)
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
