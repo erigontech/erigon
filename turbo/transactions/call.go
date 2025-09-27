@@ -112,6 +112,7 @@ func DoCall(
 	blockNrOrHash rpc.BlockNumberOrHash,
 	header *types.Header,
 	overrides *ethapi2.StateOverrides,
+	blockOverrides *ethapi2.BlockOverrides,
 	gasCap uint64,
 	chainConfig *chain.Config,
 	stateReader state.StateReader,
@@ -154,7 +155,7 @@ func DoCall(
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
-			return nil, errors.New("header.BaseFee uint256 overflow")
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
 		}
 	}
 	msg, err := args.ToMessage(gasCap, baseFee)
@@ -162,6 +163,10 @@ func DoCall(
 		return nil, err
 	}
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	if blockOverrides != nil {
+		blockOverrides.Override(&blockCtx)
+	}
+
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})

@@ -424,7 +424,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	if config != nil && config.BlockOverrides != nil {
-		err := config.BlockOverrides.Override(blockCtx)
+		err := config.BlockOverrides.Override(&blockCtx)
 		if err != nil {
 			return err
 		}
