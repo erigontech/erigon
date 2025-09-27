@@ -284,11 +284,9 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil,
-		false, // checkNonce
-		false, // checkGas
-		true,  // isFree
-		nil,   // maxFeePerBlobGas
+		data, nil, false,
+		true, // isFree
+		nil,  // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
 	vmConfig.NoReceipts = true
@@ -303,7 +301,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
-		vm.AccountRef(msg.From()),
+		msg.From(),
 		*msg.To(),
 		msg.Data(),
 		msg.Gas(),
@@ -326,11 +324,9 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 		SysCallGasLimit,
 		u256.Num0,
 		nil, nil,
-		data, nil,
-		false, // checkNonce
-		false, // checkGas
-		true,  // isFree
-		nil,   // maxFeePerBlobGas
+		data, nil, false,
+		true, // isFree
+		nil,  // maxFeePerBlobGas
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
@@ -340,7 +336,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.SysCreate(
-		vm.AccountRef(msg.From()),
+		msg.From(),
 		msg.Data(),
 		msg.Gas(),
 		msg.Value(),

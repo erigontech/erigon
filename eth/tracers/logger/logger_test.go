@@ -32,22 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-type dummyContractRef struct {
-	calledForEach bool
-}
-
-func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return common.Address{} }
-func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
-func (dummyContractRef) SetCode(common.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
-	d.calledForEach = true
-}
-func (d *dummyContractRef) SubBalance(amount *big.Int) {}
-func (d *dummyContractRef) AddBalance(amount *big.Int) {}
-func (d *dummyContractRef) SetBalance(*big.Int)        {}
-func (d *dummyContractRef) SetNonce(uint64)            {}
-func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
+// dummyContractRef removed - no longer needed after ContractRef interface removal
 
 func TestStoreCapture(t *testing.T) {
 	c := vm.NewJumpDestCache(128)
@@ -57,7 +42,7 @@ func TestStoreCapture(t *testing.T) {
 	var (
 		logger   = NewStructLogger(nil)
 		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
-		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 100000, c)
+		contract = vm.NewContract(common.Address{}, common.Address{}, new(uint256.Int), 100000, false /* skipAnalysis */, c)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
@@ -83,7 +68,7 @@ func TestStoreCapture(t *testing.T) {
 //		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
 //		mem      = vm.NewMemory()
 //		stack    = vm.New()
-//		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 0, c)
+//		contract = vm.NewContract(common.Address{}, common.Address{}, new(uint256.Int), 0, false /* skipAnalysis */, c)
 //	)
 //	stack.push(uint256.NewInt(1))
 //	stack.push(uint256.NewInt(0))

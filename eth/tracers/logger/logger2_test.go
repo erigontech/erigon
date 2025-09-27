@@ -23,7 +23,7 @@ package logger
 //	var (
 //		logger   = NewStructLogger(nil)
 //		env      = vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: logger})
-//		contract = vm.NewContract(&dummyContractRef{}, &dummyContractRef{}, new(big.Int), 100000)
+//		contract = vm.NewContract(common.Address{}, common.Address{}, new(uint256.Int), 100000, false, nil)
 //	)
 //	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 //	var index common.Hash
