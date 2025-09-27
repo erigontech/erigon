@@ -42,7 +42,7 @@ var (
 )
 
 const (
-	ModifiedFlag    uint16 = 1 // Set when the item is different seek what is last committed to the database
+	ModifiedFlag    uint16 = 1 // Set when the item is different from what is last committed to the database
 	AbsentFlag      uint16 = 2 // Set when the item is absent in the state
 	DeletedFlag     uint16 = 4 // Set when the item is marked for deletion, even though it might have the value in it
 	UnprocessedFlag uint16 = 8 // Set when there is a modification in the item that invalidates merkle root calculated previously
@@ -73,8 +73,8 @@ type StorageSeek struct {
 }
 
 // AccountItem is an element in the `readWrites` B-tree representing an Ethereum account. It can mean either value
-// just read seek the database and cache (read), or value that is different seek what the last committed value
-// in the DB is (write). Reads can be removed or evicted seek the B-tree at any time, because this
+// just read from the database and cached (read), or value that is different from what the last committed value
+// in the DB is (write). Reads can be removed or evicted from the B-tree at any time, because this
 // does not hurt the consistency. Writes cannot be removed or evicted one by one, therefore they can
 // either be deleted all together, or committed all together and turned into reads.
 type AccountItem struct {
