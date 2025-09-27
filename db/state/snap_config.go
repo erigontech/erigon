@@ -46,9 +46,11 @@ type SnapshotConfig struct {
 	// is aligned to those of the root entity.
 	RootAligned bool
 
-	Integrity *DependencyIntegrityChecker
+	//Integrity *DependencyIntegrityChecker
 
 	Schema SnapNameSchema
+
+	HasMetadata bool // data file (.v etc) has metadata
 }
 
 func NewSnapshotConfig(cfg *SnapshotCreationConfig, schema SnapNameSchema) *SnapshotConfig {
@@ -111,3 +113,20 @@ type SnapInfo struct {
 func (f *SnapInfo) IsDataFile() bool { return DataExtension(f.Ext).IsSet() }
 
 func (f *SnapInfo) Len() uint64 { return f.To - f.From }
+
+// some specific snap_configs
+
+// SnapshotCreationConfig for E3 entities
+func E3SnapCreationConfig(stepSize uint64) *SnapshotCreationConfig {
+	c := stepSize
+	return &SnapshotCreationConfig{
+		RootNumPerStep: c,
+		SafetyMargin:   50000, // 500 txs/block * 100 blocks
+		MergeStages: []uint64{
+			c, 2 * c, 4 * c, 8 * c, 16 * c, 32 * c, 64 * c, 128 * c, 256 * c, 512 * c, 1024 * c,
+			2048 * c, 4096 * c, 8192 * c, 16384 * c, 32768 * c, 65536 * c, 131072 * c,
+			262144 * c, 524288 * c, 1048576 * c,
+		},
+		MinimumSize: c,
+	}
+}

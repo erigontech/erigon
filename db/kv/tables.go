@@ -820,6 +820,13 @@ func String2Domain(in string) (Domain, error) {
 	}
 }
 
+func String2Forkable(in string) (ForkableId, error) {
+	switch in {
+	default:
+		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
+	}
+}
+
 const MaxUint16 uint16 = 1<<16 - 1
 
 // --- Deprecated
