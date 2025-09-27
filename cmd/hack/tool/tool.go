@@ -38,6 +38,18 @@ func ChainConfig(tx kv.Tx) *chain.Config {
 	return chainConfig
 }
 
+func ChainConfigWithErr(tx kv.Tx) (*chain.Config, error) {
+	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, err
+	}
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisBlockHash)
+	if err != nil {
+		return nil, err
+	}
+	return chainConfig, nil
+}
+
 func ChainConfigFromDB(db kv.RoDB) (cc *chain.Config) {
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		cc = ChainConfig(tx)
