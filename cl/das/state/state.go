@@ -91,7 +91,8 @@ func (s *PeerDasState) GetMyCustodyColumns() (map[cltypes.CustodyIndex]bool, err
 		log.Warn("node ID is not set, return empty map")
 		return make(map[cltypes.CustodyIndex]bool), nil
 	}
-	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(node.ID(), s.GetAdvertisedCgc())
+	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, s.GetAdvertisedCgc())
+	updatedCustodyColumns, err := peerdasutils.GetCustodyColumns(node.ID(), sampleSize)
 	if err != nil {
 		return nil, err
 	}
