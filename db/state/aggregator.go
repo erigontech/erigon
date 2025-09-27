@@ -915,12 +915,12 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
+func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	txNumInFiles := at.TxNumsInFiles(entitySet...)
 	if txNumInFiles > 0 {
 		txNumInFiles--
 	}
-	return txNumInFiles / at.StepSize()
+	return kv.Step(txNumInFiles / at.StepSize())
 }
 
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
@@ -1762,8 +1762,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
+	return at.getLatest(domain, k, tx, nil, time.Time{})
+}
+
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].GetLatest(k, tx)
+		return at.d[domain].getLatest(k, tx, metrics, start)
 	}
 
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
@@ -1771,6 +1775,9 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 		return nil, kv.Step(0), false, err
 	}
 	if ok {
+		if metrics != nil {
+			metrics.updateDbReads(domain, start)
+		}
 		return v, step, true, nil
 	}
 
@@ -1778,7 +1785,9 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	if !found {
 		return nil, kv.Step(0), false, err
 	}
-
+	if metrics != nil {
+		metrics.updateFileReads(domain, start)
+	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
 }

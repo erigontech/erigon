@@ -90,6 +90,10 @@ type Trie interface {
 
 	// Makes trie more verbose
 	SetTrace(bool)
+	// Trace domain writes only (no filding etc)
+	SetTraceDomain(bool)
+	SetCapture(capture []string)
+	GetCapture(truncate bool) []string
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -101,7 +105,13 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
+	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error)
+}
+
+type CommitProgress struct {
+	KeyIndex    uint64
+	UpdateCount uint64
+	Metrics     MetricValues
 }
 
 type PatriciaContext interface {
@@ -140,7 +150,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		//fn := func(key []byte) []byte { return hexToBin(key) }
 		//tree := NewUpdateTree(mode, tmpdir, fn)
 		//return trie, tree
-		panic("omg its not supported")
+		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -868,7 +878,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				stat.ExtCount++
 				medians["ext"] = append(medians["ext"], c.extLen)
 			default:
-				panic("unexpected cell " + fmt.Sprintf("%s", c.FullString()))
+				panic("unexpected cell " + c.FullString())
 			}
 			if c.extLen > 0 {
 				switch tv {
@@ -959,7 +969,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	return t
 }
@@ -970,7 +980,7 @@ func (t *Updates) SetMode(m Mode) {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	t.Reset()
 }

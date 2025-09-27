@@ -272,6 +272,10 @@ func (a *Account) Copy(image *Account) {
 	a.Incarnation = image.Incarnation
 }
 
+func (a *Account) Empty() bool {
+	return a == nil || (a.Nonce == 0 && a.Balance.IsZero() && a.CodeHash == empty.CodeHash)
+}
+
 func (a *Account) DecodeForHashing(enc []byte) error {
 	length, structure, pos := decodeLengthForHashing(enc, 0)
 	if pos+length != len(enc) {

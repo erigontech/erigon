@@ -232,12 +232,16 @@ func ValidateHeaderTime(
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
 		if header.Time > uint64(now.Unix())+config.CalculatePeriod(header.Number.Uint64()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	} else {
 		// Don't waste time checking blocks from the future
 		if header.Time > uint64(now.Unix()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -258,7 +262,9 @@ func ValidateHeaderTime(
 	// Post Bhilai HF, reject blocks form non-primary producers if they're earlier than the expected time
 	if config.IsBhilai(header.Number.Uint64()) && succession != 0 {
 		if header.Time > uint64(now.Unix()) {
-			return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -466,12 +472,16 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		// from non-primary producer. Such blocks will be rejected later when we know the succession
 		// number of the signer in the current sprint.
 		if header.Time > uint64(now)+c.config.CalculatePeriod(number) {
-			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			}
 		}
 	} else {
 		// Don't waste time checking blocks from the future
 		if header.Time > uint64(now) {
-			return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			if dbg.BorValidateHeaderTime {
+				return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
+			}
 		}
 	}
 
@@ -1274,7 +1284,7 @@ func (c *Bor) CommitStates(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount uint256.Int, bailout bool) error {
 	// get inputs before
 	input1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1285,17 +1295,8 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 		return err
 	}
 
-	if !bailout {
-		err := db.SubBalance(sender, *amount, tracing.BalanceChangeTransfer)
-		if err != nil {
-			return err
-		}
-	}
-	err = db.AddBalance(recipient, *amount, tracing.BalanceChangeTransfer)
-	if err != nil {
-		return err
-	}
-	// get outputs after
+	consensus.Transfer(db, sender, recipient, amount, bailout)
+
 	output1, err := db.GetBalance(sender)
 	if err != nil {
 		return err
@@ -1305,7 +1306,7 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, 
 		return err
 	}
 	// add transfer log into state
-	addTransferLog(db, transferLogSig, sender, recipient, amount, &input1, &input2, &output1, &output2)
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
 	return nil
 }
 
@@ -1316,18 +1317,18 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 // AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
-	output1 := result.SenderInitBalance.Clone()
-	output2 := result.CoinbaseInitBalance.Clone()
+	output1 := result.SenderInitBalance
+	output2 := result.CoinbaseInitBalance
 	addTransferLog(
 		ibs,
 		transferFeeLogSig,
 		sender,
 		coinbase,
-		&result.FeeTipped,
-		&result.SenderInitBalance,
-		&result.CoinbaseInitBalance,
-		output1.Sub(output1, &result.FeeTipped),
-		output2.Add(output2, &result.FeeTipped),
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		*output1.Sub(&output1, &result.FeeTipped),
+		*output2.Add(&output2, &result.FeeTipped),
 	)
 
 }
