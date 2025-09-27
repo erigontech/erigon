@@ -403,8 +403,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		dbDuration := commitmentMetrics.DbReadDuration - prevCommitmentMetrics.DbReadDuration
 		fileReads := commitmentMetrics.FileReadCount - prevCommitmentMetrics.FileReadCount
 		fileDuration := commitmentMetrics.FileReadDuration - prevCommitmentMetrics.FileReadDuration
-		cachePutCount := commitmentMetrics.CachePutCount - commitmentMetrics.CachePutCount
-		cachePutSize := commitmentMetrics.CachePutSize - commitmentMetrics.CachePutSize
+		cachePutCount := commitmentMetrics.CachePutCount - prevCommitmentMetrics.CachePutCount
+		cachePutSize := commitmentMetrics.CachePutSize - prevCommitmentMetrics.CachePutSize
 
 		mxCommitmentDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxCommitmentDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
