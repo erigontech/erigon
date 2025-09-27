@@ -24,7 +24,11 @@ type DomainCfg struct {
 }
 
 func (d DomainCfg) Tables() []string {
-	return []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	tables := []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable}
+	if d.Hist.IiCfg.ValuesTable != "" {
+		tables = append(tables, d.Hist.IiCfg.ValuesTable)
+	}
+	return tables
 }
 
 func (d DomainCfg) GetVersions() VersionTypes {
