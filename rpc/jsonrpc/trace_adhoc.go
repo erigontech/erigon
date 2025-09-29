@@ -535,52 +535,6 @@ func (ot *OeTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
-func cleanHex(b []byte) string {
-	idx := 0
-	for ; idx < len(b) && b[idx] == 0; idx++ {
-	}
-
-	if idx == len(b) {
-		return "0x0"
-	}
-
-	return "0x" + hex.EncodeToString(b[idx:])
-}
-
-func hexPadCanonical(b []byte, expectedBytes int) string {
-	// 1. Esegui il trimming degli zero byte (come fa cleanHex)
-	idx := 0
-	for ; idx < len(b) && b[idx] == 0; idx++ {
-	}
-
-	trimmed := b[idx:]
-
-	// Gestisce il caso ZERO (cleanHex lo fa già, ma lo ripetiamo per sicurezza)
-	if len(trimmed) == 0 {
-		return "0x0"
-	}
-
-	// 2. Calcola la lunghezza desiderata del padding
-	// Se il valore è un PUSH o un dato di lunghezza nota (es. CALLDATASIZE),
-	// deve avere almeno la sua lunghezza nativa (ad esempio 2 caratteri per 1 byte)
-	targetLen := expectedBytes * 2 // Lunghezza in caratteri Hex
-
-	// Codifica in hex
-	hexStr := hex.EncodeToString(trimmed)
-
-	// 3. Applica il padding se la lunghezza è inferiore a quella target e il valore non è 32 byte completo
-	// La logica di padding è complessa: solo i valori inferiori alla dimensione intera del word vengono paddati.
-	if len(hexStr) < targetLen && expectedBytes < 32 {
-		// Aggiunge gli zeri iniziali mancanti fino a raggiungere la lunghezza target
-		return "0x" + fmt.Sprintf("%0*s", targetLen, hexStr)
-	}
-
-	// Per i valori interi a 32 byte (come i risultati di ADD/SUB), la logica è diversa
-	// Qui assumiamo che i valori a lunghezza fissa siano puliti ma che i dati operativi necessitino di padding.
-
-	return "0x" + hexStr
-}
-
 func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
@@ -619,7 +573,9 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				stackValue := tracers.StackBack(st, 0).Bytes()
 				if len(stackValue) >= pushBytes {
 					pushedData := stackValue[len(stackValue)-pushBytes:]
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, hexPadCanonical(pushedData, pushBytes))
+					paddedData := make([]byte, 32)
+					copy(paddedData[32-len(pushedData):], pushedData)
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(paddedData))
 					showStack = 0
 				}
 			}
@@ -627,6 +583,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				for i := showStack - 1; i >= 0; i-- {
 					if len(st) > i {
 						valueBytes := tracers.StackBack(st, i).Bytes()
+
 						ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(valueBytes))
 					}
 				}
