@@ -586,11 +586,18 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			}
 			if pushBytes > 0 && len(st) > 0 {
 				stackValue := tracers.StackBack(st, 0).Bytes()
-				if len(stackValue) >= pushBytes {
-					pushedData := stackValue[len(stackValue)-pushBytes:]
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, padHexToLength(pushedData, pushBytes))
-					showStack = 0
-				}
+                                var pushedData []byte
+
+                                if len(stackValue) >= pushBytes {
+                                    pushedData = stackValue[len(stackValue)-pushBytes:]
+                                } else {
+                                    pushedData = stackValue 
+                                }
+
+                                if pushBytes > 0 { 
+                                   ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, padHexToLength(pushedData, pushBytes))
+                                   showStack = 0 
+                                }
 			}
 			if showStack > 0 {
 				for i := showStack - 1; i >= 0; i-- {
