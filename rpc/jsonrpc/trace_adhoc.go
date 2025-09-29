@@ -559,7 +559,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
 				showStack = int(ot.lastOp-vm.SWAP1) + 2
 			case ot.lastOp >= vm.DUP1 && ot.lastOp <= vm.DUP16:
-				showStack = int(ot.lastOp-vm.DUP1) + 2
+				showStack = 1
 			}
 			switch ot.lastOp {
 			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.SDIV, vm.SAR, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
@@ -582,9 +582,10 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			if showStack > 0 {
 				for i := showStack - 1; i >= 0; i-- {
 					if len(st) > i {
-						valueBytes := tracers.StackBack(st, i).Bytes()
-
-						ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(valueBytes))
+                                            valueBytes := tracers.StackBack(st, i).Bytes() 
+                                            paddedData := make([]byte, 32)
+                                            copy(paddedData[32-len(valueBytes):], valueBytes)
+                                            ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x" + hex.EncodeToString(paddedData))
 					}
 				}
 			}
