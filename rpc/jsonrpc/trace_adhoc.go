@@ -535,17 +535,6 @@ func (ot *OeTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
-func padPushData(b []byte, expectedBytes int) string {
-	padded := make([]byte, expectedBytes)
-
-	idx := 0
-	for ; idx < len(b) && b[idx] == 0; idx++ {
-	}
-	trimmed := b[idx:]
-	copy(padded[expectedBytes-len(trimmed):], trimmed)
-	return "0x" + hex.EncodeToString(padded)
-}
-
 func padHexToLength(b []byte, expectedBytes int) string {
 	idx := 0
 	for ; idx < len(b) && b[idx] == 0; idx++ {
@@ -555,9 +544,9 @@ func padHexToLength(b []byte, expectedBytes int) string {
 		paddedZero := make([]byte, expectedBytes)
 		return "0x" + hex.EncodeToString(paddedZero)
 	}
-
 	targetLen := expectedBytes
 	padded := make([]byte, targetLen)
+
 	copy(padded[targetLen-len(trimmed):], trimmed)
 	return "0x" + hex.EncodeToString(padded)
 }
@@ -599,7 +588,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				stackValue := tracers.StackBack(st, 0).Bytes()
 				if len(stackValue) >= pushBytes {
 					pushedData := stackValue[len(stackValue)-pushBytes:]
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, padPushData(pushedData, pushBytes))
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, padHexToLength(pushedData, pushBytes))
 					showStack = 0
 				}
 			}
@@ -613,6 +602,8 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 						switch ot.lastOp {
 						case vm.CALLDATASIZE, vm.RETURNDATASIZE:
 							expectedLength = 4
+						case vm.GAS, vm.GASLIMIT, vm.DIFFICULTY, vm.TIMESTAMP, vm.NUMBER, vm.BASEFEE:
+							expectedLength = 8
 						}
 
 						if expectedLength < 32 {
