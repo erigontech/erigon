@@ -198,6 +198,7 @@ func (g *gaugeResetTask) reset() {
 
 var execResetTask *gaugeResetTask
 var commitResetTask *gaugeResetTask
+var domainResetTask *gaugeResetTask
 
 // enough time to alow the sampler to scrape
 const resetDelay = 60 * time.Second
@@ -221,21 +222,12 @@ func resetExecGauges(ctx context.Context) {
 				mxExecMGasSec, mxTaskMgasSec, mxExecBlockDuration, mxExecTxnDuration,
 				mxExecTxnExecDuration, mxExecTxnReadDuration, mxExecTxnAccountReadDuration, mxExecTxnStoreageReadDuration,
 				mxExecTxnCodeReadDuration, mxExecReadRate, mxExecAccountReadRate, mxExecStorageReadRate,
-				mxExecCodeReadRate, mxExecWriteRate, mxExecDomainReads, mxExecDomainReadDuration,
-				mxExecDomainCacheReads, mxExecDomainCacheReadDuration, mxExecDomainDbReads, mxExecDomainDbReadDuration,
-				mxExecDomainFileReads, mxExecDomainFileReadDuration, mxExecAccountDomainReads, mxExecAccountDomainReadDuration,
-				mxExecAccountDomainCacheReads, mxExecAccountDomainCacheReadDuration, mxExecAccountDomainDbReads, mxExecAccountDomainDbReadDuration,
-				mxExecAccountDomainFileReads, mxExecAccountDomainFileReadDuration, mxExecStorageDomainReads, mxExecStorageDomainReadDuration,
-				mxExexStorageDomainCacheReads, mxExecStorageDomainCacheReadDuration, mxExecStorageDomainDbReads, mxExecStorageDomainDbReadDuration,
-				mxExecStorageDomainFileReads, mxExecStorageDomainFileReadDuration, mxExecCodeDomainReads, mxExecCodeDomainReadDuration,
-				mxExexCodeDomainCacheReads, mxExecCodeDomainCacheReadDuration, mxExecCodeDomainDbReads, mxExecCodeDomainDbReadDuration,
-				mxExecCodeDomainFileReads, mxExecCodeDomainFileReadDuration, mxExecDomainPutRate, mxExecDomainPutSize,
-				mxExecAccountDomainPutRate, mxExecAccountDomainPutSize, mxExecStorageDomainPutRate, mxExecStorageDomainPutSize,
-				mxExecCodeDomainPutRate, mxExecCodeDomainPutSize},
+				mxExecCodeReadRate, mxExecWriteRate},
 		}
 		execResetTask.run(ctx)
 	}
 }
+
 func resetCommitmentGauges(ctx context.Context) {
 	if commitResetTask != nil {
 		commitResetTask.Lock()
@@ -251,7 +243,37 @@ func resetCommitmentGauges(ctx context.Context) {
 			ctx:   ctx,
 			gauges: []metrics.Gauge{
 				mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentMGasSec, mxCommitmentBlockDuration,
-				mxCommitmentReadRate, mxCommitmentAccountReadRate,
+			},
+		}
+		commitResetTask.run(ctx)
+	}
+}
+
+func resetDomainGauges(ctx context.Context) {
+	if domainResetTask != nil {
+		domainResetTask.Lock()
+		defer domainResetTask.Unlock()
+		if domainResetTask.stopped {
+			domainResetTask.Timer = time.NewTimer(resetDelay)
+		} else {
+			domainResetTask.Reset(resetDelay)
+		}
+	} else {
+		domainResetTask = &gaugeResetTask{
+			Timer: time.NewTimer(resetDelay),
+			ctx:   ctx,
+			gauges: []metrics.Gauge{
+				mxExecDomainReads, mxExecDomainReadDuration,
+				mxExecDomainCacheReads, mxExecDomainCacheReadDuration, mxExecDomainDbReads, mxExecDomainDbReadDuration,
+				mxExecDomainFileReads, mxExecDomainFileReadDuration, mxExecAccountDomainReads, mxExecAccountDomainReadDuration,
+				mxExecAccountDomainCacheReads, mxExecAccountDomainCacheReadDuration, mxExecAccountDomainDbReads, mxExecAccountDomainDbReadDuration,
+				mxExecAccountDomainFileReads, mxExecAccountDomainFileReadDuration, mxExecStorageDomainReads, mxExecStorageDomainReadDuration,
+				mxExexStorageDomainCacheReads, mxExecStorageDomainCacheReadDuration, mxExecStorageDomainDbReads, mxExecStorageDomainDbReadDuration,
+				mxExecStorageDomainFileReads, mxExecStorageDomainFileReadDuration, mxExecCodeDomainReads, mxExecCodeDomainReadDuration,
+				mxExexCodeDomainCacheReads, mxExecCodeDomainCacheReadDuration, mxExecCodeDomainDbReads, mxExecCodeDomainDbReadDuration,
+				mxExecCodeDomainFileReads, mxExecCodeDomainFileReadDuration, mxExecDomainPutRate, mxExecDomainPutSize,
+				mxExecAccountDomainPutRate, mxExecAccountDomainPutSize, mxExecStorageDomainPutRate, mxExecStorageDomainPutSize,
+				mxExecCodeDomainPutRate, mxExecCodeDomainPutSize, mxCommitmentReadRate, mxCommitmentAccountReadRate,
 				mxCommitmentStorageReadRate, mxCommitmentBranchReadRate, mxCommitmentBrancgWriteRate,
 				mxCommitmentKeyRate, mxCommitmentAccountKeyRate, mxCommitmentStorageKeyRate, mxCommitmentFoldRate,
 				mxCommitmentUnfoldRate, mxCommitmentDomainReads, mxCommitmentDomainReadDuration, mxCommitmentDomainCacheReads,
@@ -259,7 +281,7 @@ func resetCommitmentGauges(ctx context.Context) {
 				mxCommitmentDomainFileReadDuration, mxCommitmentDomainPutRate, mxCommitmentDomainPutSize,
 			},
 		}
-		commitResetTask.run(ctx)
+		domainResetTask.run(ctx)
 	}
 }
 
@@ -1074,6 +1096,7 @@ func ExecV3(ctx context.Context,
 	defer flushEvery.Stop()
 	defer resetExecGauges(ctx)
 	defer resetCommitmentGauges(ctx)
+	defer resetDomainGauges(ctx)
 
 	var executor executor
 	var executorContext context.Context
