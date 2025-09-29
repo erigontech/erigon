@@ -990,7 +990,7 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 				// check that the tx index file exist
 				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
 				txIdxVer := verMap["transactions-to-block"]["idx"].Current
-				idxName = strings.Replace(idxName, idxVer.String(), txIdxVer.String(), 1)
+				txIdxName = strings.Replace(txIdxName, segVer.String(), txIdxVer.String(), 1)
 				if exists, err := dir2.FileExist(filepath.Join(snapDir, txIdxName)); err != nil {
 					return err
 				} else if !exists {
