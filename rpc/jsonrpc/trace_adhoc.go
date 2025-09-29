@@ -551,16 +551,6 @@ func padHexToLength(b []byte, expectedBytes int) string {
 	return "0x" + hex.EncodeToString(padded)
 }
 
-func forcePadTo32Bytes(b []byte) []byte {
-    if len(b) == 32 {
-        return b 
-    }
-    
-    padded := make([]byte, 32)
-    copy(padded[32-len(b):], b)
-    return padded
-}
-
 func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
@@ -620,8 +610,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 							hexOutput := padHexToLength(valueBytes, expectedLength)
 							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, hexOutput)
 						} else {
-                                                        paddedBytes := forcePadTo32Bytes(valueBytes)
-                                                        ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(paddedBytes))
+							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(valueBytes))
 						}
 					}
 				}
