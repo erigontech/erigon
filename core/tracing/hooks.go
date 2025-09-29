@@ -251,6 +251,9 @@ const (
 	// account within the same txn (captured at end of tx).
 	// Note it doesn't account for a self-destruct which appoints itself as recipient.
 	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
+	// GasChangeTxDataFloor is the amount of extra gas the transaction has to pay to reach the minimum gas requirement for the
+	// transaction data. This change will always be a negative change.
+	GasChangeTxDataFloor GasChangeReason = 19
 )
 
 // Arbitrum specific
