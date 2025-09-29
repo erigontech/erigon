@@ -545,10 +545,15 @@ func padHexToLength(b []byte, expectedBytes int) string {
 		return "0x" + hex.EncodeToString(paddedZero)
 	}
 	targetLen := expectedBytes
-	padded := make([]byte, targetLen)
+        if len(trimmed) > targetLen {
+            trimmed = trimmed[len(trimmed) - targetLen:]
+        }
 
-	copy(padded[targetLen-len(trimmed):], trimmed)
-	return "0x" + hex.EncodeToString(padded)
+        padded := make([]byte, targetLen)
+        copyStart := targetLen - len(trimmed)
+    
+        copy(padded[copyStart:], trimmed)
+        return "0x" + hex.EncodeToString(padded)
 }
 
 func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
