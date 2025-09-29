@@ -496,25 +496,6 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	//idxFName := info.Type.IdxFileName(fileVer, info.From, info.To)
-	//idxPath := filepath.Join(info.Dir(), idxFName)
-	//
-	//idxFPathMask, err := version.ReplaceVersionWithMask(idxPath)
-	//if err != nil {
-	//	return fmt.Errorf("[build index] can't replace idx with mask in file %s: %w", idxFName, err)
-	//}
-	//idxFPath, idxVer, ok, err := version.FindFilesWithVersionsByPattern(idxFPathMask)
-	//if err != nil {
-	//	_, fName := filepath.Split(fPath)
-	//	return fmt.Errorf("build index err %w fname %s", err, fName)
-	//}
-	//if !ok {
-	//	_, fName := filepath.Split(fPath)
-	//	idxVer = indexVersion.Current
-	//	return fmt.Errorf("build index err %w fname %s", os.ErrNotExist, fName)
-	//} else if idxVer.Less(indexVersion.MinSupported) {
-	//	version.VersionTooLowPanic(idxFPath, indexVersion)
-	//}
 	idxVer := indexVersion.Current
 	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
