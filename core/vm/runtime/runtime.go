@@ -146,7 +146,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	var (
 		address = common.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
-		sender  = vm.AccountRef(cfg.Origin)
+		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
@@ -202,7 +202,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	}
 	var (
 		vmenv  = NewEnv(cfg)
-		sender = vm.AccountRef(cfg.Origin)
+		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil, nil)
@@ -242,7 +242,7 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
-		sender,
+		sender.Address(),
 		address,
 		input,
 		cfg.GasLimit,

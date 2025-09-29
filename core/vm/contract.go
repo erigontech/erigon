@@ -22,43 +22,37 @@ package vm
 import (
 	"fmt"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/core/tracing"
 )
 
-// ContractRef is a reference to the contract's backing object
-type ContractRef interface {
-	Address() common.Address
-}
-
-// AccountRef implements ContractRef.
+// AccountRef is a reference to an account address.
 //
 // Account references are used during EVM initialisation and
 // it's primary use is to fetch addresses. Removing this object
 // proves difficult because of the cached jump destinations which
-// are fetched from the parent contract (i.e. the caller), which
-// is a ContractRef.
+// are fetched from the parent contract (i.e. the caller).
 type AccountRef common.Address
 
 // Address casts AccountRef to a Address
 func (ar AccountRef) Address() common.Address { return (common.Address)(ar) }
 
 // Contract represents an ethereum contract in the state database. It contains
-// the contract code, calling arguments. Contract implements ContractRef
+// the contract code, calling arguments.
 type Contract struct {
 	// CallerAddress is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
 	CallerAddress common.Address
-	caller        ContractRef
 	self          common.Address
 	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
+	skipAnalysis  bool
 
 	Code     []byte
 	CodeHash common.Hash
@@ -96,10 +90,11 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, gas uint64, jumpDest *JumpDestCache) *Contract {
+func NewContract(callerAddr common.Address, addr common.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
-		CallerAddress: caller.Address(), caller: caller, self: addr,
-		value: value,
+		CallerAddress: callerAddr, self: addr,
+		value:        value,
+		skipAnalysis: skipAnalysis,
 		// Gas should be a pointer so it can safely be reduced through the run
 		// This pointer will be off the state transition
 		Gas:       gas,
@@ -119,6 +114,9 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	// Only JUMPDESTs allowed for destinations
 	if OpCode(c.Code[udest]) != JUMPDEST {
 		return false, false
+	}
+	if c.skipAnalysis {
+		return true, false
 	}
 	return c.isCode(udest), true
 }
@@ -160,12 +158,10 @@ func (c *Contract) isCode(udest uint64) bool {
 // AsDelegate sets the contract to be a delegate call and returns the current
 // contract (for chaining calls)
 func (c *Contract) AsDelegate() *Contract {
-	// NOTE: caller must, at all times be a contract. It should never happen
-	// that caller is something other than a Contract.
-	parent := c.caller.(*Contract)
-	c.CallerAddress = parent.CallerAddress
-	c.value = parent.value
-
+	// For delegate calls, we need to use the caller's caller address
+	// and inherit the value from the parent call
+	// Since we removed ContractRef, the caller address should be set by the caller
+	// of this method before calling AsDelegate()
 	return c
 }
 
