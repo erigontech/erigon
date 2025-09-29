@@ -535,6 +535,18 @@ func (ot *OeTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
+func cleanHex(b []byte) string {
+	idx := 0
+	for ; idx < len(b) && b[idx] == 0; idx++ {
+	}
+
+	if idx == len(b) {
+		return "0x0"
+	}
+
+	return "0x" + hex.EncodeToString(b[idx:])
+}
+
 func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
@@ -551,12 +563,13 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			var showStack int
 			var pushBytes int
 			switch {
-			case ot.lastOp >= vm.PUSH0 && ot.lastOp <= vm.PUSH32:
+			case ot.lastOp >= vm.PUSH1 && ot.lastOp <= vm.PUSH32:
 				showStack = 1
 				pushBytes = int(ot.lastOp - vm.PUSH1 + 1)
+			case ot.lastOp == vm.PUSH0:
+				showStack = 1
 			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
 				showStack = int(ot.lastOp-vm.SWAP1) + 2
-
 			case ot.lastOp >= vm.DUP1 && ot.lastOp <= vm.DUP16:
 				showStack = int(ot.lastOp-vm.DUP1) + 2
 			}
@@ -573,12 +586,15 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				if len(stackValue) >= pushBytes {
 					pushedData := stackValue[len(stackValue)-pushBytes:]
 					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(pushedData))
-					showStack = 0
+					showStack = 0 
 				}
 			}
-			for i := showStack - 1; i >= 0; i-- {
-				if len(st) > i {
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, tracers.StackBack(st, i).Hex())
+			if showStack > 0 {
+				for i := showStack - 1; i >= 0; i-- {
+					if len(st) > i {
+						valueBytes := tracers.StackBack(st, i).Bytes()
+						ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, cleanHex(valueBytes))
+					}
 				}
 			}
 			// Set the "mem" of the last operation
