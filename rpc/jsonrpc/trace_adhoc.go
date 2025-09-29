@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -548,11 +549,14 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 		if ot.lastVmOp != nil && ot.lastVmOp.Ex != nil {
 			// Set the "push" of the last operation
 			var showStack int
+			var pushBytes int
 			switch {
 			case ot.lastOp >= vm.PUSH0 && ot.lastOp <= vm.PUSH32:
 				showStack = 1
+				pushBytes = int(ot.lastOp - vm.PUSH1 + 1)
 			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
 				showStack = int(ot.lastOp-vm.SWAP1) + 2
+
 			case ot.lastOp >= vm.DUP1 && ot.lastOp <= vm.DUP16:
 				showStack = int(ot.lastOp-vm.DUP1) + 2
 			}
@@ -563,6 +567,14 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY, vm.SGT, vm.GASPRICE,
 				vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE:
 				showStack = 1
+			}
+			if pushBytes > 0 && len(st) > 0 {
+				stackValue := tracers.StackBack(st, 0).Bytes()
+				if len(stackValue) >= pushBytes {
+					pushedData := stackValue[len(stackValue)-pushBytes:]
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(pushedData))
+					showStack = 0
+				}
 			}
 			for i := showStack - 1; i >= 0; i-- {
 				if len(st) > i {
