@@ -80,10 +80,10 @@ var Indexes = struct {
 	TxnHash,
 	TxnHash2BlockNum snaptype.Index
 }{
-	HeaderHash:       snaptype.Index{Name: "headers", Version: version.V2_1_standart},
-	BodyHash:         snaptype.Index{Name: "bodies", Version: version.V2_1_standart},
-	TxnHash:          snaptype.Index{Name: "transactions", Version: version.V2_0_standart},
-	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Version: version.V2_0_standart, Offset: 1},
+	HeaderHash:       snaptype.Index{Name: "headers", Version: version.V1_1_standart},
+	BodyHash:         snaptype.Index{Name: "bodies", Version: version.V1_1_standart},
+	TxnHash:          snaptype.Index{Name: "transactions", Version: version.V1_1_standart},
+	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Version: version.V1_1_standart, Offset: 1},
 }
 
 var (
