@@ -15,6 +15,7 @@ import (
 	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/arb"
 	"github.com/holiman/uint256"
 )
 
@@ -68,6 +69,7 @@ var skipAccountChecks = [...]bool{
 // func (tx *ArbitrumInternalTx) skipAccountChecks() bool        { return true }
 
 type ArbitrumUnsignedTx struct {
+	arb.NoTimeBoosted
 	ChainId *big.Int
 	From    common.Address
 
@@ -439,14 +441,6 @@ func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
 	panic("implement me")
 }
 
-func (t *ArbitrumUnsignedTx) IsTimeBoosted() bool {
-	return false
-}
-
-func (tx *ArbitrumUnsignedTx) SetTimeboosted(bool) {
-	// not supported
-}
-
 // func (tx *ArbitrumUnsignedTx) gas() uint64         {  }
 // func (tx *ArbitrumUnsignedTx) gasPrice() *big.Int  { return tx.GasFeeCap }
 // func (tx *ArbitrumUnsignedTx) gasTipCap() *big.Int { return bigZero }
@@ -465,6 +459,7 @@ func (tx *ArbitrumUnsignedTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //}
 
 type ArbitrumContractTx struct {
+	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
 	From      common.Address
@@ -871,14 +866,6 @@ func (tx *ArbitrumContractTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //	}
 //	return dst.Set(baseFee)
 //}
-
-func (t *ArbitrumContractTx) IsTimeBoosted() bool {
-	return false
-}
-
-func (tx *ArbitrumContractTx) SetTimeboosted(bool) {
-	// not supported
-}
 
 type ArbitrumRetryTx struct {
 	ChainId             *big.Int
@@ -1394,6 +1381,7 @@ func (tx *ArbitrumRetryTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //}
 
 type ArbitrumSubmitRetryableTx struct {
+	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
 	From      common.Address
@@ -1903,14 +1891,6 @@ func (tx *ArbitrumSubmitRetryableTx) Unwrap() Transaction {
 	return tx
 }
 
-func (tx *ArbitrumSubmitRetryableTx) IsTimeBoosted() bool {
-	return false
-}
-
-func (tx *ArbitrumSubmitRetryableTx) SetTimeboosted(bool) {
-	// not supported
-}
-
 // func (tx *ArbitrumSubmitRetryableTx) chainID() *big.Int            { return tx.ChainId }
 // func (tx *ArbitrumSubmitRetryableTx) accessList() types.AccessList { return nil }
 // func (tx *ArbitrumSubmitRetryableTx) gas() uint64                  { return tx.Gas }
@@ -1937,6 +1917,7 @@ func (tx *ArbitrumSubmitRetryableTx) decode(input []byte) error {
 //}
 
 type ArbitrumDepositTx struct {
+	arb.NoTimeBoosted
 	ChainId     *big.Int
 	L1RequestId common.Hash
 	From        common.Address
@@ -2250,28 +2231,22 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, d)
 }
 
-func (d *ArbitrumDepositTx) IsTimeBoosted() bool {
-	return false
-}
-
-func (d *ArbitrumDepositTx) SetTimeboosted(bool) {
-	// not supported
-}
-
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)
 //}
 
 type ArbitrumInternalTx struct {
+	arb.NoTimeBoosted
 	ChainId *uint256.Int
 	Data    []byte
 }
 
 func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
-	return &ArbitrumInternalTx{
-		t.ChainId.Clone(),
-		common.CopyBytes(t.Data),
+	cpy := &ArbitrumInternalTx{
+		ChainId: t.ChainId.Clone(),
+		Data:    common.CopyBytes(t.Data),
 	}
+	return cpy
 }
 
 func (tx *ArbitrumInternalTx) Type() byte                   { return ArbitrumInternalTxType }
@@ -2477,14 +2452,6 @@ func (t *ArbitrumInternalTx) encode(b *bytes.Buffer) error {
 }
 func (t *ArbitrumInternalTx) decode(input []byte) error {
 	return rlp.DecodeBytes(input, t)
-}
-
-func (t *ArbitrumInternalTx) IsTimeBoosted() bool {
-	return false
-}
-
-func (t *ArbitrumInternalTx) SetTimeboosted(bool) {
-	// not supported in ArbitrumInternalTx
 }
 
 //func (tx *ArbitrumInternalTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {

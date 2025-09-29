@@ -7,8 +7,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/core"
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
@@ -767,6 +765,8 @@ func genFromRPc(cliCtx *cli.Context) error {
 	}
 
 	verification := cliCtx.Bool(Verify.Name)
+	isArbitrum := cliCtx.Bool(Arbitrum.Name)
+
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
 	start := cliCtx.Uint64(FromBlock.Name)
@@ -802,25 +802,6 @@ func genFromRPc(cliCtx *cli.Context) error {
 	latestBlock := new(big.Int)
 	latestBlock.SetString(latestBlockHex[2:], 16)
 	noWrite := cliCtx.Bool(NoWrite.Name)
-
-	var chainConfig *chain.Config
-	{
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-			if err != nil {
-				return err
-			}
-			chainConfig, err = core.ReadChainConfig(tx, genesisHash)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-
-	isArbitrum := chainConfig.IsArbitrum()
 
 	var blockNumber big.Int
 	// Process blocks from the starting block up to the latest.
