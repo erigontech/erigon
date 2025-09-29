@@ -165,6 +165,9 @@ func (s BlocksFreezing) String() string {
 	if !s.ProduceE2 {
 		out = append(out, "--"+FlagSnapStop+"=true")
 	}
+	if !s.ProduceE3 {
+		out = append(out, "--"+FlagSnapStateStop+"=true")
+	}
 	return strings.Join(out, " ")
 }
 
