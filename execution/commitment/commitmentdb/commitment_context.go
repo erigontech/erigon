@@ -207,9 +207,14 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	if frozenSteps := trieContext.getter.StepsInFiles(kv.CommitmentDomain); step < frozenSteps {
-		return 0, 0, nil, fmt.Errorf("commitment state out of date: commitment step: %d, expected step: %d", step, frozenSteps)
+
+	if trieContext.limitReadAsOfTxNum == 0 {
+		// assume we're processing the latest state - in which case it needs to be writable
+		if frozenSteps := trieContext.getter.StepsInFiles(kv.CommitmentDomain); step < frozenSteps {
+			return 0, 0, nil, fmt.Errorf("commitment state out of date: commitment step: %d, expected step: %d", step, frozenSteps)
+		}
 	}
+
 	if len(state) < 16 {
 		return 0, 0, nil, nil
 	}

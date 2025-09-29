@@ -343,7 +343,7 @@ func (so *stateObject) Code() ([]byte, error) {
 	so.db.stateReader.SetTrace(false, "")
 
 	if err != nil {
-		return nil, fmt.Errorf("can't code for %x: %w", so.Address(), err)
+		return nil, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
 	so.code = code
 	return code, nil

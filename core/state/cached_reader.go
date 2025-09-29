@@ -37,7 +37,7 @@ func NewCachedReader(r StateReader, cache *shards.StateCache) *CachedReader {
 }
 
 func (cr *CachedReader) SetTrace(trace bool, tracePrefix string) {
-	cr.r.SetTrace(true, tracePrefix)
+	cr.r.SetTrace(trace, tracePrefix)
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state
