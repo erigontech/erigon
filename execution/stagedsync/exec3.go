@@ -403,8 +403,8 @@ func updateExecDomainMetrics(metrics *dbstate.DomainMetrics, prevMetrics *dbstat
 		dbDuration := commitmentMetrics.DbReadDuration - prevCommitmentMetrics.DbReadDuration
 		fileReads := commitmentMetrics.FileReadCount - prevCommitmentMetrics.FileReadCount
 		fileDuration := commitmentMetrics.FileReadDuration - prevCommitmentMetrics.FileReadDuration
-		cachePutCount := commitmentMetrics.CachePutCount - commitmentMetrics.CachePutCount
-		cachePutSize := commitmentMetrics.CachePutSize - commitmentMetrics.CachePutSize
+		cachePutCount := commitmentMetrics.CachePutCount - prevCommitmentMetrics.CachePutCount
+		cachePutSize := commitmentMetrics.CachePutSize - prevCommitmentMetrics.CachePutSize
 
 		mxCommitmentDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxCommitmentDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
@@ -1265,7 +1265,7 @@ func ExecV3(ctx context.Context,
 					if dbg.TraceBlock(blockNum) {
 						se.doms.SetTrace(true, false)
 					}
-					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix(), nil)
+					rh, err := executor.domains().ComputeCommitment(ctx, applyTx, true, blockNum, inputTxNum, execStage.LogPrefix(), nil)
 					se.doms.SetTrace(false, false)
 
 					if err != nil {
@@ -1373,7 +1373,6 @@ func ExecV3(ctx context.Context,
 					if err != nil {
 						return err
 					}
-
 					// on chain-tip: if batch is full then stop execution - to allow stages commit
 					if !initialCycle {
 						if isBatchFull {
@@ -1643,7 +1642,7 @@ func ExecV3(ctx context.Context,
 									lastExecutedLog = time.Now()
 								}
 
-								rh, err := pe.doms.ComputeCommitment(ctx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
+								rh, err := pe.doms.ComputeCommitment(ctx, applyTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 								close(commitProgress)
 								captured := pe.doms.SetTrace(false, false)
 								if err != nil {
@@ -1942,7 +1941,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {

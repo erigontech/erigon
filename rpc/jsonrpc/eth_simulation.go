@@ -415,7 +415,6 @@ func (s *simulator) simulateBlock(
 	txNum := minTxNum + 1 + uint64(txnIndex)
 	sharedDomains.SetBlockNum(blockNumber)
 	sharedDomains.SetTxNum(txNum)
-	sharedDomains.GetCommitmentContext().SetTxNum(txNum)
 
 	var stateReader state.StateReader
 	if latest {
@@ -484,7 +483,7 @@ func (s *simulator) simulateBlock(
 
 	// Compute the state root for execution on the latest state and also on the historical state if commitment history is present.
 	if latest || s.commitmentHistory {
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, false, header.Number.Uint64(), txNum, "eth_simulateV1", nil)
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, header.Number.Uint64(), txNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
 		}

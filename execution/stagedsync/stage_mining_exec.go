@@ -244,7 +244,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		return err
 	}
 
-	rh, err := txc.Doms.ComputeCommitment(ctx, true, blockHeight, txNum, s.LogPrefix(), nil)
+	rh, err := txc.Doms.ComputeCommitment(ctx, txc.Tx.(kv.TemporalTx), true, blockHeight, txNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}

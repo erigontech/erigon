@@ -162,7 +162,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -259,7 +259,6 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	sd.sdCtx.SetTxNum(txNum)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
