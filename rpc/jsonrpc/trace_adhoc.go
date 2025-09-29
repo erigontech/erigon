@@ -620,6 +620,8 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
                                                         expectedLength = 3
                                                 case vm.BYTE: 
                                                         expectedLength = 1
+						case vm.ADDRESS, vm.CALLER, vm.ORIGIN, vm.COINBASE, vm.BALANCE, vm.EXTCODESIZE, vm.EXTCODECOPY, vm.EXTCODEHASH:
+                                                        expectedLength = 20
 						}
 
 						if expectedLength < 32 {
