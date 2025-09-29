@@ -574,7 +574,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
 				showStack = int(ot.lastOp-vm.SWAP1) + 2
 			case ot.lastOp >= vm.DUP1 && ot.lastOp <= vm.DUP16:
-				showStack = 1
+                                showStack = int(ot.lastOp - vm.DUP1) + 2 
 			}
 			switch ot.lastOp {
 			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.SDIV, vm.SAR, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
@@ -611,6 +611,10 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 							expectedLength = 4
 						case vm.GAS, vm.GASLIMIT, vm.DIFFICULTY, vm.TIMESTAMP, vm.NUMBER, vm.BASEFEE:
 							expectedLength = 8
+                                                case vm.SLOAD: 
+                                                        expectedLength = 3
+                                                case vm.BYTE: 
+                                                        expectedLength = 1
 						}
 
 						if expectedLength < 32 {
