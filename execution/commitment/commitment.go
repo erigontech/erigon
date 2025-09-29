@@ -28,9 +28,10 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -921,19 +922,6 @@ func (m Mode) String() string {
 	}
 }
 
-func ParseCommitmentMode(s string) Mode {
-	var mode Mode
-	switch s {
-	case "off":
-		mode = ModeDisabled
-	case "update":
-		mode = ModeUpdate
-	default:
-		mode = ModeDirect
-	}
-	return mode
-}
-
 type Updates struct {
 	hasher keyHasher
 	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
@@ -1227,8 +1215,8 @@ func (uf UpdateFlags) String() string {
 }
 
 type Update struct {
-	CodeHash   [length.Hash]byte
-	Storage    [length.Hash]byte
+	CodeHash   common.Hash
+	Storage    common.Hash
 	StorageLen int
 	Flags      UpdateFlags
 	Balance    uint256.Int

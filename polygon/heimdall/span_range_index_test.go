@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 type spanRangeIndexTest struct {
@@ -24,15 +26,15 @@ func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 	ctx, cancel := context.WithCancel(t.Context())
 	logger := log.New()
 
-	db, err := mdbx.New(kv.HeimdallDB, logger).
-		InMem(tmpDir).
+	db, err := mdbx.New(dbcfg.HeimdallDB, logger).
+		InMem(t, tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{kv.BorSpansIndex: {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
 
 	require.NoError(t, err)
 
-	index := NewSpanRangeIndex(polygoncommon.AsDatabase(db), kv.BorSpansIndex)
+	index := NewSpanRangeIndex(polygondb.AsDatabase(db), kv.BorSpansIndex)
 
 	t.Cleanup(func() { db.Close(); cancel() })
 

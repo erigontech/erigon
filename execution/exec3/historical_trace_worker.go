@@ -39,11 +39,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -161,7 +161,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
-			_, ibs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			_, ibs, err = genesiswrite.GenesisToBlock(nil, rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
@@ -224,7 +224,6 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
 		vmCfg := *rw.vmCfg
-		vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		vmCfg.Tracer = tracer.Tracer().Hooks
 		ibs.SetTxContext(txTask.BlockNum, txTask.TxIndex)
 		txn := txTask.Tx
@@ -606,7 +605,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		f := core.GetHashFn(header, getHeaderFunc)
@@ -630,7 +628,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
-				SkipAnalysis:    skipAnalysis,
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,

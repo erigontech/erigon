@@ -22,7 +22,7 @@ package p2p
 import (
 	"fmt"
 
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -66,8 +66,8 @@ type Protocol struct {
 	// Attributes contains protocol specific information for the node record.
 	Attributes []enr.Entry
 
-	FromProto map[proto_sentry.MessageId]uint64
-	ToProto   map[uint64]proto_sentry.MessageId
+	FromProto map[sentryproto.MessageId]uint64
+	ToProto   map[uint64]sentryproto.MessageId
 }
 
 func (p Protocol) cap() Cap {

@@ -320,5 +320,12 @@
     "Name": "pawel-4-exp-heavy",
     "Gas": 506,
     "NoBenchmark": false
+  },
+  {
+    "Input": "000000000000000000000000000000000000000000000000000000000000001700000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000017bffffffffffffffffffffffffffffffffffffffffffffbffffffffffffffffff7ffffffffffffffffffffffffffffffffffffffffffe",
+    "Expected": "200f14de1d474710c1c979920452e0ffc2ac6f618afba5",
+    "Name": "mod_vul_pawel_3_exp_8",
+    "Gas": 200,
+    "NoBenchmark": false
   }
 ]

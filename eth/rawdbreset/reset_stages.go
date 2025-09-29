@@ -70,7 +70,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 		return fmt.Errorf("saving Bodies progress failed: %w", err)
 	}
 	if err := stages.SaveStageProgress(tx, stages.Headers, 1); err != nil {
-		return fmt.Errorf("saving Bodies progress failed: %w", err)
+		return fmt.Errorf("saving Headers progress failed: %w", err)
 	}
 	if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
 		return fmt.Errorf("saving Snapshots progress failed: %w", err)
@@ -168,7 +168,7 @@ var Tables = map[stages.SyncStage][]string{
 	stages.Finish:      {},
 }
 var stateBuckets = []string{
-	kv.Epoch, kv.PendingEpoch, kv.Code,
+	kv.Epoch, kv.PendingEpoch,
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,

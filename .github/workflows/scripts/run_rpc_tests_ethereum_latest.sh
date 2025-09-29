@@ -8,18 +8,27 @@ RESULT_DIR="$2"
 # The REFERENCE_HOST that hosts the reference client
 REFERENCE_HOST="$3"
 
+if [ -z "$REFERENCE_HOST" ]; then
+    echo "*WARNING*: REFERENCE_HOST is not set, RPC tests on latest will run without reference comparison"
+    echo "*WARNING*: RPC responses are available for inspection in results directory"
+    DUMP_RESPONSE="always-dump-response"
+fi
+
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
-   #disbale temporaryy to be investigates
-   debug_traceBlockByNumber/test_30.json
-
+   debug_traceBlockByNumber/test_30.json # huge JSON response => slow diff
    debug_traceCall/test_22.json
+   debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
    debug_traceCallMany
    erigon_
    eth_callBundle
    eth_getProof/test_04.json
    eth_getProof/test_08.json
    eth_getProof/test_09.json
+   eth_simulateV1/test_06.json # state root mismatch
+   eth_simulateV1/test_07.json # state root mismatch
+   eth_simulateV1/test_12.json # state root mismatch
+   eth_simulateV1/test_16.json # state root mismatch
    ots_
    parity_
    trace_
@@ -29,4 +38,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.80.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.90.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message"

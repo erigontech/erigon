@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/p2p"
+	polygonp2p "github.com/erigontech/erigon/polygon/p2p"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -52,20 +52,18 @@ func NewService(
 	notifications *shards.Notifications,
 	engineAPISwitcher EngineAPISwitcher,
 	minedBlockReg MinedBlockObserverRegistrar,
-
+	tmpDir string,
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := p2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
+	p2pService := polygonp2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData, tmpDir)
 	execution := newExecutionClient(logger, executionClient)
-
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
-
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
@@ -91,7 +89,7 @@ func NewService(
 		ccBuilderFactory,
 		heimdallService,
 		bridgeService,
-		events.Events(),
+		events,
 		notifications,
 		NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 		engineAPISwitcher,
@@ -110,7 +108,7 @@ func NewService(
 type Service struct {
 	logger          log.Logger
 	sync            *Sync
-	p2pService      *p2p.Service
+	p2pService      *polygonp2p.Service
 	store           Store
 	events          *TipEvents
 	heimdallService *heimdall.Service

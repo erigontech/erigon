@@ -14,11 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package state_test
 
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"os"
@@ -26,31 +27,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	b.Helper()
-	logger := log.New()
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
-	b.Cleanup(db.Close)
-	salt, err := GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(b, err)
-	agg, err := NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(b, err)
-	b.Cleanup(agg.Close)
-	return db, agg
+	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
+	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
@@ -60,14 +59,13 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	vals := queueKeys(ctx, 53, length.Hash)
 
 	aggStep := uint64(100_00)
-	_db, agg := testDbAndAggregatorBench(b, aggStep)
-	db := wrapDbWithCtx(_db, agg)
+	db, _ := testDbAndAggregatorBench(b, aggStep)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	domains, err := NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -79,7 +77,6 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		domains.SetTxNum(txNum)
 		err := domains.DomainPut(kv.StorageDomain, tx, key, val, txNum, prev, 0)
 		prev = val
 		require.NoError(b, err)
@@ -121,7 +118,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
 	M := 1024
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
+	kv, bt, err := state.OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
 	require.NoError(b, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -140,7 +137,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	}
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
+func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *state.BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
@@ -152,7 +149,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
+	kv, bt, err := state.OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })
@@ -176,7 +173,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.Equal(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.Key())
 			cur.Close()
 		}
 	})
@@ -188,7 +185,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.Equal(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.Key())
 
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
@@ -392,4 +389,106 @@ func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
 			tx.Rollback()
 		}
 	})
+}
+
+// takes first 100k keys from file
+func pivotKeysFromKV(dataPath string) ([][]byte, error) {
+	decomp, err := seg.NewDecompressor(dataPath)
+	if err != nil {
+		return nil, err
+	}
+
+	getter := decomp.MakeGetter()
+	getter.Reset(0)
+
+	key := make([]byte, 0, 64)
+
+	listing := make([][]byte, 0, 1000)
+
+	for getter.HasNext() {
+		if len(listing) > 100000 {
+			break
+		}
+		key, _ := getter.Next(key[:0])
+		listing = append(listing, common.Copy(key))
+		getter.Skip()
+	}
+	decomp.Close()
+
+	return listing, nil
+}
+
+func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
+	tb.Helper()
+
+	rnd := newRnd(0)
+	values := make([]byte, valueSize)
+
+	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(tb, err)
+
+	bufSize := 8 * datasize.KB
+	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
+		bufSize = 1 * datasize.MB
+	}
+	collector := etl.NewCollector(state.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
+
+	for i := 0; i < keyCount; i++ {
+		key := make([]byte, keySize)
+		n, err := rnd.Read(key[:])
+		require.Equal(tb, keySize, n)
+		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
+		require.NoError(tb, err)
+
+		n, err = rnd.Read(values[:rnd.IntN(valueSize)+1])
+		require.NoError(tb, err)
+
+		err = collector.Collect(key, values[:n])
+		require.NoError(tb, err)
+	}
+
+	writer := seg.NewWriter(comp, compressFlags)
+
+	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		_, err = writer.Write(k)
+		require.NoError(tb, err)
+		_, err = writer.Write(v)
+		require.NoError(tb, err)
+		return nil
+	}
+
+	err = collector.Load(nil, "", loader, etl.TransformArgs{})
+	require.NoError(tb, err)
+
+	collector.Close()
+
+	err = comp.Compress()
+	require.NoError(tb, err)
+	comp.Close()
+
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+	compPath := decomp.FilePath()
+	ps := background.NewProgressSet()
+
+	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
+	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
+	err = state.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	require.NoError(tb, err)
+
+	return compPath
+}
+
+// Opens .kv at dataPath and generates index over it to file 'indexPath'
+func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
+	tb.Helper()
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	r := seg.NewReader(decomp.MakeGetter(), compressed)
+	err = state.BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	require.NoError(tb, err)
 }

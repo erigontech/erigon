@@ -45,9 +45,10 @@ import (
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
 var (
-	Mainnet    = fromEmbeddedToml(snapshothashes.Mainnet)
-	Holesky    = fromEmbeddedToml(snapshothashes.Holesky)
-	Sepolia    = fromEmbeddedToml(snapshothashes.Sepolia)
+	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
+	Holesky = fromEmbeddedToml(snapshothashes.Holesky)
+	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
+	//Mumbai     = fromToml(snapshothashes.Mumbai)
 	Amoy       = fromEmbeddedToml(snapshothashes.Amoy)
 	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
 	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
@@ -363,10 +364,6 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 	return cfg
 }
 
-func NewNonSeededCfg(networkName string) *Cfg {
-	return newCfg(networkName, Preverified{})
-}
-
 type Cfg struct {
 	ExpectBlocks      uint64
 	Preverified       Preverified          // immutable
@@ -436,9 +433,10 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.Mainnet:    Mainnet,
-	networkname.Holesky:    Holesky,
-	networkname.Sepolia:    Sepolia,
+	networkname.Mainnet: Mainnet,
+	networkname.Holesky: Holesky,
+	networkname.Sepolia: Sepolia,
+	//networkname.Mumbai:     Mumbai,
 	networkname.Amoy:       Amoy,
 	networkname.BorMainnet: BorMainnet,
 	networkname.Gnosis:     Gnosis,
@@ -500,8 +498,9 @@ func KnownCfg(networkName string) (*Cfg, bool) {
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+	networkname.Mainnet: webseedsParse(webseed.Mainnet),
+	networkname.Sepolia: webseedsParse(webseed.Sepolia),
+	//networkname.Mumbai:     webseedsParse(webseed.Mumbai),
 	networkname.Amoy:       webseedsParse(webseed.Amoy),
 	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
 	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
@@ -552,6 +551,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 	// Re-load the preverified hashes
 	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
 	Holesky = fromEmbeddedToml(snapshothashes.Holesky)
+	//Mumbai = fromEmbeddedToml(snapshothashes.Mumbai)
 	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
 	Amoy = fromEmbeddedToml(snapshothashes.Amoy)
 	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
@@ -561,8 +561,9 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
-		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+		networkname.Mainnet: webseedsParse(webseed.Mainnet),
+		networkname.Sepolia: webseedsParse(webseed.Sepolia),
+		//networkname.Mumbai:     webseedsParse(webseed.Mumbai),
 		networkname.Amoy:       webseedsParse(webseed.Amoy),
 		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
@@ -572,9 +573,10 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 	}
 
 	knownPreverified = map[string]Preverified{
-		networkname.Mainnet:    Mainnet,
-		networkname.Holesky:    Holesky,
-		networkname.Sepolia:    Sepolia,
+		networkname.Mainnet: Mainnet,
+		networkname.Holesky: Holesky,
+		networkname.Sepolia: Sepolia,
+		//networkname.Mumbai:     Mumbai,
 		networkname.Amoy:       Amoy,
 		networkname.BorMainnet: BorMainnet,
 		networkname.Gnosis:     Gnosis,
@@ -603,6 +605,8 @@ func GetToml(networkName string) []byte {
 		return snapshothashes.Holesky
 	case networkname.Sepolia:
 		return snapshothashes.Sepolia
+	//case networkname.Mumbai:
+	//	return snapshothashes.Mumbai
 	case networkname.Amoy:
 		return snapshothashes.Amoy
 	case networkname.BorMainnet:

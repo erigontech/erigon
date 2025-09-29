@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/snaptype"
 	"io"
 	"math"
 	"net/http"
@@ -37,7 +38,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/estimate"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -64,7 +65,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
 )
@@ -114,13 +114,13 @@ func (w *withPPROF) withProfile() {
 	}
 }
 
-func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
+func (w *withSentinel) connectSentinel() (sentinelproto.SentinelClient, error) {
 	// YOLO message size
 	gconn, err := grpc.Dial(w.Sentinel, grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt)))
 	if err != nil {
 		return nil, err
 	}
-	return sentinel.NewSentinelClient(gconn), nil
+	return sentinelproto.NewSentinelClient(gconn), nil
 }
 
 func openFs(fsName string, path string) (afero.Fs, error) {

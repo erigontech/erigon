@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
@@ -109,7 +110,7 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 }
 
 func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
-	db, err = mdbx.New(kv.DiagnosticsDB, log.New()).
+	db, err = mdbx.New(dbcfg.DiagnosticsDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DiagnosticsTablesCfg }).
 		GrowthStep(4 * datasize.MB).
 		MapSize(16 * datasize.GB).

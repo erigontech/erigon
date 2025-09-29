@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -103,7 +103,7 @@ type EthAPI interface {
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 
 	// Sending related (see ./eth_call.go)
-	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Bytes, error)
+	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
@@ -393,8 +393,8 @@ type bridgeReader interface {
 type APIImpl struct {
 	*BaseAPI
 	ethBackend                  rpchelper.ApiBackend
-	txPool                      txpool.TxpoolClient
-	mining                      txpool.MiningClient
+	txPool                      txpoolproto.TxpoolClient
+	mining                      txpoolproto.MiningClient
 	gasCache                    *GasPriceCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64
@@ -407,7 +407,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}

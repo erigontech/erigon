@@ -49,10 +49,10 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/compress"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -351,11 +351,6 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-				if err != nil {
-					return err
-				}
-				defer l.Unlock()
 				if err := doPublishable(cliCtx); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
@@ -552,6 +547,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
+		_maxFrom = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -771,7 +767,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -822,7 +818,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -947,18 +943,24 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
 			// check that the file exist
-			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, segName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing file %s", segName)
 			}
 			// check that the index file exist
 			idxName := strings.Replace(segName, ".seg", ".idx", 1)
-			if _, err := os.Stat(filepath.Join(snapDir, idxName)); err != nil {
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, idxName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing index file %s", idxName)
 			}
 			if snapType == "transactions" {
 				// check that the tx index file exist
 				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-				if _, err := os.Stat(filepath.Join(snapDir, txIdxName)); err != nil {
+				if exists, err := dir2.FileExist(filepath.Join(snapDir, txIdxName)); err != nil {
+					return err
+				} else if !exists {
 					return fmt.Errorf("missing tx index file %s", txIdxName)
 				}
 			}
@@ -1358,7 +1360,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	}
 
 	ctx := cliCtx.Context
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -1556,7 +1558,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
@@ -1597,7 +1599,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
 
@@ -1879,7 +1881,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer logger.Info("Done")
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2011,7 +2013,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	decomp.Close()
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2038,7 +2040,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	from := uint64(0)
 
-	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -2268,10 +2270,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	if err := state.CheckSnapshotsCompatibility(dirs); err != nil {
-		panic(err)
-	}
-	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}
