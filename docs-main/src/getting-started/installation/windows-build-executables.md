@@ -1,6 +1,6 @@
 # Build executable binaries natively for Windows
 
-Before proceeding, ensure that the [hardware](../getting-started/hw-requirements.md) and [software](../getting-started/sw-requirements.md) requirements are met.
+Before proceeding, ensure that the [hardware](../hardware-requirements.md) and [software](../software-requirements.md) requirements are met.
 
 
 ## Installing Chocolatey
@@ -134,4 +134,4 @@ or from any place use the full address of the executable:
 start C:\Users\username\AppData\Local\erigon.exe
 ```
 
-See [basic usage](../basic-usage.md) documentation on available options and flags to customize your Erigon experience.
+See [basic usage](../../fundamentals/basic-usage.md) documentation on available options and flags to customize your Erigon experience.

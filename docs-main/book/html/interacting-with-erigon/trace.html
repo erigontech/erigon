@@ -1,0 +1,745 @@
+<!DOCTYPE HTML>
+<html lang="en" class="ayu sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>trace - Erigon 3 Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Erigon 3 documentation!">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "ayu";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('ayu')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Erigon 3 Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/erigontech/erigon" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="trace-rpc-namespace"><a class="header" href="#trace-rpc-namespace"><code>trace</code> RPC Namespace</a></h1>
+<p>The <code>trace</code> module is for getting a deeper insight into transaction processing.
+It includes two sets of calls the transaction trace filtering API and the ad-hoc tracing API.</p>
+<p>In order to use the Transaction-Trace Filtering API, Erigon must be fully synced with the argument <code>trace</code> in <code>http.api</code> flag.</p>
+<pre><code class="language-bash">./build/bin/erigon --http.api: eth,erigon,trace
+</code></pre>
+<p>As for the Ad-hoc Tracing API, as long the blocks have not yet been pruned, the RPC calls will work.</p>
+<h2 id="the-ad-hoc-tracing-api"><a class="header" href="#the-ad-hoc-tracing-api">The Ad-hoc Tracing API</a></h2>
+<p>The ad-hoc tracing API allows you to perform a number of different diagnostics on calls or transactions,
+either historical ones from the chain or hypothetical ones not yet mined. The diagnostics include:</p>
+<ul>
+<li><code>trace</code> <strong>Transaction trace</strong>. An equivalent trace to that in the previous section.</li>
+<li><code>vmTrace</code> <strong>Virtual Machine execution trace</strong>. Provides a full trace of the VM's state throughout the execution of the transaction, including for any subcalls.</li>
+<li><code>stateDiff</code> <strong>State difference</strong>. Provides information detailing all altered portions of the Ethereum state made due to the execution of the transaction.</li>
+</ul>
+<p>There are three means of providing a transaction to execute; either providing the same information as when making
+a call using <code>eth_call</code> (see <code>trace_call</code>), through providing raw, signed, transaction data as when using
+<code>eth_sendRawTransaction</code> (see <code>trace_rawTransaction</code>) or simply a transaction hash for a previously mined
+transaction (see <code>trace_replayTransaction</code>). In the latter case, your node must be in archive mode or the
+transaction should be within the most recent 1000 blocks.</p>
+<h2 id="the-transaction-trace-filtering-api"><a class="header" href="#the-transaction-trace-filtering-api">The Transaction-Trace Filtering API</a></h2>
+<p>These APIs allow you to get a full <em>externality</em> trace on any transaction executed throughout the Erigon chain.
+Unlike the log filtering API, you are able to search and filter based only upon address information.
+Information returned includes the execution of all <code>CREATE</code>s, <code>SUICIDE</code>s and all variants of <code>CALL</code> together
+with input data, output data, gas usage, amount transferred and the success status of each individual action.</p>
+<h3 id="traceaddress-field"><a class="header" href="#traceaddress-field"><code>traceAddress</code> field</a></h3>
+<p>The <code>traceAddress</code> field of all returned traces, gives the exact location in the call trace [index in root, index in first <code>CALL</code>, index in second <code>CALL</code>, ...].</p>
+<p>i.e. if the trace is:</p>
+<pre><code>A
+  CALLs B
+    CALLs G
+  CALLs C
+    CALLs G
+</code></pre>
+<p>then it should look something like:</p>
+<p><code>[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]</code></p>
+<h2 id="json-rpc-methods"><a class="header" href="#json-rpc-methods">JSON-RPC methods</a></h2>
+<h4 id="ad-hoc-tracing"><a class="header" href="#ad-hoc-tracing">Ad-hoc Tracing</a></h4>
+<ul>
+<li><a href="#trace_call">trace_call</a></li>
+<li><a href="#trace_callmany">trace_callMany</a></li>
+<li><a href="#trace_rawtransaction">trace_rawTransaction</a></li>
+<li><a href="#trace_replayblocktransactions">trace_replayBlockTransactions</a></li>
+<li><a href="#trace_replaytransaction">trace_replayTransaction</a></li>
+</ul>
+<h4 id="transaction-trace-filtering"><a class="header" href="#transaction-trace-filtering">Transaction-Trace Filtering</a></h4>
+<ul>
+<li><a href="#trace_block">trace_block</a></li>
+<li><a href="#trace_filter">trace_filter</a></li>
+<li><a href="#trace_get">trace_get</a></li>
+<li><a href="#trace_transaction">trace_transaction</a></li>
+</ul>
+<h2 id="json-rpc-api-reference"><a class="header" href="#json-rpc-api-reference">JSON-RPC API Reference</a></h2>
+<h3 id="trace_call"><a class="header" href="#trace_call">trace_call</a></h3>
+<p>Executes the given call and returns a number of possible traces for it.</p>
+<h4 id="parameters"><a class="header" href="#parameters">Parameters</a></h4>
+<ol start="0">
+<li><code>Object</code> - [Transaction object] where <code>from</code> field is optional and <code>nonce</code> field is omitted.</li>
+<li><code>Array</code> - Type of trace, one or more of: <code>"vmTrace"</code>, <code>"trace"</code>, <code>"stateDiff"</code>.</li>
+<li><code>Quantity</code> or <code>Tag</code> - (optional) Integer of a block number, or the string <code>'earliest'</code>, <code>'latest'</code> or <code>'pending'</code>.</li>
+</ol>
+<h4 id="returns"><a class="header" href="#returns">Returns</a></h4>
+<ul>
+<li><code>Array</code> - Block traces</li>
+</ul>
+<h4 id="example"><a class="header" href="#example">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_call","params":[{ ... },["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "output": "0x",
+    "stateDiff": null,
+    "trace": [{
+      "action": { ... },
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
+      "subtraces": 0,
+      "traceAddress": [],
+      "type": "call"
+    }],
+    "vmTrace": null
+  }
+}
+</code></pre>
+<hr />
+<h3 id="trace_callmany"><a class="header" href="#trace_callmany">trace_callMany</a></h3>
+<p>Performs multiple call traces on top of the same block. i.e. transaction <code>n</code> will be executed on top of a pending block with all <code>n-1</code> transactions applied (traced) first. Allows to trace dependent transactions.</p>
+<h4 id="parameters-1"><a class="header" href="#parameters-1">Parameters</a></h4>
+<ol start="0">
+<li><code>Array</code> - List of trace calls with the type of trace, one or more of: <code>"vmTrace"</code>, <code>"trace"</code>, <code>"stateDiff"</code>.</li>
+<li><code>Quantity</code> or <code>Tag</code> - (optional) integer block number, or the string <code>'latest'</code>, <code>'earliest'</code> or <code>'pending'</code>, see the <a href="#the-default-block-parameter">default block parameter</a>.</li>
+</ol>
+<pre><code class="language-js">params: [
+  [
+    [
+      {
+        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "value": "0x186a0"
+      },
+      ["trace"]
+    ],
+    [
+      {
+        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "value": "0x186a0"
+      },
+      ["trace"]
+    ]
+  ],
+  "latest"
+]
+</code></pre>
+<h4 id="returns-1"><a class="header" href="#returns-1">Returns</a></h4>
+<ul>
+<li><code>Array</code> - Array of the given transactions' traces</li>
+</ul>
+<h4 id="example-1"><a class="header" href="#example-1">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "output": "0x",
+      "stateDiff": null,
+      "trace": [{
+        "action": {
+          "callType": "call",
+          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+          "gas": "0x1dcd12f8",
+          "input": "0x",
+          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "value": "0x186a0"
+        },
+        "result": {
+          "gasUsed": "0x0",
+          "output": "0x"
+        },
+        "subtraces": 0,
+        "traceAddress": [],
+        "type": "call"
+      }],
+      "vmTrace": null
+    },
+    {
+      "output": "0x",
+      "stateDiff": null,
+      "trace": [{
+        "action": {
+          "callType": "call",
+          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+          "gas": "0x1dcd12f8",
+          "input": "0x",
+          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "value": "0x186a0"
+        },
+        "result": {
+          "gasUsed": "0x0",
+          "output": "0x"
+        },
+        "subtraces": 0,
+        "traceAddress": [],
+        "type": "call"
+      }],
+      "vmTrace": null
+    }
+  ]
+}
+</code></pre>
+<hr />
+<h3 id="trace_rawtransaction"><a class="header" href="#trace_rawtransaction">trace_rawTransaction</a></h3>
+<p>Traces a call to <code>eth_sendRawTransaction</code> without making the call, returning the traces</p>
+<h4 id="parameters-2"><a class="header" href="#parameters-2">Parameters</a></h4>
+<ol start="0">
+<li><code>Data</code> - Raw transaction data.</li>
+<li><code>Array</code> - Type of trace, one or more of: <code>"vmTrace"</code>, <code>"trace"</code>, <code>"stateDiff"</code>.</li>
+</ol>
+<pre><code class="language-js">params: [
+  "0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",
+  ["trace"]
+]
+</code></pre>
+<h4 id="returns-2"><a class="header" href="#returns-2">Returns</a></h4>
+<ul>
+<li><code>Object</code> - Block traces.</li>
+</ul>
+<h4 id="example-2"><a class="header" href="#example-2">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_rawTransaction","params":["0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "output": "0x",
+    "stateDiff": null,
+    "trace": [{
+      "action": { ... },
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
+      "subtraces": 0,
+      "traceAddress": [],
+      "type": "call"
+    }],
+    "vmTrace": null
+  }
+}
+</code></pre>
+<hr />
+<h3 id="trace_replayblocktransactions"><a class="header" href="#trace_replayblocktransactions">trace_replayBlockTransactions</a></h3>
+<p>Replays all transactions in a block returning the requested traces for each transaction.</p>
+<h4 id="parameters-3"><a class="header" href="#parameters-3">Parameters</a></h4>
+<ol start="0">
+<li><code>Quantity</code> or <code>Tag</code> - Integer of a block number, or the string <code>'earliest'</code>, <code>'latest'</code> or <code>'pending'</code>.</li>
+<li><code>Array</code> - Type of trace, one or more of: <code>"vmTrace"</code>, <code>"trace"</code>, <code>"stateDiff"</code>.</li>
+</ol>
+<pre><code class="language-js">params: [
+  "0x2ed119",
+  ["trace"]
+]
+</code></pre>
+<h4 id="returns-3"><a class="header" href="#returns-3">Returns</a></h4>
+<ul>
+<li><code>Array</code> - Block transactions traces.</li>
+</ul>
+<h4 id="example-3"><a class="header" href="#example-3">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_replayBlockTransactions","params":["0x2ed119",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "output": "0x",
+      "stateDiff": null,
+      "trace": [{
+        "action": { ... },
+        "result": {
+          "gasUsed": "0x0",
+          "output": "0x"
+        },
+        "subtraces": 0,
+        "traceAddress": [],
+        "type": "call"
+      }],
+      "transactionHash": "0x...",
+      "vmTrace": null
+    },
+    { ... }
+  ]
+}
+</code></pre>
+<hr />
+<h3 id="trace_replaytransaction"><a class="header" href="#trace_replaytransaction">trace_replayTransaction</a></h3>
+<p>Replays a transaction, returning the traces.</p>
+<h4 id="parameters-4"><a class="header" href="#parameters-4">Parameters</a></h4>
+<ol start="0">
+<li><code>Hash</code> - Transaction hash.</li>
+<li><code>Array</code> - Type of trace, one or more of: <code>"vmTrace"</code>, <code>"trace"</code>, <code>"stateDiff"</code>.</li>
+</ol>
+<pre><code class="language-js">params: [
+  "0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",
+  ["trace"]
+]
+</code></pre>
+<h4 id="returns-4"><a class="header" href="#returns-4">Returns</a></h4>
+<ul>
+<li><code>Object</code> - Block traces.</li>
+</ul>
+<h4 id="example-4"><a class="header" href="#example-4">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_replayTransaction","params":["0x02d4a872e096445e80d05276ee756cefef7f3b376bcec14246469c0cd97dad8f",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "output": "0x",
+    "stateDiff": null,
+    "trace": [{
+      "action": { ... },
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
+      "subtraces": 0,
+      "traceAddress": [],
+      "type": "call"
+    }],
+    "vmTrace": null
+  }
+}
+</code></pre>
+<hr />
+<h3 id="trace_block"><a class="header" href="#trace_block">trace_block</a></h3>
+<p>Returns traces created at given block.</p>
+<h4 id="parameters-5"><a class="header" href="#parameters-5">Parameters</a></h4>
+<ol start="0">
+<li><code>Quantity</code> or <code>Tag</code> - Integer of a block number, or the string <code>'earliest'</code>, <code>'latest'</code> or <code>'pending'</code>.</li>
+</ol>
+<pre><code class="language-js">params: [
+  "0x2ed119" // 3068185
+]
+</code></pre>
+<h4 id="returns-5"><a class="header" href="#returns-5">Returns</a></h4>
+<ul>
+<li><code>Array</code> - Block traces.</li>
+</ul>
+<h4 id="example-5"><a class="header" href="#example-5">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_block","params":["0x2ed119"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "action": {
+        "callType": "call",
+        "from": "0xaa7b131dc60b80d3cf5e59b5a21a666aa039c951",
+        "gas": "0x0",
+        "input": "0x",
+        "to": "0xd40aba8166a212d6892125f079c33e6f5ca19814",
+        "value": "0x4768d7effc3fbe"
+      },
+      "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+      "blockNumber": 3068185,
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
+      "subtraces": 0,
+      "traceAddress": [],
+      "transactionHash": "0x07da28d752aba3b9dd7060005e554719c6205c8a3aea358599fc9b245c52f1f6",
+      "transactionPosition": 0,
+      "type": "call"
+    },
+    ...
+  ]
+}
+</code></pre>
+<hr />
+<h3 id="trace_filter"><a class="header" href="#trace_filter">trace_filter</a></h3>
+<p>Returns traces matching given filter</p>
+<h4 id="parameters-6"><a class="header" href="#parameters-6">Parameters</a></h4>
+<ol start="0">
+<li><code>Object</code> - The filter object
+<ul>
+<li><code>fromBlock</code>:   <code>Quantity</code> or <code>Tag</code> - (optional) From this block.</li>
+<li><code>toBlock</code>:   <code>Quantity</code> or <code>Tag</code> - (optional) To this block.</li>
+<li><code>fromAddress</code>:   <code>Array</code> - (optional) Sent from these addresses.</li>
+<li><code>toAddress</code>:   <code>Address</code> - (optional) Sent to these addresses.</li>
+<li><code>after</code>:   <code>Quantity</code> - (optional) The offset trace number</li>
+<li><code>count</code>:   <code>Quantity</code> - (optional) Integer number of traces to display in a batch.</li>
+</ul>
+</li>
+</ol>
+<pre><code class="language-js">params: [{
+  "fromBlock": "0x2ed0c4", // 3068100
+  "toBlock": "0x2ed128", // 3068200
+  "toAddress": ["0x8bbB73BCB5d553B5A556358d27625323Fd781D37"],
+  "after": 1000,
+  "count": 100
+}]
+</code></pre>
+<h4 id="returns-6"><a class="header" href="#returns-6">Returns</a></h4>
+<ul>
+<li><code>Array</code> - Traces matching given filter</li>
+</ul>
+<h4 id="example-6"><a class="header" href="#example-6">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_filter","params":[{"fromBlock":"0x2ed0c4","toBlock":"0x2ed128","toAddress":["0x8bbB73BCB5d553B5A556358d27625323Fd781D37"],"after":1000,"count":100}],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "action": {
+        "callType": "call",
+        "from": "0x32be343b94f860124dc4fee278fdcbd38c102d88",
+        "gas": "0x4c40d",
+        "input": "0x",
+        "to": "0x8bbb73bcb5d553b5a556358d27625323fd781d37",
+        "value": "0x3f0650ec47fd240000"
+      },
+      "blockHash": "0x86df301bcdd8248d982dbf039f09faf792684e1aeee99d5b58b77d620008b80f",
+      "blockNumber": 3068183,
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
+      "subtraces": 0,
+      "traceAddress": [],
+      "transactionHash": "0x3321a7708b1083130bd78da0d62ead9f6683033231617c9d268e2c7e3fa6c104",
+      "transactionPosition": 3,
+      "type": "call"
+    },
+    ...
+  ]
+}
+</code></pre>
+<hr />
+<h3 id="trace_get"><a class="header" href="#trace_get">trace_get</a></h3>
+<p>Returns trace at given position.</p>
+<h4 id="parameters-7"><a class="header" href="#parameters-7">Parameters</a></h4>
+<ol start="0">
+<li><code>Hash</code> - Transaction hash.</li>
+<li><code>Array</code> - Index positions of the traces.</li>
+</ol>
+<pre><code class="language-js">params: [
+  "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+  ["0x0"]
+]
+</code></pre>
+<h4 id="returns-7"><a class="header" href="#returns-7">Returns</a></h4>
+<ul>
+<li><code>Object</code> - Trace object</li>
+</ul>
+<h4 id="example-7"><a class="header" href="#example-7">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_get","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",["0x0"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "action": {
+      "callType": "call",
+      "from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
+      "gas": "0x13e99",
+      "input": "0x16c72721",
+      "to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
+      "value": "0x0"
+    },
+    "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+    "blockNumber": 3068185,
+    "result": {
+      "gasUsed": "0x183",
+      "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
+    },
+    "subtraces": 0,
+    "traceAddress": [
+      0
+    ],
+    "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+    "transactionPosition": 2,
+    "type": "call"
+  }
+}
+</code></pre>
+<hr />
+<h3 id="trace_transaction"><a class="header" href="#trace_transaction">trace_transaction</a></h3>
+<p>Returns all traces of given transaction</p>
+<h4 id="parameters-8"><a class="header" href="#parameters-8">Parameters</a></h4>
+<ol start="0">
+<li><code>Hash</code> - Transaction hash</li>
+</ol>
+<pre><code class="language-js">params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]
+</code></pre>
+<h4 id="returns-8"><a class="header" href="#returns-8">Returns</a></h4>
+<ul>
+<li><code>Array</code> - Traces of given transaction</li>
+</ul>
+<h4 id="example-8"><a class="header" href="#example-8">Example</a></h4>
+<p>Request</p>
+<pre><code class="language-bash">curl --data '{"method":"trace_transaction","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+</code></pre>
+<p>Response</p>
+<pre><code class="language-js">{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "action": {
+        "callType": "call",
+        "from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
+        "gas": "0x13e99",
+        "input": "0x16c72721",
+        "to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
+        "value": "0x0"
+      },
+      "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+      "blockNumber": 3068185,
+      "result": {
+        "gasUsed": "0x183",
+        "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "subtraces": 0,
+      "traceAddress": [
+        0
+      ],
+      "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+      "transactionPosition": 2,
+      "type": "call"
+    },
+    ...
+  ]
+}
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../interacting-with-erigon/debug.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../interacting-with-erigon/txpool.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../interacting-with-erigon/debug.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../interacting-with-erigon/txpool.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <!-- Livereload script (if served using the cli tool) -->
+        <script>
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsAddress = wsProtocol + "//" + location.host + "/" + "__livereload";
+            const socket = new WebSocket(wsAddress);
+            socket.onmessage = function (event) {
+                if (event.data === "reload") {
+                    socket.close();
+                    location.reload();
+                }
+            };
+
+            window.onbeforeunload = function() {
+                socket.close();
+            }
+        </script>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

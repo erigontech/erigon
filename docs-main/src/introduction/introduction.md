@@ -6,15 +6,15 @@ Erigon is an efficient Ethereum implementation designed for speed, modularity, a
 
 With Erigon 3 the default configuration shifts from archive node to full node, enhancing efficiency, accessibility, and versatility for a wider range of users. Archive nodes remain available for developers and researchers needing full historical data, while the full node offers faster sync times and lower resource usage for everyday operations.
 
-See here **[why you should be using Erigon](why-using-erigon.md)**.
+See here **[why you should be using Erigon](./why-using-erigon.md)**.
 
 # Topics
 
-- Review the hardware and software requirements to [get started](/getting-started/getting-started.md).
-- Follow the [installation guide](/getting-started/installation.md) to set up Erigon.
-- Learn the [basic usage](/fundamentals/basic-usage.md) of Erigon.
-- Find how to [configure Erigon](/fundamentals/configuring-erigon.md).
-- Interact with Erigon's advanced [RPC](/interacting-with-erigon/interacting-with-erigon.md).
+- Review the hardware and software requirements to [get started](../getting-started/getting-started.md).
+- Follow the [installation guide](../getting-started/installation.md) to set up Erigon.
+- Learn the [basic usage](../fundamentals/basic-usage.md) of Erigon.
+- Find how to [configure Erigon](../fundamentals/configuring-erigon.md).
+- Interact with Erigon's advanced [RPC](../interacting-with-erigon/interacting-with-erigon.md).
 
 Explore also our help, wiki and dedicated developer guide.
 

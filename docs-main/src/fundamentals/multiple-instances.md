@@ -1,4 +1,4 @@
-# Multiple instances / One machine [REVIEW]
+# Multiple instances / One machine
 
 Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.
 

@@ -1,6 +1,6 @@
 [book]
-authors = ["Bloxster"]
+authors = ["Erigon"]
 language = "en"
 multilingual = false
 src = "src"
-title = "docs-help"
+title = "Help Section"

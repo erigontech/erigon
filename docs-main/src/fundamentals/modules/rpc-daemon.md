@@ -4,31 +4,6 @@
 
 The RPC daemon is a crucial component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component. For detailed instructions on running it remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
 
-## Erigon RPC Method Guidelines
-
-This document provides guidelines for understanding and using the various RPC methods available in Erigon.
-
-1. **Compatibility with `eth` namespace**  
-   - Erigon aims to be compatible with all standard Ethereum JSON-RPC API methods, as described [here](https://ethereum.org/en/developers/docs/apis/json-rpc/). See also [here](https://github.com/erigontech/erigon/blob/main/docs/readthedocs/source/rpc/index.rst) for examples.
-
-1. **Compatibility with standard Geth methods**
-   - All methods featured by Geth including [WebSocket Server](https://geth.ethereum.org/docs/interacting-with-geth/rpc#websockets-server), [IPC Server](https://geth.ethereum.org/docs/interacting-with-geth/rpc#ipc-server), TLS, [GraphQL](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql), etc..., are supported by Erigon.
-
-1. **Otterscan Methods (`ots_`)**  
-   - In addition to the standard Geth methods, Erigon includes RPC methods prefixed with `ots_` for **Otterscan**. These are specific to the Otterscan functionality integrated with Erigon. See more details [here](https://docs.otterscan.io/api-docs/ots-api). 
-
-1. **Erigon Extensions (`erigon_`)**  
-   - Erigon introduces some small extensions to the Geth API, denoted by the `erigon_` prefix aimed to enhance the functionality, see more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status) about implementation status.
-
-1. **gRPC API**  
-   - Erigon also exposes a **gRPC** API for lower-level data access. This is primarily used by Erigon’s components when they are deployed separately as independent processes (either on the same or different servers). 
-   - This gRPC API is also accessible to users. For more information, visit the [Erigon Interfaces GitHub repository](https://github.com/erigontech/interfaces).
-
-1. **Trace Module (`trace_`)**  
-   - Erigon includes **[the `trace_` module](JSONRPC-trace-module.md)**, which originates from OpenEthereum. This module provides additional functionality related to tracing transactions and state changes, which is valuable for advanced debugging and analysis.
-
-## More info
-
 For a comprehensive understanding of the RPC daemon's functionality, configuration, and usage, please refer to <https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md> (also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`) which covers the following key topics:
 
 1. **Introduction**: An overview of the RPC daemon, its benefits, and how it integrates with Erigon.

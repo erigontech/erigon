@@ -48,7 +48,7 @@ Follow the below instructions depending on your installation method:
 
 ### Pre-built Binaries
 
-Download the latest binary file from <https://github.com/erigontech/erigon/releases>, do the [checksum](../installation/prebuilt.md#checksums) and reinstall it, no other operation needed.
+Download the latest binary file from <https://github.com/erigontech/erigon/releases>, do the [checksum](../installation/pre-built-binaries.md#checksums) and reinstall it, no other operation needed.
 
 ### Docker
 

@@ -15,9 +15,7 @@ The RPC Daemon supports various API namespaces, which can be enabled or disabled
 - [`bor`](bor.md): Polygon Bor-specific API (when running on Polygon)
 - [`ots`](ots.md): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
 - [`internal`](internal.md): Erigon specific API for development and debugging purposes.
-- [`gRPC`](gRPC.md): API for lower-level data access.
-
-Looking at the Reth documentation you provided, I'll rewrite it for Erigon based on the codebase context. The documentation covers RPC transports (HTTP, WebSockets, IPC) and API configuration, which corresponds to Erigon's RPC daemon configuration found in <cite>cmd/rpcdaemon/cli/config.go</cite> and related files.
+- [`gRPC`](grpc.md): API for lower-level data access.
 
 ## Erigon RPC Transports
 

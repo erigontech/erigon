@@ -127,7 +127,7 @@
                         <a href="print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/erigontech/docs" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/erigontech/erigon" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
 
@@ -271,9 +271,9 @@
 <h3 id="archive-node-requirements"><a class="header" href="#archive-node-requirements">Archive Node Requirements</a></h3>
 <p>Archive nodes retain <strong>all</strong> historical state and require significantly more disk space. These are typically used for block explorers or deep analytical queries. (<code>--prune.mode=archive</code>)</p>
 <div class="table-wrapper"><table><thead><tr><th>Network</th><th>Disk Size (Required)</th><th>Disk Size (Recommended)</th><th>RAM (Required)</th><th>RAM (Recommended)</th></tr></thead><tbody>
-<tr><td>Mainnet</td><td>1.6 TB</td><td>4 TB</td><td>32 GB</td><td>64 GB</td></tr>
-<tr><td>Polygon</td><td>4.6 TB</td><td>8 TB</td><td>64 GB</td><td>128 GB</td></tr>
-<tr><td>Gnosis</td><td>550 GB</td><td>1 TB</td><td>16 GB</td><td>32 GB</td></tr>
+<tr><td>Mainnet</td><td>1.77 TB</td><td>4 TB</td><td>32 GB</td><td>64 GB</td></tr>
+<tr><td>Polygon</td><td>4.85 TB</td><td>8 TB</td><td>64 GB</td><td>128 GB</td></tr>
+<tr><td>Gnosis</td><td>539 GB</td><td>1 TB</td><td>16 GB</td><td>32 GB</td></tr>
 </tbody></table>
 </div>
 <h2 id="bandwidth-requirements"><a class="header" href="#bandwidth-requirements">Bandwidth Requirements</a></h2>
@@ -717,6 +717,125 @@ Windows support for docker-compose is not ready yet.
 <li>Ensure Erigon uses the same network ports and JWT secret that Geth previously used. Otherwise, you must reconfigure the consensus client to match Erigon's new settings.</li>
 </ol>
 <p>Once these requirements are met, start syncing Erigon. While it syncs, ensure no errors appear in the logs of either Erigon or the consensus client. Note that the sync time can vary depending on the chain. You can periodically check the <code>eth_syncing</code> JSON-RPC method or the health check to monitor the progress.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="easy-nodes"><a class="header" href="#easy-nodes">Easy Nodes</a></h1>
+<p>These guides are recommended if you want to test Erigon and have your node up and running in minutes without reading all the documentation.</p>
+<ul>
+<li><a href="easy-nodes/how-to-run-an-ethereum-node.html">Ethereum node</a></li>
+<li><a href="easy-nodes/how-to-run-a-gnosis-chain-node.html">Gnosis Chain node</a></li>
+<li><a href="easy-nodes/how-to-run-a-polygon-node.html">Polygon node</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="how-to-run-an-ethereum-node"><a class="header" href="#how-to-run-an-ethereum-node">How to run an Ethereum node</a></h1>
+<h2 id="prerequisites-1"><a class="header" href="#prerequisites-1">Prerequisites</a></h2>
+<ul>
+<li>Check the <a href="easy-nodes/../getting-started/hw-requirements.html">hardware</a> prerequisites;</li>
+<li>Check which <a href="easy-nodes/../basic/node.html">type of node</a> you want to run and the <a href="easy-nodes/../getting-started/hw-requirements.html#minimal-node-requirements">disk space</a> required.</li>
+</ul>
+<h2 id="install-erigon"><a class="header" href="#install-erigon">Install Erigon​</a></h2>
+<p>To set up Erigon quickly, we recommend the following:</p>
+<ul>
+<li>For Linux and MacOS users, use our <a href="easy-nodes/../installation/prebuilt.html">pre-built binaries</a>;</li>
+<li>For Windows users, <a href="easy-nodes/../installation/build_exec_win.html">build executable binaries natively</a>.</li>
+</ul>
+<h1 id="start-erigon"><a class="header" href="#start-erigon">Start Erigon​</a></h1>
+<p>To execute a Ethereum full node using pre-compiled binaries, use the following basic command:</p>
+<pre><code class="language-bash">erigon
+</code></pre>
+<h2 id="example-of-basic-configuration"><a class="header" href="#example-of-basic-configuration">Example of basic configuration​</a></h2>
+<p>The command above allows you to run your local Erigon node on the Ethereum mainnet with Caplin, the embedded Consesus Layer. Additionally, you can include several options, as shown in the following example:</p>
+<pre><code class="language-bash">erigon \
+--datadir=&lt;your_data_dir&gt; \
+--prune.mode=minimal \
+--http.addr="0.0.0.0" \
+--http.api=eth,web3,net,debug,trace,txpool \
+--torrent.download.rate=512mb
+</code></pre>
+<h3 id="flags-explanation"><a class="header" href="#flags-explanation">Flags explanation</a></h3>
+<ul>
+<li><code>--datadir=&lt;your_data_dir&gt;</code> to store Erigon files in a non-default location. Default data directory is <code>./home/user/.local/share/erigon</code>.</li>
+<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../basic/node.html">type of node</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
+<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../basic/wallet.html">wallet</a>.</li>
+<li><code>--torrent.download.rate=512mb</code> to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.</li>
+<li>Default chain is <code>--chain=mainnet</code> for Ethereum mainnet. Use the flag <code>--chain=holesky</code> for Holesky testnet, <code>--chain=sepolia</code> for Sepolia testnet or <code>--chain=hoodi</code> for Hoodi testnet.</li>
+</ul>
+<p>To stop your Erigon node you can use the <code>CTRL+C</code> command.</p>
+<p>When you get familiar with running Erigon from CLI you may also consider <a href="easy-nodes/../staking.html">staking</a> and/or run a <a href="easy-nodes/ethereum-with-an-external-cl.html">Ethereum node with an external Consensus Layer</a>.</p>
+<p>Additional flags can be added to <a href="easy-nodes/../advanced/configuring.html">configure</a> Erigon with several <a href="easy-nodes/../advanced/options.html">options</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="ethereum-with-an-external-cl"><a class="header" href="#ethereum-with-an-external-cl">Ethereum with an external CL</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="how-to-run-a-gnosis-chain-node"><a class="header" href="#how-to-run-a-gnosis-chain-node">How to run a Gnosis Chain node</a></h1>
+<h2 id="prerequisites-2"><a class="header" href="#prerequisites-2">Prerequisites</a></h2>
+<ul>
+<li>Check the <a href="easy-nodes/../getting-started/hw-requirements.html">hardware</a> prerequisites;</li>
+<li>Check which <a href="easy-nodes/../basic/node.html">type of node</a> you want to run and the <a href="easy-nodes/../getting-started/hw-requirements.html#minimal-node-requirements">disk space</a> required.</li>
+</ul>
+<h2 id="install-erigon-1"><a class="header" href="#install-erigon-1">Install Erigon​</a></h2>
+<p>To set up Erigon quickly, we recommend the following:</p>
+<ul>
+<li>For Linux and MacOS users, use our <a href="easy-nodes/../installation/prebuilt.html">pre-built binaries</a>;</li>
+<li>For Windows users, <a href="easy-nodes/../installation/build_exec_win.html">build executable binaries natively</a>.</li>
+</ul>
+<h1 id="start-erigon-1"><a class="header" href="#start-erigon-1">Start Erigon​</a></h1>
+<p>To execute a Gnosis Chain full node using pre-compiled binaries, use the following basic command:</p>
+<pre><code class="language-bash">erigon --chain=gnosis
+</code></pre>
+<h2 id="example-of-basic-configuration-1"><a class="header" href="#example-of-basic-configuration-1">Example of basic configuration​</a></h2>
+<p>The command above allows you to run your local Erigon node on the Gnosis Chain. Additionally, you can include several options, as shown in the following example:</p>
+<pre><code class="language-bash">erigon \
+--chain=gnosis \
+--datadir=&lt;your_data_dir&gt; \
+--prune.mode=minimal \
+--http.addr="0.0.0.0" \
+--http.api=eth,web3,net,debug,trace,txpool \
+--torrent.download.rate=512mb
+</code></pre>
+<h3 id="flags-explanation-1"><a class="header" href="#flags-explanation-1">Flags explanation</a></h3>
+<ul>
+<li><code>--chain=gnosis</code> specifies the Gnosis Chain network, use <code>--chain=chiado</code> for Chiado testnet.</li>
+<li><code>--datadir=&lt;your_data_dir&gt;</code> to store Erigon files in a non-default location. Default data directory is <code>./home/user/.local/share/erigon</code>.</li>
+<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../basic/node.html">type of node</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
+<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../basic/wallet.html">wallet</a>.</li>
+<li><code>--torrent.download.rate=512mb</code> to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.</li>
+</ul>
+<p>To stop your Erigon node you can use the <code>CTRL+C</code> command.</p>
+<p>When you get familiar with running Erigon from CLI you may also consider <a href="easy-nodes/../staking.html">staking</a> and/or run a <a href="easy-nodes/gno_extcl.html">Gnosis chain node with an external Consensus Layer</a>.</p>
+<p>Additional flags can be added to <a href="easy-nodes/../advanced/configuring.html">configure</a> Erigon with several <a href="easy-nodes/../advanced/options.html">options</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="gnosis-with-an-external-cl"><a class="header" href="#gnosis-with-an-external-cl">Gnosis with an external CL</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="how-to-run-a-polygon-node"><a class="header" href="#how-to-run-a-polygon-node">How to run a Polygon node</a></h1>
+<h2 id="prerequisites-3"><a class="header" href="#prerequisites-3">Prerequisites</a></h2>
+<ul>
+<li>Check the <a href="easy-nodes/../getting-started/hw-requirements.html">hardware</a> prerequisites;</li>
+<li>Check which <a href="easy-nodes/../basic/node.html">type of node</a> you want to run and the <a href="easy-nodes/../getting-started/hw-requirements.html#minimal-node-requirements">disk space</a> required.</li>
+</ul>
+<h2 id="install-erigon-2"><a class="header" href="#install-erigon-2">Install Erigon​</a></h2>
+<p>To set up Erigon quickly, we recommend the following:</p>
+<ul>
+<li>For Linux and MacOS users, use our <a href="easy-nodes/../installation/prebuilt.html">pre-built binaries</a>;</li>
+<li>For Windows users, <a href="easy-nodes/../installation/build_exec_win.html">build executable binaries natively</a>.</li>
+</ul>
+<h1 id="start-erigon-2"><a class="header" href="#start-erigon-2">Start Erigon</a></h1>
+<p>To execute an Erigon full node on the Polygon mainnet with remote Heimdall using pre-compiled binaries, use the following basic command:</p>
+<pre><code class="language-bash">erigon --chain=bor-mainnet --bor.heimdall=https://heimdall-api.polygon.technology
+</code></pre>
+<h2 id="example-of-basic-configuration-2"><a class="header" href="#example-of-basic-configuration-2">Example of basic configuration​</a></h2>
+<p>The command above allows you to run your local Erigon node on the Polygon mainnet. Additionally, you can include several options, as shown in the following example:</p>
+<pre><code class="language-bash">erigon \
+--chain=bor-mainnet \
+--bor.heimdall=https://heimdall-api.polygon.technology \
+--datadir=&lt;your_data_dir&gt; \
+--prune.mode=minimal \
+--http.addr="0.0.0.0" \
+--http.api=eth,web3,net,debug,trace,txpool \
+--torrent.download.rate=512mb
+</code></pre>
+<h3 id="flags-explanation-2"><a class="header" href="#flags-explanation-2">Flags explanation</a></h3>
+<ul>
+<li><code>--chain=bor-mainnet</code> and <code>--bor.heimdall=https://heimdall-api.polygon.technologyspecifies</code> specify respctevely the Polygon mainnet and the API endpoint for the Heimdall network; to use Amoy tesnet replace with flags <code>--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology</code>.</li>
+<li><code>--datadir=&lt;your_data_dir&gt;</code> to store Erigon files in a non-default location. Default data directory is <code>./home/user/.local/share/erigon</code>.</li>
+<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../basic/node.html">type of node</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
+<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../basic/wallet.html">wallet</a>.</li>
+<li><code>--torrent.download.rate=512mb</code> to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.</li>
+</ul>
+<p>To stop your Erigon node you can use the <code>CTRL+C</code> command.</p>
+<p>Several other <a href="easy-nodes/../advanced/configuring.html">configurations</a> and <a href="easy-nodes/../advanced/options.html">options</a> are available.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="fundamentals"><a class="header" href="#fundamentals">Fundamentals</a></h1>
 <ul>
 <li><a href="fundamentals/basic-usage.html">Basic Usage</a></li>
@@ -2329,7 +2448,7 @@ All stages implement comprehensive error logging with contextual information to 
 <blockquote>
 <p>⚠️<strong>Warning</strong>: To maintain a high level of security, it is recommended to create all the keys locally and then copy the 3 required files remotely to the remote node.</p>
 </blockquote>
-<h3 id="prerequisites-1"><a class="header" href="#prerequisites-1">Prerequisites</a></h3>
+<h3 id="prerequisites-4"><a class="header" href="#prerequisites-4">Prerequisites</a></h3>
 <p>Make sure you have <a href="https://openssl-library.org/source/">openssl</a> installed.</p>
 <h3 id="notes-1"><a class="header" href="#notes-1">Notes</a></h3>
 <p>Normally, the "client side" (in our case, the RPCdaemon) will check that the server's host name matches the "Common Name" attribute of the "server" certificate. At this time, this check is disabled and will be re-enabled when the instructions above on how to correctly generate Common Name certificates are updated. For example, if you are running the Erigon instance in the Google Cloud, you will need to specify the internal IP in the <code>-private.api.addr</code> option. You will also need to open the firewall on the port you use to connect to the Erigon instances.</p>
@@ -2616,7 +2735,7 @@ make txpool
 </code></pre>
 <pre><code class="language-sh">./build/bin/rpcdaemon --private.api.addr=localhost:9090 --datadir=&lt;your datadir&gt; --txpool.api.addr=localhost:9094
 </code></pre>
-<h2 id="flags-explanation"><a class="header" href="#flags-explanation">Flags explanation</a></h2>
+<h2 id="flags-explanation-3"><a class="header" href="#flags-explanation-3">Flags explanation</a></h2>
 <ul>
 <li>
 <p><code>--txpool.disable</code>: This flag disables the internal transaction pool (txpool) and block producer (default: <code>false</code>). When running the txpool as a separate process, this flag is used to prevent the internal txpool from interfering with the external one.</p>
@@ -2909,7 +3028,7 @@ Flags:
 
 Use " [command] --help" for more information about a command.
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="multiple-instances--one-machine"><a class="header" href="#multiple-instances--one-machine">Multiple instances / One machine</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="multiple-instances--one-machine-review"><a class="header" href="#multiple-instances--one-machine-review">Multiple instances / One machine [REVIEW]</a></h1>
 <p>Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.</p>
 <h2 id="required-configuration-flags"><a class="header" href="#required-configuration-flags">Required Configuration Flags</a></h2>
 <p>To avoid conflicts between instances, you must define <strong>6 essential flags</strong> for each instance:</p>
@@ -3016,59 +3135,43 @@ export ERIGON_SNAPSHOT_MADV_RND=false
 vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 </code></pre>
-<p><strong>File:</strong> README.md (L678-685)</p>
 <pre><code class="language-markdown">vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 </code></pre>
-<h1 id="if-it-failing-with-cant-allocate-memory-try"><a class="header" href="#if-it-failing-with-cant-allocate-memory-try">if it failing with "can't allocate memory", try:</a></h1>
-<p>sync &amp;&amp; sudo sysctl vm.drop_caches=3
-echo 1 &gt; /proc/sys/vm/compact_memory</p>
-<pre><code></code></pre>
-<p><strong>File:</strong> README.md (L769-774)</p>
-<pre><code class="language-markdown">**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimizations: "reduce Disk random access".
-"Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
-running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
-same Disk.
-
+<p>If it is failing with "can't allocate memory", try:</p>
+<pre><code>sync &amp;&amp; sudo sysctl vm.drop_caches=3
+echo 1 &gt; /proc/sys/vm/compact_memory
 </code></pre>
-<p><strong>File:</strong> README.md (L782-791)</p>
-<pre><code class="language-markdown">What can do:
-
-- reduce disk latency (not throughput, not iops)
-    - use latency-critical cloud-drives
-    - or attached-NVMe (at least for initial sync)
-- increase RAM
-- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
-- Use `--db.pagesize=64kb` (less fragmentation, more IO)
-- Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
-
-</code></pre>
-<p><strong>File:</strong> docker-compose.yml (L9-12)</p>
+<blockquote>
+<p><strong>Warning:</strong>: Running multiple instances of Erigon on the same machine will cause concurrent disk access, which can negatively impact performance. One of Erigon's main optimizations is to reduce disk random access, but the "Blocks Execution stage" still performs many random reads, making it the slowest stage. Therefore, <strong>we do not recommend running multiple genesis syncs on the same disk</strong>. However, if the genesis sync has already been completed, it is acceptable to run multiple Erigon instances on the same disk.</p>
+</blockquote>
+<p>What can be done:</p>
+<ul>
+<li>reduce disk latency (not throughput, not iops)
+<ul>
+<li>use latency-critical cloud-drives</li>
+<li>or attached-NVMe (at least for initial sync)</li>
+</ul>
+</li>
+<li>increase RAM</li>
+<li>if you throw enough RAM, then can set env variable <code>ERIGON_SNAPSHOT_MADV_RND=false</code></li>
+<li>Use <code>--db.pagesize=64kb</code> (less fragmentation, more IO)</li>
+<li>Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)</li>
+</ul>
 <pre><code class="language-yaml"># Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 # Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
 
 # Connections: erigon -&gt; (sentries, downloader), rpcdaemon -&gt; (erigon, txpool), txpool -&gt; erigon
 </code></pre>
-<p><strong>File:</strong> docs/programmers_guide/db_faq.md (L34-42)</p>
-<pre><code class="language-markdown">### How RAM used
-
-Erigon will use all available RAM, but this RAM will not belong to Erigon’s process. OS will own all this
-memory. And OS will maintain hot part of DB in RAM. If OS will need RAM for other programs or for second Erigon instance
-OS will manage all the work. This called PageCache. Erigon itself using under 2Gb. So, Erigon will benefit from more
-RAM and will use all RAM without re-configuration. Same PageCache can be used by other processes if they run on same
-machine by just opening same DB file. For example if RPCDaemon started with —datadir option - it will open db of
-Erigon and will use same PageCache (if data A already in RAM because it’s hot and RPCDaemon read it - then it read it
-from RAM not from Disk). Shared memory.
-</code></pre>
-<p><strong>File:</strong> cmd/devnet/devnet/node.go (L190-194)</p>
+<h3 id="how-ram-is-used"><a class="header" href="#how-ram-is-used">How RAM is used</a></h3>
+<p>Erigon will utilize all available RAM, but this memory will not be directly owned by Erigon's process. Instead, the operating system (OS) will manage this memory. The OS will keep the frequently accessed parts of the database (DB) in RAM. If the OS needs to allocate RAM for other programs or for a second instance of Erigon, it will handle the memory management accordingly. This mechanism is known as PageCache.</p>
+<p>Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPCDaemon is started with the <code>--datadir</code> option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPCDaemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.</p>
 <pre><code class="language-go">	// These are set to prevent disk and page size churn which can be excessive
 	// when running multiple nodes
 	// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
 	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
 	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 </code></pre>
-<p><strong>File:</strong> tests/automated-testing/docker-compose.yml (L9-24)</p>
 <pre><code class="language-yaml">      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
     ports:
       - "8551:8551"
@@ -3086,7 +3189,6 @@ from RAM not from Disk). Shared memory.
     command: |
       --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --staticpeers=$ENODE --log.dir.path=/logs/node2
 </code></pre>
-<p><strong>File:</strong> cmd/prometheus/prometheus.yml (L11-24)</p>
 <pre><code class="language-yaml">      - targets:
           - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
           - erigon:6061
@@ -4962,7 +5064,7 @@ client := remote.NewKVClient(conn)
   --ws \
   --ws.port=8546 \
 </code></pre>
-<h2 id="flags-explanation-1"><a class="header" href="#flags-explanation-1">Flags explanation:</a></h2>
+<h2 id="flags-explanation-4"><a class="header" href="#flags-explanation-4">Flags explanation:</a></h2>
 <ul>
 <li><code>--externalcl</code>: Enables the use of an external CL.</li>
 <li><code>--datadir=/data/erigon</code>: Defines the directory to be used for databases.</li>
@@ -5039,7 +5141,7 @@ client := remote.NewKVClient(conn)
 <div style="break-before: page; page-break-before: always;"></div><h1 id="creating-a-dashboard"><a class="header" href="#creating-a-dashboard">Creating a dashboard</a></h1>
 <p>You can set up monitoring for Erigon using Grafana and Prometheus. Erigon has built-in support for this monitoring stack with pre-configured dashboards and metrics collection. This guide will walk you through setting up a complete monitoring dashboard for Erigon using Prometheus and Grafana, leveraging the built-in monitoring tools provided in the Erigon codebase.</p>
 <p>The monitoring setup leverages Erigon's built-in metrics system and provides comprehensive visibility into node performance, storage usage, and network activity. The pre-configured dashboards are actively maintained and include metrics for both execution and consensus layer operations when running with Caplin.</p>
-<h2 id="prerequisites-2"><a class="header" href="#prerequisites-2">Prerequisites</a></h2>
+<h2 id="prerequisites-5"><a class="header" href="#prerequisites-5">Prerequisites</a></h2>
 <ul>
 <li>Docker and Docker Compose installed</li>
 <li>Erigon node running</li>
@@ -5061,7 +5163,7 @@ client := remote.NewKVClient(conn)
 <p>Erigon provides a simple Docker Compose setup for the monitoring stack:</p>
 <pre><code class="language-bash">docker compose up -d prometheus grafana
 </code></pre>
-<p>Alternatively, you can use the make target <a href="monitoring/creating-a-dashboard.html#0-2">3</a> :</p>
+<p>Alternatively, you can use the make target:</p>
 <pre><code class="language-bash">make prometheus
 </code></pre>
 <h2 id="step-4-access-grafana-dashboard"><a class="header" href="#step-4-access-grafana-dashboard">Step 4: Access Grafana Dashboard</a></h2>
@@ -5070,7 +5172,7 @@ client := remote.NewKVClient(conn)
 <h2 id="step-5-pre-configured-dashboards"><a class="header" href="#step-5-pre-configured-dashboards">Step 5: Pre-configured Dashboards</a></h2>
 <p>Erigon comes with comprehensive pre-built dashboards that monitor various aspects of the node:</p>
 <h3 id="main-dashboard-features"><a class="header" href="#main-dashboard-features">Main Dashboard Features</a></h3>
-<p>The <code>erigon_internals.json</code> dashboard <a href="monitoring/creating-a-dashboard.html#0-4">5</a>  includes panels for:</p>
+<p>The <code>erigon_internals.json</code> dashboard includes panels for:</p>
 <ul>
 <li><strong>Storage Monitoring</strong>: Snapshots, chaindata, and temp directory sizes</li>
 <li><strong>Block Processing</strong>: Block importing latency and execution times</li>
@@ -5079,7 +5181,7 @@ client := remote.NewKVClient(conn)
 </ul>
 <h3 id="key-metrics-to-monitor"><a class="header" href="#key-metrics-to-monitor">Key Metrics to Monitor</a></h3>
 <ol>
-<li><strong>Block Execution Speed</strong></li>
+<li><strong>Block Execution Speed</strong> - Measures how long it takes Erigon to execute individual blocks</li>
 <li><strong>Storage Growth</strong> - Monitor chaindata and snapshot sizes</li>
 <li><strong>Processing Times</strong> - Track validation and execution latencies</li>
 </ol>
@@ -5101,7 +5203,14 @@ client := remote.NewKVClient(conn)
 <li>Use the custom config: <code>ERIGON_PROMETHEUS_CONFIG=/new/location/prometheus.yml docker compose up prometheus grafana</code></li>
 </ol>
 <h2 id="step-8-memory-usage-monitoring"><a class="header" href="#step-8-memory-usage-monitoring">Step 8: Memory Usage Monitoring</a></h2>
-<p>The dashboard includes proper memory usage tracking that accounts for OS page cache. This is important because standard tools like <code>htop</code> can be misleading for Erigon memory usage.</p>
+<p>The dashboard includes proper memory usage tracking that accounts for OS page cache. This is important because standard tools like <code>htop</code> can be misleading for Erigon memory usage. Erigon's internal database (MDBX) uses <code>MemoryMap</code> where the OS manages all read, write, and cache operations instead of the application. The <code>htop</code> tool shows "App + OS used to hold page cache for given App" in the <code>res</code> column, but this isn't informative because most of that memory is OS page cache that gets automatically freed when needed.</p>
+<p>The pre-configured Grafana dashboards include specific memory monitoring panels. The main <code>erigon.json</code> dashboard tracks Go memory statistics including:</p>
+<ul>
+<li><code>go_memstats_heap_alloc_bytes</code>: Current heap allocation</li>
+<li><code>go_memstats_sys_bytes</code>: Total system memory</li>
+<li><code>go_memstats_stack_inuse_bytes</code>: Stack memory in use</li>
+</ul>
+<p>Erigon uses approximately 4GB of RAM during genesis sync and around 1GB during normal operation, while OS page cache can utilize unlimited memory <a href="monitoring/creating-a-dashboard.html#1-8">9</a> . The system is designed so that OS page cache automatically manages memory allocation and can be shared between multiple processes accessing the same database files.</p>
 <h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
 <ul>
 <li>Ensure Erigon is running with <code>--metrics</code> flag enabled</li>
@@ -5373,7 +5482,7 @@ Installation and usage instructions</p>
 <p>The Erigon team does not take any responsibility for losses or damages occurred through the use of Erigon. While we employ a seasoned in-house security team, we have not subjected our systems to independent third-party security assessments.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="donate"><a class="header" href="#donate">Donate</a></h1>
 <p><em>Driving Ethereum progress through community-supported research and development</em></p>
-<p>Erigon Technologies AG is a non-profit project dedicated to advancing Ethereum technology for the public good. Our work is funded entirely by grants from blockchain companies and donations from our community.</p>
+<p>Erigon Technologies AG is a non-profit company dedicated to advancing Ethereum technology for the public good. Our work is funded entirely by grants from blockchain companies and donations from our community.</p>
 <p>Your contribution will help us to:</p>
 <ul>
 <li>Advance the Ethereum protocol for a more secure, efficient, and user-friendly experience</li>

@@ -21,7 +21,7 @@ cd erigon
 make txpool
 ```
 
-2) Together with external TxPool also [Sentry](sentry.md) and [RPCDaemon](JSONRPC-daemon.md) must be compiled and run separately.
+2) Together with external TxPool also [Sentry](sentry.md) and [RPCDaemon](rpc-daemon.md) must be compiled and run separately.
 
 ```bash
 make sentry

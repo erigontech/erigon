@@ -6,7 +6,7 @@ To install WSL, follow Microsoft official instructions: <https://learn.microsoft
 
 > **Important**: WSL Version 2 is the only version supported.
 
-Under this option you can build Erigon as you would on a regular Linux distribution (see detailed instructions [here](linux.md)).
+Under this option you can build Erigon as you would on a regular Linux distribution (see detailed instructions [here](../installation/linux-and-macos.md)).
 
 You can also point your data to any of the mounted Windows partitions ( e.g. `/mnt/c/[...]`, `/mnt/d/[...]` etc..) but be aware that performance will be affected: this is due to the fact that these mount points use `DrvFS`, which is a network file system, and additionally MDBX locks the db for exclusive access, meaning that only one process at a time can access the data.
 

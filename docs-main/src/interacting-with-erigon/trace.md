@@ -35,8 +35,7 @@ with input data, output data, gas usage, amount transferred and the success stat
 
 ### `traceAddress` field
 
-The `traceAddress` field of all returned traces, gives the exact location in the call trace [index in root,
-index in first `CALL`, index in second `CALL`, ...].
+The `traceAddress` field of all returned traces, gives the exact location in the call trace [index in root, index in first `CALL`, index in second `CALL`, ...].
 
 i.e. if the trace is:
 ```

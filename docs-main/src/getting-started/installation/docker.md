@@ -39,7 +39,7 @@ docker images
 docker run -it <image_id> --v
 ```
 
-If you want to start Erigon add the options according to the [basic usage](../basic-usage.md) page or the advanced customization page. For example:
+If you want to start Erigon add the options according to the [basic usage](../../fundamentals/basic-usage.md) page or the advanced customization page. For example:
 
 ```bash
 docker run -it 36f25992dd1a --chain=holesky --prune.mode=minimal

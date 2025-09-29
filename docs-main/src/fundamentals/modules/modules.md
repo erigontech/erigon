@@ -6,7 +6,7 @@ Erigon is by default an "all-in-one" binary solution, but it's possible start an
 - [TxPool](txpool.md), the transaction pool
 - [Sentry](sentry.md), the p2p layer
 - [Downloader](downloader.md), the history download layer (we don't recommend run it externally)
-- [Caplin](fundamentals/caplin.md), the novel Consensus Layer
+- [Caplin](..//caplin.md), the embedded Consensus Layer
 
 This may be for security, scalability, decentralisation, resource limitation, custom implementation, or any other reason you/your team deems appropriate. See the appropriate section to understand how to start each service separately.
 
