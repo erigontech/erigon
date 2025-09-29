@@ -126,20 +126,25 @@ func (a *Antiquary) Loop() error {
 		return nil
 	}
 	if a.downloader != nil {
-		completedReply, err := a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
-		if err != nil {
-			return err
-		}
 		reCheckTicker := time.NewTicker(3 * time.Second)
 		defer reCheckTicker.Stop()
 
+		// We need to make sure we 100% finish the download process.
+		// 1) Define some time completionEpoch window
+		completionEpoch := 2 * time.Minute
+		// 2) Define a progress counter
+		progress := time.Now()
+
 		// Fist part of the antiquate is to download caplin snapshots
-		for (!completedReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
+		for !time.Now().Add(completionEpoch).Before(progress) && !a.backfilled.Load() {
 			select {
 			case <-reCheckTicker.C:
-				completedReply, err = a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
+				completedReply, err := a.downloader.Completed(a.ctx, &downloaderproto.CompletedRequest{})
 				if err != nil {
 					return err
+				}
+				if !completedReply.Completed {
+					progress = time.Now() // reset the progress if we are not completed
 				}
 			case <-a.ctx.Done():
 			}
