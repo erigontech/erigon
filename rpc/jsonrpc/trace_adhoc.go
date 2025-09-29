@@ -535,6 +535,16 @@ func (ot *OeTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
+func cleanHex(b []byte) string {
+    trimmed := bytes.TrimLeft(b, "\x00")
+
+    if len(trimmed) == 0 {
+        return "0x0" // Restituisce la stringa canonica per il valore zero
+    }
+
+    return "0x" + hex.EncodeToString(trimmed)
+}
+
 func encodePaddedInt(data []byte, length int) string {
     idx := 0
     for ; idx < len(data) && data[idx] == 0; idx++ {
@@ -589,12 +599,8 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			if pushBytes > 0 && len(st) > 0 {
 				stackValue := tracers.StackBack(st, 0).Bytes()
 				if len(stackValue) >= pushBytes {
-					pushedData := stackValue[len(stackValue)-pushBytes:]
-					trimmedData := bytes.TrimLeft(pushedData, "\x00")
-					if len(trimmedData) == 0 {
-						trimmedData = []byte{0} // Se era zero, rimane un singolo byte 0
-					}
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(trimmedData))
+                                        pushedData := stackValue[len(stackValue)-pushBytes:]
+                                        ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, cleanHex(pushedData))
 					showStack = 0
 				}
 			}
@@ -613,7 +619,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 						if expectedLength < 32 {
 							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, encodePaddedInt(valueBytes, expectedLength))
 						} else {
-							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(valueBytes))
+                                                        ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x" + hex.EncodeToString(valueBytes))
 						}
 					}
 				}
