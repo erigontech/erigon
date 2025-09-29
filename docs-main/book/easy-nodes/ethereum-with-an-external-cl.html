@@ -156,6 +156,63 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="ethereum-with-an-external-cl"><a class="header" href="#ethereum-with-an-external-cl">Ethereum with an external CL</a></h1>
+<p>Alternatively, you can run an Ethereum node with an external Consensus Layer (CL).</p>
+<p>Both <a href="#erigon-with-prysm-as-the-external-cl">Prysm</a> and <a href="#erigon-with-lighthouse-as-the-external-cl">Lighthouse</a>, or any other Consensus Layer client can be used alongside Erigon by adding the <code>--externalcl</code> flag. This allows you to access the Ethereum blockchain directly and manage your keys to stake your ETH and produce blocks.</p>
+<h2 id="erigon-with-prysm-as-the-external-cl"><a class="header" href="#erigon-with-prysm-as-the-external-cl">Erigon with Prysm as the external CL</a></h2>
+<ol>
+<li>
+<p>Start Erigon with the <code>--externalcl</code> flag:</p>
+<pre><code class="language-bash">erigon --externalcl
+</code></pre>
+<p>If your Consensus Layer (CL) client is on a different device, add the following flags:</p>
+<ul>
+<li><code>--authrpc.addr 0.0.0.0</code>, since the Engine API listens on localhost by default;</li>
+<li><code>--authrpc.vhosts &lt;CL_host&gt;</code> where &lt;CL_host&gt; is the source host or the appropriate hostname that your CL client is using.</li>
+</ul>
+</li>
+<li>
+<p>Install and run <strong>Prysm</strong> by following the official guide: <a href="https://docs.prylabs.network/docs/install/install-with-script">https://docs.prylabs.network/docs/install/install-with-script</a>.</p>
+<p>Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at <a href="https://eth-clients.github.io/checkpoint-sync-endpoints">https://eth-clients.github.io/checkpoint-sync-endpoints</a>.</p>
+</li>
+<li>
+<p>To communicate with Erigon, the <code>--execution-endpoint</code> must be specified as <code>&lt;erigon address&gt;:8551</code>, where <code>&lt;erigon address&gt;</code> is either <code>http://localhost</code> or the IP address of the device running Erigon.</p>
+</li>
+<li>
+<p>Prysm must point to the <a href="../fundamentals/jwt.html">JWT secret</a> automatically created by Erigon in the <code>--datadir</code> directory.</p>
+<pre><code class="language-bash">./prysm.sh beacon-chain \
+--execution-endpoint http://localhost:8551 \
+--mainnet --jwt-secret=&lt;your-datadir&gt;/jwt.hex \
+--checkpoint-sync-url=https://beaconstate.info \
+--genesis-beacon-api-url=https://beaconstate.info
+</code></pre>
+</li>
+</ol>
+<h2 id="erigon-with-lighthouse-as-the-external-cl"><a class="header" href="#erigon-with-lighthouse-as-the-external-cl">Erigon with Lighthouse as the external CL</a></h2>
+<ol>
+<li>
+<p>Start Erigon:</p>
+<pre><code class="language-bash">./build/bin/erigon --externalcl
+</code></pre>
+</li>
+<li>
+<p>Install and run Lighthouse by following the official guide: <a href="https://lighthouse-book.sigmaprime.io/installation.html">https://lighthouse-book.sigmaprime.io/installation.html</a></p>
+</li>
+<li>
+<p>Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints at <a href="https://eth-clients.github.io/checkpoint-sync-endpoints">https://eth-clients.github.io/checkpoint-sync-endpoints</a>.</p>
+</li>
+<li>
+<p>To communicate with Erigon, the <code>--execution-endpoint</code> must be specified as <code>&lt;erigon address&gt;:8551</code>, where <code>&lt;erigon address&gt;</code> is either <code>http://localhost</code> or the IP address of the device running Erigon.</p>
+</li>
+<li>
+<p>Lighthouse must point to the <a href="../fundamentals/jwt.html">JWT secret</a> automatically created by Erigon in the <code>--datadir</code> directory.</p>
+<pre><code class="language-bash">lighthouse bn \
+--network mainnet \
+--execution-endpoint http://localhost:8551 \
+--execution-jwt &lt;your-datadir&gt;/jwt.hex \
+--checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
+</code></pre>
+</li>
+</ol>
 
                     </main>
 

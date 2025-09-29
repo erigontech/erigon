@@ -15,5 +15,6 @@ preferred-dark-theme = "Ayu"
 enable = true    # whether or not to enable section folding
 level = 1         # the depth to start folding
 
-[output.linkcheck]
+# [output.linkcheck]
+# Enable this section only with the appropriate plugin installed
 

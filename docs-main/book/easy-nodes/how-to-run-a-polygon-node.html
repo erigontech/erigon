@@ -158,14 +158,14 @@
                         <h1 id="how-to-run-a-polygon-node"><a class="header" href="#how-to-run-a-polygon-node">How to run a Polygon node</a></h1>
 <h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
 <ul>
-<li>Check the <a href="../getting-started/hw-requirements.html">hardware</a> prerequisites;</li>
-<li>Check which <a href="../basic/node.html">type of node</a> you want to run and the <a href="../getting-started/hw-requirements.html#minimal-node-requirements">disk space</a> required.</li>
+<li>Check the <a href="../getting-started/hardware-requirements.html">hardware</a> prerequisites;</li>
+<li>Check which <a href="../fundamentals/sync-modes.html">sync mode</a> you want to run and the <a href="../getting-started/hardware-requirements.html#minimal-node-requirements">disk space</a> required.</li>
 </ul>
 <h2 id="install-erigon"><a class="header" href="#install-erigon">Install Erigon​</a></h2>
 <p>To set up Erigon quickly, we recommend the following:</p>
 <ul>
-<li>For Linux and MacOS users, use our <a href="../installation/prebuilt.html">pre-built binaries</a>;</li>
-<li>For Windows users, <a href="../installation/build_exec_win.html">build executable binaries natively</a>.</li>
+<li>For Linux and MacOS users, use our <a href="../getting-started/installation/pre-built-binaries.html">pre-built binaries</a>;</li>
+<li>For Windows users, <a href="../getting-started/installation/windows-build-executables.html">build executable binaries natively</a>.</li>
 </ul>
 <h1 id="start-erigon"><a class="header" href="#start-erigon">Start Erigon</a></h1>
 <p>To execute an Erigon full node on the Polygon mainnet with remote Heimdall using pre-compiled binaries, use the following basic command:</p>
@@ -186,12 +186,12 @@
 <ul>
 <li><code>--chain=bor-mainnet</code> and <code>--bor.heimdall=https://heimdall-api.polygon.technologyspecifies</code> specify respctevely the Polygon mainnet and the API endpoint for the Heimdall network; to use Amoy tesnet replace with flags <code>--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology</code>.</li>
 <li><code>--datadir=&lt;your_data_dir&gt;</code> to store Erigon files in a non-default location. Default data directory is <code>./home/user/.local/share/erigon</code>.</li>
-<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="../basic/node.html">type of node</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
-<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="../basic/wallet.html">wallet</a>.</li>
+<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="../fundamentals/sync-modes.html">sync mode</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
+<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="../fundamentals/web3-wallet.html">web3 wallet</a>.</li>
 <li><code>--torrent.download.rate=512mb</code> to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.</li>
 </ul>
 <p>To stop your Erigon node you can use the <code>CTRL+C</code> command.</p>
-<p>Several other <a href="../advanced/configuring.html">configurations</a> and <a href="../advanced/options.html">options</a> are available.</p>
+<p>Additional flags can be added to <a href="../fundamentals/configuring-erigon.html">configure</a> Erigon with several <a href="../fundamentals/configuring-erigon.html#options">options</a>.</p>
 
                     </main>
 

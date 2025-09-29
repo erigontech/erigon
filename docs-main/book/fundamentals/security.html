@@ -156,6 +156,37 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="security"><a class="header" href="#security">Security</a></h1>
+<p>The security practices focus heavily on the RPC daemon since it's the primary external interface. The modular architecture allows you to run components separately, which can improve security by isolating services. For production deployments, consider using the distributed mode where services communicate via secured gRPC rather than running everything in a single process.</p>
+<h2 id="network-security"><a class="header" href="#network-security">Network Security</a></h2>
+<p><strong>Firewall Configuration</strong>: Secure your network ports properly. The default ports include:</p>
+<ul>
+<li>Port <code>30303</code> for P2P networking</li>
+<li>Port <code>8545</code> for JSON-RPC (if enabled)</li>
+<li>Port <code>9090</code> for private API communication</li>
+</ul>
+<p><strong>CORS Protection</strong>: When exposing RPC endpoints, avoid using wildcard CORS domains. Instead, set specific hostnames or IP addresses to prevent cross-origin attacks.</p>
+<h2 id="rpc-security"><a class="header" href="#rpc-security">RPC Security</a></h2>
+<p><strong>Method Allowlisting</strong>: Restrict available RPC methods using access control lists. Create a <code>rules.json</code> file specifying only the methods you need:</p>
+<pre><code class="language-json">{
+  "allow": ["net_version", "web3_eth_getBlockByHash"]
+}
+</code></pre>
+<p><strong>Remove Admin APIs</strong>: Don't include <code>admin</code> in your <code>--http.api</code> list for public-facing nodes.</p>
+<p><strong>Rate Limiting</strong>: Protect against DOS attacks by configuring <code>--rpc.batch.concurrency</code> and <code>--rpc.batch.limit</code>.</p>
+<h2 id="tls-and-authentication"><a class="header" href="#tls-and-authentication">TLS and Authentication</a></h2>
+<p><strong>TLS Encryption</strong>: For remote RPC daemon deployments, enable TLS authentication. The process involves:</p>
+<ol>
+<li>Generating CA key pairs</li>
+<li>Creating certificates for each instance</li>
+<li>Deploying certificates to secure communication</li>
+</ol>
+<p><strong>Private API Security</strong>: Configure secure communication between RPC daemon and Erigon instance using TLS certificates.</p>
+<h2 id="operational-security"><a class="header" href="#operational-security">Operational Security</a></h2>
+<p><strong>Dedicated User</strong>: Run Erigon as a dedicated system user rather than root to limit potential damage from security breaches.</p>
+<p><strong>Transaction Pool Security</strong>: Use <code>--txpool.nolocals=true</code> for public nodes to prevent local transaction injection.</p>
+<p><strong>Virtual Host Protection</strong>: Configure <code>HTTPVirtualHosts</code> to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.</p>
+<h2 id="health-monitoring"><a class="header" href="#health-monitoring">Health Monitoring</a></h2>
+<p><strong>Health Checks</strong>: Implement monitoring using the <code>/health</code> endpoint to detect issues early. Configure minimum peer counts and block validation to ensure your node stays healthy.</p>
 
                     </main>
 
@@ -165,7 +196,7 @@
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../fundamentals/tls-authentication.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../fundamentals/jwt.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -179,7 +210,7 @@
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../fundamentals/tls-authentication.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../fundamentals/jwt.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

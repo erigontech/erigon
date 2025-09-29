@@ -181,8 +181,7 @@ Unlike the log filtering API, you are able to search and filter based only upon 
 Information returned includes the execution of all <code>CREATE</code>s, <code>SUICIDE</code>s and all variants of <code>CALL</code> together
 with input data, output data, gas usage, amount transferred and the success status of each individual action.</p>
 <h3 id="traceaddress-field"><a class="header" href="#traceaddress-field"><code>traceAddress</code> field</a></h3>
-<p>The <code>traceAddress</code> field of all returned traces, gives the exact location in the call trace [index in root,
-index in first <code>CALL</code>, index in second <code>CALL</code>, ...].</p>
+<p>The <code>traceAddress</code> field of all returned traces, gives the exact location in the call trace [index in root, index in first <code>CALL</code>, index in second <code>CALL</code>, ...].</p>
 <p>i.e. if the trace is:</p>
 <pre><code>A
   CALLs B

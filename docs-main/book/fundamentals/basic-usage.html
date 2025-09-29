@@ -169,7 +169,7 @@
 <pre><code class="language-bash">./build/bin/erigon
 </code></pre>
 <p>This CLI command allows you to run an Ethereum <strong>full node</strong> where every process is integrated and no special configuration is needed.</p>
-<p>The default Consensus Layer utilized is <a href="./fundamentals/caplin.html">Caplin</a>, the Erigon flagship embedded CL.</p>
+<p>The default Consensus Layer utilized is <a href="caplin.html">Caplin</a>, the Erigon flagship embedded CL.</p>
 <h2 id="basic-configuration"><a class="header" href="#basic-configuration">Basic Configuration​</a></h2>
 <ul>
 <li>
@@ -178,23 +178,23 @@
 </code></pre>
 </li>
 <li>
-<p>Based on the <a href="fundamentals/sync-modes.html">sync mode</a> you want to run you can add <code>--prune.mode=archive</code> to run a archive node, <code>--prune.mode=full</code> for a full node or <code>--prune.mode=minimal</code> for a minimal node.
+<p>Based on the <a href="sync-modes.html">sync mode</a> you want to run you can add <code>--prune.mode=archive</code> to run a archive node, <code>--prune.mode=full</code> for a full node or <code>--prune.mode=minimal</code> for a minimal node.
 The default node is full node.</p>
 </li>
 <li>
 <p><code>--chain=mainnet</code>, add the flag <code>--chain=sepolia</code> for Sepolia testnet or <code>--chain=holesky</code> for Holesky testnet.</p>
 </li>
 <li>
-<p><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="fundamentals/web3-wallet.html">wallet</a>.</p>
+<p><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="web3-wallet.html">wallet</a>.</p>
 </li>
 <li>
 <p>To increase download speed add <code>--torrent.download.rate=512mb</code> (default is 16mb).</p>
 </li>
 </ul>
 <p>To stop the Erigon node you can use the <code>CTRL+C</code> command.</p>
-<p>Additional flags can be added to configure the node with several <a href="fundamentals/fundamentals.html">options</a>.</p>
+<p>Additional flags can be added to <a href="configuring-erigon.html">configure</a> the node with several options.</p>
 <h2 id="testnets"><a class="header" href="#testnets">Testnets</a></h2>
-<p>If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public <a href="fundamentals/supported-networks.html#testnets">testnets</a>, Holesky, adding the option <code>--chain=holesky</code> and using the default Consensus Layer, Caplin. You can also had the flag <code>--prune.mode=minimal</code> to have a node that is syncing fast while taking not so much disk space:</p>
+<p>If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public <a href="supported-networks.html#testnets">testnets</a>, Holesky, adding the option <code>--chain=holesky</code> and using the default Consensus Layer, Caplin. You can also had the flag <code>--prune.mode=minimal</code> to have a node that is syncing fast while taking not so much disk space:</p>
 <pre><code class="language-bash">./build/bin/erigon --chain=holesky --prune.mode=minimal
 </code></pre>
 <h2 id="help"><a class="header" href="#help">Help</a></h2>

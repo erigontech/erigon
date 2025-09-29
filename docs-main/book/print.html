@@ -160,14 +160,14 @@
 <img src="introduction//images/Erigon-2024-ICON-V1-O-scaled.webp" alt="Erigon 3" style="display: block; margin: 0 auto; max-width: 200px">
 <p>Erigon is an efficient Ethereum implementation designed for speed, modularity, and optimization.</p>
 <p>With Erigon 3 the default configuration shifts from archive node to full node, enhancing efficiency, accessibility, and versatility for a wider range of users. Archive nodes remain available for developers and researchers needing full historical data, while the full node offers faster sync times and lower resource usage for everyday operations.</p>
-<p>See here <strong><a href="introduction/why-using-erigon.html">why you should be using Erigon</a></strong>.</p>
+<p>See here <strong><a href="introduction/./why-using-erigon.html">why you should be using Erigon</a></strong>.</p>
 <h1 id="topics"><a class="header" href="#topics">Topics</a></h1>
 <ul>
-<li>Review the hardware and software requirements to <a href="introduction//getting-started/getting-started.html">get started</a>.</li>
-<li>Follow the <a href="introduction//getting-started/installation.html">installation guide</a> to set up Erigon.</li>
-<li>Learn the <a href="introduction//fundamentals/basic-usage.html">basic usage</a> of Erigon.</li>
-<li>Find how to <a href="introduction//fundamentals/configuring-erigon.html">configure Erigon</a>.</li>
-<li>Interact with Erigon's advanced <a href="introduction//interacting-with-erigon/interacting-with-erigon.html">RPC</a>.</li>
+<li>Review the hardware and software requirements to <a href="introduction/../getting-started/getting-started.html">get started</a>.</li>
+<li>Follow the <a href="introduction/../getting-started/installation.html">installation guide</a> to set up Erigon.</li>
+<li>Learn the <a href="introduction/../fundamentals/basic-usage.html">basic usage</a> of Erigon.</li>
+<li>Find how to <a href="introduction/../fundamentals/configuring-erigon.html">configure Erigon</a>.</li>
+<li>Interact with Erigon's advanced <a href="introduction/../interacting-with-erigon/interacting-with-erigon.html">RPC</a>.</li>
 </ul>
 <p>Explore also our help, wiki and dedicated developer guide.</p>
 <h1 id="additional-resources-and-information"><a class="header" href="#additional-resources-and-information">Additional Resources and Information</a></h1>
@@ -251,7 +251,7 @@
 <li>When using multiple disks, consider implementing a <strong>RAID 0</strong> configuration to maximize performance and utilize space efficiently. RAID ZFS is not recommended.</li>
 </ul>
 <h2 id="disk-size-and-ram-requirements"><a class="header" href="#disk-size-and-ram-requirements">Disk Size and RAM Requirements</a></h2>
-<p>The amount of disk space recommended and RAM you need depends on the <a href="getting-started/../basic/node.html">type of node</a> you want to run. The "Disk Size (Required)" values listed below are obtained using the standard Erigon configuration, with the sole exception of the <code>--prune.mode</code> flag.</p>
+<p>The amount of disk space recommended and RAM you need depends on the <a href="getting-started/../fundamentals/sync-modes.html">sync mode</a> you want to run. The "Disk Size (Required)" values listed below are obtained using the standard Erigon configuration, with the sole exception of the <code>--prune.mode</code> flag.</p>
 <h3 id="minimal-node-requirements"><a class="header" href="#minimal-node-requirements">Minimal Node Requirements</a></h3>
 <p>Minimal nodes are suitable for light operation with pruned state and minimal historical data retention. (<code>--prune.mode=minimal</code>)</p>
 <div class="table-wrapper"><table><thead><tr><th>Network</th><th>Disk Size (Required)</th><th>Disk Size (Recommended)</th><th>RAM (Required)</th><th>RAM (Recommended)</th></tr></thead><tbody>
@@ -393,7 +393,7 @@ cd erigon
 </li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="build-executable-binaries-natively-for-windows"><a class="header" href="#build-executable-binaries-natively-for-windows">Build executable binaries natively for Windows</a></h1>
-<p>Before proceeding, ensure that the <a href="getting-started/installation/../getting-started/hw-requirements.html">hardware</a> and <a href="getting-started/installation/../getting-started/sw-requirements.html">software</a> requirements are met.</p>
+<p>Before proceeding, ensure that the <a href="getting-started/installation/../hardware-requirements.html">hardware</a> and <a href="getting-started/installation/../software-requirements.html">software</a> requirements are met.</p>
 <h2 id="installing-chocolatey"><a class="header" href="#installing-chocolatey">Installing Chocolatey</a></h2>
 <p>Install <em>Chocolatey package manager</em> by following these <a href="https://docs.chocolatey.org/en-us/choco/setup">instructions</a>.</p>
 <p>Once your Windows machine has the above installed, open the <strong>Command Prompt</strong> by typing "<strong>cmd</strong>" in the search bar and check that you have correctly installed Chocolatey:</p>
@@ -462,14 +462,14 @@ cd erigon
 <p>or from any place use the full address of the executable:</p>
 <pre><code class="language-powershell">start C:\Users\username\AppData\Local\erigon.exe
 </code></pre>
-<p>See <a href="getting-started/installation/../basic-usage.html">basic usage</a> documentation on available options and flags to customize your Erigon experience.</p>
+<p>See <a href="getting-started/installation/../../fundamentals/basic-usage.html">basic usage</a> documentation on available options and flags to customize your Erigon experience.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="windows-subsystem-for-linux-wsl"><a class="header" href="#windows-subsystem-for-linux-wsl">Windows Subsystem for Linux (WSL)</a></h1>
 <p>WSL enables running a complete GNU/Linux environment natively within Windows 10, providing Linux compatibility without the performance overhead of traditional virtualization.</p>
 <p>To install WSL, follow Microsoft official instructions: <a href="https://learn.microsoft.com/en-us/windows/wsl/install">https://learn.microsoft.com/en-us/windows/wsl/install</a>.</p>
 <blockquote>
 <p><strong>Important</strong>: WSL Version 2 is the only version supported.</p>
 </blockquote>
-<p>Under this option you can build Erigon as you would on a regular Linux distribution (see detailed instructions <a href="getting-started/installation/linux.html">here</a>).</p>
+<p>Under this option you can build Erigon as you would on a regular Linux distribution (see detailed instructions <a href="getting-started/installation/../installation/linux-and-macos.html">here</a>).</p>
 <p>You can also point your data to any of the mounted Windows partitions ( e.g. <code>/mnt/c/[...]</code>, <code>/mnt/d/[...]</code> etc..) but be aware that performance will be affected: this is due to the fact that these mount points use <code>DrvFS</code>, which is a network file system, and additionally MDBX locks the db for exclusive access, meaning that only one process at a time can access the data.</p>
 <blockquote>
 <p>⚠️ <strong>Warning</strong>: The remote db RPCdaemon is an experimental feature and is not recommended, it is extremely slow. It is highly preferable to use the embedded RPCdaemon.</p>
@@ -506,7 +506,7 @@ cd erigon
 </ol>
 <pre><code class="language-bash">docker run -it &lt;image_id&gt; --v
 </code></pre>
-<p>If you want to start Erigon add the options according to the <a href="getting-started/installation/../basic-usage.html">basic usage</a> page or the advanced customization page. For example:</p>
+<p>If you want to start Erigon add the options according to the <a href="getting-started/installation/../../fundamentals/basic-usage.html">basic usage</a> page or the advanced customization page. For example:</p>
 <pre><code class="language-bash">docker run -it 36f25992dd1a --chain=holesky --prune.mode=minimal
 </code></pre>
 <p>To exit the container press <code>Ctrl+C</code>; the container will stop.</p>
@@ -613,7 +613,7 @@ Windows support for docker-compose is not ready yet.
 <li><a href="getting-started/installation/upgrading.html#compiled-from-source">Compiled source code</a></li>
 </ul>
 <h3 id="pre-built-binaries"><a class="header" href="#pre-built-binaries">Pre-built Binaries</a></h3>
-<p>Download the latest binary file from <a href="https://github.com/erigontech/erigon/releases">https://github.com/erigontech/erigon/releases</a>, do the <a href="getting-started/installation/../installation/prebuilt.html#checksums">checksum</a> and reinstall it, no other operation needed.</p>
+<p>Download the latest binary file from <a href="https://github.com/erigontech/erigon/releases">https://github.com/erigontech/erigon/releases</a>, do the <a href="getting-started/installation/../installation/pre-built-binaries.html#checksums">checksum</a> and reinstall it, no other operation needed.</p>
 <h3 id="docker-1"><a class="header" href="#docker-1">Docker</a></h3>
 <p>If you're using Docker to run Erigon, the process to upgrade to a newer version of the software is straightforward and revolves around pulling the latest Docker image and then running it. Here's how you can upgrade Erigon using Docker:</p>
 <ul>
@@ -727,14 +727,14 @@ Windows support for docker-compose is not ready yet.
 <div style="break-before: page; page-break-before: always;"></div><h1 id="how-to-run-an-ethereum-node"><a class="header" href="#how-to-run-an-ethereum-node">How to run an Ethereum node</a></h1>
 <h2 id="prerequisites-1"><a class="header" href="#prerequisites-1">Prerequisites</a></h2>
 <ul>
-<li>Check the <a href="easy-nodes/../getting-started/hw-requirements.html">hardware</a> prerequisites;</li>
-<li>Check which <a href="easy-nodes/../basic/node.html">type of node</a> you want to run and the <a href="easy-nodes/../getting-started/hw-requirements.html#minimal-node-requirements">disk space</a> required.</li>
+<li>Check the <a href="easy-nodes/../getting-started/hardware-requirements.html">hardware</a> prerequisites;</li>
+<li>Check which <a href="easy-nodes/../fundamentals/sync-modes.html">sync mode</a> you want to run and the <a href="easy-nodes/../getting-started/hardware-requirements.html#minimal-node-requirements">disk space</a> required.</li>
 </ul>
 <h2 id="install-erigon"><a class="header" href="#install-erigon">Install Erigon​</a></h2>
 <p>To set up Erigon quickly, we recommend the following:</p>
 <ul>
-<li>For Linux and MacOS users, use our <a href="easy-nodes/../installation/prebuilt.html">pre-built binaries</a>;</li>
-<li>For Windows users, <a href="easy-nodes/../installation/build_exec_win.html">build executable binaries natively</a>.</li>
+<li>For Linux and MacOS users, use our <a href="easy-nodes/../getting-started/installation/pre-built-binaries.html">pre-built binaries</a>;</li>
+<li>For Windows users, <a href="easy-nodes/../getting-started/installation/windows-build-executables.html">build executable binaries natively</a>.</li>
 </ul>
 <h1 id="start-erigon"><a class="header" href="#start-erigon">Start Erigon​</a></h1>
 <p>To execute a Ethereum full node using pre-compiled binaries, use the following basic command:</p>
@@ -752,26 +752,83 @@ Windows support for docker-compose is not ready yet.
 <h3 id="flags-explanation"><a class="header" href="#flags-explanation">Flags explanation</a></h3>
 <ul>
 <li><code>--datadir=&lt;your_data_dir&gt;</code> to store Erigon files in a non-default location. Default data directory is <code>./home/user/.local/share/erigon</code>.</li>
-<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../basic/node.html">type of node</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
-<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../basic/wallet.html">wallet</a>.</li>
+<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../fundamentals/sync-modes.html">sync mode</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
+<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../fundamentals/web3-wallet.html">web3 wallet</a>.</li>
 <li><code>--torrent.download.rate=512mb</code> to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.</li>
 <li>Default chain is <code>--chain=mainnet</code> for Ethereum mainnet. Use the flag <code>--chain=holesky</code> for Holesky testnet, <code>--chain=sepolia</code> for Sepolia testnet or <code>--chain=hoodi</code> for Hoodi testnet.</li>
 </ul>
 <p>To stop your Erigon node you can use the <code>CTRL+C</code> command.</p>
-<p>When you get familiar with running Erigon from CLI you may also consider <a href="easy-nodes/../staking.html">staking</a> and/or run a <a href="easy-nodes/ethereum-with-an-external-cl.html">Ethereum node with an external Consensus Layer</a>.</p>
-<p>Additional flags can be added to <a href="easy-nodes/../advanced/configuring.html">configure</a> Erigon with several <a href="easy-nodes/../advanced/options.html">options</a>.</p>
+<p>When you get familiar with running Erigon from CLI you may also consider <a href="easy-nodes/../staking/staking.html">staking</a> and/or run a <a href="easy-nodes/ethereum-with-an-external-cl.html">Ethereum node with an external Consensus Layer</a>.</p>
+<p>Additional flags can be added to <a href="easy-nodes/../fundamentals/configuring-erigon.html">configure</a> Erigon with several <a href="easy-nodes/../fundamentals/configuring-erigon.html#options">options</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="ethereum-with-an-external-cl"><a class="header" href="#ethereum-with-an-external-cl">Ethereum with an external CL</a></h1>
+<p>Alternatively, you can run an Ethereum node with an external Consensus Layer (CL).</p>
+<p>Both <a href="easy-nodes/ethereum-with-an-external-cl.html#erigon-with-prysm-as-the-external-cl">Prysm</a> and <a href="easy-nodes/ethereum-with-an-external-cl.html#erigon-with-lighthouse-as-the-external-cl">Lighthouse</a>, or any other Consensus Layer client can be used alongside Erigon by adding the <code>--externalcl</code> flag. This allows you to access the Ethereum blockchain directly and manage your keys to stake your ETH and produce blocks.</p>
+<h2 id="erigon-with-prysm-as-the-external-cl"><a class="header" href="#erigon-with-prysm-as-the-external-cl">Erigon with Prysm as the external CL</a></h2>
+<ol>
+<li>
+<p>Start Erigon with the <code>--externalcl</code> flag:</p>
+<pre><code class="language-bash">erigon --externalcl
+</code></pre>
+<p>If your Consensus Layer (CL) client is on a different device, add the following flags:</p>
+<ul>
+<li><code>--authrpc.addr 0.0.0.0</code>, since the Engine API listens on localhost by default;</li>
+<li><code>--authrpc.vhosts &lt;CL_host&gt;</code> where &lt;CL_host&gt; is the source host or the appropriate hostname that your CL client is using.</li>
+</ul>
+</li>
+<li>
+<p>Install and run <strong>Prysm</strong> by following the official guide: <a href="https://docs.prylabs.network/docs/install/install-with-script">https://docs.prylabs.network/docs/install/install-with-script</a>.</p>
+<p>Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at <a href="https://eth-clients.github.io/checkpoint-sync-endpoints">https://eth-clients.github.io/checkpoint-sync-endpoints</a>.</p>
+</li>
+<li>
+<p>To communicate with Erigon, the <code>--execution-endpoint</code> must be specified as <code>&lt;erigon address&gt;:8551</code>, where <code>&lt;erigon address&gt;</code> is either <code>http://localhost</code> or the IP address of the device running Erigon.</p>
+</li>
+<li>
+<p>Prysm must point to the <a href="easy-nodes/../fundamentals/jwt.html">JWT secret</a> automatically created by Erigon in the <code>--datadir</code> directory.</p>
+<pre><code class="language-bash">./prysm.sh beacon-chain \
+--execution-endpoint http://localhost:8551 \
+--mainnet --jwt-secret=&lt;your-datadir&gt;/jwt.hex \
+--checkpoint-sync-url=https://beaconstate.info \
+--genesis-beacon-api-url=https://beaconstate.info
+</code></pre>
+</li>
+</ol>
+<h2 id="erigon-with-lighthouse-as-the-external-cl"><a class="header" href="#erigon-with-lighthouse-as-the-external-cl">Erigon with Lighthouse as the external CL</a></h2>
+<ol>
+<li>
+<p>Start Erigon:</p>
+<pre><code class="language-bash">./build/bin/erigon --externalcl
+</code></pre>
+</li>
+<li>
+<p>Install and run Lighthouse by following the official guide: <a href="https://lighthouse-book.sigmaprime.io/installation.html">https://lighthouse-book.sigmaprime.io/installation.html</a></p>
+</li>
+<li>
+<p>Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints at <a href="https://eth-clients.github.io/checkpoint-sync-endpoints">https://eth-clients.github.io/checkpoint-sync-endpoints</a>.</p>
+</li>
+<li>
+<p>To communicate with Erigon, the <code>--execution-endpoint</code> must be specified as <code>&lt;erigon address&gt;:8551</code>, where <code>&lt;erigon address&gt;</code> is either <code>http://localhost</code> or the IP address of the device running Erigon.</p>
+</li>
+<li>
+<p>Lighthouse must point to the <a href="easy-nodes/../fundamentals/jwt.html">JWT secret</a> automatically created by Erigon in the <code>--datadir</code> directory.</p>
+<pre><code class="language-bash">lighthouse bn \
+--network mainnet \
+--execution-endpoint http://localhost:8551 \
+--execution-jwt &lt;your-datadir&gt;/jwt.hex \
+--checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
+</code></pre>
+</li>
+</ol>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="how-to-run-a-gnosis-chain-node"><a class="header" href="#how-to-run-a-gnosis-chain-node">How to run a Gnosis Chain node</a></h1>
 <h2 id="prerequisites-2"><a class="header" href="#prerequisites-2">Prerequisites</a></h2>
 <ul>
-<li>Check the <a href="easy-nodes/../getting-started/hw-requirements.html">hardware</a> prerequisites;</li>
-<li>Check which <a href="easy-nodes/../basic/node.html">type of node</a> you want to run and the <a href="easy-nodes/../getting-started/hw-requirements.html#minimal-node-requirements">disk space</a> required.</li>
+<li>Check the <a href="easy-nodes/../getting-started/hardware-requirements.html">hardware</a> prerequisites;</li>
+<li>Check which <a href="easy-nodes/../fundamentals/sync-modes.html">sync mode</a> you want to run and the <a href="easy-nodes/../getting-started/hardware-requirements.html#minimal-node-requirements">disk space</a> required.</li>
 </ul>
 <h2 id="install-erigon-1"><a class="header" href="#install-erigon-1">Install Erigon​</a></h2>
 <p>To set up Erigon quickly, we recommend the following:</p>
 <ul>
-<li>For Linux and MacOS users, use our <a href="easy-nodes/../installation/prebuilt.html">pre-built binaries</a>;</li>
-<li>For Windows users, <a href="easy-nodes/../installation/build_exec_win.html">build executable binaries natively</a>.</li>
+<li>For Linux and MacOS users, use our <a href="easy-nodes/../getting-started/installation/pre-built-binaries.html">pre-built binaries</a>;</li>
+<li>For Windows users, <a href="easy-nodes/../getting-started/installation/windows-build-executables.html">build executable binaries natively</a>.</li>
 </ul>
 <h1 id="start-erigon-1"><a class="header" href="#start-erigon-1">Start Erigon​</a></h1>
 <p>To execute a Gnosis Chain full node using pre-compiled binaries, use the following basic command:</p>
@@ -791,25 +848,76 @@ Windows support for docker-compose is not ready yet.
 <ul>
 <li><code>--chain=gnosis</code> specifies the Gnosis Chain network, use <code>--chain=chiado</code> for Chiado testnet.</li>
 <li><code>--datadir=&lt;your_data_dir&gt;</code> to store Erigon files in a non-default location. Default data directory is <code>./home/user/.local/share/erigon</code>.</li>
-<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../basic/node.html">type of node</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
-<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../basic/wallet.html">wallet</a>.</li>
+<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../fundamentals/sync-modes.html">sync mode</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
+<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../fundamentals/web3-wallet.html">web3 wallet</a>.</li>
 <li><code>--torrent.download.rate=512mb</code> to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.</li>
 </ul>
 <p>To stop your Erigon node you can use the <code>CTRL+C</code> command.</p>
-<p>When you get familiar with running Erigon from CLI you may also consider <a href="easy-nodes/../staking.html">staking</a> and/or run a <a href="easy-nodes/gno_extcl.html">Gnosis chain node with an external Consensus Layer</a>.</p>
-<p>Additional flags can be added to <a href="easy-nodes/../advanced/configuring.html">configure</a> Erigon with several <a href="easy-nodes/../advanced/options.html">options</a>.</p>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="gnosis-with-an-external-cl"><a class="header" href="#gnosis-with-an-external-cl">Gnosis with an external CL</a></h1>
+<p>When you get familiar with running Erigon from CLI you may also consider <a href="easy-nodes/../staking/staking.html">staking</a> and/or run a <a href="easy-nodes/gnosis-with-an-external-cl.html">Ethereum node with an external Consensus Layer</a>.</p>
+<p>Additional flags can be added to <a href="easy-nodes/../fundamentals/configuring-erigon.html">configure</a> Erigon with several <a href="easy-nodes/../fundamentals/configuring-erigon.html#options">options</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="gnosis-chain-with-an-external-cl"><a class="header" href="#gnosis-chain-with-an-external-cl">Gnosis Chain with an external CL</a></h1>
+<p>Alternatively, you can also run a Ethereum node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with Lighthouse.</p>
+<ol>
+<li>
+<p>Start Erigon:</p>
+<pre><code class="language-bash">erigon --chain=gnosis --externalcl 
+</code></pre>
+<p>If your CL client is on a different device, add the following flags:</p>
+<ul>
+<li><code>--authrpc.addr 0.0.0.0</code>, since the Engine API listens on localhost by default;</li>
+<li><code>--authrpc.vhosts &lt;CL_host&gt;</code> where <code>&lt;CL_host&gt;</code> is the source host or the appropriate hostname that your CL client is using.</li>
+</ul>
+</li>
+<li>
+<ul>
+<li>Install Lighthouse, following instructions at <a href="https://lighthouse-book.sigmaprime.io/installation.html">https://lighthouse-book.sigmaprime.io/installation.html</a>.</li>
+<li>Compile with a feature flag to enable Gnosis Chain:</li>
+</ul>
+<pre><code class="language-bash">env FEATURES=gnosis make
+</code></pre>
+</li>
+<li>
+<p>Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints, for example:</p>
+<ul>
+<li><code>https://checkpoint.gnosischain.com</code> for Gnosis Chain;</li>
+<li><code>https://checkpoint.chiadochain.net</code> for Chiado testnet.</li>
+</ul>
+</li>
+<li>
+<p>To communicate with Erigon, the execution endpoint must be specified as <code>&lt;erigon address&gt;:8551</code>, where <code>&lt;erigon address&gt;</code> is either <code>http://localhost</code> or the IP address of the device running Erigon.</p>
+</li>
+<li>
+<p>Lighthouse must point to the <a href="easy-nodes/../fundamentals/jwt.html">JWT secret</a> automatically created by Erigon in the <code>--datadir</code> directory. In the following example the default data directory is used.</p>
+<pre><code> lighthouse \
+ --network gnosis beacon_node \
+ --datadir=data \
+ --http \
+ --execution-endpoint http://localhost:8551 \
+ --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+ --checkpoint-sync-url "https://checkpoint.gnosischain.com"
+</code></pre>
+<p>Here is an example of Lighthouse running the Chiado testnet:</p>
+<pre><code> lighthouse \
+ --network chiado \
+ --datadir=data \
+ --http \
+ --execution-endpoint http://localhost:8551 \
+ --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+ --checkpoint-sync-url "https://checkpoint.chiadochain.net"
+</code></pre>
+</li>
+</ol>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="how-to-run-a-polygon-node"><a class="header" href="#how-to-run-a-polygon-node">How to run a Polygon node</a></h1>
 <h2 id="prerequisites-3"><a class="header" href="#prerequisites-3">Prerequisites</a></h2>
 <ul>
-<li>Check the <a href="easy-nodes/../getting-started/hw-requirements.html">hardware</a> prerequisites;</li>
-<li>Check which <a href="easy-nodes/../basic/node.html">type of node</a> you want to run and the <a href="easy-nodes/../getting-started/hw-requirements.html#minimal-node-requirements">disk space</a> required.</li>
+<li>Check the <a href="easy-nodes/../getting-started/hardware-requirements.html">hardware</a> prerequisites;</li>
+<li>Check which <a href="easy-nodes/../fundamentals/sync-modes.html">sync mode</a> you want to run and the <a href="easy-nodes/../getting-started/hardware-requirements.html#minimal-node-requirements">disk space</a> required.</li>
 </ul>
 <h2 id="install-erigon-2"><a class="header" href="#install-erigon-2">Install Erigon​</a></h2>
 <p>To set up Erigon quickly, we recommend the following:</p>
 <ul>
-<li>For Linux and MacOS users, use our <a href="easy-nodes/../installation/prebuilt.html">pre-built binaries</a>;</li>
-<li>For Windows users, <a href="easy-nodes/../installation/build_exec_win.html">build executable binaries natively</a>.</li>
+<li>For Linux and MacOS users, use our <a href="easy-nodes/../getting-started/installation/pre-built-binaries.html">pre-built binaries</a>;</li>
+<li>For Windows users, <a href="easy-nodes/../getting-started/installation/windows-build-executables.html">build executable binaries natively</a>.</li>
 </ul>
 <h1 id="start-erigon-2"><a class="header" href="#start-erigon-2">Start Erigon</a></h1>
 <p>To execute an Erigon full node on the Polygon mainnet with remote Heimdall using pre-compiled binaries, use the following basic command:</p>
@@ -830,12 +938,12 @@ Windows support for docker-compose is not ready yet.
 <ul>
 <li><code>--chain=bor-mainnet</code> and <code>--bor.heimdall=https://heimdall-api.polygon.technologyspecifies</code> specify respctevely the Polygon mainnet and the API endpoint for the Heimdall network; to use Amoy tesnet replace with flags <code>--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology</code>.</li>
 <li><code>--datadir=&lt;your_data_dir&gt;</code> to store Erigon files in a non-default location. Default data directory is <code>./home/user/.local/share/erigon</code>.</li>
-<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../basic/node.html">type of node</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
-<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../basic/wallet.html">wallet</a>.</li>
+<li>Erigon is full node by default, use <code>--prune.mode=archive</code> to run a archive node or <code>--prune.mode=minimal</code> (EIP-4444). If you want to change <a href="easy-nodes/../fundamentals/sync-modes.html">sync mode</a> delete the <code>--datadir</code> folder content and restart Erigon with the appropriate flags.</li>
+<li><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="easy-nodes/../fundamentals/web3-wallet.html">web3 wallet</a>.</li>
 <li><code>--torrent.download.rate=512mb</code> to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.</li>
 </ul>
 <p>To stop your Erigon node you can use the <code>CTRL+C</code> command.</p>
-<p>Several other <a href="easy-nodes/../advanced/configuring.html">configurations</a> and <a href="easy-nodes/../advanced/options.html">options</a> are available.</p>
+<p>Additional flags can be added to <a href="easy-nodes/../fundamentals/configuring-erigon.html">configure</a> Erigon with several <a href="easy-nodes/../fundamentals/configuring-erigon.html#options">options</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="fundamentals"><a class="header" href="#fundamentals">Fundamentals</a></h1>
 <ul>
 <li><a href="fundamentals/basic-usage.html">Basic Usage</a></li>
@@ -844,10 +952,8 @@ Windows support for docker-compose is not ready yet.
 <li><a href="fundamentals/layer-2-networks.html">Layer 2 Networks</a></li>
 <li><a href="fundamentals/default-ports.html">Default ports</a></li>
 <li><a href="fundamentals/sync-modes.html">Sync Modes</a></li>
-<li><a href="fundamentals/caplin.html">Caplin</a></li>
 <li><a href="fundamentals/optimizing-storage.html">Optimizing Storage</a></li>
 <li><a href="fundamentals/logs.html">Logs</a></li>
-<li><a href="fundamentals/command-line-options.html">Command-line Options</a></li>
 <li><a href="fundamentals/security.html">Security</a></li>
 <li><a href="fundamentals/tls-authentication.html">TLS Authentication</a></li>
 <li><a href="fundamentals/performance-tricks.html">Performance Tricks</a></li>
@@ -876,7 +982,7 @@ Windows support for docker-compose is not ready yet.
 <pre><code class="language-bash">./build/bin/erigon
 </code></pre>
 <p>This CLI command allows you to run an Ethereum <strong>full node</strong> where every process is integrated and no special configuration is needed.</p>
-<p>The default Consensus Layer utilized is <a href="fundamentals/./fundamentals/caplin.html">Caplin</a>, the Erigon flagship embedded CL.</p>
+<p>The default Consensus Layer utilized is <a href="fundamentals/caplin.html">Caplin</a>, the Erigon flagship embedded CL.</p>
 <h2 id="basic-configuration"><a class="header" href="#basic-configuration">Basic Configuration​</a></h2>
 <ul>
 <li>
@@ -885,23 +991,23 @@ Windows support for docker-compose is not ready yet.
 </code></pre>
 </li>
 <li>
-<p>Based on the <a href="fundamentals/fundamentals/sync-modes.html">sync mode</a> you want to run you can add <code>--prune.mode=archive</code> to run a archive node, <code>--prune.mode=full</code> for a full node or <code>--prune.mode=minimal</code> for a minimal node.
+<p>Based on the <a href="fundamentals/sync-modes.html">sync mode</a> you want to run you can add <code>--prune.mode=archive</code> to run a archive node, <code>--prune.mode=full</code> for a full node or <code>--prune.mode=minimal</code> for a minimal node.
 The default node is full node.</p>
 </li>
 <li>
 <p><code>--chain=mainnet</code>, add the flag <code>--chain=sepolia</code> for Sepolia testnet or <code>--chain=holesky</code> for Holesky testnet.</p>
 </li>
 <li>
-<p><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="fundamentals/fundamentals/web3-wallet.html">wallet</a>.</p>
+<p><code>--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool</code> to use RPC and e.g. be able to connect your <a href="fundamentals/web3-wallet.html">wallet</a>.</p>
 </li>
 <li>
 <p>To increase download speed add <code>--torrent.download.rate=512mb</code> (default is 16mb).</p>
 </li>
 </ul>
 <p>To stop the Erigon node you can use the <code>CTRL+C</code> command.</p>
-<p>Additional flags can be added to configure the node with several <a href="fundamentals/fundamentals/fundamentals.html">options</a>.</p>
+<p>Additional flags can be added to <a href="fundamentals/configuring-erigon.html">configure</a> the node with several options.</p>
 <h2 id="testnets"><a class="header" href="#testnets">Testnets</a></h2>
-<p>If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public <a href="fundamentals/fundamentals/supported-networks.html#testnets">testnets</a>, Holesky, adding the option <code>--chain=holesky</code> and using the default Consensus Layer, Caplin. You can also had the flag <code>--prune.mode=minimal</code> to have a node that is syncing fast while taking not so much disk space:</p>
+<p>If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one of the public <a href="fundamentals/supported-networks.html#testnets">testnets</a>, Holesky, adding the option <code>--chain=holesky</code> and using the default Consensus Layer, Caplin. You can also had the flag <code>--prune.mode=minimal</code> to have a node that is syncing fast while taking not so much disk space:</p>
 <pre><code class="language-bash">./build/bin/erigon --chain=holesky --prune.mode=minimal
 </code></pre>
 <h2 id="help"><a class="header" href="#help">Help</a></h2>
@@ -2274,7 +2380,7 @@ Configure the op-node with the <code>--l1.trustrpc</code> flag to trust the Erig
 <ul>
 <li><code>--caplin.blobs-immediate-backfill</code>: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.</li>
 </ul>
-<p>Caplin can also be used for <a href="fundamentals//staking/caplin.html">block production</a>, aka <strong>staking</strong>.</p>
+<p>Caplin can also be used for <a href="fundamentals/../staking/caplin.html">block production</a>, aka <strong>staking</strong>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="optimizing-storage"><a class="header" href="#optimizing-storage">Optimizing Storage</a></h1>
 <p><em>Using fast disks and cheap disks</em></p>
 <p>For optimal performance, it's recommended to store the datadir on a fast NVMe-RAID disk. However, if this is not feasible, you can store the history on a cheaper disk and still achieve good performance.</p>
@@ -2432,6 +2538,47 @@ All stages implement comprehensive error logging with contextual information to 
 <p>This logging system is designed to provide comprehensive visibility into Erigon's complex synchronization process while maintaining performance. The structured nature of the logs makes them suitable for both human operators and automated monitoring systems. The staged approach allows for granular control over logging verbosity and enables precise debugging of synchronization issues.</p>
 <p>The logging framework's flexibility supports various deployment scenarios, from development environments requiring verbose debugging output to production systems optimized for performance monitoring and alerting.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="security"><a class="header" href="#security">Security</a></h1>
+<p>The security practices focus heavily on the RPC daemon since it's the primary external interface. The modular architecture allows you to run components separately, which can improve security by isolating services. For production deployments, consider using the distributed mode where services communicate via secured gRPC rather than running everything in a single process.</p>
+<h2 id="network-security"><a class="header" href="#network-security">Network Security</a></h2>
+<p><strong>Firewall Configuration</strong>: Secure your network ports properly. The default ports include:</p>
+<ul>
+<li>Port <code>30303</code> for P2P networking</li>
+<li>Port <code>8545</code> for JSON-RPC (if enabled)</li>
+<li>Port <code>9090</code> for private API communication</li>
+</ul>
+<p><strong>CORS Protection</strong>: When exposing RPC endpoints, avoid using wildcard CORS domains. Instead, set specific hostnames or IP addresses to prevent cross-origin attacks.</p>
+<h2 id="rpc-security"><a class="header" href="#rpc-security">RPC Security</a></h2>
+<p><strong>Method Allowlisting</strong>: Restrict available RPC methods using access control lists. Create a <code>rules.json</code> file specifying only the methods you need:</p>
+<pre><code class="language-json">{
+  "allow": ["net_version", "web3_eth_getBlockByHash"]
+}
+</code></pre>
+<p><strong>Remove Admin APIs</strong>: Don't include <code>admin</code> in your <code>--http.api</code> list for public-facing nodes.</p>
+<p><strong>Rate Limiting</strong>: Protect against DOS attacks by configuring <code>--rpc.batch.concurrency</code> and <code>--rpc.batch.limit</code>.</p>
+<h2 id="tls-and-authentication"><a class="header" href="#tls-and-authentication">TLS and Authentication</a></h2>
+<p><strong>TLS Encryption</strong>: For remote RPC daemon deployments, enable TLS authentication. The process involves:</p>
+<ol>
+<li>Generating CA key pairs</li>
+<li>Creating certificates for each instance</li>
+<li>Deploying certificates to secure communication</li>
+</ol>
+<p><strong>Private API Security</strong>: Configure secure communication between RPC daemon and Erigon instance using TLS certificates.</p>
+<h2 id="operational-security"><a class="header" href="#operational-security">Operational Security</a></h2>
+<p><strong>Dedicated User</strong>: Run Erigon as a dedicated system user rather than root to limit potential damage from security breaches.</p>
+<p><strong>Transaction Pool Security</strong>: Use <code>--txpool.nolocals=true</code> for public nodes to prevent local transaction injection.</p>
+<p><strong>Virtual Host Protection</strong>: Configure <code>HTTPVirtualHosts</code> to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.</p>
+<h2 id="health-monitoring"><a class="header" href="#health-monitoring">Health Monitoring</a></h2>
+<p><strong>Health Checks</strong>: Implement monitoring using the <code>/health</code> endpoint to detect issues early. Configure minimum peer counts and block validation to ensure your node stays healthy.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="jwt-secret"><a class="header" href="#jwt-secret">JWT secret</a></h1>
+<p>The JWT secret is a key that allows Ethereum entities to securely validate JWTs used for authentication, authorization, and transmitting information, like a passphrase that allows Ethereum nodes/servers to verify if requests are legitimate. It should be protected and not exposed publicly.</p>
+<p>JWT stands for <strong>JSON Web Token</strong>, and it is a way to securely transmit information between parties as a JSON object. The JWT contains a header, payload, and signature, generated by encrypting the header and payload with a secret.</p>
+<p>In Ethereum, JWTs can be used to validate transactions or API calls. The Ethereum node or API server would have the JWT secret stored locally. When a JWT is received, the node/server uses the same secret to generate a signature from the header and payload.</p>
+<p>If the newly generated signature matches the one in the JWT, it proves the JWT is valid and comes from an authorized source in possession of the secret. Different nodes/servers would have different secrets allowing them to verify the JWTs intended for them.</p>
+<p>More information here: <a href="https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md">https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md</a></p>
+<h1 id="erigon-jwt-secret"><a class="header" href="#erigon-jwt-secret">Erigon JWT secret</a></h1>
+<p>Erigon creates automatically a JWT secret upon launch.</p>
+<p>By default, the JWT secret key is located in the datadir as <code>jwt.hex</code>, and its path can be specified with the <code>--authrpc.jwtsecret</code> flag.</p>
+<p>Both Erigon and any external Consensus Layer need to point to the same JWT secret file.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="tls-authentication"><a class="header" href="#tls-authentication">TLS Authentication</a></h1>
 <h2 id="introduction-1"><a class="header" href="#introduction-1">Introduction</a></h2>
 <p>TLS authentication can be enabled to ensure communication integrity and access control to the Erigon node.</p>
@@ -2543,7 +2690,7 @@ All stages implement comprehensive error logging with contextual information to 
 <li><a href="fundamentals/modules/txpool.html">TxPool</a>, the transaction pool</li>
 <li><a href="fundamentals/modules/sentry.html">Sentry</a>, the p2p layer</li>
 <li><a href="fundamentals/modules/downloader.html">Downloader</a>, the history download layer (we don't recommend run it externally)</li>
-<li><a href="fundamentals/modules/fundamentals/caplin.html">Caplin</a>, the novel Consensus Layer</li>
+<li><a href="fundamentals/modules/..//caplin.html">Caplin</a>, the embedded Consensus Layer</li>
 </ul>
 <p>This may be for security, scalability, decentralisation, resource limitation, custom implementation, or any other reason you/your team deems appropriate. See the appropriate section to understand how to start each service separately.</p>
 <blockquote>
@@ -2552,48 +2699,6 @@ All stages implement comprehensive error logging with contextual information to 
 <div style="break-before: page; page-break-before: always;"></div><h1 id="rpc-daemon"><a class="header" href="#rpc-daemon">RPC Daemon</a></h1>
 <p><em>Remote Procedure Call</em></p>
 <p>The RPC daemon is a crucial component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component. For detailed instructions on running it remotely, refer to the documentation <a href="https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely">here</a>.</p>
-<h2 id="erigon-rpc-method-guidelines"><a class="header" href="#erigon-rpc-method-guidelines">Erigon RPC Method Guidelines</a></h2>
-<p>This document provides guidelines for understanding and using the various RPC methods available in Erigon.</p>
-<ol>
-<li>
-<p><strong>Compatibility with <code>eth</code> namespace</strong></p>
-<ul>
-<li>Erigon aims to be compatible with all standard Ethereum JSON-RPC API methods, as described <a href="https://ethereum.org/en/developers/docs/apis/json-rpc/">here</a>. See also <a href="https://github.com/erigontech/erigon/blob/main/docs/readthedocs/source/rpc/index.rst">here</a> for examples.</li>
-</ul>
-</li>
-<li>
-<p><strong>Compatibility with standard Geth methods</strong></p>
-<ul>
-<li>All methods featured by Geth including <a href="https://geth.ethereum.org/docs/interacting-with-geth/rpc#websockets-server">WebSocket Server</a>, <a href="https://geth.ethereum.org/docs/interacting-with-geth/rpc#ipc-server">IPC Server</a>, TLS, <a href="https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql">GraphQL</a>, etc..., are supported by Erigon.</li>
-</ul>
-</li>
-<li>
-<p><strong>Otterscan Methods (<code>ots_</code>)</strong></p>
-<ul>
-<li>In addition to the standard Geth methods, Erigon includes RPC methods prefixed with <code>ots_</code> for <strong>Otterscan</strong>. These are specific to the Otterscan functionality integrated with Erigon. See more details <a href="https://docs.otterscan.io/api-docs/ots-api">here</a>.</li>
-</ul>
-</li>
-<li>
-<p><strong>Erigon Extensions (<code>erigon_</code>)</strong></p>
-<ul>
-<li>Erigon introduces some small extensions to the Geth API, denoted by the <code>erigon_</code> prefix aimed to enhance the functionality, see more details <a href="https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status">here</a> about implementation status.</li>
-</ul>
-</li>
-<li>
-<p><strong>gRPC API</strong></p>
-<ul>
-<li>Erigon also exposes a <strong>gRPC</strong> API for lower-level data access. This is primarily used by Erigon’s components when they are deployed separately as independent processes (either on the same or different servers).</li>
-<li>This gRPC API is also accessible to users. For more information, visit the <a href="https://github.com/erigontech/interfaces">Erigon Interfaces GitHub repository</a>.</li>
-</ul>
-</li>
-<li>
-<p><strong>Trace Module (<code>trace_</code>)</strong></p>
-<ul>
-<li>Erigon includes <strong><a href="fundamentals/modules/JSONRPC-trace-module.html">the <code>trace_</code> module</a></strong>, which originates from OpenEthereum. This module provides additional functionality related to tracing transactions and state changes, which is valuable for advanced debugging and analysis.</li>
-</ul>
-</li>
-</ol>
-<h2 id="more-info"><a class="header" href="#more-info">More info</a></h2>
 <p>For a comprehensive understanding of the RPC daemon's functionality, configuration, and usage, please refer to <a href="https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md">https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md</a> (also contained in your locally compiled Erigon folder at <code>/cmd/rpcdaemon</code>) which covers the following key topics:</p>
 <ol>
 <li><strong>Introduction</strong>: An overview of the RPC daemon, its benefits, and how it integrates with Erigon.</li>
@@ -2717,7 +2822,7 @@ Flags:
 make txpool
 </code></pre>
 <ol start="2">
-<li>Together with external TxPool also <a href="fundamentals/modules/sentry.html">Sentry</a> and <a href="fundamentals/modules/JSONRPC-daemon.html">RPCDaemon</a> must be compiled and run separately.</li>
+<li>Together with external TxPool also <a href="fundamentals/modules/sentry.html">Sentry</a> and <a href="fundamentals/modules/rpc-daemon.html">RPCDaemon</a> must be compiled and run separately.</li>
 </ol>
 <pre><code class="language-bash">make sentry
 </code></pre>
@@ -2862,7 +2967,7 @@ make sentry
 <pre><code class="language-bash">--sentry.api.addr value
 </code></pre>
 <p>Where <code>value</code> is comma separated sentry addresses <code>&lt;host&gt;:&lt;port&gt;,&lt;host&gt;:&lt;port&gt;</code>.</p>
-<h2 id="more-info-1"><a class="header" href="#more-info-1">More info</a></h2>
+<h2 id="more-info"><a class="header" href="#more-info">More info</a></h2>
 <p>For other information regarding Sentry functionality, configuration, and usage, please refer to the embedded file you can find in your compiled Erigon folder at <code>./cmd/sentry/README.md</code>.</p>
 <h3 id="command-line-options-3"><a class="header" href="#command-line-options-3">Command Line Options</a></h3>
 <p>To display available options for Sentry digit:</p>
@@ -3028,7 +3133,7 @@ Flags:
 
 Use " [command] --help" for more information about a command.
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="multiple-instances--one-machine-review"><a class="header" href="#multiple-instances--one-machine-review">Multiple instances / One machine [REVIEW]</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="multiple-instances--one-machine"><a class="header" href="#multiple-instances--one-machine">Multiple instances / One machine</a></h1>
 <p>Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.</p>
 <h2 id="required-configuration-flags"><a class="header" href="#required-configuration-flags">Required Configuration Flags</a></h2>
 <p>To avoid conflicts between instances, you must define <strong>6 essential flags</strong> for each instance:</p>
@@ -3221,7 +3326,7 @@ echo 1 &gt; /proc/sys/vm/compact_memory
 <li>A new browser tab will open, displaying various fields to fill out. Complete the fields with the proper information, in this example for Ethereum network:
 <ul>
 <li><strong>Network Name</strong>: <code>Ethereum on E3</code> (or any name of your choice)</li>
-<li><strong>Chain ID</strong>: <code>1</code> for chain ID parameter see <a href="fundamentals/networks.html">Supported Networks</a></li>
+<li><strong>Chain ID</strong>: <code>1</code> for chain ID parameter see <a href="fundamentals/supported-networks.html">Supported Networks</a></li>
 <li><strong>New RPC URL</strong>: <code>http://127.0.0.1:8545</code></li>
 <li><strong>Currency Symbol</strong>: <code>ETH</code></li>
 <li><strong>Block Explorer URL</strong>: <code>https://www.etherscan.io</code> (or any explorer of your choice)</li>
@@ -3244,9 +3349,8 @@ echo 1 &gt; /proc/sys/vm/compact_memory
 <li><a href="interacting-with-erigon/bor.html"><code>bor</code></a>: Polygon Bor-specific API (when running on Polygon)</li>
 <li><a href="interacting-with-erigon/ots.html"><code>ots</code></a>: These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.</li>
 <li><a href="interacting-with-erigon/internal.html"><code>internal</code></a>: Erigon specific API for development and debugging purposes.</li>
-<li><a href="interacting-with-erigon/gRPC.html"><code>gRPC</code></a>: API for lower-level data access.</li>
+<li><a href="interacting-with-erigon/grpc.html"><code>gRPC</code></a>: API for lower-level data access.</li>
 </ul>
-<p>Looking at the Reth documentation you provided, I'll rewrite it for Erigon based on the codebase context. The documentation covers RPC transports (HTTP, WebSockets, IPC) and API configuration, which corresponds to Erigon's RPC daemon configuration found in <cite>cmd/rpcdaemon/cli/config.go</cite> and related files.</p>
 <h2 id="erigon-rpc-transports"><a class="header" href="#erigon-rpc-transports">Erigon RPC Transports</a></h2>
 <p>Erigon supports HTTP, WebSockets, IPC, and gRPC through its RPC daemon.</p>
 <h3 id="http"><a class="header" href="#http">HTTP</a></h3>
@@ -3935,8 +4039,7 @@ Unlike the log filtering API, you are able to search and filter based only upon 
 Information returned includes the execution of all <code>CREATE</code>s, <code>SUICIDE</code>s and all variants of <code>CALL</code> together
 with input data, output data, gas usage, amount transferred and the success status of each individual action.</p>
 <h3 id="traceaddress-field"><a class="header" href="#traceaddress-field"><code>traceAddress</code> field</a></h3>
-<p>The <code>traceAddress</code> field of all returned traces, gives the exact location in the call trace [index in root,
-index in first <code>CALL</code>, index in second <code>CALL</code>, ...].</p>
+<p>The <code>traceAddress</code> field of all returned traces, gives the exact location in the call trace [index in root, index in first <code>CALL</code>, index in second <code>CALL</code>, ...].</p>
 <p>i.e. if the trace is:</p>
 <pre><code>A
   CALLs B
@@ -4966,13 +5069,13 @@ client := remote.NewKVClient(conn)
 <p>Erigon is a comprehensive execution and consensus layer that also supports staking, aka block production, for Ethereum and Gnosis Chain. Both remote miners and Caplin are supported.</p>
 <ul>
 <li>
-<p>Using a <a href="staking/advanced/bp-ext.html">external consensus client as validator</a>;</p>
+<p>Using a <a href="staking/../staking/external-consensus-client-as-validator.html">external consensus client as validator</a>;</p>
 </li>
 <li>
-<p>Using <a href="staking/advanced/bp-caplin.html">Caplin as validator</a>.</p>
+<p>Using <a href="staking/../staking/caplin.html">Caplin as validator</a>.</p>
 </li>
 </ul>
-<p>Additionally, you can configure Erigon to work with <a href="staking/shutter.html">Shutter Network</a>.</p>
+<p>Additionally, you can configure Erigon to work with <a href="staking/shutter-network.html">Shutter Network</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="using-caplin-as-validator"><a class="header" href="#using-caplin-as-validator">Using Caplin as validator</a></h1>
 <p><em>Running Erigon with Caplin as validator</em></p>
 <p>Caplin is also suitable for staking. However, it is required to pair it with a validator key manager, such as Lighthouse or Teku, since it doesn't have a native key management system.</p>
@@ -5033,14 +5136,15 @@ client := remote.NewKVClient(conn)
 <p>If you have existing validator keys, import them:</p>
 <pre><code class="language-bash">lighthouse account validator import --directory &lt;path_to_validator_keys&gt;
 </code></pre>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="using-an-external-consensus-client-as-validator"><a class="header" href="#using-an-external-consensus-client-as-validator">Using an External Consensus Client as Validator</a></h1>
-<p>To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag <code>--externalcl</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="using-an-external-consensus-client-as-validator"><a class="header" href="#using-an-external-consensus-client-as-validator">Using an external Consensus Client as validator</a></h1>
+<p>To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag <code>--externalcl</code>. Here are a couple of examples on how to configure Lighhouse and Prysm to run along with Erigon:</p>
+<ul>
+<li><a href="staking/../easy-nodes/ethereum-with-an-external-cl.html">Ethereum</a></li>
+<li><a href="staking/../easy-nodes/gnosis-with-an-external-cl.html">Gnosis Chain</a></li>
+</ul>
 <p>Once you have Erigon and a CL client up and running, you can proceed to set up a Validator Client (VC). The VC is responsible for managing your keys and signing valid blocks.</p>
-<blockquote>
-<p>You can find a couple of example on how to run a Ethereum and Gnosis node using an external CL in the <strong>Help Section</strong>.</p>
-</blockquote>
 <h2 id="getting-started-with-a-validator-client"><a class="header" href="#getting-started-with-a-validator-client">Getting Started with a Validator Client</a></h2>
-<p>To set up a Validator Client (VC), follow the instructions provided in the official documentation, such as:</p>
+<p>To set up a VC, follow the instructions provided in the official documentation, such as:</p>
 <p><a href="https://lighthouse-book.sigmaprime.io/mainnet-validator.html">https://lighthouse-book.sigmaprime.io/mainnet-validator.html</a>.</p>
 <p>This guide will walk you through the process of setting up a VC, including:</p>
 <ul>

@@ -155,7 +155,58 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="gnosis-with-an-external-cl"><a class="header" href="#gnosis-with-an-external-cl">Gnosis with an external CL</a></h1>
+                        <h1 id="gnosis-chain-with-an-external-cl"><a class="header" href="#gnosis-chain-with-an-external-cl">Gnosis Chain with an external CL</a></h1>
+<p>Alternatively, you can also run a Ethereum node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with Lighthouse.</p>
+<ol>
+<li>
+<p>Start Erigon:</p>
+<pre><code class="language-bash">erigon --chain=gnosis --externalcl 
+</code></pre>
+<p>If your CL client is on a different device, add the following flags:</p>
+<ul>
+<li><code>--authrpc.addr 0.0.0.0</code>, since the Engine API listens on localhost by default;</li>
+<li><code>--authrpc.vhosts &lt;CL_host&gt;</code> where <code>&lt;CL_host&gt;</code> is the source host or the appropriate hostname that your CL client is using.</li>
+</ul>
+</li>
+<li>
+<ul>
+<li>Install Lighthouse, following instructions at <a href="https://lighthouse-book.sigmaprime.io/installation.html">https://lighthouse-book.sigmaprime.io/installation.html</a>.</li>
+<li>Compile with a feature flag to enable Gnosis Chain:</li>
+</ul>
+<pre><code class="language-bash">env FEATURES=gnosis make
+</code></pre>
+</li>
+<li>
+<p>Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints, for example:</p>
+<ul>
+<li><code>https://checkpoint.gnosischain.com</code> for Gnosis Chain;</li>
+<li><code>https://checkpoint.chiadochain.net</code> for Chiado testnet.</li>
+</ul>
+</li>
+<li>
+<p>To communicate with Erigon, the execution endpoint must be specified as <code>&lt;erigon address&gt;:8551</code>, where <code>&lt;erigon address&gt;</code> is either <code>http://localhost</code> or the IP address of the device running Erigon.</p>
+</li>
+<li>
+<p>Lighthouse must point to the <a href="../fundamentals/jwt.html">JWT secret</a> automatically created by Erigon in the <code>--datadir</code> directory. In the following example the default data directory is used.</p>
+<pre><code> lighthouse \
+ --network gnosis beacon_node \
+ --datadir=data \
+ --http \
+ --execution-endpoint http://localhost:8551 \
+ --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+ --checkpoint-sync-url "https://checkpoint.gnosischain.com"
+</code></pre>
+<p>Here is an example of Lighthouse running the Chiado testnet:</p>
+<pre><code> lighthouse \
+ --network chiado \
+ --datadir=data \
+ --http \
+ --execution-endpoint http://localhost:8551 \
+ --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+ --checkpoint-sync-url "https://checkpoint.chiadochain.net"
+</code></pre>
+</li>
+</ol>
 
                     </main>
 
