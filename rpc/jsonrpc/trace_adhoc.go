@@ -535,6 +535,23 @@ func (ot *OeTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
+func encodePaddedInt(data []byte, length int) string {
+    idx := 0
+    for ; idx < len(data) && data[idx] == 0; idx++ {
+    }
+    trimmed := data[idx:]
+
+    if len(trimmed) == 0 {
+        return "0x0" 
+    }
+
+    hexStr := hex.EncodeToString(trimmed)
+    
+    targetLen := length * 2
+
+    return "0x" + fmt.Sprintf("%0*s", targetLen, hexStr)
+}
+
 func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
@@ -573,19 +590,31 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				stackValue := tracers.StackBack(st, 0).Bytes()
 				if len(stackValue) >= pushBytes {
 					pushedData := stackValue[len(stackValue)-pushBytes:]
-					paddedData := make([]byte, 32)
-					copy(paddedData[32-len(pushedData):], pushedData)
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(paddedData))
+					trimmedData := bytes.TrimLeft(pushedData, "\x00")
+					if len(trimmedData) == 0 {
+						trimmedData = []byte{0} // Se era zero, rimane un singolo byte 0
+					}
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(trimmedData))
 					showStack = 0
 				}
 			}
 			if showStack > 0 {
 				for i := showStack - 1; i >= 0; i-- {
 					if len(st) > i {
-                                            valueBytes := tracers.StackBack(st, i).Bytes() 
-                                            paddedData := make([]byte, 32)
-                                            copy(paddedData[32-len(valueBytes):], valueBytes)
-                                            ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x" + hex.EncodeToString(paddedData))
+						valueBytes := tracers.StackBack(st, i).Bytes()
+
+						var expectedLength = 32
+
+						switch ot.lastOp {
+						case vm.CALLDATASIZE, vm.RETURNDATASIZE, vm.GASLIMIT, vm.GASPRICE:
+							expectedLength = 4
+						}
+
+						if expectedLength < 32 {
+							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, encodePaddedInt(valueBytes, expectedLength))
+						} else {
+							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(valueBytes))
+						}
 					}
 				}
 			}
