@@ -373,7 +373,7 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 		}, tracer)
 	}
 	if chain.Config().IsPrague(header.Time) {
-		misc.StoreBlockHashesEip2935(header, state, config, chain)
+		_ = misc.StoreBlockHashesEip2935(header, state)
 	}
 }
 

@@ -439,7 +439,7 @@ func (s *simulator) simulateBlock(
 	}
 	intraBlockState := state.New(stateReader)
 
-	// Override the state before execution.
+	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
 		if err := stateOverrides.Override(intraBlockState); err != nil {
@@ -452,6 +452,25 @@ func (s *simulator) simulateBlock(
 		// Transfers must be recorded as if they were logs: use a tracer that records all logs and ether transfers
 		vmConfig.Tracer = tracer.Hooks()
 	}
+
+	// Apply additional processing steps before block execution.
+	if s.chainConfig.IsPrague(header.Time) {
+		err := misc.StoreBlockHashesEip2935(header, intraBlockState)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	engine, ok := s.engine.(consensus.Engine)
+	if !ok {
+		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
+	}
+	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, s.chainConfig, intraBlockState, header, engine, false /* constCall */, vmConfig)
+	}
+	if header.ParentBeaconBlockRoot != nil {
+		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, systemCall, vmConfig.Tracer)
+	}
+	intraBlockState.SoftFinalise()
 
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.canonicalReader, s.chainConfig,
@@ -496,13 +515,6 @@ func (s *simulator) simulateBlock(
 	var withdrawals types.Withdrawals
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
-	}
-	engine, ok := s.engine.(consensus.Engine)
-	if !ok {
-		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
-	}
-	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, s.chainConfig, intraBlockState, header, engine, false /* constCall */, vmConfig)
 	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
 		receiptList, withdrawals, nil, systemCall, nil, s.logger)
