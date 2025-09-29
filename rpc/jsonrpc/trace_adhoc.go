@@ -610,7 +610,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 							hexOutput := padHexToLength(valueBytes, expectedLength)
 							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, hexOutput)
 						} else {
-							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(valueBytes))
+							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, padHexToLength(valueBytes, expectedLength))
 						}
 					}
 				}
