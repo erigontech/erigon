@@ -542,34 +542,29 @@ func padPushData(b []byte, expectedBytes int) string {
 	for ; idx < len(b) && b[idx] == 0; idx++ {
 	}
 	trimmed := b[idx:]
-
 	copy(padded[expectedBytes-len(trimmed):], trimmed)
-
 	return "0x" + hex.EncodeToString(padded)
 }
 
 func padHexToLength(b []byte, expectedBytes int) string {
-    idx := 0
-    for ; idx < len(b) && b[idx] == 0; idx++ {
-    }
-    
-    trimmed := b[idx:] 
+	idx := 0
+	for ; idx < len(b) && b[idx] == 0; idx++ {
+	}
+	trimmed := b[idx:]
+	if len(trimmed) == 0 {
+		paddedZero := make([]byte, expectedBytes)
+		return "0x" + hex.EncodeToString(paddedZero)
+	}
 
-    if len(trimmed) == 0 {
-        paddedZero := make([]byte, expectedBytes)
-        return "0x" + hex.EncodeToString(paddedZero)
-    }
-
-    targetLen := expectedBytes
-    padded := make([]byte, targetLen)
-    copy(padded[targetLen-len(trimmed):], trimmed)
-    return "0x" + hex.EncodeToString(padded)
+	targetLen := expectedBytes
+	padded := make([]byte, targetLen)
+	copy(padded[targetLen-len(trimmed):], trimmed)
+	return "0x" + hex.EncodeToString(padded)
 }
 
 func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
-
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if len(ot.vmOpStack) > 0 {
@@ -618,13 +613,13 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 						switch ot.lastOp {
 						case vm.CALLDATASIZE, vm.RETURNDATASIZE:
 							expectedLength = 4
+						}
 
 						if expectedLength < 32 {
 							hexOutput := padHexToLength(valueBytes, expectedLength)
 							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, hexOutput)
 						} else {
 							ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, "0x"+hex.EncodeToString(valueBytes))
-						}
 						}
 					}
 				}
