@@ -185,12 +185,11 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 	op := vm.OpCode(opcode)
 	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
 		addr := scope.Address()
+
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
-		if _, ok := a.excl[addr]; !ok {
-			a.list.addSlot(addr, slot)
-			if _, ok := a.createdContracts[addr]; !ok {
-				a.usedBeforeCreation[addr] = struct{}{}
-			}
+		a.list.addSlot(addr, slot)
+		if _, ok := a.createdContracts[addr]; !ok {
+			a.usedBeforeCreation[addr] = struct{}{}
 		}
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {

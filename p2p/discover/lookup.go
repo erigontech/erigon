@@ -21,6 +21,7 @@ package discover
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon/p2p/enode"
@@ -165,7 +166,7 @@ func (it *lookup) query(n *node, reply chan<- []*node) {
 	fails := it.tab.db.FindFails(n.ID(), n.IP())
 	r, err := it.queryfunc(n)
 
-	if err == errClosed {
+	if errors.Is(err, errClosed) {
 		// Avoid recording failures on shutdown.
 		reply <- nil
 		return
