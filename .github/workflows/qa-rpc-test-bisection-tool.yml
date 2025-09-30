@@ -114,16 +114,21 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
       - name: Start Git Bisect
+        env:
+          STARTING_COMMIT: ${{ inputs.starting_commit }}
+          ENDING_COMMIT: ${{ inputs.ending_commit }}
         run: |
           git bisect start
-          git bisect bad ${{ inputs.ending_commit }}
-          git bisect good ${{ inputs.starting_commit }}
+          git bisect bad $ENDING_COMMIT
+          git bisect good $STARTING_COMMIT
 
       - name: Run Git Bisect with Test Script
         id: bisect_run
+        env:
+          TEST_NAME: ${{ inputs.test_name }}
         run: |
           set -o pipefail
-          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh ${{ inputs.test_name }}
+          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh $TEST_NAME
 
       - name: Get Bisect Result
         if: success()
