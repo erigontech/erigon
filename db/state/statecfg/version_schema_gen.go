@@ -2,9 +2,7 @@
 
 package statecfg
 
-import (
-	"github.com/erigontech/erigon/db/version"
-)
+import "github.com/erigontech/erigon/db/version"
 
 func InitSchemasGen() {
 	Schema.AccountsDomain.Version.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
@@ -37,13 +35,13 @@ func InitSchemasGen() {
 	Schema.RCacheDomain.Hist.Version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.RCacheDomain.Hist.IiCfg.Version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.RCacheDomain.Hist.IiCfg.Version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.ReceiptDomain.Version.AccessorBT = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
-	Schema.ReceiptDomain.Version.DataKV = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.ReceiptDomain.Version.AccessorKVEI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
-	Schema.ReceiptDomain.Hist.Version.DataV = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.ReceiptDomain.Hist.Version.AccessorVI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
-	Schema.ReceiptDomain.Hist.IiCfg.Version.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.ReceiptDomain.Hist.IiCfg.Version.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
+	Schema.ReceiptDomain.Version.AccessorBT = version.Versions{version.Version{1, 3}, version.Version{1, 0}}
+	Schema.ReceiptDomain.Version.DataKV = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
+	Schema.ReceiptDomain.Version.AccessorKVEI = version.Versions{version.Version{1, 3}, version.Version{1, 0}}
+	Schema.ReceiptDomain.Hist.Version.DataV = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
+	Schema.ReceiptDomain.Hist.Version.AccessorVI = version.Versions{version.Version{1, 3}, version.Version{1, 0}}
+	Schema.ReceiptDomain.Hist.IiCfg.Version.DataEF = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
+	Schema.ReceiptDomain.Hist.IiCfg.Version.AccessorEFI = version.Versions{version.Version{2, 2}, version.Version{1, 0}}
 	Schema.StorageDomain.Version.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.StorageDomain.Version.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.StorageDomain.Version.AccessorKVEI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
