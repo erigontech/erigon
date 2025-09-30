@@ -17,10 +17,14 @@
 package stagedsync
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -102,23 +106,43 @@ type UnwindReason struct {
 	// them as bad - as they may get replayed then deselected
 	Block *common.Hash
 	// If unwind is caused by a bad block, this error is not empty
-	Err error
+	ErrBadBlock error
+	// If unwind is caused by some operational error, this error is not empty
+	ErrOperational error
 }
 
 func (u UnwindReason) IsBadBlock() bool {
-	return u.Err != nil
+	return u.ErrBadBlock != nil
 }
 
-var StagedUnwind = UnwindReason{nil, nil}
-var ExecUnwind = UnwindReason{nil, nil}
-var ForkChoice = UnwindReason{nil, nil}
+func (u UnwindReason) Err() error {
+	if u.ErrBadBlock != nil {
+		return fmt.Errorf("bad block err: %w", u.ErrBadBlock)
+	}
+	if u.ErrOperational != nil {
+		return fmt.Errorf("operational err: %w", u.ErrOperational)
+	}
+	return nil
+}
+
+var StagedUnwind = UnwindReason{}
+var ExecUnwind = UnwindReason{}
+var ForkChoice = UnwindReason{}
 
 func BadBlock(badBlock common.Hash, err error) UnwindReason {
-	return UnwindReason{&badBlock, err}
+	if !errors.Is(err, consensus.ErrInvalidBlock) {
+		// make sure to always have ErrInvalidBlock in the error chain for bad block unwinding
+		err = fmt.Errorf("%w: %w", consensus.ErrInvalidBlock, err)
+	}
+	return UnwindReason{Block: &badBlock, ErrBadBlock: err}
+}
+
+func OperationalErr(err error) UnwindReason {
+	return UnwindReason{ErrOperational: err}
 }
 
 func ForkReset(badBlock common.Hash) UnwindReason {
-	return UnwindReason{&badBlock, nil}
+	return UnwindReason{Block: &badBlock}
 }
 
 // Unwinder allows the stage to cause an unwind.

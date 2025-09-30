@@ -109,6 +109,7 @@ type Message interface {
 	FeeCap() *uint256.Int
 	TipCap() *uint256.Int
 	Gas() uint64
+	CheckGas() bool
 	BlobGas() uint64
 	MaxFeePerBlobGas() *uint256.Int
 	Value() *uint256.Int
@@ -273,6 +274,10 @@ func CheckEip1559TxGasFeeCap(from common.Address, feeCap, tipCap, baseFee *uint2
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
+	if st.evm.ChainRules().IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
+		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, st.msg.From().Hex(), len(st.msg.BlobHashes()))
+	}
+
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		stNonce, err := st.state.GetNonce(st.msg.From())
@@ -312,10 +317,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 
-	if st.evm.ChainRules().IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
-		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, st.msg.From().Hex(), len(st.msg.BlobHashes()))
-	}
-
 	// Make sure the transaction feeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
@@ -339,7 +340,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if st.msg.CheckGas() && st.evm.ChainRules().IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From().Hex(), st.msg.Gas())
 	}
 

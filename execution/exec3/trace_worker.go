@@ -26,10 +26,10 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
@@ -97,7 +97,6 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.header = header
 	e.rules = blockCtx.Rules(e.chainConfig)
 	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
-	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
 func (e *TraceWorker) GetRawLogs(txIdx int) types.Logs { return e.ibs.GetRawLogs(txIdx) }

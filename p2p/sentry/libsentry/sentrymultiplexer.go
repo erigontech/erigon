@@ -102,14 +102,44 @@ func (m *sentryMultiplexer) PenalizePeer(ctx context.Context, in *sentryproto.Pe
 	return &emptypb.Empty{}, g.Wait()
 }
 
-func (m *sentryMultiplexer) PeerMinBlock(ctx context.Context, in *sentryproto.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *sentryMultiplexer) SetPeerLatestBlock(ctx context.Context, in *sentryproto.SetPeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, client := range m.clients {
 		client := client
 
 		g.Go(func() error {
-			_, err := client.PeerMinBlock(gctx, in, opts...)
+			_, err := client.SetPeerLatestBlock(gctx, in, opts...)
+			return err
+		})
+	}
+
+	return &emptypb.Empty{}, g.Wait()
+}
+
+func (m *sentryMultiplexer) SetPeerMinimumBlock(ctx context.Context, in *sentryproto.SetPeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	for _, client := range m.clients {
+		client := client
+
+		g.Go(func() error {
+			_, err := client.SetPeerMinimumBlock(gctx, in, opts...)
+			return err
+		})
+	}
+
+	return &emptypb.Empty{}, g.Wait()
+}
+
+func (m *sentryMultiplexer) SetPeerBlockRange(ctx context.Context, in *sentryproto.SetPeerBlockRangeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	for _, client := range m.clients {
+		client := client
+
+		g.Go(func() error {
+			_, err := client.SetPeerBlockRange(gctx, in, opts...)
 			return err
 		})
 	}

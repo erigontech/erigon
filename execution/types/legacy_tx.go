@@ -358,6 +358,7 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		data:       tx.Data,
 		accessList: nil,
 		checkNonce: true,
+		checkGas:   true,
 	}
 
 	var err error

@@ -51,7 +51,7 @@ import (
 var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
 // Fail-back block gas limit. Better specify one in the chain config.
-const DefaultBlockGasLimit uint64 = 45_000_000
+const DefaultBlockGasLimit uint64 = 60_000_000
 
 func DefaultBlockGasLimitByChain(config *Config) uint64 {
 	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
@@ -91,6 +91,7 @@ var Defaults = Config{
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
+		MaxReorgDepth:            dbg.MaxReorgDepth,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -117,6 +118,8 @@ var Defaults = Config{
 		ProduceE3:  true,
 	},
 }
+
+const DefaultChainDBPageSize = 16 * datasize.KB
 
 func init() {
 	home := os.Getenv("HOME")
@@ -247,6 +250,9 @@ type Config struct {
 
 	OverrideOsakaTime *big.Int `toml:",omitempty"`
 
+	// Whether to avoid overriding chain config already stored in the DB
+	KeepStoredChainConfig bool
+
 	// Embedded Silkworm support
 	SilkwormExecution            bool
 	SilkwormRpcDaemon            bool
@@ -285,6 +291,7 @@ type Sync struct {
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
+	MaxReorgDepth            uint64
 	KeepExecutionProofs      bool
 	PersistReceiptsCacheV2   bool
 	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
