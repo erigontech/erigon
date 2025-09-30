@@ -242,7 +242,7 @@ func (c *Compressor) compressWithPatternCandidates(ctx context.Context, countMet
 	logPrefix := c.logPrefix
 	trace := c.trace
 	cfg := c.WordLvlCfg
-	segmentFilePath := c.tmpOutFilePath
+	segmentFilePath := cf.Name()
 
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
