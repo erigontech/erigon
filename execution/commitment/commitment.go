@@ -1086,7 +1086,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
-	c.update.StorageLen = int16(len(val))
+	c.update.StorageLen = int8(len(val))
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
@@ -1217,7 +1217,7 @@ func (uf UpdateFlags) String() string {
 type Update struct {
 	CodeHash   common.Hash
 	Storage    common.Hash
-	StorageLen int16
+	StorageLen int8
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
@@ -1332,7 +1332,7 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		if len(buf) < pos+int(l) {
 			return 0, errors.New("decode Update: buffer too small for storage")
 		}
-		u.StorageLen = int16(l)
+		u.StorageLen = int8(l)
 		copy(u.Storage[:], buf[pos:pos+int(u.StorageLen)])
 		pos += int(u.StorageLen)
 	}

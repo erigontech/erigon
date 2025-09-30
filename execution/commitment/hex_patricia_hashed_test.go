@@ -1619,7 +1619,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
 	update.Nonce = rand.Uint64()
 	rnd.Read(update.Storage[:])
-	update.StorageLen = int16(len(update.Storage))
+	update.StorageLen = int8(len(update.Storage))
 	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
 
 	target.reset()
@@ -1636,7 +1636,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
 	update.Nonce = rand.Uint64()
 	rnd.Read(update.Storage[:rnd.Intn(len(update.Storage))])
-	update.StorageLen = int16(len(update.Storage))
+	update.StorageLen = int8(len(update.Storage))
 	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
 
 	target.reset()
