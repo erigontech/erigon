@@ -9,6 +9,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/db/version"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -17,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
-	"github.com/erigontech/erigon/db/version"
 )
 
 // search key in all files of all domains and print file names

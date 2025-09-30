@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
@@ -22,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/p2p/enode"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
