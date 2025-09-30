@@ -166,6 +166,9 @@ func (tds *TrieDbState) SetTrie(tr *trie.Trie) {
 	tds.t = tr
 }
 
+func (tds *TrieDbState) SetTrace(_ bool, _ string) {
+}
+
 func (tds *TrieDbState) SetResolveReads(rr bool) {
 	tds.resolveReads = rr
 }
@@ -669,7 +672,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key common.Ha
 			return uint256.Int{}, false, nil
 		}
 	}
-	seckey, err := common.HashData(key.Bytes())
+	seckey, err := common.HashData(key[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -858,11 +861,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnat
 
 	storagePlainKey := dbutils.GenerateStoragePlainKey(address, key)
 	tsw.tds.currentBuffer.storageReads[storageKey] = storagePlainKey
-	if len(v) > 0 {
-		m[seckey] = v
-	} else {
-		m[seckey] = nil
-	}
+	m[seckey] = v
 	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
 	return nil
 }
