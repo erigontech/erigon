@@ -136,6 +136,9 @@ func filesItemLess(i, j *FilesItem) bool {
 }
 
 func (i *FilesItem) closeFiles() {
+	if i == nil {
+		return
+	}
 	if i.decompressor != nil {
 		i.decompressor.Close()
 		i.decompressor = nil
@@ -178,6 +181,9 @@ func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 }
 
 func (i *FilesItem) closeFilesAndRemove() {
+	if i == nil {
+		return
+	}
 	if i.decompressor != nil {
 		i.decompressor.Close()
 		// paranoic-mode on: don't delete frozen files

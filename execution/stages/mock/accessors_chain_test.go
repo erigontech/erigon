@@ -443,6 +443,7 @@ func TestHeadStorage2(t *testing.T) {
 func TestHeadStorage(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
+	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
