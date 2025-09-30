@@ -41,7 +41,7 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 		row[i].hashLen = 32
 		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.Equal(tb, row[i].hashLen, n)
+		require.Equal(tb, int(row[i].hashLen), n)
 
 		th := rand.Intn(120)
 		switch {
