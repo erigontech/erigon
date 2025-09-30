@@ -314,8 +314,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	agg.BuildFilesInBackground(outputTxNum.Load())
-
 	var uncommitedGas uint64
 	var b *types.Block
 
