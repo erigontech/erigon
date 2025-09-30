@@ -64,6 +64,12 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	if err != nil {
 		return err
 	}
+
+	if blockNumber == 0 {
+		stream.WriteNil()
+		return fmt.Errorf("genesis is not traceable")
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return err
@@ -234,6 +240,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if err != nil {
 		return err
 	}
+
 	if !ok {
 		if chainConfig.Bor == nil {
 			stream.WriteNil()
@@ -256,6 +263,11 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 
 		isBorStateSyncTxn = true
+	}
+
+	if blockNum == 0 {
+		stream.WriteNil()
+		return fmt.Errorf("genesis is not traceable")
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -412,7 +424,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	if config != nil && config.BlockOverrides != nil {
-		err := config.BlockOverrides.Override(blockCtx)
+		err := config.BlockOverrides.Override(&blockCtx)
 		if err != nil {
 			return err
 		}
@@ -532,8 +544,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	stream.WriteArrayStart()
 	for bundleIndex, bundle := range bundles {
 		stream.WriteArrayStart()
-		// first change blockContext
-		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
+		// first change block context
+		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
 		// do not reset ibs, because we want to keep the overrides and state change
 		// ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {
