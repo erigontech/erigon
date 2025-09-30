@@ -177,8 +177,8 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 		logger.Debug("[ind] HasFile: file does not exists", "f", fName)
 		return false
 	}
-
-	if !fileVer.Eq(i.Version.Current) {
+	// file ver 1.2.4 and i.ver 1.2.3 should be okay
+	if fileVer.Major != i.Version.Current.Major {
 		if !fileVer.Less(i.Version.MinSupported) {
 			i.Version.Current = fileVer
 		} else {
