@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -170,7 +171,7 @@ type simulator struct {
 	base              *types.Header
 	chainConfig       *chain.Config
 	engine            consensus.EngineReader
-	canonicalReader   services.CanonicalReader
+	blockReader       services.FullBlockReader
 	logger            log.Logger
 	gasCap            uint64
 	returnDataLimit   int
@@ -186,7 +187,7 @@ func newSimulator(
 	header *types.Header,
 	chainConfig *chain.Config,
 	engine consensus.EngineReader,
-	canonicalReader services.CanonicalReader,
+	blockReader services.FullBlockReader,
 	logger log.Logger,
 	gasCap uint64,
 	returnDataLimit int,
@@ -197,7 +198,7 @@ func newSimulator(
 		base:              header,
 		chainConfig:       chainConfig,
 		engine:            engine,
-		canonicalReader:   canonicalReader,
+		blockReader:       blockReader,
 		logger:            logger,
 		gasCap:            gasCap,
 		returnDataLimit:   returnDataLimit,
@@ -438,7 +439,7 @@ func (s *simulator) simulateBlock(
 	}
 	intraBlockState := state.New(stateReader)
 
-	// Override the state before execution.
+	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
 		if err := stateOverrides.Override(intraBlockState); err != nil {
@@ -452,8 +453,20 @@ func (s *simulator) simulateBlock(
 		vmConfig.Tracer = tracer.Hooks()
 	}
 
+	// Apply pre-transaction state modifications before block execution.
+	engine, ok := s.engine.(consensus.Engine)
+	if !ok {
+		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
+	}
+	systemCallCustom := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		return core.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
+	}
+	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
+	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
+	intraBlockState.SoftFinalise()
+
 	// Create a custom block context and apply any custom block overrides
-	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.canonicalReader, s.chainConfig,
+	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.blockReader, s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
 
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
@@ -496,12 +509,8 @@ func (s *simulator) simulateBlock(
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
 	}
-	engine, ok := s.engine.(consensus.Engine)
-	if !ok {
-		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
-	}
 	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, s.chainConfig, intraBlockState, header, engine, false /* constCall */, vmConfig)
+		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
 		receiptList, withdrawals, nil, systemCall, nil, s.logger)

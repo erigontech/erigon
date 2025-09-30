@@ -25,10 +25,6 @@ DISABLED_TEST_LIST=(
    eth_getProof/test_04.json
    eth_getProof/test_08.json
    eth_getProof/test_09.json
-   eth_simulateV1/test_06.json # state root mismatch
-   eth_simulateV1/test_07.json # state root mismatch
-   eth_simulateV1/test_12.json # state root mismatch
-   eth_simulateV1/test_16.json # state root mismatch
    ots_
    parity_
    trace_
