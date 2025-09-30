@@ -15,11 +15,11 @@ concurrency:
 jobs:
   sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
-    timeout-minutes: 740  # 12 hours plus 20 minutes
+    timeout-minutes: 1440  # 24 hours
     strategy:
       fail-fast: false
       matrix:
-        chain: [ sepolia, holesky, amoy, chiado ]  # Chain name as specified on the erigon command line
+        chain: [ sepolia, hoodi, amoy, chiado ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa

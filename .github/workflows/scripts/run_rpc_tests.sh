@@ -3,16 +3,17 @@ set -e # Enable exit on error
 
 # Sanity check for mandatory parameters
 if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE]"
+  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE]"
   echo
-  echo "  CHAIN:           The chain identifier (possible values: mainnet, gnosis, polygon)"
-  echo "  RPC_VERSION:     The rpc-tests repository version or branch (e.g., v1.66.0, main)"
-  echo "  DISABLED_TESTS:  Comma-separated list of disabled tests (optional, default: empty)"
-  echo "  WORKSPACE:       Workspace directory (optional, default: /tmp)"
-  echo "  RESULT_DIR:      Result directory (optional, default: empty)"
-  echo "  TESTS_TYPE:      Test type (optional, default: empty, possible values: latest or all)"
-  echo "  REFERENCE_HOST:  Host address of client node used as reference system (optional, default: empty)"
-  echo "  COMPARE_ERROR_MESSAGE: Verify the Error Message (optional, default empty possible values: do-not-compare-error-message)"
+  echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis, polygon)"
+  echo "  RPC_VERSION:           The rpc-tests repository version or branch (e.g., v1.66.0, main)"
+  echo "  DISABLED_TESTS:        Comma-separated list of disabled tests (optional, default: empty)"
+  echo "  WORKSPACE:             Workspace directory where repository checkout will happen (optional, default: /tmp)"
+  echo "  RESULT_DIR:            Result directory where mismatching test results are saved (optional, default: empty)"
+  echo "  TESTS_TYPE:            Test type (optional, default: empty, possible values: latest or all)"
+  echo "  REFERENCE_HOST:        Host address of client node used as reference system (optional, default: empty)"
+  echo "  COMPARE_ERROR_MESSAGE: Verify the error message (optional, default: empty, possible values: do-not-compare-error-message)"
+  echo "  DUMP_RESPONSE:         Dump each test response (optional, default: empty, possible values: always-dump-response)"
   echo
   exit 1
 fi
@@ -25,6 +26,7 @@ RESULT_DIR="$5"
 TEST_TYPE="$6"
 REFERENCE_HOST="$7"
 COMPARE_ERROR_MESSAGE="$8"
+DUMP_RESPONSE="$9"
 
 OPTIONAL_FLAGS=""
 NUM_OF_RETRIES=1
@@ -44,11 +46,17 @@ fi
 
 if [ "$TEST_TYPE" = "latest" ]; then
     OPTIONAL_FLAGS+=" --tests-on-latest-block"
-    NUM_OF_RETRIES=3
+    if [ -n "$REFERENCE_HOST" ]; then
+        NUM_OF_RETRIES=3
+    fi
 fi
 
 if [ "$COMPARE_ERROR_MESSAGE" = "do-not-compare-error-message" ]; then
     OPTIONAL_FLAGS+=" --do-not-compare-error"
+fi
+
+if [ "$DUMP_RESPONSE" = "always-dump-response" ]; then
+    OPTIONAL_FLAGS+=" --dump-response"
 fi
 
 echo "Setup the test execution environment..."
@@ -86,7 +94,7 @@ while true; do
    python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS"
    RUN_TESTS_EXIT_CODE=$?
 
-   if [ $RUN_TESTS_EXIT_CODE -eq 0 ]; then
+   if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then
         break
    fi
    retries=$((retries + 1))
@@ -99,7 +107,7 @@ done
 set -e # Re-enable exit on error after test run
 
 # Save any failed results to the requested result directory if provided
-if [ $RUN_TESTS_EXIT_CODE -ne 0 ] && [ -n "$RESULT_DIR" ]; then
+if [ "$RUN_TESTS_EXIT_CODE" -ne 0 ] && [ -n "$RESULT_DIR" ]; then
   # Copy the results to the requested result directory
   cp -r "$WORKSPACE/rpc-tests/integration/$CHAIN/results/" "$RESULT_DIR"
   # Clean up the local result directory
@@ -112,4 +120,4 @@ if [ -f ".venv/bin/activate" ]; then
   deactivate 2>/dev/null || :
 fi
 
-exit $RUN_TESTS_EXIT_CODE
+exit "$RUN_TESTS_EXIT_CODE"

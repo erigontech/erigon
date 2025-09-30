@@ -12,7 +12,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 type spanRangeIndexTest struct {
@@ -34,7 +34,7 @@ func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 
 	require.NoError(t, err)
 
-	index := NewSpanRangeIndex(polygoncommon.AsDatabase(db), kv.BorSpansIndex)
+	index := NewSpanRangeIndex(polygondb.AsDatabase(db), kv.BorSpansIndex)
 
 	t.Cleanup(func() { db.Close(); cancel() })
 

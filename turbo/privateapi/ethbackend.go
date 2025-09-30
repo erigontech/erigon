@@ -35,13 +35,13 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -511,4 +511,15 @@ func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.B
 		BlockNumber: blockNum,
 		Present:     ok,
 	}, err
+}
+
+func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *emptypb.Empty) (*remoteproto.MinimumBlockAvailableReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
+	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
 }
