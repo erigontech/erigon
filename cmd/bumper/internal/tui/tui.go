@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"github.com/erigontech/erigon/db/version"
+	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -449,15 +450,9 @@ func clone(s schema.Schema) schema.Schema {
 			Hist:   make(schema.Group, len(c.Hist)),
 			Ii:     make(schema.Group, len(c.Ii)),
 		}
-		for k2, v := range c.Domain {
-			cc.Domain[k2] = v
-		}
-		for k2, v := range c.Hist {
-			cc.Hist[k2] = v
-		}
-		for k2, v := range c.Ii {
-			cc.Ii[k2] = v
-		}
+		maps.Copy(cc.Domain, c.Domain)
+		maps.Copy(cc.Hist, c.Hist)
+		maps.Copy(cc.Ii, c.Ii)
 		out[k] = cc
 	}
 	return out

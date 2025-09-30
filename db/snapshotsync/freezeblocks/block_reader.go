@@ -18,10 +18,14 @@ package freezeblocks
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -63,6 +67,16 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
 	return block, err
 }
+
+func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	reply, err := r.client.MinimumBlockAvailable(ctx, &emptypb.Empty{})
+	if err != nil {
+		return 0, err
+	}
+
+	return reply.BlockNum, nil
+}
+
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
@@ -417,6 +431,53 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+
+func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	if r.FrozenBlocks() > 0 {
+		snapshotTypes := []snaptype.Enum{
+			snaptype2.Enums.Headers,
+			snaptype2.Enums.Bodies,
+			snaptype2.Enums.Transactions,
+		}
+
+		snapshotMin := uint64(0)
+		for _, snapType := range snapshotTypes {
+			if minBlock, ok := r.sn.SegmentsMinByType(snapType); ok {
+				if minBlock > snapshotMin {
+					snapshotMin = minBlock
+				}
+			}
+		}
+		return snapshotMin, nil
+	}
+
+	if tx == nil {
+		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
+	}
+
+	var err error
+	dbMinBlock, err := r.findFirstCompleteBlock(tx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
+	}
+
+	return dbMinBlock, nil
+}
+
+// findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
+func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
+	firstKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
+	}
+
+	if len(firstKey) < 8 {
+		return math.MaxUint64, nil // no body data found
+	}
+
+	result := binary.BigEndian.Uint64(firstKey[:8])
+	return result, nil
+}
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 	if r.borSn == nil {
 		return 0
