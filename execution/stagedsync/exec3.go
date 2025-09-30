@@ -196,90 +196,84 @@ func (g *gaugeResetTask) reset() {
 	}
 }
 
-var execResetTask *gaugeResetTask
-var commitResetTask *gaugeResetTask
-var domainResetTask *gaugeResetTask
+var execResetTask = gaugeResetTask{}
+var commitResetTask = gaugeResetTask{}
+var domainResetTask = gaugeResetTask{}
 
 // enough time to alow the sampler to scrape
 const resetDelay = 60 * time.Second
 
 func resetExecGauges(ctx context.Context) {
-	if execResetTask != nil {
-		execResetTask.Lock()
-		defer execResetTask.Unlock()
+	execResetTask.Lock()
+	defer execResetTask.Unlock()
+	if execResetTask.Timer != nil {
 		if execResetTask.stopped {
 			execResetTask.Timer = time.NewTimer(resetDelay)
 		} else {
 			execResetTask.Reset(resetDelay)
 		}
 	} else {
-		execResetTask = &gaugeResetTask{
-			Timer: time.NewTimer(resetDelay),
-			ctx:   ctx,
-			gauges: []metrics.Gauge{
-				mxExecStepsInDB, mxExecRepeats, mxExecTriggers, mxExecTransactions,
-				mxExecTxnPerBlock, mxExecGasPerTxn, mxExecBlocks, mxExecCPUs,
-				mxExecMGasSec, mxTaskMgasSec, mxExecBlockDuration, mxExecTxnDuration,
-				mxExecTxnExecDuration, mxExecTxnReadDuration, mxExecTxnAccountReadDuration, mxExecTxnStoreageReadDuration,
-				mxExecTxnCodeReadDuration, mxExecReadRate, mxExecAccountReadRate, mxExecStorageReadRate,
-				mxExecCodeReadRate, mxExecWriteRate},
-		}
+		execResetTask.Timer = time.NewTimer(resetDelay)
+		execResetTask.ctx = ctx
+		execResetTask.gauges = []metrics.Gauge{
+			mxExecStepsInDB, mxExecRepeats, mxExecTriggers, mxExecTransactions,
+			mxExecTxnPerBlock, mxExecGasPerTxn, mxExecBlocks, mxExecCPUs,
+			mxExecMGasSec, mxTaskMgasSec, mxExecBlockDuration, mxExecTxnDuration,
+			mxExecTxnExecDuration, mxExecTxnReadDuration, mxExecTxnAccountReadDuration, mxExecTxnStoreageReadDuration,
+			mxExecTxnCodeReadDuration, mxExecReadRate, mxExecAccountReadRate, mxExecStorageReadRate,
+			mxExecCodeReadRate, mxExecWriteRate}
 		execResetTask.run(ctx)
 	}
 }
 
 func resetCommitmentGauges(ctx context.Context) {
-	if commitResetTask != nil {
-		commitResetTask.Lock()
-		defer commitResetTask.Unlock()
+	commitResetTask.Lock()
+	defer commitResetTask.Unlock()
+	if commitResetTask.Timer != nil {
 		if commitResetTask.stopped {
 			commitResetTask.Timer = time.NewTimer(resetDelay)
 		} else {
 			commitResetTask.Reset(resetDelay)
 		}
 	} else {
-		commitResetTask = &gaugeResetTask{
-			Timer: time.NewTimer(resetDelay),
-			ctx:   ctx,
-			gauges: []metrics.Gauge{
-				mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentMGasSec, mxCommitmentBlockDuration,
-			},
+		commitResetTask.Timer = time.NewTimer(resetDelay)
+		commitResetTask.ctx = ctx
+		commitResetTask.gauges = []metrics.Gauge{
+			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentMGasSec, mxCommitmentBlockDuration,
 		}
 		commitResetTask.run(ctx)
 	}
 }
 
 func resetDomainGauges(ctx context.Context) {
-	if domainResetTask != nil {
-		domainResetTask.Lock()
-		defer domainResetTask.Unlock()
+	domainResetTask.Lock()
+	defer domainResetTask.Unlock()
+	if domainResetTask.Timer != nil {
 		if domainResetTask.stopped {
 			domainResetTask.Timer = time.NewTimer(resetDelay)
 		} else {
 			domainResetTask.Reset(resetDelay)
 		}
 	} else {
-		domainResetTask = &gaugeResetTask{
-			Timer: time.NewTimer(resetDelay),
-			ctx:   ctx,
-			gauges: []metrics.Gauge{
-				mxExecDomainReads, mxExecDomainReadDuration,
-				mxExecDomainCacheReads, mxExecDomainCacheReadDuration, mxExecDomainDbReads, mxExecDomainDbReadDuration,
-				mxExecDomainFileReads, mxExecDomainFileReadDuration, mxExecAccountDomainReads, mxExecAccountDomainReadDuration,
-				mxExecAccountDomainCacheReads, mxExecAccountDomainCacheReadDuration, mxExecAccountDomainDbReads, mxExecAccountDomainDbReadDuration,
-				mxExecAccountDomainFileReads, mxExecAccountDomainFileReadDuration, mxExecStorageDomainReads, mxExecStorageDomainReadDuration,
-				mxExexStorageDomainCacheReads, mxExecStorageDomainCacheReadDuration, mxExecStorageDomainDbReads, mxExecStorageDomainDbReadDuration,
-				mxExecStorageDomainFileReads, mxExecStorageDomainFileReadDuration, mxExecCodeDomainReads, mxExecCodeDomainReadDuration,
-				mxExexCodeDomainCacheReads, mxExecCodeDomainCacheReadDuration, mxExecCodeDomainDbReads, mxExecCodeDomainDbReadDuration,
-				mxExecCodeDomainFileReads, mxExecCodeDomainFileReadDuration, mxExecDomainPutRate, mxExecDomainPutSize,
-				mxExecAccountDomainPutRate, mxExecAccountDomainPutSize, mxExecStorageDomainPutRate, mxExecStorageDomainPutSize,
-				mxExecCodeDomainPutRate, mxExecCodeDomainPutSize, mxCommitmentReadRate, mxCommitmentAccountReadRate,
-				mxCommitmentStorageReadRate, mxCommitmentBranchReadRate, mxCommitmentBrancgWriteRate,
-				mxCommitmentKeyRate, mxCommitmentAccountKeyRate, mxCommitmentStorageKeyRate, mxCommitmentFoldRate,
-				mxCommitmentUnfoldRate, mxCommitmentDomainReads, mxCommitmentDomainReadDuration, mxCommitmentDomainCacheReads,
-				mxCommitmentDomainCacheReadDuration, mxCommitmentDomainDbReads, mxCommitmentDomainDbReadDuration, mxCommitmentDomainFileReads,
-				mxCommitmentDomainFileReadDuration, mxCommitmentDomainPutRate, mxCommitmentDomainPutSize,
-			},
+		domainResetTask.Timer = time.NewTimer(resetDelay)
+		domainResetTask.ctx = ctx
+		domainResetTask.gauges = []metrics.Gauge{
+			mxExecDomainReads, mxExecDomainReadDuration,
+			mxExecDomainCacheReads, mxExecDomainCacheReadDuration, mxExecDomainDbReads, mxExecDomainDbReadDuration,
+			mxExecDomainFileReads, mxExecDomainFileReadDuration, mxExecAccountDomainReads, mxExecAccountDomainReadDuration,
+			mxExecAccountDomainCacheReads, mxExecAccountDomainCacheReadDuration, mxExecAccountDomainDbReads, mxExecAccountDomainDbReadDuration,
+			mxExecAccountDomainFileReads, mxExecAccountDomainFileReadDuration, mxExecStorageDomainReads, mxExecStorageDomainReadDuration,
+			mxExexStorageDomainCacheReads, mxExecStorageDomainCacheReadDuration, mxExecStorageDomainDbReads, mxExecStorageDomainDbReadDuration,
+			mxExecStorageDomainFileReads, mxExecStorageDomainFileReadDuration, mxExecCodeDomainReads, mxExecCodeDomainReadDuration,
+			mxExexCodeDomainCacheReads, mxExecCodeDomainCacheReadDuration, mxExecCodeDomainDbReads, mxExecCodeDomainDbReadDuration,
+			mxExecCodeDomainFileReads, mxExecCodeDomainFileReadDuration, mxExecDomainPutRate, mxExecDomainPutSize,
+			mxExecAccountDomainPutRate, mxExecAccountDomainPutSize, mxExecStorageDomainPutRate, mxExecStorageDomainPutSize,
+			mxExecCodeDomainPutRate, mxExecCodeDomainPutSize, mxCommitmentReadRate, mxCommitmentAccountReadRate,
+			mxCommitmentStorageReadRate, mxCommitmentBranchReadRate, mxCommitmentBrancgWriteRate,
+			mxCommitmentKeyRate, mxCommitmentAccountKeyRate, mxCommitmentStorageKeyRate, mxCommitmentFoldRate,
+			mxCommitmentUnfoldRate, mxCommitmentDomainReads, mxCommitmentDomainReadDuration, mxCommitmentDomainCacheReads,
+			mxCommitmentDomainCacheReadDuration, mxCommitmentDomainDbReads, mxCommitmentDomainDbReadDuration, mxCommitmentDomainFileReads,
+			mxCommitmentDomainFileReadDuration, mxCommitmentDomainPutRate, mxCommitmentDomainPutSize,
 		}
 		domainResetTask.run(ctx)
 	}

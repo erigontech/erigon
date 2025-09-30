@@ -1052,17 +1052,17 @@ func (q *PriorityQueue[T]) ResultCh() chan T {
 }
 
 func (q *PriorityQueue[T]) Close() {
+	q.Lock()
+	defer q.Unlock()
 	if q.closed {
 		return
 	}
 	q.closed = true
 
-	q.Lock()
 	if len(q.resultCh) == 0 {
 		close(q.resultCh)
 		q.resultCh = nil
 	}
-	q.Unlock()
 }
 
 func (q *PriorityQueue[T]) Len() (l int) {
