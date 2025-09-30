@@ -1597,7 +1597,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	require.True(t, update.Balance.Eq(&target.Balance))
 	require.Equal(t, update.Nonce, target.Nonce)
 	require.Equal(t, update.CodeHash, target.CodeHash)
-	require.Equal(t, 0, target.StorageLen)
+	require.Equal(t, 0, int(target.StorageLen))
 
 	update.Reset()
 
@@ -1612,7 +1612,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	require.True(t, update.Balance.Eq(&target.Balance))
 	require.Equal(t, update.Nonce, target.Nonce)
 	require.Equal(t, update.CodeHash, target.CodeHash)
-	require.Equal(t, 0, target.StorageLen)
+	require.Equal(t, 0, int(target.StorageLen))
 
 	update.Reset()
 
