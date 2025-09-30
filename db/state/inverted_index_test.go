@@ -816,7 +816,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 }
 
 func TestInvIndexPruningPerf(t *testing.T) {
-	//t.Skip("for manual benchmarks ")
+	t.Skip("for manual benchmarks ")
 	testDbAndInvertedIndex2 := func(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 		tb.Helper()
 		dirs := datadir.New("/Users/alex/data/remove_me_test")
