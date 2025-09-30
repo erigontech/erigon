@@ -17,6 +17,9 @@
   "shanghaiTime": 1696000704,
   "cancunTime": 1707305664,
   "pragueTime": 1740434112,
+  "osakaTime": 1759308480,
+  "bpo1Time": 1759800000,
+  "bpo2Time": 1760389824,
   "blobSchedule": {
     "cancun": {
       "target": 3,
@@ -27,6 +30,21 @@
       "target": 6,
       "max": 9,
       "baseFeeUpdateFraction": 5007716
+    },
+    "osaka": {
+      "target": 6,
+      "max": 9,
+      "baseFeeUpdateFraction": 5007716
+    },
+    "bpo1": {
+      "target": 10,
+      "max": 15,
+      "baseFeeUpdateFraction": 8346193
+    },
+    "bpo2": {
+      "target": 14,
+      "max": 21,
+      "baseFeeUpdateFraction": 11684671
     }
   },
   "depositContractAddress": "0x4242424242424242424242424242424242424242",
