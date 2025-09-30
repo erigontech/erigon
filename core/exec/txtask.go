@@ -898,8 +898,6 @@ func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
 type PriorityQueue[T queueable[T]] struct {
 	limit      int
 	closed     bool
-	adds       int
-	removes    int
 	resultCh   chan T
 	addWaiters chan any
 	sync.RWMutex
@@ -941,7 +939,6 @@ func (q *PriorityQueue[T]) Add(ctx context.Context, item T) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case resultCh <- item: // Needs to have outside of the lock
-		q.adds++
 	}
 
 	return nil
@@ -1041,7 +1038,6 @@ func (q *PriorityQueueIter[T]) HasNext() bool {
 func (q *PriorityQueueIter[T]) PopNext() T {
 	q.q.Lock()
 	defer q.q.Unlock()
-	q.q.removes++
 	return heap.Pop(q.q.results).(T)
 }
 
