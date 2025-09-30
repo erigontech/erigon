@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -687,6 +688,9 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 
 			// Get timeboosted field from receipt, default to false if not present
 			if timeboosted, ok := receipt["timeboosted"].(bool); ok && timeboosted {
+				if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
+					fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", tx.Hash().Hex())
+				}
 				tx.SetTimeboosted(timeboosted)
 			}
 		}
