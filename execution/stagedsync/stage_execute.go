@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -89,10 +88,13 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
+<<<<<<< HEAD
 
 	applyWorker, applyWorkerMining *exec3.Worker
 
 	arbitrumWasmDB wasmdb.WasmIface
+=======
+>>>>>>> ec7e6d31d6 (Parallel ExecV3 Processing (#16922))
 }
 
 func StageExecuteBlocksCfg(
@@ -120,6 +122,7 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
+<<<<<<< HEAD
 		db:                db,
 		prune:             pm,
 		batchSize:         batchSize,
@@ -140,6 +143,24 @@ func StageExecuteBlocksCfg(
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), vmConfig.Tracer, context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
 
 		arbitrumWasmDB: arbitrumWasmDB,
+=======
+		db:            db,
+		prune:         pm,
+		batchSize:     batchSize,
+		chainConfig:   chainConfig,
+		engine:        engine,
+		vmConfig:      vmConfig,
+		dirs:          dirs,
+		notifications: notifications,
+		stateStream:   stateStream,
+		badBlockHalt:  badBlockHalt,
+		blockReader:   blockReader,
+		hd:            hd,
+		genesis:       genesis,
+		historyV3:     true,
+		syncCfg:       syncCfg,
+		silkworm:      silkworm,
+>>>>>>> ec7e6d31d6 (Parallel ExecV3 Processing (#16922))
 	}
 }
 
@@ -147,9 +168,6 @@ func StageExecuteBlocksCfg(
 
 func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
-	if !initialCycle {
-		workersCount = 1
-	}
 
 	prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
 	if err != nil {
@@ -164,8 +182,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return nil
 	}
 
-	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, dbg.Exec3Parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil
@@ -368,8 +385,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		defer tx.Rollback()
 		txc.SetTx(tx)
 	}
-	logPrefix := u.LogPrefix()
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
+
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Ttx)
 	if err != nil {

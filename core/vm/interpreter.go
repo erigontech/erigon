@@ -268,12 +268,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		pc   = &_pc      // program counter
 		cost uint64
 		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		gasCopy uint64 // for Tracer to log gas remaining before execution
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
-		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
-		trace   = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
+		pcCopy                 uint64 // needed for the deferred Tracer
+		gasCopy                uint64 // for Tracer to log gas remaining before execution
+		callGas                uint64
+		logged                 bool   // deferred Tracer should ignore already logged steps
+		res                    []byte // result of the opcode execution function
+		debug                  = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
+		trace                  = dbg.TraceInstructions && in.evm.intraBlockState.Trace()
+		blockNum               uint64
+		txIndex, txIncarnation int
 	)
 
 	contract.Input = input
@@ -318,14 +321,24 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// parent context.
 	steps := 0
 
+	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
+		switch op {
+		case CALL, CALLCODE, DELEGATECALL, STATICCALL:
+			return callGas
+		default:
+			return cost
+		}
+	}
+
 	for {
 		steps++
 		if steps%5000 == 0 && in.evm.Cancelled() {
 			break
 		}
-		if debug {
+		if dbg.TraceDyanmicGas || debug || trace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
+			blockNum, txIndex, txIncarnation = in.evm.intraBlockState.BlockNumber(), in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation()
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
@@ -365,15 +378,21 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
+			callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
+
+			if dbg.TraceDyanmicGas && dynamicCost > 0 {
+				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+			}
+
 			if !contract.UseGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
 		}
 
-		// Do tracing before memory expansion
+		// Do gas tracing before memory expansion
 		if in.cfg.Tracer != nil {
 			if in.cfg.Tracer.OnGasChange != nil {
 				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
@@ -384,20 +403,21 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 
-		// TODO - move this to a trace & set in the worker
-		if trace {
-			var str string
-			if operation.string != nil {
-				str = operation.string(*pc, callContext)
-			} else {
-				str = op.String()
-			}
-
-			fmt.Printf("(%d.%d) %5d %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, cost, str)
-		}
-
 		if memorySize > 0 {
 			mem.Resize(memorySize)
+		}
+
+		// TODO - move this to a trace & set in the worker
+
+		if trace {
+			var opstr string
+			if operation.string != nil {
+				opstr = operation.string(*pc, callContext)
+			} else {
+				opstr = op.String()
+			}
+
+			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, _pc, traceGas(op, callGas, cost), opstr)
 		}
 
 		// execute the operation

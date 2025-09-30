@@ -773,7 +773,7 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 func stSload(_ uint64, scope *ScopeContext) string {
 	loc := scope.Stack.peek()
-	return fmt.Sprintf("%s %d", SLOAD, loc)
+	return fmt.Sprintf("%s %x", SLOAD, loc)
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -787,7 +787,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 func stSstore(_ uint64, scope *ScopeContext) string {
 	loc, val := scope.Stack.data[len(scope.Stack.data)-1], scope.Stack.data[len(scope.Stack.data)-2]
-	return fmt.Sprintf("%s %d %d", SSTORE, &loc, &val)
+	return fmt.Sprintf("%s %x %d", SSTORE, loc.Bytes32(), &val)
 }
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -867,6 +867,10 @@ func opMsize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 func opGas(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	scope.Stack.push(new(uint256.Int).SetUint64(scope.Contract.Gas))
 	return nil, nil
+}
+
+func stGas(pc uint64, scope *ScopeContext) string {
+	return fmt.Sprintf("%s %d", GAS, scope.Contract.Gas)
 }
 
 func opSwap1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -992,6 +996,18 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	return nil, nil
 }
 
+func stCreate(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	var (
+		value  = stack.data[len(stack.data)-1]
+		offset = stack.data[len(stack.data)-2]
+		size   = stack.data[len(stack.data)-3]
+		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	)
+
+	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.Contract.Gas)
+}
+
 func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
@@ -1027,6 +1043,18 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 	interpreter.returnData = nil // clear dirty return data buffer
 	return nil, nil
+}
+
+func stCreate2(_ uint64, scope *ScopeContext) string {
+	stack := scope.Stack
+	var (
+		endowment    = stack.data[len(stack.data)-1]
+		offset, size = stack.data[len(stack.data)-2], stack.data[len(stack.data)-3]
+		salt         = stack.data[len(stack.data)-4]
+		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	)
+
+	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.Contract.Gas)
 }
 
 func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -1153,7 +1181,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 
 func stDelegateCall(_ uint64, scope *ScopeContext) string {
 	stack := scope.Stack
-	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
+	addr, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4]
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
