@@ -59,12 +59,14 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 	return credentials.NewTLS(&tls.Config{
+		// Certificates are used both by servers (to present to clients) and by clients (for mTLS)
 		Certificates: []tls.Certificate{peerCert},
-		ClientCAs:    caCertPool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		MinVersion:   tls.VersionTLS12,
-		//nolint:gosec
-		InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
+		// Server side: verify client certificates against provided CA pool
+		ClientCAs: caCertPool,
+		// Client side: verify server certificate chain against provided CA pool
+		RootCAs:    caCertPool,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS12,
 	}), nil
 }
 
