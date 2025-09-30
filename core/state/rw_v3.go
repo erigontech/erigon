@@ -205,7 +205,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
-	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
+	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ && !dbg.DiscardCommitment() {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
