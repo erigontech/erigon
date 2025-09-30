@@ -679,7 +679,7 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 		}
 
 		if isArbitrum {
-			// Query receipt
+			// Query receipt// TODO request only if txtype supports timeboosted at all
 			var receipt map[string]interface{}
 			err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", tx.Hash())
 			if err != nil {
