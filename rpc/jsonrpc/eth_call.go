@@ -441,9 +441,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	// get account data from the trie
 	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.Bytes()))
 	if acc == nil {
+
 		for i, k := range storageKeys {
+			keyInt := new(big.Int).SetBytes(k[:])
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   common.BytesToHash(k[:]).Hex(),
+				Key:   hexutil.EncodeBig(keyInt),
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -477,7 +479,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
-		proof.StorageProof[i].Key = common.BytesToHash(keyHash[:]).Hex()
+		keyInt := new(big.Int).SetBytes(keyHash[:])
+		proof.StorageProof[i].Key = hexutil.EncodeBig(keyInt)
 
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
