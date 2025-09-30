@@ -2,7 +2,6 @@ package tui
 
 import (
 	"errors"
-	"github.com/erigontech/erigon/db/version"
 	"maps"
 	"path/filepath"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/erigontech/erigon/cmd/bumper/internal/schema"
+	"github.com/erigontech/erigon/db/version"
 )
 
 type focus int

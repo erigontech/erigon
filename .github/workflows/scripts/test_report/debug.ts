@@ -10,7 +10,7 @@ process.env.GITHUB_REPOSITORY = 'erigontech/erigon'; // Required for github.cont
 
 console.log("Debugging generate-test-report.ts with environment variables set.");
 
-import { run } from './generate-test-report';
+import {run} from './generate-test-report';
 
 run();
 
