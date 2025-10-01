@@ -1,6 +1,6 @@
 module github.com/erigontech/erigon
 
-go 1.24
+go 1.25
 
 require (
 	github.com/erigontech/mdbx-go v0.27.24
@@ -78,7 +78,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.14.0
 	github.com/nsf/jsondiff v0.0.0-20230430225905-43f6cf3098c1
 	github.com/nxadm/tail v1.4.11
-	github.com/okx/poseidongold v0.0.3
+	github.com/okx/poseidongold v1.0.0
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.2.1
 	github.com/pion/randutil v0.1.0
@@ -320,3 +320,5 @@ replace github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-al
 replace github.com/erigontech/erigon-snapshot => github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240805114253-42da880260bb
 
 replace github.com/erigontech/interfaces => github.com/ledgerwatch/interfaces v0.0.0-20241024161200-024ffe1cabff
+
+replace github.com/okx/poseidongold => github.com/gateway-fm/poseidongold v1.0.0

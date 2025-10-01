@@ -1,4 +1,4 @@
-FROM golang:1.23 AS base
+FROM golang:1.25 AS base
 
 RUN apt-get update \
 && apt-get -y install make openssh-client ca-certificates && update-ca-certificates

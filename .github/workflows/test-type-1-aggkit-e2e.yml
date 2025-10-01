@@ -22,7 +22,7 @@ jobs:
   build-aggkit-image:
     uses: ./.github/workflows/build-aggkit-image.yml # Replace with aggkit's version if PR to pass repository and ref is merged
     with:
-      go-version: 1.24.x
+      go-version: 1.25.x
       docker-image-name: aggkit
       repository: agglayer/aggkit
       ref:        2364b97d3186c5bd3b8ea618863219c58c0e49bb
