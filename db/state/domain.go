@@ -1460,7 +1460,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 // Returns the first txNum from available history
 func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 	if len(dt.ht.files) == 0 {
-		return 0
+		return math.MaxUint64
 	}
 	return dt.ht.files[0].startTxNum
 }
