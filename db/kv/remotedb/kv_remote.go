@@ -50,6 +50,7 @@ type remoteOpts struct {
 }
 
 var _ kv.TemporalTx = (*tx)(nil)
+var _ kv.TemporalRoDB = (*DB)(nil)
 
 type DB struct {
 	remoteKV     remoteproto.KVClient

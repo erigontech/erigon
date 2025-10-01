@@ -583,9 +583,11 @@ func ExecV3(ctx context.Context,
 
 		if u != nil && !u.HasUnwindPoint() {
 			if b != nil {
-				if errors.Is(execErr, ErrWrongTrieRoot) {
-					execErr = handleIncorrectRootHashError(
-						b.NumberU64(), b.Hash(), b.ParentHash(), applyTx, cfg, execStage, maxBlockNum, logger, u)
+				if execErr != nil {
+					if errors.Is(execErr, ErrWrongTrieRoot) {
+						execErr = handleIncorrectRootHashError(
+							b.NumberU64(), b.Hash(), b.ParentHash(), applyTx, cfg, execStage, maxBlockNum, logger, u)
+					}
 				} else {
 					_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 					if err != nil {
