@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -80,10 +81,10 @@ var Indexes = struct {
 	TxnHash,
 	TxnHash2BlockNum snaptype.Index
 }{
-	HeaderHash:       snaptype.Index{Name: "headers", Version: version.V1_1_standart},
-	BodyHash:         snaptype.Index{Name: "bodies", Version: version.V1_1_standart},
-	TxnHash:          snaptype.Index{Name: "transactions", Version: version.V1_1_standart},
-	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Version: version.V1_1_standart, Offset: 1},
+	HeaderHash:       snaptype.Index{Name: statecfg.HeadersIdx, Version: statecfg.Schema.HeadersBlock.Version.AccessorIdx},
+	BodyHash:         snaptype.Index{Name: statecfg.BodiesIdx, Version: statecfg.Schema.BodiesBlock.Version.AccessorIdx},
+	TxnHash:          snaptype.Index{Name: statecfg.TransactionsIdx, Version: statecfg.Schema.TransactionsBlock.Version.AccessorIdx},
+	TxnHash2BlockNum: snaptype.Index{Name: statecfg.TransactionsToBlockIdx, Version: statecfg.Schema.TxnHash2BlockNumBlock.Version.AccessorIdx, Offset: 1},
 }
 
 var (
@@ -100,8 +101,8 @@ var (
 	)
 	Headers = snaptype.RegisterType(
 		Enums.Headers,
-		"headers",
-		version.V1_1_standart,
+		statecfg.Headers,
+		statecfg.Schema.HeadersBlock.Version.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
@@ -141,8 +142,8 @@ var (
 
 	Bodies = snaptype.RegisterType(
 		Enums.Bodies,
-		"bodies",
-		version.V1_1_standart,
+		statecfg.Bodies,
+		statecfg.Schema.BodiesBlock.Version.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.BodyHash},
 		snaptype.IndexBuilderFunc(
@@ -175,8 +176,8 @@ var (
 
 	Transactions = snaptype.RegisterType(
 		Enums.Transactions,
-		"transactions",
-		version.V1_1_standart,
+		statecfg.Transactions,
+		statecfg.Schema.TransactionsBlock.Version.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
 		snaptype.IndexBuilderFunc(
