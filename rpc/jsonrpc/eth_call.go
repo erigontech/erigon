@@ -346,6 +346,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	return hexutil.Uint64(hi), nil
 }
 
+type StorageKeysInfo struct {
+	Hash      common.Hash
+	KeyLength int
+}
+
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	roTx, err := api.db.BeginTemporalRo(ctx)
@@ -361,14 +366,15 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, errors.New("block not found")
 	}
 
-	storageKeysConverted := make([]common.Hash, len(storageKeys))
+	storageKeysConverted := make([]StorageKeysInfo, len(storageKeys))
 	for i, s := range storageKeys {
-		storageKeysConverted[i].SetBytes(s)
+		storageKeysConverted[i].Hash.SetBytes(s)
+		storageKeysConverted[i].KeyLength = len(s)
 	}
 	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -441,11 +447,19 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	// get account data from the trie
 	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.Bytes()))
 	if acc == nil {
-
-		for i, k := range storageKeys {
-			keyInt := new(big.Int).SetBytes(k[:])
+		for i, storageKey := range storageKeys {
+			// Output key encoding is a bit special: if the input was a 32-byte hash, it is
+			// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
+			// JSON-RPC spec for getProof. This behavior exists to preserve backwards
+			// compatibility with older client versions.
+			var outputKey string
+			if storageKey.KeyLength != 32 {
+				outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
+			} else {
+				outputKey = hexutil.Encode(storageKey.Hash[:])
+			}
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   hexutil.EncodeBig(keyInt),
+				Key:   outputKey,
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -462,7 +476,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
-			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil)
+			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
 		}
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
@@ -478,10 +492,18 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// get storage key proofs
-	for i, keyHash := range storageKeys {
-		keyInt := new(big.Int).SetBytes(keyHash[:])
-		proof.StorageProof[i].Key = hexutil.EncodeBig(keyInt)
-
+	for i, storageKey := range storageKeys {
+		// Output key encoding is a bit special: if the input was a 32-byte hash, it is
+		// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
+		// JSON-RPC spec for getProof. This behavior exists to preserve backwards
+		// compatibility with older client versions.
+		var outputKey string
+		if storageKey.KeyLength != 32 {
+			outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
+		} else {
+			outputKey = hexutil.Encode(storageKey.Hash[:])
+		}
+		proof.StorageProof[i].Key = outputKey
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
 			proof.StorageProof[i].Proof = nil
@@ -492,7 +514,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		// prepare key path (keccak(address) | keccak(key))
 		var fullKey []byte
 		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
-		fullKey = append(fullKey, crypto.Keccak256(keyHash.Bytes())...)
+		fullKey = append(fullKey, crypto.Keccak256(storageKey.Hash.Bytes())...)
 
 		// get proof for the given key
 		storageProof, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)
@@ -500,7 +522,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, _, err := reader.ReadAccountStorage(address, keyHash)
+		res, _, err := reader.ReadAccountStorage(address, storageKey.Hash)
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
