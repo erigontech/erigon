@@ -380,37 +380,43 @@ execute_benchmark() {
 
     local logfile="$LOG_LOCATION/output.txt"
     ./build/bin/integration reset_state --datadir $datadir --chain $CHAIN > $logfile
-    echo "1" | ./build/bin/erigon snapshots rm-state  --datadir $datadir --latest
+    if [[ "$SKIP_MIRROR" != true ]]; then
+        echo "1" | ./build/bin/erigon snapshots rm-state  --datadir $datadir --latest
+    fi
 
     BLOCK_AT=$(cat $logfile|awk '/OtterSync/ {print $2}'|tail -1)
     STATE_AT_TXNUM=$(cat $logfile|awk '/accounts/ {print $3}'|tail -1)
     local logfile2="$LOG_LOCATION/output2.txt"
     ./build/bin/erigon seg txnum --datadir $datadir  --txnum $STATE_AT_TXNUM > $logfile2 2>&1
     STATE_AT=$(cat $logfile2|grep out|awk -F'block=' '{print $2}')
-    STATE_TO=$((STATE_AT + 5000))
+    STATE_TO=$((STATE_AT + 1000))
 
     EXEC_TO=$((BLOCK_AT < STATE_TO ? BLOCK_AT : STATE_TO))
 
     cmd="$(strip_quotes "$cmd") --block $EXEC_TO"
 
-    log_info "Command: $cmd"
-    log_info "Will run for ${timeout_seconds} seconds"
-    
+    log_info "Executing Command: $cmd"
+
     # Create a log file for this run
-    local log_file="benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
+    local log_file=$LOG_LOCATION/"benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
     
     # Start the command in background and capture its PID
-    eval "$cmd" > "$log_file" 2>&1 &
+    timeout --preserve-status -k 3600 -s SIGKILL 3600 bash -c "$cmd" 2>&1 | tee "$log_file"
     local pid=$!
-    
+    log_info "Process started with PID: $pid"
+    wait $pid
+    if [[ $? -ne 0 ]]; then
+        log_error "Benchmark run $run_number failed"
+        exit 1
+    fi
+
+
     if [[ $run_number -eq 1 ]]; then
         ERIGON_PID1=$pid
     else
         ERIGON_PID2=$pid
     fi
     
-    log_info "Process started with PID: $pid"
-    log_info "Output being captured to: $log_file"
     
     # Monitor the process
     local elapsed=0

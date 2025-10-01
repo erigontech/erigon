@@ -1,5 +1,5 @@
 source_datadir: /erigon-data/par_eth
 chain: mainnet
 ## --block is added by script to the stage_exec commands
-erigon_cmd1: ERIGON_NO_PRUNE=true ERIGON_NO_MERGE=true DISCARD_COMMITMENT=true ./build/bin/integration stage_exec --datadir /erigon-data/par_eth_serial/ --chain mainnet  --batchSize=10g --no-commit  --metrics --metrics.port 6061
-erigon_cmd2: ERIGON_EXEC3_PARALLEL=true ERIGON_NO_PRUNE=true ERIGON_NO_MERGE=true DISCARD_COMMITMENT=true ./build/bin/integration stage_exec --datadir /erigon-data/par_eth_par/ --chain mainnet  --batchSize=10g --no-commit  --metrics --metrics.port 6061
+erigon_cmd1: ERIGON_NO_PRUNE=true ERIGON_NO_MERGE=true ERIGON_DISCARD_COMMITMENT=true ./build/bin/integration stage_exec --datadir /erigon-data/par_eth_serial/ --chain mainnet  --batchSize=10g --no-commit  --metrics --metrics.port 6061
+erigon_cmd2: ERIGON_EXEC3_PARALLEL=true ERIGON_NO_PRUNE=true ERIGON_NO_MERGE=true ERIGON_DISCARD_COMMITMENT=true ./build/bin/integration stage_exec --datadir /erigon-data/par_eth_par/ --chain mainnet  --batchSize=10g --no-commit  --metrics --metrics.port 6061
