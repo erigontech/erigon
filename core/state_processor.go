@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -145,7 +144,7 @@ func MakeReceipt(
 		txn = &t.Tx
 	}
 	if txn.Type() == types.BlobTxType {
-		receipt.BlobGasUsed = uint64(len(txn.GetBlobHashes()) * int(params.GasPerBlob))
+		receipt.BlobGasUsed = txn.GetBlobGas()
 	}
 	// If the transaction created a contract, store the creation address in the receipt.
 	if msg.To() == nil {

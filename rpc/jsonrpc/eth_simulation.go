@@ -445,6 +445,7 @@ func (s *simulator) simulateBlock(
 		if err := stateOverrides.Override(intraBlockState); err != nil {
 			return nil, nil, err
 		}
+		intraBlockState.SoftFinalise()
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -468,6 +469,10 @@ func (s *simulator) simulateBlock(
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.blockReader, s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
+	if bsc.BlockOverrides.BlobBaseFee != nil {
+		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
+	}
+	rules := blockCtx.Rules(s.chainConfig)
 
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 	callResults := make([]CallResult, 0, len(bsc.Calls))
@@ -480,7 +485,7 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(blockCtx.Rules(s.chainConfig), stateWriter)
+		err = intraBlockState.FinalizeTx(rules, stateWriter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -490,7 +495,7 @@ func (s *simulator) simulateBlock(
 		header.BlobGasUsed = &cumulativeBlobGasUsed
 	}
 
-	if err := intraBlockState.CommitBlock(blockCtx.Rules(s.chainConfig), stateWriter); err != nil {
+	if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 	}
 

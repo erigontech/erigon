@@ -48,6 +48,7 @@ type BlockOverrides struct {
 	GasLimit    *hexutil.Uint           `json:"gasLimit"`
 	Difficulty  *hexutil.Uint           `json:"difficulty"`
 	BaseFee     *uint256.Int            `json:"baseFeePerGas"`
+	BlobBaseFee *hexutil.Big            `json:"blobBaseFee"`
 	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
 	BeaconRoot  *common.Hash            `json:"beaconRoot"`
 	Withdrawals *types.Withdrawals      `json:"withdrawals"`
