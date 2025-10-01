@@ -635,10 +635,10 @@ func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name, tx)
+	return tx.historyStartFrom(name, tx.Tx)
 }
 func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name, tx)
+	return tx.historyStartFrom(name, tx.RwTx)
 }
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.Tx)
