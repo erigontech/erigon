@@ -1102,12 +1102,24 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		}
 	}
 
+	domsFlushFn := func() (bool, FlushAndComputeCommitmentTimes, error) {
+		if !inMemExec {
+			start = time.Now()
+			err := doms.Flush(ctx, applyTx)
+			times.Flush = time.Since(start)
+			if err != nil {
+				return false, times, err
+			}
+		}
+		return true, times, nil
+	}
+
 	if header == nil {
 		return false, times, errors.New("header is nil")
 	}
 
 	if dbg.DiscardCommitment() {
-		return true, times, nil
+		return domsFlushFn()
 	}
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
@@ -1130,15 +1142,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 			applyTx, cfg, e, maxBlockNum, logger, u)
 		return false, times, err
 	}
-	if !inMemExec {
-		start = time.Now()
-		err := doms.Flush(ctx, applyTx)
-		times.Flush = time.Since(start)
-		if err != nil {
-			return false, times, err
-		}
-	}
-	return true, times, nil
+	return domsFlushFn()
 
 }
 
