@@ -1,5 +1,3 @@
-//go:build integration && !windows
-
 // these tests have cleanup issues for mdbx on windows
 package stagedsync
 
@@ -650,6 +648,9 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 var discardLogging = true
 
 func TestLessConflicts(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -676,6 +677,9 @@ func TestLessConflicts(t *testing.T) {
 }
 
 func TestLessConflictsWithMetadata(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -724,6 +728,9 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 }
 
 func TestZeroTx(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	logger := logger(discardLogging)
 
@@ -745,6 +752,9 @@ func TestZeroTx(t *testing.T) {
 }
 
 func TestAlternatingTx(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 
 	logger := logger(discardLogging)
@@ -767,6 +777,9 @@ func TestAlternatingTx(t *testing.T) {
 }
 
 func TestAlternatingTxWithMetadata(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	logger := logger(discardLogging)
 
@@ -810,6 +823,9 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 }
 
 func TestMoreConflicts(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -836,6 +852,9 @@ func TestMoreConflicts(t *testing.T) {
 }
 
 func TestMoreConflictsWithMetadata(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -884,6 +903,9 @@ func TestMoreConflictsWithMetadata(t *testing.T) {
 }
 
 func TestRandomTx(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -908,6 +930,9 @@ func TestRandomTx(t *testing.T) {
 }
 
 func TestRandomTxWithMetadata(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -954,6 +979,9 @@ func TestRandomTxWithMetadata(t *testing.T) {
 }
 
 func TestTxWithLongTailRead(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -983,6 +1011,9 @@ func TestTxWithLongTailRead(t *testing.T) {
 }
 
 func TestTxWithLongTailReadWithMetadata(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	rand := rand.New(rand.NewSource(0))
 
@@ -1034,6 +1065,9 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 }
 
 func TestDexScenario(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	logger := logger(discardLogging)
 
@@ -1079,6 +1113,9 @@ func TestDexScenario(t *testing.T) {
 }
 
 func TestDexScenarioWithMetadata(t *testing.T) {
+	if testing.Short() || runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	//t.Parallel()
 	logger := logger(discardLogging)
 
