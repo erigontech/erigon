@@ -182,6 +182,11 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 }
 
 func CalculateEffectiveGas(gas *uint256.Int, ep uint8) *uint256.Int {
+	// if egp 0 return 0
+	if ep == 0 {
+		return uint256.NewInt(0)
+	}
+
 	val := gas.Clone()
 	epi := new(uint256.Int).SetUint64(uint64(ep))
 	epi = epi.Add(epi, u256.Num1)

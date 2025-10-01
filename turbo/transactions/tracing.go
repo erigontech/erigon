@@ -105,6 +105,11 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		effectiveGasPricePercentage, _ := hermezReader.GetEffectiveGasPricePercentage(txn.Hash())
 		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 
+		// free if egp is 0
+		if effectiveGasPricePercentage == 0 {
+			msg.SetIsFree(true)
+		}
+
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)

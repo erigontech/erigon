@@ -48,13 +48,24 @@ func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *stat
 		msg.SetFeeCap(CalculateEffectiveGas(msg.FeeCap(), effectiveGasPricePercentage))
 	}
 
+	isFree := false
+
+	// free if egp is 0
+	if effectiveGasPricePercentage == 0 {
+		isFree = true
+	}
+
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
 		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		if engine.IsServiceTransaction(msg.From(), syscall) {
+			isFree = true
+		}
 	}
+
+	msg.SetIsFree(isFree)
 
 	// some zk networks need to ensure the injected batch is free, the transaction for this lives on the
 	// L1 or on a disk on file as part of launching the ZK contracts so can't be changed which means
