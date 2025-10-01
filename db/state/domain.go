@@ -162,6 +162,14 @@ func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep))
 }
 
+func (d *Domain) firstTxNumInDB(tx kv.Tx) (firstTxNum uint64, found bool) {
+	firstTxNumBytes, _ := kv.FirstKey(tx, d.History.KeysTable)
+	if len(firstTxNumBytes) == 0 {
+		return 0, false
+	}
+	return binary.BigEndian.Uint64(firstTxNumBytes), true
+}
+
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 	lstIdx, _ := kv.LastKey(tx, d.History.KeysTable)
@@ -1458,9 +1466,13 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 }
 
 // Returns the first txNum from available history
-func (dt *DomainRoTx) HistoryStartFrom() uint64 {
-	if len(dt.ht.files) == 0 {
-		return math.MaxUint64 // default value of +∞
+func (dt *DomainRoTx) HistoryStartFrom(db kv.RoDB) uint64 {
+	if len(dt.ht.files) == 0 { // if no history files, check in MDBX
+		firstTxNumInMdbx, found := firstTxNumInDB(db, dt.d)
+		if !found {
+			return math.MaxUint64 // default value of +∞
+		}
+		return firstTxNumInMdbx
 	}
 	return dt.ht.files[0].startTxNum
 }
