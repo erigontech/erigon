@@ -162,14 +162,6 @@ func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep))
 }
 
-func (d *Domain) firstTxNumInDB(tx kv.Tx) (firstTxNum uint64, found bool) {
-	firstTxNumBytes, _ := kv.FirstKey(tx, d.History.KeysTable)
-	if len(firstTxNumBytes) == 0 {
-		return 0, false
-	}
-	return binary.BigEndian.Uint64(firstTxNumBytes), true
-}
-
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 	lstIdx, _ := kv.LastKey(tx, d.History.KeysTable)

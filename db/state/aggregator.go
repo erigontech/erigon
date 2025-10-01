@@ -1923,7 +1923,11 @@ func (at *AggregatorRoTx) Close() {
 // First txnum found in MDBX
 func firstTxNumInDB(db kv.RoDB, domain *Domain) (firstTxNum uint64, found bool) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		firstTxNum, found = domain.firstTxNumInDB(tx)
+		var err error
+		firstTxNum, found, err = domain.firstTxNumInDB(tx)
+		if err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		log.Warn("[aggregator] firstTxNumInDB", "err", err)
