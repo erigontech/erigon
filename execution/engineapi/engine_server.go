@@ -472,14 +472,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForStuff(200*time.Millisecond, func() (bool, error) {
 			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForStuff(200*time.Millisecond, func() (bool, error) {
 			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
@@ -493,7 +493,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
+	waitingForExecutionReady, err := waitForStuff(2000*time.Millisecond, func() (bool, error) {
 		isReady, err := s.chainRW.Ready(ctx)
 		return !isReady, err
 	})
