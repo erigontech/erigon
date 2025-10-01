@@ -46,13 +46,24 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		msg.SetGasPrice(CalculateEffectiveGas(msg.GasPrice(), effectiveGasPricePercentage))
 	}
 
+	isFree := false
+
+	// free if egp is 0
+	if effectiveGasPricePercentage == 0 {
+		isFree = true
+	}
+
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
 		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		if engine.IsServiceTransaction(msg.From(), syscall) {
+			isFree = true
+		}
 	}
+
+	msg.SetIsFree(isFree)
 
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
