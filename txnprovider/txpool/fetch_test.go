@@ -61,13 +61,13 @@ func TestFetch(t *testing.T) {
 	// Send one transaction id
 	wg.Add(1)
 	errs := m.Send(&sentryproto.InboundMessage{
-		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
 		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
 		PeerId: peerID,
 	})
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("sending new pool txn hashes 66 (%d): %v", i, err)
+			t.Errorf("sending new pool txn hashes 68 (%d): %v", i, err)
 		}
 	}
 	wg.Wait()
