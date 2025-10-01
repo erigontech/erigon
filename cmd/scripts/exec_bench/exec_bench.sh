@@ -389,7 +389,7 @@ execute_benchmark() {
     local logfile2="$LOG_LOCATION/output2.txt"
     ./build/bin/erigon seg txnum --datadir $datadir  --txnum $STATE_AT_TXNUM > $logfile2 2>&1
     STATE_AT=$(cat $logfile2|grep out|awk -F'block=' '{print $2}')
-    STATE_TO=$((STATE_AT + 1000))
+    STATE_TO=$((STATE_AT + 2000))
 
     EXEC_TO=$((BLOCK_AT < STATE_TO ? BLOCK_AT : STATE_TO))
 
@@ -402,49 +402,9 @@ execute_benchmark() {
     
     # Start the command in background and capture its PID
     timeout --preserve-status -k 3600 -s SIGKILL 3600 bash -c "$cmd" 2>&1 | tee "$log_file"
-    local pid=$!
-    log_info "Process started with PID: $pid"
-    wait $pid
     if [[ $? -ne 0 ]]; then
         log_error "Benchmark run $run_number failed"
         exit 1
-    fi
-
-
-    if [[ $run_number -eq 1 ]]; then
-        ERIGON_PID1=$pid
-    else
-        ERIGON_PID2=$pid
-    fi
-    
-    
-    # Monitor the process
-    local elapsed=0
-    while [[ $elapsed -lt $timeout_seconds ]]; do
-        if ! kill -0 $pid 2>/dev/null; then
-            log_warn "Process $pid exited before timeout (after ${elapsed}s)"
-            break
-        fi
-        
-        # Show progress every 5 seconds
-        if [[ $((elapsed % 5)) -eq 0 ]] && [[ $elapsed -gt 0 ]]; then
-            log_info "  ... running (${elapsed}/${timeout_seconds}s)"
-        fi
-        
-        sleep 1
-        ((elapsed++))
-    done
-    
-    # Kill the process if it's still running
-    if kill -0 $pid 2>/dev/null; then
-        kill_process $pid "benchmark process"
-    fi
-    
-    # Clear the PID variable
-    if [[ $run_number -eq 1 ]]; then
-        ERIGON_PID1=""
-    else
-        ERIGON_PID2=""
     fi
     
     log_info "Benchmark run $run_number completed"
