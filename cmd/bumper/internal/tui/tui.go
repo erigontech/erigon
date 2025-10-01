@@ -383,7 +383,7 @@ func (m *model) beginEdit() {
 }
 
 func (m *model) View() string {
-	title := lipgloss.NewStyle().Bold(true).Render("Schema Versions")
+	title := lipgloss.NewStyle().Bold(true).Render("Bumper 1.0.1")
 	left := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
 		lipgloss.JoinVertical(lipgloss.Left, "Schemas", m.left.View()),
 	)
