@@ -1638,8 +1638,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 }
 
 // Returns the first known txNum found in history files of a given domain
-func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return at.d[name].HistoryStartFrom(at.a.db)
+func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) uint64 {
+	return at.d[name].HistoryStartFrom(tx)
 }
 
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
@@ -1921,15 +1921,10 @@ func (at *AggregatorRoTx) Close() {
 }
 
 // First txnum found in MDBX
-func firstTxNumInDB(db kv.RoDB, domain *Domain) (firstTxNum uint64, found bool) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		var err error
-		firstTxNum, found, err = domain.firstTxNumInDB(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+func firstTxNumInDB(tx kv.Tx, domain *Domain) (firstTxNum uint64, found bool) {
+	var err error
+	firstTxNum, found, err = domain.firstTxNumInDB(tx)
+	if err != nil {
 		log.Warn("[aggregator] firstTxNumInDB", "err", err)
 	}
 	return firstTxNum, found
