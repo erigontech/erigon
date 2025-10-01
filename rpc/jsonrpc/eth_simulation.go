@@ -173,7 +173,7 @@ type simulator struct {
 	engine            consensus.EngineReader
 	blockReader       services.FullBlockReader
 	logger            log.Logger
-	gasCap            uint64
+	gasPool           *core.GasPool
 	returnDataLimit   int
 	evmCallTimeout    time.Duration
 	commitmentHistory bool
@@ -200,7 +200,7 @@ func newSimulator(
 		engine:            engine,
 		blockReader:       blockReader,
 		logger:            logger,
-		gasCap:            gasCap,
+		gasPool:           new(core.GasPool).AddGas(gasCap),
 		returnDataLimit:   returnDataLimit,
 		evmCallTimeout:    evmCallTimeout,
 		commitmentHistory: commitmentHistory,
@@ -555,18 +555,18 @@ func (s *simulator) simulateCall(
 	}
 	defer cancel()
 
-	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasCap)
+	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Prepare the transaction message
-	msg, err := call.ToMessage(s.gasCap, blockCtx.BaseFee)
+	msg, err := call.ToMessage(s.gasPool.Gas(), blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	txCtx := core.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasCap, blockCtx.BaseFee)
+	txn, err := call.ToTransaction(s.gasPool.Gas(), blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -582,8 +582,12 @@ func (s *simulator) simulateCall(
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-	result, err := core.ApplyMessage(evm, msg, gp, true, false, s.engine)
+	// Treat gas and blob gas as part of the same pool.
+	err = s.gasPool.AddBlobGas(msg.BlobGas()).SubGas(msg.BlobGas())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	result, err := core.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)
 	}
