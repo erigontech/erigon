@@ -8,6 +8,12 @@ RESULT_DIR="$2"
 # The REFERENCE_HOST that hosts the reference client
 REFERENCE_HOST="$3"
 
+if [ -z "$REFERENCE_HOST" ]; then
+    echo "*WARNING*: REFERENCE_HOST is not set, RPC tests on latest will run without reference comparison"
+    echo "*WARNING*: RPC responses are available for inspection in results directory"
+    DUMP_RESPONSE="always-dump-response"
+fi
+
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
    debug_traceBlockByNumber/test_30.json # huge JSON response => slow diff
@@ -28,4 +34,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.87.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.90.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message" "$DUMP_RESPONSE"

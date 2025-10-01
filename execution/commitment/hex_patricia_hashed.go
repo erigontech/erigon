@@ -79,6 +79,8 @@ type HexPatriciaHashed struct {
 	rootTouched   bool
 	rootPresent   bool
 	trace         bool
+	traceDomain   bool
+	capture       []string
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
@@ -126,10 +128,10 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 type cell struct {
 	hashedExtension [128]byte
 	extension       [64]byte
-	accountAddr     [length.Addr]byte               // account plain key
+	accountAddr     common.Address                  // account plain key
 	storageAddr     [length.Addr + length.Hash]byte // storage plain key
-	hash            [length.Hash]byte               // cell hash
-	stateHash       [length.Hash]byte
+	hash            common.Hash                     // cell hash
+	stateHash       common.Hash
 	hashedExtLen    int       // length of the hashed extension, if any
 	extLen          int       // length of the extension, if any
 	accountAddrLen  int       // length of account plain key
@@ -140,7 +142,7 @@ type cell struct {
 	Update                    // state update
 
 	// temporary buffers
-	hashBuf [length.Hash]byte
+	hashBuf common.Hash
 }
 
 type loadFlags uint8
@@ -459,7 +461,7 @@ func readUvarint(data []byte) (uint64, int, error) {
 	return l, n, nil
 }
 
-func (cell *cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
+func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
 		balanceBytes = cell.Balance.ByteLen()
@@ -624,8 +626,8 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, true)
 }
 
-func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Hash]byte, error) {
-	var hashBuf [length.Hash]byte
+func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Hash, error) {
+	var hashBuf common.Hash
 
 	// Compute the total length of binary representation
 	var kp, kl int
@@ -720,7 +722,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 
 func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, depth int, buf []byte) ([]byte, bool, []byte, error) {
 	var err error
-	var storageRootHash [length.Hash]byte
+	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
 	if hph.memoizationOff {
 		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
@@ -753,7 +755,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				return res, storageRootHashIsSet, nil, err
 			} else {
 				storageRootHashIsSet = true
-				storageRootHash = *(*[length.Hash]byte)(res[1:])
+				storageRootHash = *(*common.Hash)(res[1:])
 				//copy(storageRootHash[:], res[1:])
 				//cell.stateHashLen = 0
 			}
@@ -780,7 +782,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				if hph.trace {
 					fmt.Printf("leafHashWithKeyVal(singleton) storage hash [%x]\n", aux)
 				}
-				storageRootHash = *(*[length.Hash]byte)(aux[1:])
+				storageRootHash = *(*common.Hash)(aux[1:])
 				storageRootHashIsSet = true
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
@@ -875,7 +877,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			if hph.trace {
 				fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
 			}
-			var hash [length.Hash]byte
+			var hash common.Hash
 			if hash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.hash[:cell.hashLen]); err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
 			}
@@ -897,7 +899,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 
 func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte) ([]byte, error) {
 	var err error
-	var storageRootHash [length.Hash]byte
+	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
 	if hph.memoizationOff {
 		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
@@ -929,7 +931,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			storageRootHashIsSet = true
-			storageRootHash = *(*[length.Hash]byte)(cell.stateHash[:cell.stateHashLen])
+			storageRootHash = *(*common.Hash)(cell.stateHash[:cell.stateHashLen])
 		} else {
 			if !cell.loaded.storage() {
 				return nil, fmt.Errorf("storage %x was not loaded as expected: cell %v", cell.storageAddr[:cell.storageAddrLen], cell.String())
@@ -953,7 +955,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				cell.stateHashLen = len(leafHash) - 1
 				return leafHash, nil
 			}
-			storageRootHash = *(*[length.Hash]byte)(leafHash[1:])
+			storageRootHash = *(*common.Hash)(leafHash[1:])
 			storageRootHashIsSet = true
 			cell.stateHashLen = 0
 			hadToReset.Add(1)
@@ -2085,7 +2087,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
 				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
 		default:
 		}
 
@@ -2183,16 +2184,17 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
-		//hph.trace = true
 
 		updatesCount = updates.Size()
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
+
+	//hph.trace = true
 
 	if collectCommitmentMetrics {
 		hph.metrics.Reset()
@@ -2210,18 +2212,57 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
+				append(append([]any{"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount))},
+					hph.metrics.logMetrics()...), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))...)
+			if progress != nil {
+				progress <- &CommitProgress{
+					KeyIndex:    ki,
+					UpdateCount: updatesCount,
+					Metrics:     hph.metrics.AsValues(),
+				}
+			}
 		default:
 		}
-		if hph.trace {
-			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+
+		if hph.trace || hph.traceDomain || hph.capture != nil {
+			update := stateUpdate
+
+			if update == nil {
+				if len(plainKey) == hph.accountKeyLen {
+					update, err = hph.ctx.Account(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+					}
+				} else {
+					update, err = hph.ctx.Storage(plainKey)
+					if err != nil {
+						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+					}
+				}
+			}
+
+			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+
+			if hph.trace || hph.traceDomain {
+				fmt.Println(trace)
+			}
+
+			if hph.capture != nil {
+				hph.capture = append(hph.capture, trace)
+			}
 		}
+
 		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
 			return fmt.Errorf("followAndUpdate: %w", err)
 		}
 		ki++
+		if progress != nil && ki == updatesCount {
+			progress <- &CommitProgress{
+				KeyIndex:    ki,
+				UpdateCount: updatesCount,
+				Metrics:     hph.metrics.AsValues(),
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -2281,7 +2322,17 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool) { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
+	capture := hph.capture
+	if truncate {
+		hph.capture = nil
+	}
+	return capture
+}
+
+func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = capture }
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 
