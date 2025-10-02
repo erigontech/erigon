@@ -7,11 +7,11 @@ global:
 scrape_configs:
   - job_name: 'erigon-serial'
     static_configs:
-      - targets: ['localhost:6061']
+      - targets: ['host.docker.internal:6061']
     metrics_path: /debug/metrics/prometheus
 
   - job_name: 'erigon-par'
     static_configs:
-      - targets: ['localhost:6062']
+      - targets: ['host.docker.internal:6062']
     metrics_path: /debug/metrics/prometheus
 

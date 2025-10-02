@@ -384,17 +384,18 @@ execute_benchmark() {
         echo "1" | ./build/bin/erigon snapshots rm-state  --datadir $datadir --latest
     fi
 
+    ./build/bin/integration print_stages --datadir $datadir --chain $CHAIN>$logfile
+
     BLOCK_AT=$(cat $logfile|awk '/OtterSync/ {print $2}'|tail -1)
     STATE_AT_TXNUM=$(cat $logfile|awk '/accounts/ {print $3}'|tail -1)
     local logfile2="$LOG_LOCATION/output2.txt"
     ./build/bin/erigon seg txnum --datadir $datadir  --txnum $STATE_AT_TXNUM > $logfile2 2>&1
     STATE_AT=$(cat $logfile2|grep out|awk -F'block=' '{print $2}')
-    STATE_TO=$((STATE_AT + 2000))
+    STATE_TO=$((STATE_AT + 3000))
 
     EXEC_TO=$((BLOCK_AT < STATE_TO ? BLOCK_AT : STATE_TO))
 
     cmd="$(strip_quotes "$cmd") --block $EXEC_TO"
-
     log_info "Executing Command: $cmd"
 
     # Create a log file for this run
@@ -409,14 +410,6 @@ execute_benchmark() {
     
     log_info "Benchmark run $run_number completed"
     log_info "Log saved to: $log_file"
-    
-    # Show last few lines of log
-    if [[ -f "$log_file" ]]; then
-        log_info "Last 5 lines of output:"
-        tail -n 5 "$log_file" | while IFS= read -r line; do
-            echo "    $line"
-        done
-    fi
 }
 
 build_erigon() {
