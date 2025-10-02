@@ -117,7 +117,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "parallel"),
-			"from", startBlockNum, "to", min(startBlockNum+blockLimit, maxBlockNum), "fromTxNum", pe.doms.TxNum(),
+			"from", startBlockNum, "to", min(startBlockNum+blockLimit, maxBlockNum), "initialTxNum", pe.doms.TxNum(),
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
 			"inMem", pe.inMemExec)
 	}

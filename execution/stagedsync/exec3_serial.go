@@ -55,8 +55,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
-			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "fromTxNum",
-			se.doms.TxNum(), "initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
+			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "initialTxNum",
+			se.progress.initialTxNum, "initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"useExternalTx", useExternalTx, "inMem", se.inMemExec)
 	}
 
@@ -120,7 +120,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Logger:           se.logger,
 			}
 
-			if txTask.TxNum > 0 && txTask.TxNum <= se.doms.TxNum() {
+			if txTask.TxNum > 0 && txTask.TxNum <= se.progress.initialTxNum {
 				havePartialBlock = true
 				inputTxNum++
 				continue
