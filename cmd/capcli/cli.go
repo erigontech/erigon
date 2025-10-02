@@ -32,8 +32,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/db/snaptype"
-
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
