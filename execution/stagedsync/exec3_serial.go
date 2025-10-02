@@ -164,7 +164,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				}
 
 				if err != nil {
-					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err)
+					return fmt.Errorf("%w, txnIdx=%d, %w", consensus.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
 				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
@@ -174,7 +174,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						return fmt.Errorf("%w, txnIdx=%d, %w", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
 
@@ -224,20 +224,18 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			if se.cfg.badBlockHalt {
 				return false, err
 			}
-			if errors.Is(err, consensus.ErrInvalidBlock) {
-				if se.u != nil {
-					if err := se.u.UnwindTo(txTask.BlockNumber()-1, BadBlock(txTask.Header.Hash(), err), se.applyTx); err != nil {
-						return false, err
-					}
+
+			if se.u != nil {
+				unwindReason := ExecUnwind
+				if errors.Is(err, consensus.ErrInvalidBlock) {
+					unwindReason = BadBlock(txTask.Header.Hash(), err)
 				}
-			} else {
-				if se.u != nil {
-					if err := se.u.UnwindTo(txTask.BlockNumber()-1, ExecUnwind, se.applyTx); err != nil {
-						return false, err
-					}
+				if err := se.u.UnwindTo(txTask.BlockNumber()-1, unwindReason, se.applyTx); err != nil {
+					return false, err
 				}
 			}
-			return false, nil
+
+			return false, err
 		}
 
 		var logIndexAfterTx uint32

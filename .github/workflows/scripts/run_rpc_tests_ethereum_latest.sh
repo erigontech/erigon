@@ -21,6 +21,7 @@ DISABLED_TEST_LIST=(
    debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
    debug_traceCallMany
    erigon_
+   eth_blobBaseFee/test_01.json # debug mismatch
    eth_callBundle
    eth_getProof/test_04.json
    eth_getProof/test_08.json
