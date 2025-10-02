@@ -513,12 +513,12 @@ var (
 	// Network Settings
 	MaxPeersFlag = cli.IntFlag{
 		Name:  "maxpeers",
-		Usage: "Maximum number of network peers (network disabled if set to 0)",
+		Usage: "Maximum number of network peers per protocol version (network disabled if set to 0)",
 		Value: nodecfg.DefaultConfig.P2P.MaxPeers,
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
-		Usage: "Maximum number of TCP connections pending to become connected peers",
+		Usage: "Maximum number of TCP connections pending to become connected peers (per protocol version)",
 		Value: nodecfg.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
