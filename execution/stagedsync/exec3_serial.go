@@ -72,7 +72,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		default:
 		}
 
-		b, err := exec3.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
+		var err error
+		b, err = exec3.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
 		if err != nil {
 			return nil, rwTx, err
 		}
