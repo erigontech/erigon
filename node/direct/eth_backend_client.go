@@ -79,6 +79,28 @@ type subscribeReply struct {
 	r   *remoteproto.SubscribeReply
 	err error
 }
+
+func sendWithRecover[T any](ctx context.Context, ch chan<- T, msg T) (err error) {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			if panicErr, ok := r.(error); ok && panicErr.Error() == "send on closed channel" {
+				err = io.EOF
+				return
+			}
+			panic(r)
+		}
+	}()
+
+	ch <- msg
+	return nil
+}
+
 type SubscribeStreamS struct {
 	ch  chan *subscribeReply
 	ctx context.Context
@@ -86,15 +108,14 @@ type SubscribeStreamS struct {
 }
 
 func (s *SubscribeStreamS) Send(m *remoteproto.SubscribeReply) error {
-	s.ch <- &subscribeReply{r: m}
-	return nil
+	return sendWithRecover(s.ctx, s.ch, &subscribeReply{r: m})
 }
 func (s *SubscribeStreamS) Context() context.Context { return s.ctx }
 func (s *SubscribeStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- &subscribeReply{err: err}
+	_ = sendWithRecover(s.ctx, s.ch, &subscribeReply{err: err})
 }
 
 type SubscribeStreamC struct {
@@ -160,8 +181,7 @@ type subscribeLogsRequest struct {
 }
 
 func (s *SubscribeLogsStreamS) Send(m *remoteproto.SubscribeLogsReply) error {
-	s.chSend <- &subscribeLogsReply{r: m}
-	return nil
+	return sendWithRecover(s.ctx, s.chSend, &subscribeLogsReply{r: m})
 }
 
 func (s *SubscribeLogsStreamS) Recv() (*remoteproto.LogsFilterRequest, error) {
@@ -180,7 +200,7 @@ func (s *SubscribeLogsStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.chSend <- &subscribeLogsReply{err: err}
+	_ = sendWithRecover(s.ctx, s.chSend, &subscribeLogsReply{err: err})
 }
 
 type SubscribeLogsStreamC struct {
@@ -191,8 +211,7 @@ type SubscribeLogsStreamC struct {
 }
 
 func (c *SubscribeLogsStreamC) Send(m *remoteproto.LogsFilterRequest) error {
-	c.chSend <- &subscribeLogsRequest{r: m}
-	return nil
+	return sendWithRecover(c.ctx, c.chSend, &subscribeLogsRequest{r: m})
 }
 
 func (c *SubscribeLogsStreamC) Recv() (*remoteproto.SubscribeLogsReply, error) {
