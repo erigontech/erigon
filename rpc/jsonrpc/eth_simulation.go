@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -170,9 +171,9 @@ type simulator struct {
 	base              *types.Header
 	chainConfig       *chain.Config
 	engine            consensus.EngineReader
-	canonicalReader   services.CanonicalReader
+	blockReader       services.FullBlockReader
 	logger            log.Logger
-	gasCap            uint64
+	gasPool           *core.GasPool
 	returnDataLimit   int
 	evmCallTimeout    time.Duration
 	commitmentHistory bool
@@ -186,7 +187,7 @@ func newSimulator(
 	header *types.Header,
 	chainConfig *chain.Config,
 	engine consensus.EngineReader,
-	canonicalReader services.CanonicalReader,
+	blockReader services.FullBlockReader,
 	logger log.Logger,
 	gasCap uint64,
 	returnDataLimit int,
@@ -197,9 +198,9 @@ func newSimulator(
 		base:              header,
 		chainConfig:       chainConfig,
 		engine:            engine,
-		canonicalReader:   canonicalReader,
+		blockReader:       blockReader,
 		logger:            logger,
-		gasCap:            gasCap,
+		gasPool:           new(core.GasPool).AddGas(gasCap),
 		returnDataLimit:   returnDataLimit,
 		evmCallTimeout:    evmCallTimeout,
 		commitmentHistory: commitmentHistory,
@@ -415,7 +416,6 @@ func (s *simulator) simulateBlock(
 	txNum := minTxNum + 1 + uint64(txnIndex)
 	sharedDomains.SetBlockNum(blockNumber)
 	sharedDomains.SetTxNum(txNum)
-	sharedDomains.GetCommitmentContext().SetTxNum(txNum)
 
 	var stateReader state.StateReader
 	if latest {
@@ -439,12 +439,13 @@ func (s *simulator) simulateBlock(
 	}
 	intraBlockState := state.New(stateReader)
 
-	// Override the state before execution.
+	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
 		if err := stateOverrides.Override(intraBlockState); err != nil {
 			return nil, nil, err
 		}
+		intraBlockState.SoftFinalise()
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -453,9 +454,25 @@ func (s *simulator) simulateBlock(
 		vmConfig.Tracer = tracer.Hooks()
 	}
 
+	// Apply pre-transaction state modifications before block execution.
+	engine, ok := s.engine.(consensus.Engine)
+	if !ok {
+		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
+	}
+	systemCallCustom := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		return core.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
+	}
+	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
+	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
+	intraBlockState.SoftFinalise()
+
 	// Create a custom block context and apply any custom block overrides
-	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.canonicalReader, s.chainConfig,
+	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.blockReader, s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
+	if bsc.BlockOverrides.BlobBaseFee != nil {
+		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
+	}
+	rules := blockCtx.Rules(s.chainConfig)
 
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 	callResults := make([]CallResult, 0, len(bsc.Calls))
@@ -468,7 +485,7 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(blockCtx.Rules(s.chainConfig), stateWriter)
+		err = intraBlockState.FinalizeTx(rules, stateWriter)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -478,13 +495,13 @@ func (s *simulator) simulateBlock(
 		header.BlobGasUsed = &cumulativeBlobGasUsed
 	}
 
-	if err := intraBlockState.CommitBlock(blockCtx.Rules(s.chainConfig), stateWriter); err != nil {
+	if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 	}
 
 	// Compute the state root for execution on the latest state and also on the historical state if commitment history is present.
 	if latest || s.commitmentHistory {
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, false, header.Number.Uint64(), txNum, "eth_simulateV1")
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, header.Number.Uint64(), txNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -497,12 +514,8 @@ func (s *simulator) simulateBlock(
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
 	}
-	engine, ok := s.engine.(consensus.Engine)
-	if !ok {
-		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
-	}
 	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, s.chainConfig, intraBlockState, header, engine, false /* constCall */, vmConfig)
+		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
 		receiptList, withdrawals, nil, systemCall, nil, s.logger)
@@ -542,18 +555,18 @@ func (s *simulator) simulateCall(
 	}
 	defer cancel()
 
-	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasCap)
+	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Prepare the transaction message
-	msg, err := call.ToMessage(s.gasCap, blockCtx.BaseFee)
+	msg, err := call.ToMessage(s.gasPool.Gas(), blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	txCtx := core.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasCap, blockCtx.BaseFee)
+	txn, err := call.ToTransaction(s.gasPool.Gas(), blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -569,8 +582,12 @@ func (s *simulator) simulateCall(
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-	result, err := core.ApplyMessage(evm, msg, gp, true, false, s.engine)
+	// Treat gas and blob gas as part of the same pool.
+	err = s.gasPool.AddBlobGas(msg.BlobGas()).SubGas(msg.BlobGas())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	result, err := core.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)
 	}

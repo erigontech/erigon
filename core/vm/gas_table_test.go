@@ -129,7 +129,7 @@ func TestEIP2200(t *testing.T) {
 
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
+				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
 					return nil
 				},
 			}
@@ -188,7 +188,7 @@ func TestCreateGas(t *testing.T) {
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
+			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
 				return nil
 			},
 		}
