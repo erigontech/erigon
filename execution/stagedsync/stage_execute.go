@@ -222,6 +222,8 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
+const trace bool = true
+
 func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedDomains,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
@@ -234,22 +236,29 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedD
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {
-				var acc accounts.Account
-				if err := accounts.DeserialiseV3(&acc, v); err != nil {
+				var account accounts.Account
+				if err := accounts.DeserialiseV3(&account, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
 				var address common.Address
 				copy(address[:], k)
 
-				newV := accounts.SerialiseV3(&acc)
+				if dbg.TraceUnwinds {
+					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+				}
+
+				newV := accounts.SerialiseV3(&account)
 				if accumulator != nil {
-					accumulator.ChangeAccount(address, acc.Incarnation, newV)
+					accumulator.ChangeAccount(address, account.Incarnation, newV)
 				}
 			} else {
 				var address common.Address
 				copy(address[:], k)
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
+				}
+				if dbg.TraceUnwinds {
+					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x\n", blockUnwindTo, txUnwindTo, address)
 				}
 			}
 			return nil
@@ -261,6 +270,13 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedD
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
 			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
+		}
+		if dbg.TraceUnwinds {
+			if v == nil {
+				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [empty]\n", blockUnwindTo, txUnwindTo, address, location)
+			} else {
+				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [%x]\n", blockUnwindTo, txUnwindTo, address, location, v)
+			}
 		}
 		return nil
 	}
