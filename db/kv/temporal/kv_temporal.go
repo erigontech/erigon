@@ -233,6 +233,10 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+	return tx.aggtx.StepsInFiles(entitySet...)
+}
+
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
@@ -627,14 +631,14 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
-func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
+func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
+	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
+	return tx.historyStartFrom(name, tx.Tx)
 }
 func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
+	return tx.historyStartFrom(name, tx.RwTx)
 }
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.Tx)

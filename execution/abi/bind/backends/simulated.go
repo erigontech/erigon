@@ -618,6 +618,10 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	} else {
 		hi = b.pendingBlock.GasLimit()
 	}
+	if hi > params.MaxTxnGasLimit && b.m.ChainConfig.IsOsaka(b.pendingBlock.Time()) {
+		// Cap the maximum gas allowance according to EIP-7825 if Osaka
+		hi = params.MaxTxnGasLimit
+	}
 	// Recap the highest gas allowance with account's balance.
 	if call.GasPrice != nil && !call.GasPrice.IsZero() {
 		balance, err := b.pendingState.GetBalance(call.From) // from can't be nil
@@ -723,7 +727,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if err != nil {
 		return nil, err
 	}
-	from.SetBalance(*uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
+	from.SetBalance(*uint256.NewInt(0).SetAllOne(), true, tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 

@@ -93,7 +93,7 @@ func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddition
 	blockSize += *mb.withdrawalsRlpSize
 	blockSize += mb.TxnsRlpSize(withAdditional...)
 	blockSize += rlp.ListPrefixLen(blockSize)
-	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Number.Uint64())
+	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Time)
 	return maxSize - blockSize
 }
 

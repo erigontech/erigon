@@ -36,7 +36,7 @@ import (
 func Assemble(
 	ctx context.Context,
 	cfg txpoolcfg.Config,
-	chainDB kv.RwDB,
+	chainDB kv.TemporalRoDB,
 	cache kvcache.Cache,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
@@ -64,7 +64,7 @@ func Assemble(
 		ctx,
 		newTxns,
 		poolDB,
-		chainDB.(kv.TemporalRwDB),
+		chainDB,
 		cfg,
 		cache,
 		chainConfig,

@@ -32,7 +32,6 @@ import (
 )
 
 const (
-	ETH67 = 67
 	ETH68 = 68
 	ETH69 = 69
 
@@ -41,12 +40,10 @@ const (
 
 var (
 	ProtocolToUintMap = map[sentryproto.Protocol]uint{
-		sentryproto.Protocol_ETH67: ETH67,
 		sentryproto.Protocol_ETH68: ETH68,
 		sentryproto.Protocol_ETH69: ETH69,
 	}
 	UintToProtocolMap = map[uint]sentryproto.Protocol{
-		ETH67: sentryproto.Protocol_ETH67,
 		ETH68: sentryproto.Protocol_ETH68,
 		ETH69: sentryproto.Protocol_ETH69,
 	}

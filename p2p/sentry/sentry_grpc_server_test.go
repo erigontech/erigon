@@ -578,7 +578,7 @@ func startHandshake(
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit67(t *testing.T) { testForkIDSplit(t, direct.ETH67) }
+func TestForkIDSplit68(t *testing.T) { testForkIDSplit(t, direct.ETH68) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (

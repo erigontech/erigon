@@ -207,6 +207,7 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPop:      4,
 		numPush:     1,
 		memorySize:  memoryCreate2,
+		string:      stCreate,
 	}
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
@@ -669,6 +670,7 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
+			string:      stGas,
 		},
 		JUMPDEST: {
 			execute:     opJumpdest,
@@ -1294,6 +1296,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      3,
 			numPush:     1,
 			memorySize:  memoryCreate,
+			string:      stCreate,
 		},
 		CALL: {
 			execute:     opCall,

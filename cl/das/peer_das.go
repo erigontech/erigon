@@ -243,6 +243,10 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
 				return
 			}
+			if sidecar.Column.Len() > int(d.beaconConfig.MaxBlobCommittmentsPerBlock) {
+				log.Warn("[blobsRecover] invalid column sidecar", "slot", slot, "blockRoot", blockRoot, "columnIndex", columnIndex, "columnLen", sidecar.Column.Len())
+				return
+			}
 			for i := 0; i < sidecar.Column.Len(); i++ {
 				matrixEntries = append(matrixEntries, cltypes.MatrixEntry{
 					Cell:        *sidecar.Column.Get(i),
@@ -663,6 +667,12 @@ mainloop:
 					}
 					if exist {
 						req.removeColumn(slot, blockRoot, columnIndex)
+						return
+					}
+					blobParameters := d.beaconConfig.GetBlobParameters(slot / d.beaconConfig.SlotsPerEpoch)
+					if sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
+						log.Warn("invalid column sidecar length", "blockRoot", blockRoot, "columnIndex", sidecar.Index, "columnLen", sidecar.Column.Len())
+						d.rpc.BanPeer(result.pid)
 						return
 					}
 

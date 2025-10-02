@@ -59,7 +59,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		NAT:             nat.Any(),
 		NoDiscovery:     true,
 		Name:            "p2p-mock",
-		NodeDatabase:    "dev/nodes/eth67",
+		NodeDatabase:    "dev/nodes/eth68",
 		PrivateKey:      privateKey,
 	}
 

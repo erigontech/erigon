@@ -268,7 +268,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remoteproto.ProtocolVersionRequest) (*remoteproto.ProtocolVersionReply, error) {
-	return &remoteproto.ProtocolVersionReply{Id: direct.ETH67}, nil
+	return &remoteproto.ProtocolVersionReply{Id: direct.ETH68}, nil
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remoteproto.ClientVersionRequest) (*remoteproto.ClientVersionReply, error) {
