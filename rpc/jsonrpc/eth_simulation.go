@@ -428,7 +428,7 @@ func (s *simulator) simulateBlock(
 		}
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-		if txNum < commitmentStartingTxNum {
+		if s.commitmentHistory && txNum < commitmentStartingTxNum {
 			return nil, nil, state.PrunedError
 		}
 
