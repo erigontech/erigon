@@ -105,7 +105,7 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: metric-plots
+        name: metric-plots-${{ env.CHAIN }}
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Clean up Erigon data directory
