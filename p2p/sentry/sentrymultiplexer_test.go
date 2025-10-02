@@ -46,7 +46,7 @@ func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentry
 		ListenerAddr: fmt.Sprintf("127.0.0.%d", i),
 	}, nil).AnyTimes()
 
-	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH67}, nil).AnyTimes()
+	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil).AnyTimes()
 
 	client.EXPECT().Peers(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
