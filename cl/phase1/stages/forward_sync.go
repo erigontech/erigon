@@ -194,7 +194,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
 	if len(blocks) >= 0 {
-		fmt.Println("[Caplin] Processing block batch", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot, "count", len(blocks)
+		fmt.Println("[Caplin] Processing block batch", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot, "count", len(blocks))
 	}
 	if err = downloadBlobs(ctx, logger, cfg, highestBlockProcessed, blocks); err != nil {
 		return
