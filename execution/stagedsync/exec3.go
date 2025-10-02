@@ -187,6 +187,7 @@ func ExecV3(ctx context.Context,
 	var (
 		stageProgress = execStage.BlockNumber
 		blockNum      = doms.BlockNum()
+		initialTxNum  = doms.TxNum()
 	)
 
 	if maxBlockNum < blockNum {
@@ -278,7 +279,7 @@ func ExecV3(ctx context.Context,
 				inMemExec:             inMemExec,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
-				progress:              NewProgress(blockNum, doms.TxNum(), commitThreshold, false, execStage.LogPrefix(), logger),
+				progress:              NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey:     execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
@@ -295,7 +296,7 @@ func ExecV3(ctx context.Context,
 		defer flushEvery.Stop()
 
 		applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery, flushEvery)
+			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery, flushEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum
 		lastCommittedTxNum = pe.lastCommittedTxNum
@@ -312,7 +313,7 @@ func ExecV3(ctx context.Context,
 				applyTx:               applyTx,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
-				progress:              NewProgress(blockNum, doms.TxNum(), commitThreshold, false, execStage.LogPrefix(), logger),
+				progress:              NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey:     execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
@@ -324,8 +325,7 @@ func ExecV3(ctx context.Context,
 		}()
 
 		b, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			inputTxNum, useExternalTx, initialCycle, applyTx, accumulator,
-			readAhead, logEvery)
+			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		if u != nil && !u.HasUnwindPoint() {
 			if b != nil {
@@ -560,7 +560,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint64, maxBlockNum uint64, readAhead chan uint64, applyResults chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint64, maxBlockNum uint64, initialTxNum uint64, readAhead chan uint64, applyResults chan applyResult) error {
 	inputTxNum, _, offsetFromBlockBeginning, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
 
 	if err != nil {
@@ -622,7 +622,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			var txTasks []exec.Task
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
-				if inputTxNum > 0 && inputTxNum <= te.progress.initialTxNum {
+				if inputTxNum > 0 && inputTxNum <= initialTxNum {
 					inputTxNum++
 					continue
 				}

@@ -93,8 +93,8 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx, accumulator *shards.Accumulator,
-	readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (kv.TemporalRwTx, error) {
+	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.Tx
@@ -117,7 +117,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "parallel"),
-			"from", startBlockNum, "to", min(startBlockNum+blockLimit, maxBlockNum), "initialTxNum", pe.doms.TxNum(),
+			"from", startBlockNum, "to", min(startBlockNum+blockLimit, maxBlockNum), "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
 			"inMem", pe.inMemExec)
 	}
@@ -128,7 +128,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	pe.resetWorkers(ctx, pe.rs, rwTx)
 
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, readAhead, applyResults); err != nil {
+	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, initialTxNum, readAhead, applyResults); err != nil {
 		return rwTx, err
 	}
 

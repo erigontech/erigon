@@ -41,8 +41,8 @@ type serialExecutor struct {
 
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx, accumulator *shards.Accumulator,
-	readAhead chan uint64, logEvery *time.Ticker) (*types.Block, kv.TemporalRwTx, error) {
+	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Block, kv.TemporalRwTx, error) {
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
 
@@ -55,8 +55,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
-			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "initialTxNum",
-			se.progress.initialTxNum, "initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
+			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "initialTxNum", initialTxNum,
+			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"useExternalTx", useExternalTx, "inMem", se.inMemExec)
 	}
 
@@ -120,7 +120,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				Logger:           se.logger,
 			}
 
-			if txTask.TxNum > 0 && txTask.TxNum <= se.progress.initialTxNum {
+			if txTask.TxNum > 0 && txTask.TxNum <= initialTxNum {
 				havePartialBlock = true
 				inputTxNum++
 				continue
