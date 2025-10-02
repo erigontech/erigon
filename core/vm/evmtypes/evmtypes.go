@@ -108,7 +108,7 @@ type (
 	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) (bool, error)
 
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error
+	TransferFunc func(IntraBlockState, common.Address, common.Address, uint256.Int, bool) error
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
@@ -129,6 +129,7 @@ type IntraBlockState interface {
 
 	SetHooks(hooks *tracing.Hooks)
 	Trace() bool
+	BlockNumber() uint64
 	TxIndex() int
 	Incarnation() int
 }

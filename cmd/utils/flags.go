@@ -513,12 +513,12 @@ var (
 	// Network Settings
 	MaxPeersFlag = cli.IntFlag{
 		Name:  "maxpeers",
-		Usage: "Maximum number of network peers (network disabled if set to 0)",
+		Usage: "Maximum number of network peers per protocol version (network disabled if set to 0)",
 		Value: nodecfg.DefaultConfig.P2P.MaxPeers,
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
-		Usage: "Maximum number of TCP connections pending to become connected peers",
+		Usage: "Maximum number of TCP connections pending to become connected peers (per protocol version)",
 		Value: nodecfg.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
@@ -1282,10 +1282,10 @@ func NewP2PConfig(
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
-	case direct.ETH67:
-		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
 	case direct.ETH68:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth68")
+	case direct.ETH69:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth69")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
