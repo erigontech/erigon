@@ -375,6 +375,22 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+
+	// Output key encoding is a bit special: if the input was a 32-byte hash, it is
+	// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
+	// JSON-RPC spec for getProof. This behavior exists to preserve backwards
+	// compatibility with older client versions.
+	getKey := func(storageKey StorageKeysInfo) string {
+		var outputKey string
+
+		if storageKey.KeyLength != 32 {
+			outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
+		} else {
+			outputKey = hexutil.Encode(storageKey.Hash[:])
+		}
+		return outputKey
+	}
+
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -448,18 +464,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.Bytes()))
 	if acc == nil {
 		for i, storageKey := range storageKeys {
-			// Output key encoding is a bit special: if the input was a 32-byte hash, it is
-			// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
-			// JSON-RPC spec for getProof. This behavior exists to preserve backwards
-			// compatibility with older client versions.
-			var outputKey string
-			if storageKey.KeyLength != 32 {
-				outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
-			} else {
-				outputKey = hexutil.Encode(storageKey.Hash[:])
-			}
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   outputKey,
+				Key:   getKey(storageKey),
 				Value: new(hexutil.Big),
 				Proof: nil,
 			}
@@ -493,17 +499,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	// get storage key proofs
 	for i, storageKey := range storageKeys {
-		// Output key encoding is a bit special: if the input was a 32-byte hash, it is
-		// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
-		// JSON-RPC spec for getProof. This behavior exists to preserve backwards
-		// compatibility with older client versions.
-		var outputKey string
-		if storageKey.KeyLength != 32 {
-			outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
-		} else {
-			outputKey = hexutil.Encode(storageKey.Hash[:])
-		}
-		proof.StorageProof[i].Key = outputKey
+		proof.StorageProof[i].Key = getKey(storageKey)
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
 			proof.StorageProof[i].Proof = nil
