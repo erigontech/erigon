@@ -877,17 +877,6 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	return k == nil && k2 == nil, nil
 }
 
-func (h *History) firstTxNumInDB(tx kv.Tx) (firstTxNum uint64, found bool, err error) {
-	firstTxNumBytes, err := kv.FirstKey(tx, h.KeysTable)
-	if err != nil {
-		return 0, false, err
-	}
-	if len(firstTxNumBytes) == 0 {
-		return 0, false, nil
-	}
-	return binary.BigEndian.Uint64(firstTxNumBytes), true, nil
-}
-
 type HistoryRecord struct {
 	TxNum uint64
 	Value []byte

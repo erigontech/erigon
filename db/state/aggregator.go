@@ -1920,16 +1920,6 @@ func (at *AggregatorRoTx) Close() {
 	}
 }
 
-// First txnum found in MDBX
-func firstTxNumInDB(tx kv.Tx, domain *Domain) (firstTxNum uint64, found bool) {
-	var err error
-	firstTxNum, found, err = domain.firstTxNumInDB(tx)
-	if err != nil {
-		log.Warn("[aggregator] firstTxNumInDB", "err", err)
-	}
-	return firstTxNum, found
-}
-
 // Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
