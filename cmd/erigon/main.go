@@ -19,6 +19,7 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"github.com/erigontech/erigon/core/syscheck"
 	"net/http"
 	"os"
 
@@ -56,6 +57,8 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	if err != nil {
 		return
 	}
+
+	syscheck.CheckKernelAllocationHints(cliCtx.Context, logger)
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
 
