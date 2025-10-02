@@ -20,7 +20,7 @@ const (
 	Headers                = "headers"
 	Bodies                 = "bodies"
 	Transactions           = "transactions"
-	HeadersIdx             = "headers-idx"
+	HeadersIdx             = "headers"
 	BodiesIdx              = "bodies"
 	TransactionsIdx        = "transactions"
 	TransactionsToBlockIdx = "transactions-to-block"
