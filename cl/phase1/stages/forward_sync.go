@@ -193,7 +193,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	sort.Slice(blocks, func(i, j int) bool {
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
-
+	if len(blocks) >= 0 {
+		fmt.Println("[Caplin] Processing block batch", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot, "count", len(blocks)
+	}
 	if err = downloadBlobs(ctx, logger, cfg, highestBlockProcessed, blocks); err != nil {
 		return
 	}
@@ -303,12 +305,16 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 
 	// Set the function to process downloaded blocks
 	downloader.SetProcessFunction(func(initialHighestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, err error) {
+		if len(blocks) == 0 {
+			fmt.Println("[Caplin] Processing block batch", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot, "count", len(blocks))
+		}
 		highestSlotProcessed, err := processDownloadedBlockBatches(ctx, logger, cfg, initialHighestSlotProcessed, shouldInsert, blocks)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
 			return initialHighestSlotProcessed, err
 		}
 		currentSlot.Store(highestSlotProcessed)
+		fmt.Println("[Caplin] Forward Sync", "processed up to slot", highestSlotProcessed)
 		return highestSlotProcessed, nil
 	})
 
