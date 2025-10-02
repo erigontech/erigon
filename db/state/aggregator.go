@@ -1638,8 +1638,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 }
 
 // Returns the first known txNum found in history files of a given domain
-func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) uint64 {
-	return at.d[name].HistoryStartFrom(tx)
+func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
+	return at.d[name].HistoryStartFrom()
 }
 
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
