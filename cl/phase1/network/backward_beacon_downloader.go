@@ -17,7 +17,10 @@
 package network
 
 import (
+	"errors"
+	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/db/kv"
@@ -38,32 +42,49 @@ import (
 // Whether the reverse downloader arrived at expected height or condition.
 type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 
+const (
+	maxBlocksPerRequest     = 64 // maximum number of blocks to request per request
+	minBlocksPerRequest     = 16 // minimum number of blocks to request per request
+	defaultBlocksPerRequest = 32 // default number of blocks to request per request
+)
+
 type BackwardBeaconDownloader struct {
-	ctx            context.Context
-	slotToDownload atomic.Uint64
-	expectedRoot   common.Hash
-	rpc            *rpc.BeaconRpcP2P
-	engine         execution_client.ExecutionEngine
-	onNewBlock     OnNewBlock
-	finished       atomic.Bool
-	reqInterval    *time.Ticker
-	db             kv.RwDB
-	sn             *freezeblocks.CaplinSnapshots
-	neverSkip      bool
+	ctx                  context.Context
+	slotToDownload       atomic.Uint64
+	expectedRoot         common.Hash
+	rpc                  *rpc.BeaconRpcP2P
+	engine               execution_client.ExecutionEngine
+	onNewBlock           OnNewBlock
+	finished             atomic.Bool
+	reqInterval          *time.Ticker
+	db                   kv.RwDB
+	sn                   *freezeblocks.CaplinSnapshots
+	neverSkip            bool
+	pendingResults       *lru.Cache[uint64, *requestResult]
+	downloadedBlocksLock sync.Mutex // lock for downloaded blocks
+	blocksPerRequest     atomic.Int64
 
 	mu sync.Mutex
 }
 
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
-	return &BackwardBeaconDownloader{
-		ctx:         ctx,
-		rpc:         rpc,
-		db:          db,
-		reqInterval: time.NewTicker(600 * time.Millisecond),
-		neverSkip:   true,
-		engine:      engine,
-		sn:          sn,
+	pendingResults, err := lru.New[uint64, *requestResult]("backward_beacon_downloader_pending_results", 2048)
+	if err != nil {
+		panic(fmt.Sprintf("could not create lru cache for pending results: %v", err))
 	}
+
+	b := &BackwardBeaconDownloader{
+		ctx:            ctx,
+		rpc:            rpc,
+		db:             db,
+		reqInterval:    time.NewTicker(600 * time.Millisecond),
+		neverSkip:      true,
+		engine:         engine,
+		sn:             sn,
+		pendingResults: pendingResults,
+	}
+	b.blocksPerRequest.Store(defaultBlocksPerRequest)
+	return b
 }
 
 // SetThrottle sets the throttle.
@@ -71,6 +92,20 @@ func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.reqInterval.Reset(throttle)
+}
+
+func (b *BackwardBeaconDownloader) IncrementBlocksPerRequest(amnt int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	current := b.blocksPerRequest.Load()
+	b.blocksPerRequest.Store(min(maxBlocksPerRequest, current+amnt))
+}
+
+func (b *BackwardBeaconDownloader) DecrementBlocksPerRequest(amnt int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	current := b.blocksPerRequest.Load()
+	b.blocksPerRequest.Store(max(minBlocksPerRequest, current-amnt))
 }
 
 // SetSlotToDownload sets slot to download.
@@ -117,60 +152,281 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 	return b.rpc.Peers()
 }
 
+type requestResult struct {
+	block           *cltypes.SignedBeaconBlock
+	peer            string
+	cachedBlockRoot common.Hash // cached block root for faster access
+}
+
+func (r *requestResult) BlockRoot() common.Hash {
+	if r.cachedBlockRoot == (common.Hash{}) {
+		blockRoot, err := r.block.Block.HashSSZ()
+		if err != nil {
+			panic(fmt.Sprintf("could not compute block root: %v", err))
+		}
+		r.cachedBlockRoot = blockRoot
+	}
+	return r.cachedBlockRoot
+}
+
+func (r *requestResult) Slot() uint64 {
+	if r.block == nil || r.block.Block == nil {
+		return 0
+	}
+	return r.block.Block.Slot
+}
+
+// RequestChunk requests a chunk of blocks from the remote beacon node.
+func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, count uint64, maxSlot uint64) ([]*requestResult, error) {
+	// 2. request the chunk
+	blocks, peer, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count+1)
+	if err != nil {
+		return []*requestResult{
+			{peer: peer},
+		}, err
+	}
+
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+
+	responses := make([]*requestResult, 0, len(blocks))
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+
+		// filter out blocks that are not in the range
+		if block.Block.Slot > maxSlot || block.Block.Slot < start {
+			continue
+		}
+
+		responses = append(responses, &requestResult{
+			block: block,
+			peer:  peer,
+		})
+	}
+	return responses, nil
+}
+
+func (b *BackwardBeaconDownloader) requestRange(ctx context.Context, downloadRange downloadRange, maxSlot uint64) (downloadedBlocks []*requestResult) {
+	// give it a 1 second timeout
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	count := downloadRange.end - downloadRange.start + 1
+	// 2. request the chunk
+	requestsResult, err := b.requestChunk(ctxWithTimeout, downloadRange.start, count, maxSlot)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			b.rpc.BanPeer(requestsResult[0].peer)
+		}
+		return
+	}
+	if requestsResult == nil {
+		return
+	}
+
+	downloadedBlocks = append(downloadedBlocks, requestsResult...)
+	for _, block := range requestsResult {
+		if block == nil {
+			continue
+		}
+		// add to the pending results
+		b.pendingResults.Add(block.Slot(), block)
+	}
+	return downloadedBlocks
+}
+
+type downloadRange struct {
+	start uint64 // start slot of the range
+	end   uint64 // end slot of the range
+}
+
+func isRangeAMissedSlot(start, end uint64, blockCache *lru.Cache[uint64, *requestResult]) bool {
+	if start != end || start == 0 {
+		return false
+	}
+	// if the range is only one block, check if the slot was not just missed
+	startBlock, ok := blockCache.Get(start - 1)
+	if !ok || startBlock == nil {
+		return false // if the block is not in the cache, it is not a missed slot
+	}
+
+	endBlock, ok := blockCache.Get(end + 1)
+	if !ok || endBlock == nil {
+		return false // if the block is not in the cache, it is not a missed slot
+	}
+	if endBlock.block == nil || startBlock.block == nil {
+		return false // if the block is nil, it is not a missed slot
+	}
+	return startBlock.BlockRoot() == endBlock.block.Block.ParentRoot
+}
+
+// isRangePresent checks if a range of blocks is present in the map.
+func getNeededRanges(start, end uint64, blockCache *lru.Cache[uint64, *requestResult]) []downloadRange {
+	ranges := make([]downloadRange, 0)
+	for i := start; i <= end; i++ {
+		if blockCache.Contains(i) {
+			continue
+		}
+		// find the next range
+		j := i
+		for j <= end && !blockCache.Contains(j) {
+			j++
+		}
+		rangeToAdd := downloadRange{
+			start: i,
+			end:   j - 1,
+		}
+		if isRangeAMissedSlot(rangeToAdd.start, rangeToAdd.end, blockCache) {
+			continue // skip this range if it is just a missed slot
+		}
+		ranges = append(ranges, rangeToAdd)
+		i = j - 1 // skip to the end of the range
+	}
+
+	return ranges
+}
+
+// removeDuplicates removes nil blocks from the list.
+func removeDuplicates(blocks []*requestResult) []*requestResult {
+	if len(blocks) == 0 {
+		return blocks
+	}
+
+	// Index to insert the next unique block
+	writeIndex := 1
+
+	for i := 1; i < len(blocks); i++ {
+		if blocks[i].Slot() != blocks[writeIndex-1].Slot() {
+			blocks[writeIndex] = blocks[i]
+			writeIndex++
+		}
+	}
+
+	return blocks[:writeIndex]
+}
+
 // RequestMore downloads a range of blocks in a backward manner.
 // The function sends a request for a range of blocks starting from a given slot and ending count blocks before it.
 // It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	count := uint64(16)
-	start := b.slotToDownload.Load() - count + 1
-	// Overflow? round to 0.
-	if start > b.slotToDownload.Load() {
-		start = 0
-	}
-	var atomicResp atomic.Value
-	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
+	subCount := uint64(b.blocksPerRequest.Load())
+	chunks := uint64(32)
+	count := subCount * chunks // 8 chunks of 32 blocks
+	lowerBound := b.slotToDownload.Load() - count + 1
 
-Loop:
-	for {
-		select {
-		case <-b.reqInterval.C:
-			go func() {
-				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
-					return
+	// Overflow? round to 0.
+	if lowerBound > b.slotToDownload.Load() {
+		lowerBound = 0
+	}
+	// 1. initialize the response channel
+	downloadedBlocks := make([]*requestResult, 0, count)
+
+	// iteratively download missing ranges
+
+	var wg sync.WaitGroup
+
+	// re-initialize the map
+
+	startSlot := b.slotToDownload.Load()
+	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
+		if downloadedBlocks[i] == nil {
+			break
+		}
+		startSlot = downloadedBlocks[i].Slot()
+	}
+
+	for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
+
+		start := currEndSlot - subCount + 1
+		if currEndSlot < subCount {
+			start = 0
+		}
+
+		rangesToDownload := getNeededRanges(start, currEndSlot, b.pendingResults)
+
+		// 2. request the chunk in parallel
+		for _, dr := range rangesToDownload {
+			// download the range in a goroutine
+			wg.Add(1)
+			// sleep to avoid flooding the network with requests
+			<-b.reqInterval.C
+			go func(downloadRange downloadRange) {
+				defer wg.Done()
+
+				// request the range
+				downloadedBlocksTemp := b.requestRange(ctx, downloadRange, b.slotToDownload.Load())
+
+				// append the downloaded blocks to the main list
+				b.downloadedBlocksLock.Lock()
+				defer b.downloadedBlocksLock.Unlock()
+				downloadedBlocks = append(downloadedBlocks, downloadedBlocksTemp...)
+
+				for _, block := range downloadedBlocksTemp {
+					b.pendingResults.Add(block.Slot(), block)
 				}
-				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-				if err != nil {
-					b.rpc.BanPeer(peerId)
-					return
-				}
-				if responses == nil {
-					b.rpc.BanPeer(peerId)
-					return
-				}
-				if len(responses) == 0 {
-					b.rpc.BanPeer(peerId)
-					return
-				}
-				atomicResp.Store(responses)
-			}()
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
-				break Loop
+			}(dr)
+		}
+		// add the blocks from the pending cache
+		for i := start; i <= currEndSlot; i++ {
+			blockInCache, ok := b.pendingResults.Get(i)
+			if !ok || blockInCache == nil {
+				continue
 			}
-			time.Sleep(10 * time.Millisecond)
+			downloadedBlocks = append(downloadedBlocks, blockInCache)
+		}
+
+		if start == 0 {
+			break
 		}
 	}
-	responses := atomicResp.Load().([]*cltypes.SignedBeaconBlock)
+	wg.Wait() // wait for all the requests to be completed
+
+	// Sanitize the downloaded blocks
+	// sort the blocks by slot
+	sort.Slice(downloadedBlocks, func(i, j int) bool {
+		return downloadedBlocks[i].Slot() < downloadedBlocks[j].Slot()
+	})
+
+	// remove duplicates
+	downloadedBlocks = removeDuplicates(downloadedBlocks)
+
+	// check if the downloaded blocks have the correct parentRoot
+	// if not, remove them from the list
+	currentParentRoot := b.expectedRoot
+	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
+		if downloadedBlocks[i] == nil {
+			continue
+		}
+		currentRoot, err := downloadedBlocks[i].block.Block.HashSSZ()
+		if err != nil {
+			panic(err)
+		}
+		if currentRoot != currentParentRoot {
+			// remove the block from the cache
+			b.pendingResults.Remove(downloadedBlocks[i].Slot())
+			// truncate the list
+			downloadedBlocks = downloadedBlocks[i:]
+			log.Debug("Gotten unexpected root", "got", common.Hash(currentRoot), "expected", currentParentRoot)
+			break
+		}
+		currentParentRoot = downloadedBlocks[i].block.Block.ParentRoot
+	}
+
+	if len(downloadedBlocks) == 0 {
+		return nil
+	}
+
 	// Import new blocks, order is forward so reverse the whole packet
-	for i := len(responses) - 1; i >= 0; i-- {
+	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
 		if b.finished.Load() {
 			return nil
 		}
-		segment := responses[i]
+		segment := downloadedBlocks[i].block
 		// is this new block root equal to the expected root?
 		blockRoot, err := segment.Block.HashSSZ()
 		if err != nil {
@@ -289,4 +545,13 @@ Loop:
 	}
 
 	return tx.Commit()
+}
+
+func (b *BackwardBeaconDownloader) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.slotToDownload.Store(0)
+	b.expectedRoot = common.Hash{}
+	b.finished.Store(false)
+	b.pendingResults = nil
 }
