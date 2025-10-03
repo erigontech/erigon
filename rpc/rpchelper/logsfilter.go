@@ -104,6 +104,15 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 	return true
 }
 
+// hasLogsFilter checks if a log filter identified by filterId is present in the LogsFilterAggregator.
+func (a *LogsFilterAggregator) hasLogsFilter(filterId LogsSubID) bool {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+
+	_, ok := a.logsFilters.Get(filterId)
+	return ok
+}
+
 // createFilterRequest creates a LogsFilterRequest from the current state of the LogsFilterAggregator.
 // It generates a request that represents the union of all current log filters.
 func (a *LogsFilterAggregator) createFilterRequest() *remoteproto.LogsFilterRequest {
