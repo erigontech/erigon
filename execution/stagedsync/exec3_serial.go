@@ -268,8 +268,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				se.LogCommitted(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
 			}
 
-			uncommitedGas = 0
-
 			se.logger.Info("Committed", "time", time.Since(commitStart),
 				"block", se.doms.BlockNum(), "txNum", se.doms.TxNum(),
 				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),

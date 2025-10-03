@@ -248,7 +248,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	var uncommitedGas uint64
 	var lastHeader *types.Header
 
 	var readAhead chan uint64
@@ -352,10 +351,8 @@ func ExecV3(ctx context.Context,
 					}
 
 					if !useExternalTx {
-						se.LogCommitted(commitStart, 0, committedTransactions, uncommitedGas, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitted(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
-
-					uncommitedGas = 0
 				}
 			} else {
 				if execErr != nil {
