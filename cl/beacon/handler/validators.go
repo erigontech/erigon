@@ -31,7 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/log/v3"
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/common/clonable"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes/solid"

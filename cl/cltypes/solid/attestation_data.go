@@ -20,7 +20,7 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/common/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )

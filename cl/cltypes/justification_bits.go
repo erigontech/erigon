@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/common/clonable"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
