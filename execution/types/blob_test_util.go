@@ -23,8 +23,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto/kzg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types/testdata"
 )

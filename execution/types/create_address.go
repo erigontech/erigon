@@ -21,7 +21,7 @@ package types
 
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 

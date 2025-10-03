@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 )
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"

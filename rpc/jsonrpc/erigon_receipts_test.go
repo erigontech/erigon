@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"

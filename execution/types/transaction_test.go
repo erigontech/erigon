@@ -36,8 +36,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )

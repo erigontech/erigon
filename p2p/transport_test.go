@@ -28,7 +28,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/pipes"
 )

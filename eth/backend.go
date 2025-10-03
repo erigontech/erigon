@@ -46,10 +46,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"

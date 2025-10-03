@@ -2,7 +2,7 @@ package main
 
 import (
 	erigon_lib_common "github.com/erigontech/erigon-lib/common"
-	erigon_crypto "github.com/erigontech/erigon-lib/crypto"
+	erigon_crypto "github.com/erigontech/erigon-lib/common/crypto"
 	erigon_version "github.com/erigontech/erigon/db/version"
 	geth_params "github.com/ethereum/go-ethereum/params"
 )

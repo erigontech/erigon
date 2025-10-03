@@ -27,7 +27,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 )
 
 type Error struct {

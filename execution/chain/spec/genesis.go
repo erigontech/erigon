@@ -29,8 +29,8 @@ import (
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )

@@ -34,9 +34,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 

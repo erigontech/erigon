@@ -31,9 +31,9 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"

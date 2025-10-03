@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/secp256k1"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 

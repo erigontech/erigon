@@ -28,7 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	libkzg "github.com/erigontech/erigon-lib/common/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"

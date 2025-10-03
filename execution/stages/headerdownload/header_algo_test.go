@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"

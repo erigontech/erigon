@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	executiontests "github.com/erigontech/erigon/execution/tests"

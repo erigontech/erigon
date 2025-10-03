@@ -293,7 +293,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -348,7 +348,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -394,7 +394,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -452,7 +452,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon-lib/common"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -500,7 +500,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -566,7 +566,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -698,7 +698,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -748,7 +748,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon-lib/common"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -823,7 +823,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -917,7 +917,7 @@ var bindTests = []struct {
 				"github.com/erigontech/erigon/execution/abi/bind/backends"
 				"github.com/erigontech/erigon-lib/common"
 				"github.com/erigontech/erigon/core"
-				"github.com/erigontech/erigon-lib/crypto"
+				"github.com/erigontech/erigon-lib/common/crypto"
 			`,
 		`
 			// Generate a new random account and a funded simulator
@@ -1107,7 +1107,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -1242,7 +1242,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 
 		`
@@ -1384,7 +1384,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -1450,7 +1450,7 @@ var bindTests = []struct {
 		"github.com/erigontech/erigon/execution/abi/bind"
 		"github.com/erigontech/erigon/execution/abi/bind/backends"
 		"github.com/erigontech/erigon/core"
-		"github.com/erigontech/erigon-lib/crypto"
+		"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 		// Initialize test accounts
@@ -1537,7 +1537,7 @@ var bindTests = []struct {
 
 		"github.com/erigontech/erigon/execution/abi/bind"
 		"github.com/erigontech/erigon/execution/abi/bind/backends"
-		"github.com/erigontech/erigon-lib/crypto"
+		"github.com/erigontech/erigon-lib/common/crypto"
 		"github.com/erigontech/erigon/core"
 		`,
 		`
@@ -1600,7 +1600,7 @@ var bindTests = []struct {
 
 		"github.com/erigontech/erigon/execution/abi/bind"
 		"github.com/erigontech/erigon/execution/abi/bind/backends"
-		"github.com/erigontech/erigon-lib/crypto"
+		"github.com/erigontech/erigon-lib/common/crypto"
 		"github.com/erigontech/erigon/core"
         `,
 		`
@@ -1663,7 +1663,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 		`,
 		`
 			// Generate a new random account and a funded simulator
@@ -1724,7 +1724,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/core"
-			"github.com/erigontech/erigon-lib/crypto"
+			"github.com/erigontech/erigon-lib/common/crypto"
 	   `,
 		`
 			key, _ := crypto.GenerateKey()

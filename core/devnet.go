@@ -4,7 +4,7 @@ import (
 	"crypto/ecdsa"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 )
 
 // Pre-calculated version of:

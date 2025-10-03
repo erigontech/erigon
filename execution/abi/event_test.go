@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 )
 
 var jsonEventTransfer = []byte(`{

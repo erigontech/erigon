@@ -27,7 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 )
 
 func TestEIP1559Signing(t *testing.T) {

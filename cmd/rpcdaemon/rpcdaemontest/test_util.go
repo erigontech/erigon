@@ -31,8 +31,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"

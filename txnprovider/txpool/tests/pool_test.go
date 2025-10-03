@@ -25,8 +25,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"

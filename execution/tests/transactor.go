@@ -24,7 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"

@@ -41,7 +41,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 )
 
 var dumpEnc bool

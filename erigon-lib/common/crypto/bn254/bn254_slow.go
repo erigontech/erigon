@@ -7,7 +7,7 @@
 // Package bn254 implements the Optimal Ate pairing over a 256-bit Barreto-Naehrig curve.
 package bn254
 
-import bn254 "github.com/erigontech/erigon-lib/crypto/bn254/google"
+import bn254 "github.com/erigontech/erigon-lib/common/crypto/bn254/google"
 
 // G1 is an abstract cyclic group. The zero value is suitable for use as the
 // output of an operation, but cannot be used as an input.

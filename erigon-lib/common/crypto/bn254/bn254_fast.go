@@ -8,7 +8,7 @@
 package bn254
 
 import (
-	bn254cf "github.com/erigontech/erigon-lib/crypto/bn254/cloudflare"
+	bn254cf "github.com/erigontech/erigon-lib/common/crypto/bn254/cloudflare"
 )
 
 // G1 is an abstract cyclic group. The zero value is suitable for use as the

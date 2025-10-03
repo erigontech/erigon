@@ -31,8 +31,8 @@ import (
 	"github.com/protolambda/ztyp/codec"
 
 	"github.com/erigontech/erigon-lib/common"
+	libcrypto "github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/math"
-	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"

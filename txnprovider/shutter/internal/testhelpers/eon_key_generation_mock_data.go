@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"

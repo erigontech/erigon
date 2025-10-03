@@ -39,9 +39,9 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
+	libkzg "github.com/erigontech/erigon-lib/common/crypto/kzg"
 	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/crypto"
-	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"

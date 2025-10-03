@@ -22,9 +22,9 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )

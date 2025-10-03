@@ -29,8 +29,8 @@ import (
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/core"

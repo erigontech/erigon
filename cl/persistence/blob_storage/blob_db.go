@@ -32,7 +32,7 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/common/crypto/kzg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
