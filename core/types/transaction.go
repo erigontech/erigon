@@ -494,6 +494,10 @@ func (m *Message) SetFeeCap(feeCap *uint256.Int) {
 	m.feeCap.Set(feeCap)
 }
 
+func (m *Message) SetTip(tip *uint256.Int) {
+	m.tip.Set(tip)
+}
+
 func (m Message) EffectiveGasPricePercentage() uint8 { return m.effectiveGasPricePercentage }
 
 func (m Message) BlobGas() uint64 { return fixedgas.BlobGasPerBlob * uint64(len(m.blobHashes)) }

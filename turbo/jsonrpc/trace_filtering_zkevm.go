@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/transactions"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, traceConfig *tracers.TraceConfig, stream *jsoniter.Stream) error {
@@ -422,13 +423,18 @@ func (api *TraceAPIImpl) callManyTransactions(
 		}
 		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 
-		// gnosis might have a fee free account here
-		if msg.FeeCap().IsZero() && engine != nil {
+		isFree := false
+		if utils.IsTxFreeByZkEgps(cfg, tx) {
+			isFree = true
+		} else if msg.FeeCap().IsZero() && engine != nil {
+			// gnosis might have a fee free account here
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, cfg, stateDb, header, engine, true /* constCall */)
 			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+			isFree = engine.IsServiceTransaction(msg.From(), syscall)
 		}
+
+		msg.SetIsFree(isFree)
 
 		msgs[i] = msg
 	}
