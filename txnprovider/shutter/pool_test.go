@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/crypto"
 	"github.com/erigontech/erigon-lib/common/log/v3"
 	"github.com/erigontech/erigon-lib/common/synctest"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"

@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/common/testlog"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
 	libchain "github.com/erigontech/erigon/execution/chain"
