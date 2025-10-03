@@ -110,10 +110,7 @@ func (a *LogsFilterAggregator) hasLogsFilter(filterId LogsSubID) bool {
 	defer a.logsFilterLock.Unlock()
 
 	_, ok := a.logsFilters.Get(filterId)
-	if !ok {
-		return false
-	}
-	return true
+	return ok
 }
 
 // createFilterRequest creates a LogsFilterRequest from the current state of the LogsFilterAggregator.
