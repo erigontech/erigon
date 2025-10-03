@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/log/v3"
-	"github.com/erigontech/erigon-lib/synctest"
+	"github.com/erigontech/erigon-lib/common/synctest"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/execution/p2p"
 )
