@@ -7,8 +7,11 @@ import (
 	"sync"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -17,12 +20,10 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/kzg"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/p2p/enode"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
@@ -71,7 +72,7 @@ func NewPeerDas(
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
 ) PeerDas {
-	kzg.InitKZG()
+	kzg.InitKZGCtx()
 	p := &peerdas{
 		state:             peerDasState,
 		nodeID:            nodeID,
@@ -294,8 +295,8 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			// kzg commitment
 			copy(kzgCommitment[:], anyColumnSidecar.KzgCommitments.Get(blobIndex)[:])
 			// kzg proof
-			ckzgBlob := ckzg.Blob(blob)
-			proof, err := ckzg.ComputeBlobKZGProof(&ckzgBlob, ckzg.Bytes48(kzgCommitment))
+			ckzgBlob := goethkzg.Blob(blob)
+			proof, err := kzg.Ctx().ComputeBlobKZGProof(&ckzgBlob, goethkzg.KZGCommitment(kzgCommitment), 0)
 			if err != nil {
 				log.Warn("[blobsRecover] failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
 				return
