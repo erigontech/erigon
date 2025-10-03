@@ -41,3 +41,9 @@ ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519_erigon -f -N -L 3000:localhost:30
 - goto dashboard Share -> Export
 - "Export for sharing externally" should be off
 - then save the json in ./cmd/scripts/exec_bench/dashboard/exec-bench.json
+- then run:
+```bash
+jq '.panels[].datasource = {"name": "Prometheus", "type": "prometheus"} |
+    .panels[].targets[]?.datasource = {"name": "Prometheus", "type": "prometheus"}' \
+    cmd/scripts/exec_bench/dashboard/exec-bench.json > output.json && mv output.json cmd/scripts/exec_bench/dashboard/exec-bench.json
+```
