@@ -29,8 +29,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -40,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/services"
@@ -434,4 +434,8 @@ func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
 
 func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
 	return back.blockReader.BlockForTxNum(ctx, tx, txNum)
+}
+
+func (back *RemoteBackend) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	return back.blockReader.MinimumBlockAvailable(ctx, tx)
 }

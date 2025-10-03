@@ -51,13 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/event"
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
@@ -112,6 +105,13 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -537,7 +537,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
 			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
-			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
+			var sideProtocols []sentryproto.Protocol
+			if stack.Config().P2P.EnableWitProtocol {
+				sideProtocols = append(sideProtocols, sentryproto.Protocol_WIT0)
+			}
+			sentryClient, err := direct.NewSentryClientDirect(protocol, server, sideProtocols)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create sentry client: %w", err)
+			}
+			sentries = append(sentries, sentryClient)
 		}
 
 		go func() {
@@ -686,6 +694,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		genesis,
 		backend.config.NetworkID,
 		logger,
+		blockReader,
 	)
 
 	// limit "new block" broadcasts to at most 10 random peers at time
@@ -1081,6 +1090,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.notifications,
 			backend.engineBackendRPC,
 			backend,
+			config.Dirs.Tmp,
 		)
 
 		// we need to initiate download before the heimdall services start rather than
@@ -1239,7 +1249,7 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient *direct.StateDiffClientDirect, mining *stagedsync.Sync, miner stagedsync.MiningState, gasPrice *uint256.Int, quitCh chan struct{}, heimdallStore heimdall.Store, tmpDir string, logger log.Logger) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.TemporalRwDB, stateDiffClient *direct.StateDiffClientDirect, mining *stagedsync.Sync, miner stagedsync.MiningState, gasPrice *uint256.Int, quitCh chan struct{}, heimdallStore heimdall.Store, tmpDir string, logger log.Logger) error {
 
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {

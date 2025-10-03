@@ -66,7 +66,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		}
 
 		if i%stepSize == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
@@ -76,7 +76,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			}
 		}
 	}
-	_, err = domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+	_, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 
 	b.Run("ComputeCommitment", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}
 	})

@@ -29,7 +29,7 @@ require (
 	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/log v0.17.0
 	github.com/anacrolix/missinggo/v2 v2.10.0
-	github.com/anacrolix/torrent v1.59.2-0.20250831024100-5a4e71ecb3c3
+	github.com/anacrolix/torrent v1.59.2-0.20250903105451-d922d78d2e61
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/charmbracelet/bubbles v0.21.0
@@ -47,6 +47,7 @@ require (
 	github.com/emicklei/dot v1.6.2
 	github.com/erigontech/speedtest v0.0.2
 	github.com/ethereum/c-kzg-4844/v2 v2.1.1
+	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
 	github.com/felixge/fgprof v0.9.5
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gdamore/tcell/v2 v2.8.1
@@ -57,7 +58,6 @@ require (
 	github.com/go-stack/stack v1.8.1
 	github.com/go-test/deep v1.1.1
 	github.com/go-viper/mapstructure/v2 v2.4.0
-	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang/snappy v1.0.0

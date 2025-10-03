@@ -23,14 +23,13 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
 // download is the process that reverse download a specific block hash.
@@ -189,10 +188,13 @@ func (e *EngineBlockDownloader) downloadV2(ctx context.Context, req BackwardDown
 
 func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req BackwardDownloadRequest) error {
 	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
+	if e.stopped.Load() {
+		return errors.New("engine block downloader is stopped")
+	}
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
-		opts = append(opts, p2p.WithChainLengthLimit(uint64(dbg.MaxReorgDepth)))
+		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
 		currentHeader := e.chainRW.CurrentHeader(ctx)
 		if currentHeader != nil {
 			opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
@@ -204,7 +206,8 @@ func (e *EngineBlockDownloader) downloadBlocksV2(ctx context.Context, req Backwa
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
-	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, opts...)
+	hr := headerReader{db: e.db, blockReader: e.blockReader}
+	feed, err := e.bbdV2.DownloadBlocksBackwards(ctx, req.MissingHash, hr, opts...)
 	if err != nil {
 		return err
 	}

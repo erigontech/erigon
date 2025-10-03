@@ -513,12 +513,12 @@ var (
 	// Network Settings
 	MaxPeersFlag = cli.IntFlag{
 		Name:  "maxpeers",
-		Usage: "Maximum number of network peers (network disabled if set to 0)",
+		Usage: "Maximum number of network peers per protocol version (network disabled if set to 0)",
 		Value: nodecfg.DefaultConfig.P2P.MaxPeers,
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
-		Usage: "Maximum number of TCP connections pending to become connected peers",
+		Usage: "Maximum number of TCP connections pending to become connected peers (per protocol version)",
 		Value: nodecfg.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
@@ -697,18 +697,21 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name: "torrent.download.rate",
-		// I'm not sure what we want here. How fast to typical users get with webseeds? Let's try no
-		// limit.
-		Usage: "Bytes per second, example: 32mb. Shared with webseeds unless that rate is set separately.",
+		// Default for 3.1. Try not drain the whole swarm by default.
+		Value: "512mb",
+		Usage: "Bytes per second, example: 32mb. Set Inf for no limit. Shared with webseeds unless that rate is set separately.",
 	}
+	// Decided to not provide a default to keep things simpler (so it shares whatever
+	// TorrentDownloadRateFlag is set to).
 	TorrentWebseedDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.webseed.download.rate",
-		Usage: "Bytes per second for webseeds, example: 32mb. If not set, rate limit is shared with torrent.download.rate",
+		Usage: "Bytes per second for webseeds, example: 32mb. Set Inf for no limit. If not set, rate limit is shared with torrent.download.rate",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
-		Name:  "torrent.upload.rate",
-		Value: "32mb",
-		Usage: "Bytes per second, example: 32mb",
+		Name: "torrent.upload.rate",
+		// Agreed in meeting to leave it quite a bit higher than 3.0 unless it becomes a problem.
+		Value: "16mb",
+		Usage: "Bytes per second, example: 32mb. Set Inf for no limit.",
 	}
 	// Deprecated. Shouldn't do anything. TODO: Remove.
 	TorrentDownloadSlotsFlag = cli.IntFlag{
@@ -1279,10 +1282,10 @@ func NewP2PConfig(
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
-	case direct.ETH67:
-		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
 	case direct.ETH68:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth68")
+	case direct.ETH69:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth69")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}

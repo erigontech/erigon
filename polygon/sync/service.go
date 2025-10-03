@@ -25,11 +25,11 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -52,20 +52,18 @@ func NewService(
 	notifications *shards.Notifications,
 	engineAPISwitcher EngineAPISwitcher,
 	minedBlockReg MinedBlockObserverRegistrar,
-
+	tmpDir string,
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := polygonp2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
+	p2pService := polygonp2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData, tmpDir)
 	execution := newExecutionClient(logger, executionClient)
-
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
-
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,

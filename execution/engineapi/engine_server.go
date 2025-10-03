@@ -31,10 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -54,6 +50,10 @@ import (
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -1023,7 +1023,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
 		return ret, nil
-	} else if version == clparams.CapellaVersion {
+	} else if version == clparams.DenebVersion {
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
 		for i, bwp := range res.BlobsWithProofs {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])

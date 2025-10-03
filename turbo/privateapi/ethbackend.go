@@ -25,9 +25,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -42,6 +39,9 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -268,7 +268,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remoteproto.ProtocolVersionRequest) (*remoteproto.ProtocolVersionReply, error) {
-	return &remoteproto.ProtocolVersionReply{Id: direct.ETH67}, nil
+	return &remoteproto.ProtocolVersionReply{Id: direct.ETH68}, nil
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remoteproto.ClientVersionRequest) (*remoteproto.ClientVersionReply, error) {
@@ -511,4 +511,15 @@ func (s *EthBackendServer) BlockForTxNum(ctx context.Context, req *remoteproto.B
 		BlockNumber: blockNum,
 		Present:     ok,
 	}, err
+}
+
+func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *emptypb.Empty) (*remoteproto.MinimumBlockAvailableReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
+	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
 }

@@ -21,10 +21,10 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -65,7 +65,7 @@ func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*b
 		}
 		return response[i].Epoch < response[j].Epoch
 	})
-	var previousVersion common.Bytes4
+	previousVersion := utils.Uint32ToBytes4(uint32(a.beaconChainCfg.GenesisForkVersion))
 	for i := range response {
 		response[i].PreviousVersion = previousVersion
 		previousVersion = response[i].CurrentVersion

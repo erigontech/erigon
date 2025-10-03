@@ -63,9 +63,10 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 	t.mockPeerDasStateReader.EXPECT().GetMyCustodyColumns().Return(map[uint64]bool{0: true, 1: true, 2: true, 3: true}, nil).AnyTimes()
 
 	t.beaconConfig = &clparams.BeaconChainConfig{
-		SlotsPerEpoch:    testSlotsPerEpoch,
-		NumberOfColumns:  4,
-		ElectraForkEpoch: 100000,
+		SlotsPerEpoch:           testSlotsPerEpoch,
+		NumberOfColumns:         4,
+		ElectraForkEpoch:        100000,
+		MaxBlobsPerBlockElectra: 9,
 	}
 
 	t.dataColumnSidecarService = NewDataColumnSidecarService(

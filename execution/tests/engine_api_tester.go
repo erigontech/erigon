@@ -152,7 +152,10 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
+	syncDefault := ethconfig.Defaults.Sync
+	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{
+		Sync: syncDefault,
 		Dirs: dirs,
 		Snapshot: ethconfig.BlocksFreezing{
 			NoDownloader: true,
@@ -210,6 +213,11 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		// requests should not take more than 5 secs in a test env, yet we can spam frequently
 		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
 		engineapi.WithJsonRpcClientMaxRetries(100),
+		engineapi.WithRetryableErrCheckers(
+			engineapi.ErrContainsRetryableErrChecker("connection refused"),
+			// below happened on win CI
+			engineapi.ErrContainsRetryableErrChecker("No connection could be made because the target machine actively refused it"),
+		),
 	)
 	require.NoError(t, err)
 	var mockCl *MockCl
@@ -228,6 +236,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
+		Transactor:           NewTransactor(rpcApiClient, genesis.Config.ChainID),
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
@@ -251,6 +260,7 @@ type EngineApiTester struct {
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
+	Transactor           Transactor
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
