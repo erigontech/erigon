@@ -223,7 +223,6 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
 
 	if tx.Timeboosted {
-		// size of Timeboosted
 		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
@@ -294,7 +293,6 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	}
 
 	if tx.Timeboosted {
-		// encode Timeboosted
 		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
 			return err
 		}
@@ -370,8 +368,6 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		}
 		return nil
 	}
-	// List already completed, set default.
-	tx.Timeboosted = false
 
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close txn struct: %w", err)
