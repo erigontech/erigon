@@ -1,5 +1,15 @@
 #!/bin/bash
 
+# benchmarking script to compare execution performance of two erigon runs
+# Looks at README.md to see instructions for running
+
+
+# some details:
+# sample.yml: specifies erigon/stage_exec start commands and source dir
+# after it does mirror datadir, it'll reset_state (to remove state data from db)
+# then remove last state snapshot
+# figure out what's the start execution block, and execute 3000 blocks from there (or upto the tip)
+
 set -euo pipefail
 
 # Color codes for output
@@ -86,16 +96,6 @@ check_required_tools() {
         missing_tools+=("yq")
     fi
     
-    # Check if prometheus is installed
-    if ! command -v prometheus &> /dev/null; then
-        missing_tools+=("prometheus")
-    fi
-    
-    # Check if grafana-server is installed
-    if ! command -v grafana-server &> /dev/null && ! command -v grafana &> /dev/null; then
-        missing_tools+=("grafana")
-    fi
-    
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         log_error "The following required tools are not installed: ${missing_tools[*]}"
         log_error "Installation instructions:"
@@ -103,12 +103,6 @@ check_required_tools() {
             case "$tool" in
                 yq)
                     log_error "  yq: brew install yq (macOS) or sudo apt install yq (Linux)"
-                    ;;
-                prometheus)
-                    log_error "  prometheus: brew install prometheus (macOS) or apt-get install prometheus (Linux)"
-                    ;;
-                grafana)
-                    log_error "  grafana: brew install grafana (macOS) or apt-get install grafana (Linux)"
                     ;;
             esac
         done
@@ -246,110 +240,6 @@ parse_config() {
     log_info "  extracted datadir2: $DATADIR2"
 }
 
-# Function to check if datadir is empty or needs initial sync
-check_datadir_needs_sync() {
-    local datadir="$1"
-    
-    # Check if directory exists but is empty or has no chaindata
-    if [[ ! -d "$datadir/chaindata" ]] || [[ -z "$(ls -A "$datadir/chaindata" 2>/dev/null)" ]]; then
-        return 0  # Needs sync
-    fi
-    
-    # Check if there's actual blockchain data (look for common Erigon DB files)
-    if [[ ! -f "$datadir/chaindata/mdbx.dat" ]] && [[ ! -f "$datadir/chaindata/data.mdb" ]]; then
-        return 0  # Needs sync
-    fi
-    
-    return 1  # Has data, no sync needed
-}
-
-# Function to perform initial sync
-perform_initial_sync() {
-    log_info "Source datadir appears to be empty or missing chaindata"
-    log_info "Performing initial sync to populate source datadir: $SOURCE_DATADIR"
-    
-    # Create the sync command by replacing datadir1 with SOURCE_DATADIR in erigon_cmd1
-    local sync_cmd="${ERIGON_CMD1//$DATADIR1/$SOURCE_DATADIR}"
-    
-    # For initial sync, always add ERIGON_STOP_BEFORE_STAGE=Execution
-    sync_cmd="ERIGON_STOP_BEFORE_STAGE=Execution ${sync_cmd}"
-    
-    log_info "Sync command: $sync_cmd"
-    log_info "Waiting for sync to reach Execution stage..."
-    log_info "Will automatically stop when 'STOP_BEFORE_STAGE env flag forced to stop app' appears in logs"
-    
-    # Create log file for initial sync
-    local sync_log="initial_sync_$(date +%Y%m%d_%H%M%S).log"
-    
-    # Start sync process
-    eval "$sync_cmd" > "$sync_log" 2>&1 &
-    local sync_pid=$!
-    
-    log_info "Sync process started with PID: $sync_pid"
-    log_info "Output being captured to: $sync_log"
-    
-    # Monitor sync progress and watch for stop message
-    local elapsed=0
-    local stop_pattern="STOP_BEFORE_STAGE env flag forced to stop app"
-    
-    while true; do
-        # Check if process is still running
-        if ! kill -0 $sync_pid 2>/dev/null; then
-            log_info "Sync process completed naturally"
-            break
-        fi
-        
-        # Check for the stop pattern in the log
-        if [[ -f "$sync_log" ]] && grep -q "$stop_pattern" "$sync_log"; then
-            log_info "Detected STOP_BEFORE_STAGE completion message"
-            kill_process $sync_pid "sync process"
-            break
-        fi
-        
-        # Show progress every 30 seconds
-        if [[ $((elapsed % 30)) -eq 0 ]] && [[ $elapsed -gt 0 ]]; then
-            log_info "  ... syncing (${elapsed}s elapsed)"
-            
-            # Show last line of log to give sense of progress
-            if [[ -f "$sync_log" ]]; then
-                local last_line=$(tail -n 1 "$sync_log" 2>/dev/null | head -c 100)
-                if [[ -n "$last_line" ]]; then
-                    log_info "  Last log: ${last_line}..."
-                fi
-            fi
-        fi
-        
-        # Safety timeout after 1 hour
-        if [[ $elapsed -gt 3600 ]]; then
-            log_warn "Sync running for over 1 hour, stopping for safety"
-            kill_process $sync_pid "sync process"
-            break
-        fi
-        
-        sleep 1
-        ((elapsed++))
-    done
-    
-    wait $sync_pid 2>/dev/null || true
-    
-    log_info "Initial sync completed after ${elapsed} seconds"
-    log_info "Sync log saved to: $sync_log"
-    
-    # Show if we found the stop message
-    if grep -q "$stop_pattern" "$sync_log"; then
-        log_info "Sync stopped at Execution stage as expected"
-    fi
-    
-    # Verify we now have data
-    if check_datadir_needs_sync "$SOURCE_DATADIR"; then
-        log_error "Initial sync appears to have failed - datadir is still empty"
-        log_error "Check $sync_log for errors"
-        exit 1
-    fi
-    
-    log_info "Source datadir now contains data, proceeding with benchmarks"
-}
-
 # Function to mirror datadir
 mirror_datadir() {
     local source="$1"
@@ -434,13 +324,6 @@ main() {
     
     # Parse configuration
     parse_config
-    
-    # Check if source datadir needs initial sync
-    if check_datadir_needs_sync "$SOURCE_DATADIR"; then
-        perform_initial_sync
-    else
-        log_info "Source datadir contains data, skipping initial sync"
-    fi
 
     build_erigon
     

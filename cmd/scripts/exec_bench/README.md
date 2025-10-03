@@ -25,7 +25,7 @@ ERIGON_GRAFANA_DASHBOARD=/home/erigon/repo/erigon/cmd/scripts/exec_bench/dashboa
 docker compose logs -f
 
 ## can do port forwarding if needed
-ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519_erigon -f -N -L 3000:localhost:3000 erigon@dev-bm-e3-ethmainnet-n1.erigon.io
+ssh -f -N -L 3000:localhost:3000 username@server
 ```
 
 5. run the script:
