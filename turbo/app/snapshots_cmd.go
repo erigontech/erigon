@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/estimate"
+	"github.com/erigontech/erigon-lib/common/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"

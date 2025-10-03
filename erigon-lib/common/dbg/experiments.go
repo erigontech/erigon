@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/estimate"
+	"github.com/erigontech/erigon-lib/common/estimate"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
