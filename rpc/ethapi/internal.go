@@ -18,7 +18,7 @@ package ethapi
 
 // This file stores proxy-objects for `internal` package
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 

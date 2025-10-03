@@ -23,9 +23,9 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/golang/snappy"
+
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var IsSysLittleEndian bool

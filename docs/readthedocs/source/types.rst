@@ -3,12 +3,12 @@ Erigon Types
 ================
 
 This document will list each major types defined and used by Erigon.
-They are found in `github.com/erigontech/erigon/execution/types` and `github.com/erigontech/erigon-lib/common`
+They are found in `github.com/erigontech/erigon/execution/types` and `github.com/erigontech/erigon/common`
 
 Address and Hash
 ================
 
-package: `github.com/erigontech/erigon-lib/common`
+package: `github.com/erigontech/erigon/common`
 
 .. code-block:: go
 

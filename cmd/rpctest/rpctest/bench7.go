@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func Bench7(erigonURL, gethURL string) error {

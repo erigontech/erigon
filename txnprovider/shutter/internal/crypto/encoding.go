@@ -24,7 +24,7 @@ import (
 
 	blst "github.com/supranational/blst/bindings/go"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 var (

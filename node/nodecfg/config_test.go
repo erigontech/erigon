@@ -26,8 +26,8 @@ import (
 	"runtime"
 	"testing"
 
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	node2 "github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"

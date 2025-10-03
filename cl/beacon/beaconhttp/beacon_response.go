@@ -20,8 +20,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type BeaconResponse struct {

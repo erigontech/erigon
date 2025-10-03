@@ -20,8 +20,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"

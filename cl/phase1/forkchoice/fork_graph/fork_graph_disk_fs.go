@@ -25,9 +25,9 @@ import (
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func getBeaconStateFilename(blockRoot common.Hash) string {

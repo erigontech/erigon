@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
 )
 
 type InMemoryPublicKeysRegistry struct {

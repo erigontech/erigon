@@ -21,7 +21,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type currentBlockNumReader func(ctx context.Context) (*uint64, error)

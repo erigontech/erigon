@@ -24,9 +24,9 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/diag/flags"
 	"github.com/erigontech/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 

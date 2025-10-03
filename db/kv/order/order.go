@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 type By bool

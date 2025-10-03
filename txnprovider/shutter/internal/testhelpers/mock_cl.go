@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	executiontests "github.com/erigontech/erigon/execution/tests"
 	"github.com/erigontech/erigon/txnprovider/shutter"

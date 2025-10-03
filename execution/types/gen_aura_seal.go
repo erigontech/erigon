@@ -5,8 +5,8 @@ package types
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // MarshalJSON marshals as JSON.

@@ -1,7 +1,7 @@
 package trie
 
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // RetainListBuilder is the structure that accumulates the list of keys that were read or changes (touched) during

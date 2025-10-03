@@ -16,7 +16,7 @@
 
 package p2p
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 type PeerShuffle func(peerIds []*PeerId)
 

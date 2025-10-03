@@ -19,7 +19,7 @@ package bor
 import (
 	"github.com/holiman/uint256"
 
-	common "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/types"
 )

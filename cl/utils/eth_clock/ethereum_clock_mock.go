@@ -13,8 +13,8 @@ import (
 	reflect "reflect"
 	time "time"
 
-	common "github.com/erigontech/erigon-lib/common"
 	clparams "github.com/erigontech/erigon/cl/clparams"
+	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
 

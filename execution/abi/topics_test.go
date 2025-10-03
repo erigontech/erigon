@@ -24,8 +24,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func TestMakeTopics(t *testing.T) {

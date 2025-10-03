@@ -16,7 +16,7 @@
 
 package trie
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 var emptyHash [32]byte
 

@@ -115,6 +115,3 @@ jobs:
 
       - name: Test
         run: .\wmake.ps1 test-short
-
-      - name: Test erigon-lib
-        run: cd erigon-lib && make test-short

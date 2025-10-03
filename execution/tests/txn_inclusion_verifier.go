@@ -23,7 +23,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/requests"

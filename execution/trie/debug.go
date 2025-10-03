@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type HexStdOutWriter struct{}

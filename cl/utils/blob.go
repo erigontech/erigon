@@ -16,7 +16,7 @@
 
 package utils
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 const VERSIONED_HASH_VERSION_KZG byte = byte(1)
 

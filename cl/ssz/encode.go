@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type Sized interface {

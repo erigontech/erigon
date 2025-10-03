@@ -144,7 +144,7 @@ func forbidOsRemove(m dsl.Matcher) {
 		`os.Remove($*_)`,
 		`os.RemoveAll($*_)`,
 	).
-		Report(`Don't call os.Remove/RemoveAll directly; use dir.RemoveFile/RemoveAll instead (erigon-lib/common/dir)`)
+		Report(`Don't call os.Remove/RemoveAll directly; use dir.RemoveFile/RemoveAll instead (erigon/common/dir)`)
 }
 
 func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {

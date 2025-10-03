@@ -3,7 +3,7 @@ package utils
 import (
 	"container/heap"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // blockMaxHeap stores a (limited-length) priority queue of blocks.

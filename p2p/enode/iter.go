@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 // Iterator represents a sequence of nodes. The Next method moves to the next node in the

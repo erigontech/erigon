@@ -187,20 +187,11 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib-short:
-	@cd erigon-lib && $(MAKE) test-short
-
-test-erigon-lib-all:
-	@cd erigon-lib && $(MAKE) test-all
-
-test-erigon-lib-all-race:
-	@cd erigon-lib && $(MAKE) test-all-race
-
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short
+test-short:
 	@{ \
 		$(GOTEST) -short > run.log 2>&1; \
 		STATUS=$$?; \
@@ -209,7 +200,7 @@ test-short: test-erigon-lib-short
 	}
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all
+test-all:
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -218,7 +209,7 @@ test-all: test-erigon-lib-all
 	}
 
 ## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race
+test-all-race:
 	@{ \
 		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
 		STATUS=$$?; \
@@ -346,7 +337,6 @@ lint:
 
 ## tidy:                              `go mod tidy`
 tidy:
-	cd erigon-lib && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir

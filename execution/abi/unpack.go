@@ -26,7 +26,7 @@ import (
 	"math/big"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 var (

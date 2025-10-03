@@ -17,8 +17,8 @@
 package cltypes
 
 import (
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/clonable"
 )
 
 func (s *SignedBeaconBlock) Clone() clonable.Clonable {

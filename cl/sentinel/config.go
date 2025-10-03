@@ -31,8 +31,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type SentinelConfig struct {

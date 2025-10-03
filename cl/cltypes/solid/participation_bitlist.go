@@ -20,10 +20,10 @@ import (
 	"encoding/json"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // ParticipationBitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!

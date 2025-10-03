@@ -19,7 +19,7 @@ package borcfg
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/assert"
 )
 
