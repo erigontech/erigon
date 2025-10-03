@@ -14,8 +14,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/log/v3"
-
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
