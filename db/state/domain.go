@@ -1458,9 +1458,10 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 }
 
 // Returns the first txNum from available history
-func (dt *DomainRoTx) HistoryStartFrom() uint64 {
-	if len(dt.ht.files) == 0 {
-		return 0
+func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
+	if len(dt.ht.files) == 0 { // if no history files, check in MDBX
+		firstTxNumInMdbx := dt.ht.h.minTxNumInDB(tx)
+		return firstTxNumInMdbx
 	}
 	return dt.ht.files[0].startTxNum
 }
