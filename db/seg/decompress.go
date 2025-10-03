@@ -33,7 +33,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/log/v3"
 	"github.com/erigontech/erigon-lib/mmap"
 )
 

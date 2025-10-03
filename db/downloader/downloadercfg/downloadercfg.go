@@ -39,7 +39,7 @@ import (
 	pp "github.com/anacrolix/torrent/peer_protocol"
 
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapcfg"
 )

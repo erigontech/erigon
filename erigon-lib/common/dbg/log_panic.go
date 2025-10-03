@@ -24,7 +24,7 @@ import (
 
 	stack2 "github.com/go-stack/stack"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/log/v3"
 )
 
 // Stack returns stack-trace in logger-friendly compact formatting

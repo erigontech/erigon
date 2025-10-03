@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/log/v3"
 )
 
 func newLastRecordCaptureTestHandler() (lastRecordCaptureTestHandler, *log.Record) {

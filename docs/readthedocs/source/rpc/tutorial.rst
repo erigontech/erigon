@@ -62,7 +62,7 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
         "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
         "github.com/erigontech/erigon/cmd/utils"
         "github.com/erigontech/erigon/rpc"
-        "github.com/erigontech/erigon-lib/log/v3"
+        "github.com/erigontech/erigon-lib/common/log/v3"
         "github.com/spf13/cobra"
     )
 

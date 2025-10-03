@@ -28,7 +28,7 @@ import (
 	gomock "go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
