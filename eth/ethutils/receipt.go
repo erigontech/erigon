@@ -127,6 +127,7 @@ func MarshalReceipt(
 		if chainConfig.IsArbitrumNitro(header.Number) {
 			fields["effectiveGasPrice"] = hexutil.Uint64(header.BaseFee.Uint64())
 			fields["l1BlockNumber"] = hexutil.Uint64(types.DeserializeHeaderExtraInformation(header).L1BlockNumber)
+			fields["timeboosted"] = txn.IsTimeBoosted()
 		} else {
 			arbTx, ok := txn.(*types.ArbitrumLegacyTxData)
 			if !ok {
@@ -136,20 +137,6 @@ func MarshalReceipt(
 				fields["l1BlockNumber"] = hexutil.Uint64(arbTx.L1BlockNumber)
 			}
 		}
-
-		// todo
-		// If blockMetadata exists for the block containing this tx, then we will determine if it was timeboosted or not
-		// and add that info to the receipt object
-		// blockMetadata, err := backend.BlockMetadataByNumber(ctx, blockNumber)
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// if blockMetadata != nil {
-		// 	fields["timeboosted"], err = blockMetadata.IsTxTimeboosted(txIndex)
-		// 	if err != nil {
-		// 		log.Error("Error checking if a tx was timeboosted", "txIndex", txIndex, "txHash", tx.Hash(), "err", err)
-		// 	}
-		// }
 	}
 	return fields
 }

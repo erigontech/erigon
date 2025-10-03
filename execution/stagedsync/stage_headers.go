@@ -182,7 +182,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	// latestBlock.SetUint64(curBlock + 6000)
 	for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
 		blockNumber.SetUint64(blockNum)
-		blk, err := snapshots.GetBlockByNumber(client, &blockNumber, false)
+		blk, err := snapshots.GetBlockByNumber(client, &blockNumber, false, cfg.chainConfig.IsArbitrum())
 		if err != nil {
 			return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 		}

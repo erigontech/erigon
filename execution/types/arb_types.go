@@ -15,6 +15,7 @@ import (
 	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/arb"
 	"github.com/holiman/uint256"
 )
 
@@ -68,6 +69,7 @@ var skipAccountChecks = [...]bool{
 // func (tx *ArbitrumInternalTx) skipAccountChecks() bool        { return true }
 
 type ArbitrumUnsignedTx struct {
+	arb.NoTimeBoosted
 	ChainId *big.Int
 	From    common.Address
 
@@ -457,6 +459,7 @@ func (tx *ArbitrumUnsignedTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //}
 
 type ArbitrumContractTx struct {
+	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
 	From      common.Address
@@ -877,6 +880,7 @@ type ArbitrumRetryTx struct {
 	RefundTo            common.Address
 	MaxRefund           *big.Int // the maximum refund sent to RefundTo (the rest goes to From)
 	SubmissionFeeRefund *big.Int // the submission fee to refund if successful (capped by MaxRefund)
+	Timeboosted         bool
 }
 
 func (tx *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
@@ -1094,6 +1098,13 @@ func (tx *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, non
 		return err
 	}
 
+	if tx.Timeboosted {
+		//encode Timeboosted
+		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -1148,6 +1159,12 @@ func (tx *ArbitrumRetryTx) payloadSize() (payloadSize int, nonceLen, gasLen int)
 	// SubmissionFeeRefund (big.Int)
 	payloadSize++ // header
 	payloadSize += rlp.BigIntLenExcludingHead(tx.SubmissionFeeRefund)
+
+	if tx.Timeboosted {
+		// Timeboosted (bool)
+		payloadSize++
+		payloadSize += rlp.BoolLen()
+	}
 
 	return payloadSize, nonceLen, gasLen
 }
@@ -1274,11 +1291,18 @@ func (tx *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.SubmissionFeeRefund = new(big.Int).SetBytes(b)
 
-	// End list decoding.
-	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close ArbitrumRetryTx: %w", err)
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = boolVal
+		// After reading the optional field, ensure list end.
+		return s.ListEnd()
 	}
-	return nil
+	// List already completed, set default.
+	tx.Timeboosted = false
+	return s.ListEnd()
 }
 
 func (tx *ArbitrumRetryTx) MarshalBinary(w io.Writer) error {
@@ -1322,6 +1346,14 @@ func (tx *ArbitrumRetryTx) Unwrap() Transaction {
 	return tx
 }
 
+func (t *ArbitrumRetryTx) IsTimeBoosted() bool {
+	return t.Timeboosted
+}
+
+func (tx *ArbitrumRetryTx) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
+}
+
 // func (tx *ArbitrumRetryTx) chainID() *big.Int            { return tx.ChainId }
 // func (tx *ArbitrumRetryTx) accessList() types.AccessList { return nil }
 // func (tx *ArbitrumRetryTx) data() []byte                 { return tx.Data }
@@ -1349,6 +1381,7 @@ func (tx *ArbitrumRetryTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 //}
 
 type ArbitrumSubmitRetryableTx struct {
+	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
 	From      common.Address
@@ -1403,6 +1436,7 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	if tx.MaxSubmissionFee != nil {
 		cpy.MaxSubmissionFee.Set(tx.MaxSubmissionFee)
 	}
+
 	return cpy
 }
 
@@ -1498,6 +1532,7 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize() (payloadSize int, gasLen int)
 	size++
 	size += 20
 	size += rlp.StringLen(tx.RetryData)
+
 	return size, gasLen
 }
 
@@ -1882,6 +1917,7 @@ func (tx *ArbitrumSubmitRetryableTx) decode(input []byte) error {
 //}
 
 type ArbitrumDepositTx struct {
+	arb.NoTimeBoosted
 	ChainId     *big.Int
 	L1RequestId common.Hash
 	From        common.Address
@@ -2200,15 +2236,17 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 //}
 
 type ArbitrumInternalTx struct {
+	arb.NoTimeBoosted
 	ChainId *uint256.Int
 	Data    []byte
 }
 
 func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
-	return &ArbitrumInternalTx{
-		t.ChainId.Clone(),
-		common.CopyBytes(t.Data),
+	cpy := &ArbitrumInternalTx{
+		ChainId: t.ChainId.Clone(),
+		Data:    common.CopyBytes(t.Data),
 	}
+	return cpy
 }
 
 func (tx *ArbitrumInternalTx) Type() byte                   { return ArbitrumInternalTxType }
@@ -2364,6 +2402,7 @@ func (tx *ArbitrumInternalTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close ArbitrumInternalTx: %w", err)
 	}

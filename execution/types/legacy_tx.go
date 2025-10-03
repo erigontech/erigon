@@ -94,7 +94,8 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
-	GasPrice *uint256.Int // wei per gas
+	GasPrice    *uint256.Int // wei per gas
+	Timeboosted bool
 }
 
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return tx.GasPrice }
@@ -126,6 +127,14 @@ func (tx *LegacyTx) Protected() bool {
 
 func (tx *LegacyTx) Unwrap() Transaction {
 	return tx
+}
+
+func (tx *LegacyTx) IsTimeBoosted() bool {
+	return tx.Timeboosted
+}
+
+func (tx *LegacyTx) SetTimeboosted(val bool) {
+	tx.Timeboosted = val
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -212,6 +221,12 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
+
+	if tx.Timeboosted {
+		payloadSize++
+		payloadSize += rlp.BoolLen()
+	}
+
 	return payloadSize, nonceLen, gasLen
 }
 
@@ -276,6 +291,12 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
+
+	if tx.Timeboosted {
+		if err := rlp.EncodeBool(tx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
 	return nil
 
 }
@@ -335,6 +356,19 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read S: %w", err)
 	}
 	tx.S.SetBytes(b)
+
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = boolVal
+		if err = s.ListEnd(); err != nil {
+			return fmt.Errorf("close txn struct: %w", err)
+		}
+		return nil
+	}
+
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close txn struct: %w", err)
 	}

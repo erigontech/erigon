@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -623,7 +624,7 @@ func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{
 }
 
 // unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
-func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (types.Transactions, error) {
+func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	var txs types.Transactions
 
 	for _, rawTx := range rawTxs {
@@ -676,21 +677,38 @@ func unMarshalTransactions(rawTxs []map[string]interface{}, arbitrum bool) (type
 		default:
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
-		txs = append(txs, tx)
 
+		if isArbitrum {
+			// Query receipt// TODO request only if txtype supports timeboosted at all
+			var receipt map[string]interface{}
+			err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", tx.Hash())
+			if err != nil {
+				return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
+			}
+
+			// Get timeboosted field from receipt, default to false if not present
+			if timeboosted, ok := receipt["timeboosted"].(bool); ok && timeboosted {
+				if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
+					fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", tx.Hash().Hex())
+				}
+				tx.SetTimeboosted(timeboosted)
+			}
+		}
+
+		txs = append(txs, tx)
 	}
 	return txs, nil
 }
 
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*types.Block, error) {
+func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool, isArbitrum bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(block.Transactions, verify)
+	txs, err := unMarshalTransactions(client, block.Transactions, verify, isArbitrum)
 	if err != nil {
 		return nil, err
 	}
@@ -751,6 +769,8 @@ func genFromRPc(cliCtx *cli.Context) error {
 	}
 
 	verification := cliCtx.Bool(Verify.Name)
+	isArbitrum := cliCtx.Bool(Arbitrum.Name)
+
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
 	start := cliCtx.Uint64(FromBlock.Name)
@@ -796,7 +816,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := GetBlockByNumber(client, &blockNumber, verification)
+				blk, err := GetBlockByNumber(client, &blockNumber, verification, isArbitrum)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}

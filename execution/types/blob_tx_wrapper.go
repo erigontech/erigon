@@ -348,6 +348,14 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDepl
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
+func (txw *BlobTxWrapper) IsTimeBoosted() bool {
+	return txw.Tx.IsTimeBoosted()
+}
+
+func (txw *BlobTxWrapper) SetTimeboosted(val bool) {
+	txw.Tx.Timeboosted = val
+}
+
 func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
