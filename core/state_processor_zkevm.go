@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *state.IntraBlockState, header *types.Header, tx types.Transaction, evm *vm.EVM, effectiveGasPricePercentage uint8) (types.Message, evmtypes.TxContext, error) {
@@ -46,23 +47,18 @@ func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *stat
 	if evm.ChainRules().IsForkID5Dragonfruit {
 		msg.SetGasPrice(CalculateEffectiveGas(msg.GasPrice(), effectiveGasPricePercentage))
 		msg.SetFeeCap(CalculateEffectiveGas(msg.FeeCap(), effectiveGasPricePercentage))
+		msg.SetTip(CalculateEffectiveGas(msg.Tip(), effectiveGasPricePercentage))
 	}
 
 	isFree := false
-
-	// free if egp is 0
-	if effectiveGasPricePercentage == 0 {
+	if utils.IsTxFreeByZkEgps(config, tx) {
 		isFree = true
-	}
-
-	if msg.FeeCap().IsZero() && engine != nil {
+	} else if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
 		}
-		if engine.IsServiceTransaction(msg.From(), syscall) {
-			isFree = true
-		}
+		isFree = engine.IsServiceTransaction(msg.From(), syscall)
 	}
 
 	msg.SetIsFree(isFree)

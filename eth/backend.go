@@ -1024,6 +1024,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.chainConfig.AllowFreeTransactions = cfg.AllowFreeTransactions
 		backend.chainConfig.ZkDefaultGasPrice = cfg.DefaultGasPrice
 		backend.chainConfig.FreeInjectedBatch = cfg.FreeInjectedBatch
+		// Map zk EGP-per-type flags into chain config for runtime checks
+		backend.chainConfig.EffectiveGasPriceForEthTransfer = cfg.EffectiveGasPriceForEthTransfer
+		backend.chainConfig.EffectiveGasPriceForErc20Transfer = cfg.EffectiveGasPriceForErc20Transfer
+		backend.chainConfig.EffectiveGasPriceForContractInvocation = cfg.EffectiveGasPriceForContractInvocation
+		backend.chainConfig.EffectiveGasPriceForContractDeployment = cfg.EffectiveGasPriceForContractDeployment
 		l1Urls := strings.Split(cfg.L1RpcUrl, ",")
 
 		backend.etherManClients = make([]*etherman.Client, len(l1Urls))

@@ -122,9 +122,13 @@ type Config struct {
 	// The block at which the PMT is enabled over the SMT.
 	PmtEnabledBlock *big.Int `json:"pmtEnabledBlock,omitempty"`
 
-	AllowFreeTransactions bool   `json:"allowFreeTransactions,omitempty"`
-	FreeInjectedBatch     bool   `json:"freeInjectedBatch,omitempty"`
-	ZkDefaultGasPrice     uint64 `json:"zkDefaultGasFee,omitempty"`
+	AllowFreeTransactions                  bool   `json:"allowFreeTransactions,omitempty"`
+	FreeInjectedBatch                      bool   `json:"freeInjectedBatch,omitempty"`
+	ZkDefaultGasPrice                      uint64 `json:"zkDefaultGasFee,omitempty"`
+	EffectiveGasPriceForEthTransfer        uint8  `json:"effectiveGasPriceForEthTransfer,omitempty"`
+	EffectiveGasPriceForErc20Transfer      uint8  `json:"effectiveGasPriceForErc20Transfer,omitempty"`
+	EffectiveGasPriceForContractInvocation uint8  `json:"effectiveGasPriceForContractInvocation,omitempty"`
+	EffectiveGasPriceForContractDeployment uint8  `json:"effectiveGasPriceForContractDeployment,omitempty"`
 
 	// block height for disabling cdk state changes that happen outside of the EVM
 	// helps with compatibility with other clients that do not handle these kinds of
