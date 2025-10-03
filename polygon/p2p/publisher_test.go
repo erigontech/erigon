@@ -30,7 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/event"
+	"github.com/erigontech/erigon-lib/common/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/execution/p2p"

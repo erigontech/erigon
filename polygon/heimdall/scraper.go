@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"
+	"github.com/erigontech/erigon-lib/common/event"
 	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
