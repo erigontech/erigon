@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const CheckpointHttpTimeout = 60 * time.Second

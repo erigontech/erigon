@@ -25,10 +25,10 @@ import (
 
 	"github.com/prysmaticlabs/gohashtree"
 
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
-	"github.com/erigontech/erigon/cl/utils"
 )
 
 // HashTreeRoot returns the hash for a given schema of objects.

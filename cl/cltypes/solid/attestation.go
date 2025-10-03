@@ -21,13 +21,13 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/clonable"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 const (

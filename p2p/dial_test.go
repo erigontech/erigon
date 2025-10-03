@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/netutil"

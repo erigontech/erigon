@@ -23,10 +23,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"

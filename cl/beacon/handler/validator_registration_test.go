@@ -25,9 +25,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/cl/clparams"
 )
 
 func TestPostEthV1ValidatorPreparation(t *testing.T) {

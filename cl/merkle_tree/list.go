@@ -21,10 +21,10 @@ import (
 
 	"github.com/prysmaticlabs/gohashtree"
 
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
-	"github.com/erigontech/erigon/cl/utils"
 )
 
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte

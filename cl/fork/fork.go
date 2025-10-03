@@ -20,10 +20,10 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var NO_GENESIS_TIME_ERR error = errors.New("genesis time is not set")

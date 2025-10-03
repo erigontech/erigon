@@ -19,11 +19,11 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/clonable"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type hashVector struct {

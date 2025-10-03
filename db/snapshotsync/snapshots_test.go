@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dir2 "github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"

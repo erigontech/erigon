@@ -22,8 +22,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
 )
 
 var (

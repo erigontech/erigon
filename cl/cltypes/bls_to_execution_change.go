@@ -19,10 +19,10 @@ package cltypes
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 // Change to EL engine

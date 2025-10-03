@@ -33,8 +33,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/execution/chain"

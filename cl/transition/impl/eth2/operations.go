@@ -28,9 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 

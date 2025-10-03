@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/netutil"
