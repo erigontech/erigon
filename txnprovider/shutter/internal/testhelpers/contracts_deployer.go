@@ -21,8 +21,8 @@ import (
 	"crypto/ecdsa"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	executiontests "github.com/erigontech/erigon/execution/tests"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"

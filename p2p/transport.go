@@ -30,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/rlpx"
 )

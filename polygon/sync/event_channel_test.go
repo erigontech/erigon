@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/synctest"
+	"github.com/erigontech/erigon/common/synctest"
 )
 
 func TestEventChannel(t *testing.T) {

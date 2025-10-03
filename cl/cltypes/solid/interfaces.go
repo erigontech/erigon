@@ -19,8 +19,8 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 

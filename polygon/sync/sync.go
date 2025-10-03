@@ -26,8 +26,8 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"

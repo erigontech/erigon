@@ -23,7 +23,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"

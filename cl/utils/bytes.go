@@ -25,7 +25,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 
-	"github.com/erigontech/erigon-lib/common/ssz"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var IsSysLittleEndian bool

@@ -40,8 +40,8 @@ import (
 	"github.com/golang/snappy"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common/crypto"
-	"github.com/erigontech/erigon-lib/common/crypto/ecies"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/ecies"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 

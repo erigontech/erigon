@@ -25,8 +25,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/log/v3"
-	"github.com/erigontech/erigon-lib/common/ssz"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 )
 

@@ -19,7 +19,7 @@ package gaspricecfg
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 var DefaultIgnorePrice = big.NewInt(2 * common.Wei)

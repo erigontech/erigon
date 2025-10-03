@@ -17,7 +17,7 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/common/clonable"
+	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 

@@ -14,7 +14,7 @@ import (
 	io "io"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon/common"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	gomock "go.uber.org/mock/gomock"
 )

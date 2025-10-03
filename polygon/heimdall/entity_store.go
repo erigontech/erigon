@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/snaptype"

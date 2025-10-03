@@ -21,8 +21,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/cbor"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/cbor"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 

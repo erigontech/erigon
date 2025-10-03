@@ -23,7 +23,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/erigontech/erigon-lib/common/crypto"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 type NodeKeyConfig struct {

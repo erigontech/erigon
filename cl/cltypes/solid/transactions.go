@@ -19,10 +19,10 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/clonable"
-	"github.com/erigontech/erigon-lib/common/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 

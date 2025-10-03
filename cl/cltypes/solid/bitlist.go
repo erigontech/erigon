@@ -21,9 +21,9 @@ import (
 	"errors"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/log/v3"
-	"github.com/erigontech/erigon-lib/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 

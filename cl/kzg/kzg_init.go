@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 

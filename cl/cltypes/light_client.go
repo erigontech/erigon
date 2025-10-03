@@ -17,7 +17,7 @@
 package cltypes
 
 import (
-	"github.com/erigontech/erigon-lib/common/clonable"
+	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
