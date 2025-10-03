@@ -42,7 +42,7 @@ type serialExecutor struct {
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Block, kv.TemporalRwTx, error) {
+	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
 
@@ -139,7 +139,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		uncommitedGas = uint64(se.executedGas.Load() - int64(se.committedGas))
 
 		if !continueLoop {
-			return b, rwTx, nil
+			return b.HeaderNoCopy(), rwTx, nil
 		}
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets {
@@ -165,7 +165,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			if !se.isMining && !bytes.Equal(rh, header.Root.Bytes()) {
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-				return nil, rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
+				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
 
@@ -218,7 +218,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
-				return b, rwTx, nil
+				return b.HeaderNoCopy(), rwTx, nil
 			}
 
 			resetCommitmentGauges(ctx)
@@ -256,11 +256,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			// on chain-tip: if batch is full then stop execution - to allow stages commit
 			if !initialCycle {
 				if isBatchFull {
-					return b, rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 				}
 
 				if canPrune {
-					return b, rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
+					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
 				}
 			}
 
@@ -279,16 +279,16 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-ctx.Done():
-			return b, rwTx, ctx.Err()
+			return b.HeaderNoCopy(), rwTx, ctx.Err()
 		default:
 		}
 
 		if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
-			return b, rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+			return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 		}
 	}
 
-	return b, rwTx, nil
+	return b.HeaderNoCopy(), rwTx, nil
 }
 
 func (se *serialExecutor) LogExecuted() {

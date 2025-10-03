@@ -249,7 +249,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	var uncommitedGas uint64
-	var b *types.Block
+	var lastHeader *types.Header
 
 	var readAhead chan uint64
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
@@ -295,7 +295,7 @@ func ExecV3(ctx context.Context,
 		flushEvery := time.NewTicker(2 * time.Second)
 		defer flushEvery.Stop()
 
-		applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
+		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery, flushEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum
@@ -324,23 +324,23 @@ func ExecV3(ctx context.Context,
 			se.LogComplete(stepsInDb)
 		}()
 
-		b, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
+		lastHeader, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		if u != nil && !u.HasUnwindPoint() {
-			if b != nil {
+			if lastHeader != nil {
 				if execErr != nil {
 					if errors.Is(execErr, ErrWrongTrieRoot) {
 						execErr = handleIncorrectRootHashError(
-							b.NumberU64(), b.Hash(), b.ParentHash(), applyTx, cfg, execStage, maxBlockNum, logger, u)
+							lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, maxBlockNum, logger, u)
 					}
 				} else {
-					_, _, err = flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, se.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 					if err != nil {
 						return err
 					}
 
-					se.lastCommittedBlockNum = b.NumberU64()
+					se.lastCommittedBlockNum = lastHeader.Number.Uint64()
 					committedTransactions := inputTxNum - se.lastCommittedTxNum
 					se.lastCommittedTxNum = inputTxNum
 
@@ -358,7 +358,13 @@ func ExecV3(ctx context.Context,
 					uncommitedGas = 0
 				}
 			} else {
-				fmt.Printf("[dbg] mmmm... do we need action here????\n")
+				if execErr != nil {
+					if errors.Is(execErr, ErrWrongTrieRoot) {
+						return fmt.Errorf("can't handle incorrect root err: %w", execErr)
+					}
+				} else {
+					return fmt.Errorf("last processed block unexpectedly nil")
+				}
 			}
 		}
 
@@ -389,12 +395,12 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(doms.TxNum())
 
-	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && b != nil {
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
 		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
-		cfg.notifications.Accumulator.StartChange(b.HeaderNoCopy(), nil, false /* unwind */)
+		cfg.notifications.Accumulator.StartChange(lastHeader, nil, false /* unwind */)
 	}
 
 	return execErr

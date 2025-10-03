@@ -94,7 +94,7 @@ type parallelExecutor struct {
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (kv.TemporalRwTx, error) {
+	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.Tx
@@ -105,7 +105,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		asyncTxChan = temporalTx.ApplyChan()
 		asyncTx = temporalTx
 	default:
-		return rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
+		return nil, rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
 	}
 
 	applyResults := make(chan applyResult, 100_000)
@@ -129,12 +129,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	pe.resetWorkers(ctx, pe.rs, rwTx)
 
 	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, initialTxNum, readAhead, applyResults); err != nil {
-		return rwTx, err
+		return nil, rwTx, err
 	}
 
 	var lastExecutedLog time.Time
 	var lastCommitedLog time.Time
 	var lastBlockResult blockResult
+	var lastHeader *types.Header
 	var uncommittedBlocks int64
 	var uncommittedTransactions uint64
 	var uncommittedGas int64
@@ -195,8 +196,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err)
 						}
 
-						if b.NumberU64() != applyResult.BlockNum {
-							return fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, b.NumberU64(), applyResult.BlockHash)
+						lastHeader = b.HeaderNoCopy()
+
+						if lastHeader.Number.Uint64() != applyResult.BlockNum {
+							return fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, lastHeader.Number.Uint64(), applyResult.BlockHash)
 						}
 
 						if blockUpdateCount != applyResult.ApplyCount {
@@ -204,7 +207,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
-							b.HeaderNoCopy(), pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
@@ -400,16 +403,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
-			return rwTx, execErr
+			return nil, rwTx, execErr
 		}
 	}
 
 	var err error
 	if rwTx, err = pe.flushAndCommit(ctx, execStage, rwTx, asyncTxChan, useExternalTx); err != nil {
-		return rwTx, fmt.Errorf("flush failed: %w", err)
+		return nil, rwTx, fmt.Errorf("flush failed: %w", err)
 	}
 
-	return rwTx, pe.wait(ctx)
+	return lastHeader, rwTx, pe.wait(ctx)
 }
 
 func (pe *parallelExecutor) LogExecuted() {
