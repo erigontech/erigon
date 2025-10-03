@@ -21,9 +21,8 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon-lib/common/length"
-
 	"github.com/erigontech/erigon-lib/common/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon-lib/common/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
