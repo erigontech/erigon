@@ -18,7 +18,7 @@ fi
 DISABLED_TEST_LIST=(
    debug_traceBlockByNumber/test_30.json # huge JSON response => slow diff
    debug_traceCall/test_22.json
-   debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
+   debug_traceCall/test_38.json 
    debug_traceCallMany
    erigon_
    eth_blobBaseFee/test_01.json # debug mismatch
