@@ -717,7 +717,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil || config.ElBlockDownloaderV2
+	const sentryMcDisableBlockDownload = true
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -1037,13 +1037,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		chainConfig,
 		executionRpc,
-		backend.sentriesClient.Hd,
-		engine_block_downloader.NewEngineBlockDownloader(ctx,
-			logger, backend.sentriesClient.Hd, executionRpc,
-			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
-			backend.chainDB, chainConfig, tmpdir, config.Sync, config.ElBlockDownloaderV2, sentryMux(sentries), statusDataProvider),
+		engine_block_downloader.NewEngineBlockDownloader(
+			ctx,
+			logger,
+			executionRpc,
+			blockReader,
+			backend.chainDB,
+			chainConfig,
+			tmpdir,
+			config.Sync,
+			sentryMux(sentries),
+			statusDataProvider,
+		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
-		false,
 		config.Miner.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
@@ -1143,13 +1149,6 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
 	var err error
-
-	if chainConfig.Bor == nil {
-		if !config.ElBlockDownloaderV2 {
-			s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
-		}
-	}
-
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
 		if err = chainKv.View(ctx, func(tx kv.Tx) error {
