@@ -24,7 +24,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -51,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
