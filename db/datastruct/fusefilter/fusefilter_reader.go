@@ -13,7 +13,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	mm "github.com/erigontech/erigon-lib/mmap"
+	mm "github.com/erigontech/erigon-lib/common/mmap"
 )
 
 type Features uint32

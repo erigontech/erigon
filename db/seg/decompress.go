@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/log/v3"
-	"github.com/erigontech/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/common/mmap"
 )
 
 type word []byte // plain text word associated with code from dictionary
