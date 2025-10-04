@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -25,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -113,10 +113,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
-	if err := hexutil.IsValidQuantity(index); err != nil {
-		log.Debug("GetStorageAt: Skipped quantity validation error " + "unable to decode storage key: " + err.Error())
+	// Validation for index i.e. storage slot is non-standard: it can be interpreted as QUANTITY (stricter) or as DATA (like Hive tests do).
+	// Waiting for a spec, we choose the latter because it's more general, but we check that the length is not greater than 64 hex-digits.
+	indexBytes, err := hexutil.FromHexWithValidation(index)
+	if err != nil {
+		return "", errors.New("unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error())
 	}
-	indexBytes := hexutil.FromHex(index)
 	if len(indexBytes) > 32 {
 		return "", hexutil.ErrTooBigHexString
 	}
@@ -137,6 +139,9 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 
 	location := common.HexToHash(index)
 	res, _, err := reader.ReadAccountStorage(address, location)
+	if err != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+	}
 	return hexutil.Encode(res.PaddedBytes(32)), err
 }
 
