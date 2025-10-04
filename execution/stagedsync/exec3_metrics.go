@@ -461,6 +461,12 @@ type Progress struct {
 	logger                         log.Logger
 }
 
+type executor interface {
+	LogExecuted()
+	LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
+	LogComplete(stepsInDb float64)
+}
+
 func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevExecTime)
