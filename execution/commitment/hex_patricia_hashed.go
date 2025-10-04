@@ -2228,7 +2228,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			update := stateUpdate
 
 			if update == nil {
-				if len(plainKey) == hph.accountKeyLen {
+				if int16(len(plainKey)) == hph.accountKeyLen {
 					update, err = hph.ctx.Account(plainKey)
 					if err != nil {
 						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
