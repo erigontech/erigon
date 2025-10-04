@@ -174,3 +174,32 @@ tracesto:
         efi:
             current: v2.1
             min: v1.0
+transactions:
+    block:
+        seg:
+            current: v1.1
+            min: v1.0
+        idx:
+            current: v1.1
+            min: v1.0
+bodies:
+    block:
+        seg:
+            current: v1.1
+            min: v1.1
+        idx:
+            current: v1.1
+            min: v1.0
+headers:
+    block:
+        seg:
+            current: v1.1
+            min: v1.0
+        idx:
+            current: v1.1
+            min: v1.0
+transactiontoblock:
+    block:
+        idx:
+            current: v1.1
+            min: v1.0

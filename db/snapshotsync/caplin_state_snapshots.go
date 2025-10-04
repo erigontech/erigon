@@ -57,7 +57,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 		Salt:       &salt,
 		BaseDataID: sn.From,
 	}
-	if err := snaptype.BuildIndex(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := snaptype.BuildIndex(ctx, sn, version.Versions{
+		Current:      sn.Version,
+		MinSupported: sn.Version,
+	}, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
 		}

@@ -29,6 +29,7 @@ type Category struct {
 	Domain Group `yaml:"domain,omitempty"`
 	Hist   Group `yaml:"hist,omitempty"`
 	Ii     Group `yaml:"ii,omitempty"`
+	Block  Group `yaml:"block,omitempty"`
 }
 
 type Schema map[string]Category

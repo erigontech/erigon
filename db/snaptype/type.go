@@ -143,8 +143,9 @@ func GetIndexSalt(baseDir string, logger log.Logger) (uint32, error) {
 }
 
 type Index struct {
-	Name   string
-	Offset int
+	Name    string
+	Offset  int
+	Version Versions
 }
 
 var CaplinIndexes = struct {
@@ -157,8 +158,6 @@ var CaplinIndexes = struct {
 
 func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	dir := info.Dir()
-	fName := IdxFileName(info.Version, info.From, info.To, i.Name)
-
 	segment, err := seg.NewDecompressor(info.Path)
 
 	if err != nil {
@@ -167,7 +166,28 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 
 	defer segment.Close()
 
-	idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
+	fNameMask := IdxFileMask(info.From, info.To, i.Name)
+	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
+	if err != nil {
+		return false
+	}
+
+	if !ok {
+		_, fName := filepath.Split(fPath)
+		logger.Debug("[ind] HasFile: file does not exists", "f", fName)
+		return false
+	}
+	// file ver 1.2.4 and i.ver 1.2.3 should be okay
+	if fileVer.Major != i.Version.Current.Major {
+		if !fileVer.Less(i.Version.MinSupported) {
+			i.Version.Current = fileVer
+		} else {
+			panic("Version is too low, try to rm idx files")
+			//return false
+		}
+	}
+
+	idx, err := recsplit.OpenIndex(fPath)
 
 	if err != nil {
 		return false
@@ -186,7 +206,7 @@ type Type interface {
 	FileInfo(dir string, from uint64, to uint64) FileInfo
 	FileInfoByMask(dir string, from uint64, to uint64) FileInfo
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
-	IdxFileNames(version Version, from uint64, to uint64) []string
+	IdxFileNames(from uint64, to uint64) []string
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
@@ -313,16 +333,16 @@ func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 	return true
 }
 
-func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {
+func (s snapType) IdxFileNames(from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
-		fileNames[i] = IdxFileName(version, from, to, index.Name)
+		fileNames[i] = IdxFileName(index.Version.Current, from, to, index.Name)
 	}
 
 	return fileNames
 }
 
-func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...Index) string {
+func (s snapType) IdxFileName(ver version.Version, from uint64, to uint64, index ...Index) string {
 	if len(index) == 0 {
 		if len(s.indexes) == 0 {
 			return ""
@@ -345,7 +365,7 @@ func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...
 		}
 	}
 
-	return IdxFileName(version, from, to, index[0].Name)
+	return IdxFileName(ver, from, to, index[0].Name)
 }
 
 func ParseFileType(s string) (Type, bool) {
@@ -441,7 +461,7 @@ func ParseEnum(s string) (Enum, bool) {
 }
 
 // Idx - iterate over segment and building .idx file
-func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Versions, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
@@ -476,7 +496,8 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(fileVer, info.From, info.To))
+	idxVer := indexVersion.Current
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err
@@ -538,7 +559,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), strings.ReplaceAll(info.name, ".seg", ".idx"))
+	cfg.IndexFile = info.Type.IdxFileName(info.Version, info.From, info.To, info.Type.Indexes()...)
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err
