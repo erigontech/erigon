@@ -309,14 +309,12 @@ func TestNewUpdates(t *testing.T) {
 		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.tree)
-		require.Nil(t, ut.keys)
 		require.Equal(t, ModeUpdate, ut.mode)
 	})
 
 	t.Run("ModeDirect", func(t *testing.T) {
 		ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
-		require.NotNil(t, ut.keys)
 		require.Equal(t, ModeDirect, ut.mode)
 	})
 
