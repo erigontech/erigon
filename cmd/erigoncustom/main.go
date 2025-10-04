@@ -30,11 +30,6 @@ import (
 var flag = cli.StringFlag{
 	Name:  "custom-stage-greeting",
 	Value: "default-value",
-}
-
-// defining a custom bucket name
-const (
-	customBucketName = "ch.torquem.demo.tgcustom.CUSTOM_BUCKET" //nolint
 )
 
 // the regular main function
@@ -54,7 +49,7 @@ func runErigon(ctx *cli.Context) error {
 	// running a node and initializing a custom bucket with all default settings
 	//eri := node.New(ctx, node.Params{
 	//	CustomBuckets: map[string]dbutils.BucketConfigItem{
-	//		customBucketName: {},
+	//		"ch.torquem.demo.tgcustom.CUSTOM_BUCKET": {},
 	//	},
 	//})
 
