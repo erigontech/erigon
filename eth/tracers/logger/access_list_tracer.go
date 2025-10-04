@@ -37,7 +37,10 @@ type accessList map[common.Address]accessListSlots
 
 // accessListSlots is an accumulator for the set of storage slots within a single
 // contract that an EVM contract execution touches.
-type accessListSlots map[common.Hash]struct{}
+type accessListSlots struct {
+	order int
+	slots map[common.Hash]int
+}
 
 // newAccessList creates a new accessList.
 func newAccessList() accessList {
@@ -48,7 +51,7 @@ func newAccessList() accessList {
 func (al accessList) addAddress(address common.Address) {
 	// Set address if not previously present
 	if _, present := al[address]; !present {
-		al[address] = make(map[common.Hash]struct{})
+		al[address] = accessListSlots{len(al), map[common.Hash]int{}}
 	}
 }
 
@@ -58,7 +61,10 @@ func (al accessList) addSlot(address common.Address, slot common.Hash) {
 	al.addAddress(address)
 
 	// Set the slot on the surely existent storage set
-	al[address][slot] = struct{}{}
+	storage := al[address]
+	if _, ok := storage.slots[slot]; !ok {
+		storage.slots[slot] = len(storage.slots)
+	}
 }
 
 // equal checks if the content of the current access list is the same as the
@@ -79,19 +85,19 @@ func (al accessList) equal(other accessList) bool {
 		}
 	}
 	// Accounts match, cross reference the storage slots too
-	for addr, slots := range al {
-		otherslots := other[addr]
+	for addr, storage := range al {
+		otherStorage := other[addr]
 
-		if len(slots) != len(otherslots) {
+		if len(storage.slots) != len(otherStorage.slots) {
 			return false
 		}
-		for hash := range slots {
-			if _, ok := otherslots[hash]; !ok {
+		for hash := range storage.slots {
+			if _, ok := otherStorage.slots[hash]; !ok {
 				return false
 			}
 		}
-		for hash := range otherslots {
-			if _, ok := slots[hash]; !ok {
+		for hash := range otherStorage.slots {
+			if _, ok := storage.slots[hash]; !ok {
 				return false
 			}
 		}
@@ -105,13 +111,13 @@ func (al accessList) Equal(other accessList) bool {
 
 // accesslist converts the accesslist to a types.AccessList.
 func (al accessList) accessList() types.AccessList {
-	acl := make(types.AccessList, 0, len(al))
-	for addr, slots := range al {
-		tuple := types.AccessTuple{Address: addr, StorageKeys: []common.Hash{}}
-		for slot := range slots {
-			tuple.StorageKeys = append(tuple.StorageKeys, slot)
+	acl := make(types.AccessList, len(al))
+	for addr, storage := range al {
+		tuple := types.AccessTuple{Address: addr, StorageKeys: make([]common.Hash, len(storage.slots))}
+		for slot, pos := range storage.slots {
+			tuple.StorageKeys[pos] = slot
 		}
-		acl = append(acl, tuple)
+		acl[storage.order] = tuple
 	}
 	return acl
 }
@@ -119,10 +125,10 @@ func (al accessList) accessList() types.AccessList {
 // accesslist converts the accesslist to a types.AccessList.
 func (al accessList) accessListSorted() types.AccessList {
 	acl := make(types.AccessList, 0, len(al))
-	for addr, slots := range al {
-		storageKeys := make([]common.Hash, 0, len(slots))
-		for slot := range slots {
-			storageKeys = append(storageKeys, slot)
+	for addr, storage := range al {
+		storageKeys := make([]common.Hash, len(storage.slots))
+		for slot, pos := range storage.slots {
+			storageKeys[pos] = slot
 		}
 		sort.Slice(storageKeys, func(i, j int) bool {
 			return storageKeys[i].Cmp(storageKeys[j]) < 0
