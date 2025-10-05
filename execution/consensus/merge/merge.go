@@ -367,13 +367,13 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 	if !misc.IsPoSHeader(header) {
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
-	if chain.Config().IsCancun(header.Time) {
+	if chain.Config().IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
 	if chain.Config().IsPrague(header.Time) {
-		misc.StoreBlockHashesEip2935(header, state, config, chain)
+		_ = misc.StoreBlockHashesEip2935(header, state)
 	}
 }
 

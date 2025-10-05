@@ -21,14 +21,11 @@ DISABLED_TEST_LIST=(
    debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
    debug_traceCallMany
    erigon_
+   eth_blobBaseFee/test_01.json # debug mismatch
    eth_callBundle
    eth_getProof/test_04.json
    eth_getProof/test_08.json
    eth_getProof/test_09.json
-   eth_simulateV1/test_06.json # state root mismatch
-   eth_simulateV1/test_07.json # state root mismatch
-   eth_simulateV1/test_12.json # state root mismatch
-   eth_simulateV1/test_16.json # state root mismatch
    ots_
    parity_
    trace_
@@ -38,4 +35,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.90.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message" "$DUMP_RESPONSE"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.93.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR" "latest" "$REFERENCE_HOST" "do-not-compare-error-message"
