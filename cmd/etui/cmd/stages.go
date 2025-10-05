@@ -38,7 +38,8 @@ var infoCmd = &cobra.Command{
 				}
 			}
 		}()
-		err := tui.MakeTUI(infoCh, errCh)
+		tuiApp := tui.NewTUI()
+		err := tuiApp.Run(infoCh, errCh)
 		if err != nil {
 			return err
 		}
