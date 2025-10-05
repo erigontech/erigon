@@ -156,7 +156,7 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
-			CompressorCfg: seg.DefaultWordLvlCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
@@ -164,7 +164,7 @@ var Schema = SchemaGen{
 
 			IiCfg: InvIdxCfg{
 				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
-				CompressorCfg: seg.DefaultWordLvlCfg,
+				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
 		},
