@@ -33,6 +33,7 @@ contract Phoenix {
     }
 
     function die() public {
-        selfdestruct(address(0));
+        address payable nil = payable(0);
+        selfdestruct(nil);
     }
 }
