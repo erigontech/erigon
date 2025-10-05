@@ -46,6 +46,7 @@ const (
 	ErrCodeInvalidParams           = -32602
 	ErrCodeReverted                = -32000
 	ErrCodeVMError                 = -32015
+	ErrCodeTimeout                 = 4001
 )
 
 const defaultErrorCode = ErrCodeReverted

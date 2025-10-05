@@ -25,6 +25,7 @@ import (
 	"path"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -63,7 +64,7 @@ func TestGasPrice(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, 0*time.Second, log.New())
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -161,7 +162,7 @@ func TestEthConfig(t *testing.T) {
 			require.NoError(t, err)
 			m := mock.MockWithGenesis(t, &genesis, key, false)
 			defer m.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
+			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, 0*time.Second, log.New())
 
 			timeArg := test.timeArg
 			result, err := eth.Config(t.Context(), &timeArg)

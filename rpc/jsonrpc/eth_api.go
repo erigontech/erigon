@@ -106,6 +106,7 @@ type EthAPI interface {
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
+	SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeout *hexutil.Uint64) (map[string]interface{}, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
@@ -403,13 +404,17 @@ type APIImpl struct {
 	AllowUnprotectedTxs         bool
 	MaxGetProofRewindBlockCount int
 	SubscribeLogsChannelSize    int
+	SendRawTxSyncTimeout        time.Duration
 	logger                      log.Logger
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, sendRawTxSyncTimeout time.Duration, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
+	}
+	if sendRawTxSyncTimeout == 0 {
+		sendRawTxSyncTimeout = 2 * time.Second // Default: 2 seconds as per EIP-7966
 	}
 
 	return &APIImpl{
@@ -425,6 +430,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		ReturnDataLimit:             returnDataLimit,
 		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
 		SubscribeLogsChannelSize:    subscribeLogsChannelSize,
+		SendRawTxSyncTimeout:        sendRawTxSyncTimeout,
 		logger:                      logger,
 	}
 }

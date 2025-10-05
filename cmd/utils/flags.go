@@ -504,6 +504,11 @@ var (
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC",
 	}
+	SendRawTxSyncTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.sendrawtxsync.timeout",
+		Usage: "Sets the timeout for eth_sendRawTransactionSync method",
+		Value: 2 * time.Second,
+	}
 	StateCacheFlag = cli.StringFlag{
 		Name:  "state.cache",
 		Value: "0MB",

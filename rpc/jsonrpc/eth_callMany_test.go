@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -99,7 +100,7 @@ func TestCallMany(t *testing.T) {
 
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
-	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir()), nil), db, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir()), nil), db, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, 0*time.Second, log.New())
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

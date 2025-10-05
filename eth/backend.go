@@ -831,6 +831,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			httpRpcCfg.AllowUnprotectedTxs,
 			httpRpcCfg.MaxGetProofRewindBlockCount,
 			httpRpcCfg.WebsocketSubscribeLogsChannelSize,
+			httpRpcCfg.SendRawTxSyncTimeout,
 			logger,
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)

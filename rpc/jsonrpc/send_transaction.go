@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
@@ -62,6 +64,45 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	return txn.Hash(), nil
+}
+
+// SendRawTransactionSync implements eth_sendRawTransactionSync.
+func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeout *hexutil.Uint64) (map[string]interface{}, error) {
+	hash, err := api.SendRawTransaction(ctx, encodedTx)
+	if err != nil {
+		return nil, err
+	}
+
+	timeoutDuration := api.SendRawTxSyncTimeout
+	if timeout != nil {
+		timeoutDuration = time.Duration(*timeout) * time.Second
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
+	defer cancel()
+
+	receipt, err := api.GetTransactionReceipt(ctx, hash)
+	if err == nil && receipt != nil {
+		return receipt, nil
+	}
+
+	headersCh, subID := api.filters.SubscribeNewHeads(1)
+	defer api.filters.UnsubscribeHeads(subID)
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, &rpc.CustomError{
+				Code:    rpc.ErrCodeTimeout,
+				Message: fmt.Sprintf("The transaction was added to the mempool but wasn't processed in %s.", timeoutDuration),
+			}
+		case <-headersCh:
+			receipt, err := api.GetTransactionReceipt(ctx, hash)
+			if err == nil && receipt != nil {
+				return receipt, nil
+			}
+		}
+	}
 }
 
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.
