@@ -165,7 +165,6 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 			EnabledPOS: true,
 		},
 		KeepStoredChainConfig: true,
-		ElBlockDownloaderV2:   true,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)

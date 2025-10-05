@@ -194,6 +194,7 @@ func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 		return err
 	}
 	if !ok {
+		s.logger.Debug(heimdallLogPrefix("synchronizing because last span not found"), "blockNum", blockNum)
 		return s.synchronizeSpans(ctx)
 	}
 
@@ -202,13 +203,15 @@ func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 		return err
 	}
 	if !ok {
+		s.logger.Debug(heimdallLogPrefix("synchronizing because last producer selection not found"), "blockNum", blockNum)
 		return s.synchronizeSpans(ctx)
 	}
 
 	if lastSpan.EndBlock < blockNum || lastProducerSelection.EndBlock < blockNum {
+		s.logger.Debug(heimdallLogPrefix("synchronizing because last span or producer selection is behind"), "blockNum", blockNum, "lastSpan", lastSpan, "lastProducerSlection", lastProducerSelection)
 		return s.synchronizeSpans(ctx)
 	}
-
+	s.logger.Debug(heimdallLogPrefix("no need to synchronize"), "blockNum", blockNum, "lastSpan", lastSpan)
 	return nil
 }
 

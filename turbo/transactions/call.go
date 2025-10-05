@@ -48,6 +48,7 @@ type BlockOverrides struct {
 	GasLimit    *hexutil.Uint           `json:"gasLimit"`
 	Difficulty  *hexutil.Uint           `json:"difficulty"`
 	BaseFee     *uint256.Int            `json:"baseFeePerGas"`
+	BlobBaseFee *hexutil.Big            `json:"blobBaseFee"`
 	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
 	BeaconRoot  *common.Hash            `json:"beaconRoot"`
 	Withdrawals *types.Withdrawals      `json:"withdrawals"`
@@ -216,7 +217,7 @@ func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader services.Ca
 		}
 		blockHash, ok, err := reader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil || !ok {
-			log.Debug("Can't get block hash by number", "blockNum", blockNum, "ok", ok, "err", err)
+			log.Error("[evm] canonical hash not found", "blockNum", blockNum, "ok", ok, "err", err)
 		}
 		return blockHash, err
 	}
@@ -299,6 +300,7 @@ func NewReusableCaller(
 	engine consensus.EngineReader,
 	stateReader state.StateReader,
 	overrides *ethapi2.StateOverrides,
+	blockOverrides *ethapi2.BlockOverrides,
 	header *types.Header,
 	initialArgs ethapi2.CallArgs,
 	gasCap uint64,
@@ -331,6 +333,9 @@ func NewReusableCaller(
 	}
 
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	if blockOverrides != nil {
+		blockOverrides.Override(&blockCtx)
+	}
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
