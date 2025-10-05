@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	event "github.com/erigontech/erigon-lib/event"
-	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	sentryproto "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	eth "github.com/erigontech/erigon/p2p/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
 )

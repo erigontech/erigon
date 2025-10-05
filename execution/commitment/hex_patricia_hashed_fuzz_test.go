@@ -127,7 +127,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 				updateSeed.Read(aux[:sz])
 
 				copy(updates[k].Storage[:], aux[:sz])
-				updates[k].StorageLen = sz
+				updates[k].StorageLen = int8(sz)
 			}
 
 			plainKeys[k] = make([]byte, kl)

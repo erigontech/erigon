@@ -31,8 +31,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -40,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const gracePeerCount = 32
@@ -217,7 +217,6 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
-	httpReq = httpReq.WithContext(ctx) // set proper context
 
 	activePeers, _, _ := s.sentinel.GetPeersCount()
 

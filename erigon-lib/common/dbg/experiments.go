@@ -85,6 +85,7 @@ var (
 	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
+	TraceUnwinds         = EnvBool("TRACE_UNWINDS", false)
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
