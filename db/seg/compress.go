@@ -100,6 +100,16 @@ var DefaultWordLvlCfg = WordLvlCfg{
 	Workers:              1,
 }
 
+var DefaultCfg = Cfg{
+	WordLvlCfg: DefaultWordLvlCfg,
+	WordLvl:    CompressNone,
+	PageLvl: PageLvlCfg{
+		PageSize:   16,
+		Compress:   false,
+		NoKeysMode: false,
+	},
+}
+
 // Compressor is the main operating type for performing per-word compression
 // After creating a compression, one needs to add superstrings to it, using `Write` function
 // In order to add word without compression, function `AddUncompressedWord` needs to be used
