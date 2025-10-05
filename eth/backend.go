@@ -1547,6 +1547,7 @@ func (s *Ethereum) setUpSnapDownloader(
 			return err
 		}
 		s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+		s.downloader.HandleTorrents(nodeCfg.DebugMux)
 
 		// start embedded Downloader
 		err = s.downloader.AddTorrentsFromDisk(ctx)
