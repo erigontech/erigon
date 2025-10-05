@@ -460,7 +460,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	defer rd.Close()
 	defer btindex.Close()
 
-	getter := seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression)
+	getter := seg.NewPagedReader(seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression), statecfg.Schema.CommitmentDomain.CompressCfg.PageLvl)
 	c, err := btindex.Seek(getter, []byte(stateKey))
 	if err != nil {
 		return false, false, err
