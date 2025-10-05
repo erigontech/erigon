@@ -25,6 +25,11 @@ var infoCmd = &cobra.Command{
 		infoCh := make(chan *commands.StagesInfo)
 		errCh := make(chan error, 1)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					println("recovered from panic: ", r)
+				}
+			}()
 			err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
 			if err != nil {
 				select {
