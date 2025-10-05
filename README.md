@@ -135,9 +135,13 @@ Running `make help` will list and describe the convenience commands available in
 1. Backup your datadir.
 2. Upgrade your Erigon binary.
 3. OPTIONAL: Upgrade snapshot files.
-   1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
-   2. Reset your datadir so that Erigon will sync to a newer snapshot. `erigon snapshots reset --datadir /your/datadir`. See [Resetting snapshots](#Resetting-snapshots) for more details.
-4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset your datadir, Erigon will sync to the latest remote snapshots.
+    1. Update snapshot file names. To do this either run Erigon 3.1 until the sync stage completes, or run
+       `erigon snapshots update-to-new-ver-format --datadir /your/datadir`.
+    2. Reset your datadir so that Erigon will sync to a newer snapshot.
+       `erigon snapshots reset --datadir /your/datadir`. See [Resetting snapshots](#Resetting-snapshots) for more
+       details.
+4. Run Erigon 3.1. Your snapshots file names will be migrated automatically if you didn't do this manually. If you reset
+   your datadir, Erigon will sync to the latest remote snapshots.
 
 ### Datadir structure
 
@@ -268,7 +272,10 @@ The torrent client in the Downloader logs to `logs/torrent.log` at the level spe
 
 ### Resetting snapshots
 
-Erigon 3.1 adds the command `erigon snapshots reset`. This modifies your datadir so that Erigon will sync to the latest remote snapshots on next run. You must pass `--datadir`. If the chain cannot be inferred from the chaindata, you must pass `--chain`. `--local=false` will prevent locally generated snapshots from also being removed. Pass `--dry-run` and/or `--verbosity=5` for more information.
+Erigon 3.1 adds the command `erigon snapshots reset`. This modifies your datadir so that Erigon will sync to the latest
+remote snapshots on next run. You must pass `--datadir`. If the chain cannot be inferred from the chaindata, you must
+pass `--chain`. `--local=false` will prevent locally generated snapshots from also being removed. Pass `--dry-run`
+and/or `--verbosity=5` for more information.
 
 ### Modularity
 
@@ -694,7 +701,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.24
+  * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.24
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)

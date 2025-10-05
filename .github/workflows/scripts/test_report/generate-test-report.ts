@@ -73,8 +73,10 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '🗑️️';  // The run was cancelled
-        case 'cancelled_after_start': return '✖️'; // The run was cancelled before it completed.
+        case 'cancelled':
+            return '🗑️️';  // The run was cancelled
+        case 'cancelled_after_start':
+            return '✖️'; // The run was cancelled before it completed.
         case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';
@@ -181,10 +183,10 @@ export async function run() {
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
         // The branch name, defaults to the current branch or 'main' if not in GitHub Actions
-        const branch= process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
+        const branch = process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
         // Use github.context.repo if available, otherwise use default values
         const repoArray = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/') : ['erigontech', 'erigon'];
-        const { owner, repo } = github.context.action ? github.context.repo : { owner: repoArray[0], repo: repoArray[1] };
+        const {owner, repo} = github.context.action ? github.context.repo : {owner: repoArray[0], repo: repoArray[1]};
 
         endDate.setUTCHours(23, 59, 59, 999);
 

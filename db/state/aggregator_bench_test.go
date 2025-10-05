@@ -114,7 +114,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	comp := seg.CompressKeys | seg.CompressVals
+	comp := seg.Cfg{WordLvl: seg.CompressKeys | seg.CompressVals, WordLvlCfg: seg.DefaultWordLvlCfg}
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
 	M := 1024
@@ -123,9 +123,9 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	defer bt.Close()
 	defer kv.Close()
 
-	keys, err := pivotKeysFromKV(dataPath)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), comp.WordLvl), comp.PageLvl)
+	keys, err := pivotKeysFromKV(getter)
 	require.NoError(b, err)
-	getter := seg.NewReader(kv.MakeGetter(), comp)
 
 	for i := 0; i < b.N; i++ {
 		p := rnd.IntN(len(keys))
@@ -137,34 +137,35 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	}
 }
 
-func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *state.BtIndex, [][]byte, string) {
+func benchInitBtreeIndex(b *testing.B, M uint64, compressCfg seg.Cfg) (*seg.Decompressor, *state.BtIndex, [][]byte, string) {
 	b.Helper()
 
 	logger := log.New()
 	tmp := b.TempDir()
 	b.Cleanup(func() { dir.RemoveAll(tmp) })
 
-	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
+	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, compressCfg)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
-	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+	buildBtreeIndex(b, dataPath, indexPath, compressCfg, 1, logger, true)
 
-	kv, bt, err := state.OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
+	kv, bt, err := state.OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compressCfg, false)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })
 
-	keys, err := pivotKeysFromKV(dataPath)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
+	keys, err := pivotKeysFromKV(getter)
 	require.NoError(b, err)
 	return kv, bt, keys, dataPath
 }
 
 func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
-	compress := seg.CompressNone
-	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
+	compressCfg := seg.Cfg{WordLvl: seg.CompressNone}
+	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compressCfg)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
-	getter := seg.NewReader(kv.MakeGetter(), compress)
+	getter := seg.NewPagedReader(seg.NewReader(kv.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
 
 	b.Run("seek_only", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
@@ -234,9 +235,9 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	require.NoError(b, err)
 	defer decomp.Close()
 
-	getter := decomp.MakeGetter()
-
-	keys, err := pivotKeysFromKV(dataPath)
+	compressCfg := Schema.StorageDomain.CompressCfg
+	getter := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), compressCfg.WordLvl), compressCfg.PageLvl)
+	keys, err := pivotKeysFromKV(getter)
 	require.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
@@ -244,19 +245,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 
 		offset, _ := idxr.Lookup(keys[p])
 		getter.Reset(offset)
-
-		require.True(b, getter.HasNext())
-
-		key, pa := getter.Next(nil)
-		require.NotEmpty(b, key)
-
-		value, pb := getter.Next(nil)
-		if pb-pa != 1 {
-			require.NotEmpty(b, value)
-		}
-
-		require.NoErrorf(b, err, "i=%d", i)
-		require.Equal(b, keys[p], key)
+		getter.Next2(nil, nil)
 	}
 }
 

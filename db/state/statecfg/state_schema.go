@@ -379,23 +379,28 @@ func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) e
 }
 
 var DomainCompressCfg = seg.Cfg{
-	MinPatternScore:      1000,
-	DictReducerSoftLimit: 2000000,
-	MinPatternLen:        20,
-	MaxPatternLen:        128,
-	SamplingFactor:       1,
-	MaxDictPatterns:      64 * 1024,
-	Workers:              1,
+	WordLvlCfg: seg.WordLvlCfg{
+		MinPatternScore:      1000,
+		DictReducerSoftLimit: 2000000,
+		MinPatternLen:        20,
+		MaxPatternLen:        128,
+		SamplingFactor:       1,
+		MaxDictPatterns:      64 * 1024,
+		Workers:              1,
+	},
 }
 
 var HistoryCompressCfg = seg.Cfg{
-	MinPatternScore:      4000,
-	DictReducerSoftLimit: 2000000,
-	MinPatternLen:        20,
-	MaxPatternLen:        128,
-	SamplingFactor:       1,
-	MaxDictPatterns:      64 * 1024,
-	Workers:              1,
+	WordLvlCfg: seg.WordLvlCfg{
+		MinPatternScore:      4000,
+		DictReducerSoftLimit: 2000000,
+		MinPatternLen:        20,
+		MaxPatternLen:        128,
+		SamplingFactor:       1,
+		MaxDictPatterns:      64 * 1024,
+		Workers:              1,
+	},
+	PageLvl: seg.DefaultCfg.PageLvl,
 }
 
 func EnableHistoricalRCache() {
