@@ -523,14 +523,14 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 	}()
 
-	_comp, err := seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	_comp, err := seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg.WordLvlCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.FilenameBase, err)
 	}
 	if h.noFsync {
 		_comp.DisableFsync()
 	}
-	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg.WordLvlCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.FilenameBase, err)
 	}
@@ -853,14 +853,14 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.PagedReader {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.historyValuesOnCompressedPage, NoKeysMode: true}
+	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.HistoryValuesOnCompressedPage, NoKeysMode: true}
 	return seg.NewPagedReader(seg.NewReader(f.MakeGetter(), h.Compression), cfg)
 }
 func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.historyValuesOnCompressedPage, NoKeysMode: true}
+	cfg := seg.PageLvlCfg{Compress: true, PageSize: h.HistoryValuesOnCompressedPage, NoKeysMode: true}
 	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), cfg)
 }
 
