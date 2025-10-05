@@ -202,8 +202,7 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 
 func GetCustodyColumns(nodeID enode.ID, cgc uint64) (map[cltypes.CustodyIndex]bool, error) {
 	// TODO: cache the following computations in terms of custody columns
-	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, cgc)
-	groups, err := GetCustodyGroups(nodeID, sampleSize)
+	groups, err := GetCustodyGroups(nodeID, cgc)
 	if err != nil {
 		return nil, err
 	}
