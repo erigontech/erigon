@@ -305,7 +305,8 @@ func (s *IntraBlockState) RecordProgram(targets []wasmdb.WasmTarget, moduleHash 
 	}
 	asmMap, err := s.TryGetActivatedAsmMap(targets, moduleHash)
 	if err != nil {
-		log.Crit("can't find activated wasm while recording", "modulehash", moduleHash, "err", err)
+		// This is not a fatal error - we may be recording a program that failed to activate. Unless state root mismatches, execution is still valid.
+		log.Debug("can't find activated wasm while recording", "modulehash", moduleHash, "err", err)
 	}
 	if s.arbExtraData.userWasms != nil {
 		s.arbExtraData.userWasms[moduleHash] = asmMap
