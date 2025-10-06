@@ -517,6 +517,10 @@ func (ff *Filters) loadLogsRequester() any {
 	return ff.logsRequestor.Load()
 }
 
+func (ff *Filters) HasSubscription(id LogsSubID) bool {
+	return ff.logsSubs.hasLogsFilter(id)
+}
+
 // UnsubscribeLogs unsubscribes from logs using the given subscription ID.
 // It returns true if the unsubscription was successful, otherwise false.
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
