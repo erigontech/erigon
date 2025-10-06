@@ -180,6 +180,27 @@ extract_datadir() {
     echo "$datadir"
 }
 
+clear_caches() {
+    sync  # Flush file system buffers (works on both)
+    
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS
+        echo "Detected macOS - using purge"
+        sudo purge
+    elif [[ "$(uname)" == "Linux" ]]; then
+        # Linux
+        echo "Detected Linux - dropping caches"
+        sudo sysctl vm.drop_caches=3
+        # Or alternatively:
+        # echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+    else
+        echo "Unsupported operating system: $(uname)"
+        return 1
+    fi
+    
+    echo "Cache clearing complete"
+}
+
 strip_quotes() {
     local str="$1"
     str="${str%\"}"
@@ -291,6 +312,7 @@ execute_benchmark() {
     # Create a log file for this run
     local log_file="$LOG_LOCATION/benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
     
+    clear_caches
     # Start the command in background and capture its PID
     timeout --preserve-status -k 3600 -s SIGKILL 3600 bash -c "$cmd" 2>&1 | tee "$log_file"
     if [[ $? -ne 0 ]]; then
