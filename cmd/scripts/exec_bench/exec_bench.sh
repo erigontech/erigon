@@ -60,7 +60,6 @@ check_required_tools() {
     log_info "All required tools are installed"
 }
 
-# Function to validate command line arguments
 validate_args() {
     SKIP_MIRROR=false
     CONTINUE_ON_ERIGON_PANIC=false
@@ -68,6 +67,10 @@ validate_args() {
     # Parse command line options
     while [[ $# -gt 0 ]]; do
         case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
             --skip-mirror)
             ## if you're running with --no-commit etc., the mirrored datadir doesn't change
             ## and so you can skip this step
@@ -88,8 +91,8 @@ validate_args() {
     done
     
     if [[ -z "${CONFIG_FILE:-}" ]]; then
-        log_error "Usage: $0 [--skip-mirror] <config.yml>"
-        log_error "  --skip-mirror: Skip mirroring datadirs (use existing ones)"
+        log_error "Usage: $0 [--skip-mirror] [--continue-on-panic] <config-file>"
+        log_error "Run '$0 --help' for more information"
         exit 1
     fi
     
@@ -97,6 +100,31 @@ validate_args() {
         log_error "Configuration file not found: $CONFIG_FILE"
         exit 1
     fi
+}
+
+# Function to display help message
+show_help() {
+    cat << EOF
+Usage: $0 [OPTIONS] <config-file>
+
+Benchmark script for Erigon.
+
+OPTIONS:
+    -h, --help              Show this help message and exit
+    --skip-mirror           Skip mirroring datadirs (use existing ones)
+                            Useful when running with --no-commit etc.
+    --continue-on-panic     Continue next steps even if erigon panics
+                            Some flags like ERIGON_STOP_AFTER_BLOCK cause
+                            intentional panics
+
+ARGUMENTS:
+    config-file             Path to the configuration file
+
+EXAMPLES:
+    $0 config.yml
+    $0 --skip-mirror config.yml
+    $0 --skip-mirror --continue-on-panic config.yml
+EOF
 }
 
 # Function to extract datadir from erigon command
