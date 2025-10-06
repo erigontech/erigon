@@ -160,7 +160,7 @@ func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) (
 	}
 
 	// recover cells and proofs
-	recoveredCells, recoveredProofs, err := kzg.Ctx().RecoverCellsAndComputeKZGProofs(cellIndices, ckzgCells, 0)
+	recoveredCells, recoveredProofs, err := kzg.Ctx().RecoverCellsAndComputeKZGProofs(cellIndices, ckzgCells, 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to recover cells and proofs: %w", err)
 	}
@@ -184,7 +184,7 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 		return nil, nil, fmt.Errorf("blob length mismatch: %d != %d", len(blob), len(ckzgBlob))
 	}
 	copy(ckzgBlob[:], blob)
-	cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&ckzgBlob, 0)
+	cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&ckzgBlob, 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to compute cells and proofs: %w", err)
 	}

@@ -81,7 +81,7 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 }
 
 func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
-	cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blobs), 0)
+	cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blobs), 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, err
 	}
