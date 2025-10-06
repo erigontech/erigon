@@ -342,6 +342,15 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 
+	if se.blockExecMetrics == nil {
+		se.blockExecMetrics = newBlockExecMetrics()
+	}
+
+	defer func(t time.Time) {
+		se.blockExecMetrics.BlockCount.Add(1)
+		se.blockExecMetrics.Duration.Add(time.Since(t))
+	}(time.Now())
+
 	if len(tasks) > 0 {
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
