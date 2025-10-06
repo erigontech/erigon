@@ -289,7 +289,7 @@ execute_benchmark() {
     log_info "Executing Command: $cmd"
 
     # Create a log file for this run
-    local log_file=$LOG_LOCATION/"benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
+    local log_file="$LOG_LOCATION/benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
     
     # Start the command in background and capture its PID
     timeout --preserve-status -k 3600 -s SIGKILL 3600 bash -c "$cmd" 2>&1 | tee "$log_file"
