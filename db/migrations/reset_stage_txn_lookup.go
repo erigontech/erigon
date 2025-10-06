@@ -19,7 +19,7 @@ package migrations
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"

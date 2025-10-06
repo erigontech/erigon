@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common/dir"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
