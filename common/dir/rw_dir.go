@@ -204,7 +204,7 @@ func RemoveFile(path string) error {
 		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
 	}
 
-	if err := os.Remove(path); err != nil { //nolint:ruleguard
+	if err := os.Remove(path); err != nil { //nolint
 		return err
 	}
 	if dbg.AssertEnabled {
@@ -220,7 +220,7 @@ func RemoveAll(path string) error {
 	if dbg.TraceDeletion {
 		log.Debug("[removing] removing dir", "path", path, "stack", dbg.Stack())
 	}
-	return os.RemoveAll(path) //nolint:ruleguard
+	return os.RemoveAll(path) //nolint
 }
 
 // CreateTemp creates a temporary file using `file` as base
