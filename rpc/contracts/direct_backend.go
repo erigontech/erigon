@@ -81,7 +81,7 @@ func (b DirectBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 
 func (b DirectBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
 	callArgs := CallArgsFromCallMsg(call)
-	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil)
+	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil, nil)
 	if err != nil {
 		return 0, err
 	}

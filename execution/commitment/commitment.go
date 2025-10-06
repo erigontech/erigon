@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -847,7 +847,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
 
-		medians := make(map[string][]int)
+		medians := make(map[string][]int16)
 		for _, c := range cells {
 			if c == nil {
 				continue
@@ -891,7 +891,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		}
 
 		for k, v := range medians {
-			sort.Ints(v)
+			slices.Sort(v)
 			switch k {
 			case "apk":
 				stat.MedianAPK = uint64(v[len(v)/2])
@@ -1095,7 +1095,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
-	c.update.StorageLen = len(val)
+	c.update.StorageLen = int8(len(val))
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
@@ -1226,7 +1226,7 @@ func (uf UpdateFlags) String() string {
 type Update struct {
 	CodeHash   common.Hash
 	Storage    common.Hash
-	StorageLen int
+	StorageLen int8
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
@@ -1341,9 +1341,9 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		if len(buf) < pos+int(l) {
 			return 0, errors.New("decode Update: buffer too small for storage")
 		}
-		u.StorageLen = int(l)
-		copy(u.Storage[:], buf[pos:pos+u.StorageLen])
-		pos += u.StorageLen
+		u.StorageLen = int8(l)
+		copy(u.Storage[:], buf[pos:pos+int(u.StorageLen)])
+		pos += int(u.StorageLen)
 	}
 	return pos, nil
 }
