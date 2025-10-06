@@ -111,8 +111,9 @@ Benchmark script for Erigon.
 
 OPTIONS:
     -h, --help              Show this help message and exit
-    --skip-mirror           Skip mirroring datadirs (use existing ones)
-                            Useful when running with --no-commit etc.
+    --skip-mirror           Skip mirroring datadirs (use existing one)
+                            Useful when running with --no-commit etc. wherein
+                            no change to datadir happens
     --continue-on-panic     Continue next steps even if erigon panics
                             Some flags like ERIGON_STOP_AFTER_BLOCK cause
                             intentional panics
