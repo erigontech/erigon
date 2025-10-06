@@ -62,10 +62,13 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 			panic(err) // should never happen assuming the parent is valid
 		}
 		if big.NewInt(0).Mul(blobBaseCost, parent.BaseFee).Cmp(big.NewInt(0).Mul(gasPerBlob, refBlobBaseFee.ToBig())) > 0 {
+			log.Info("blob calc (osaka)", "parentExcessBlobGas", parentExcessBlobGas,
+				"parentBlobGasUsed", parentBlobGasUsed*(max-target)/max)
 			return parentExcessBlobGas + parentBlobGasUsed*(max-target)/max
 		}
 	}
-	log.Info("blob calc", parentExcessBlobGas, parentBlobGasUsed, targetBlobGas)
+	log.Info("blob calc", "parentExcessBlobGas", parentExcessBlobGas,
+		"parentBlobGasUsed", parentBlobGasUsed, "targetBlobGas", targetBlobGas)
 	return parentExcessBlobGas + parentBlobGasUsed - targetBlobGas
 }
 
