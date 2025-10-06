@@ -206,7 +206,7 @@ parse_config() {
         exit 1
     fi
     
-    if [[ ! -d $SOURCE_DATADIR ]]; then
+    if [[ ! -d "$SOURCE_DATADIR" ]]; then
         log_error "Source datadir not found: $SOURCE_DATADIR"
         exit 1
     fi
@@ -269,17 +269,17 @@ execute_benchmark() {
     log_info "Starting benchmark run $run_number for $datadir"
 
     local logfile="$LOG_LOCATION/output.txt"
-    ./build/bin/integration reset_state --datadir $datadir --chain $CHAIN > $logfile
+    ./build/bin/integration reset_state --datadir "$datadir" --chain $CHAIN > $logfile
     if [[ "$SKIP_MIRROR" != true ]]; then
-        echo "1" | ./build/bin/erigon snapshots rm-state  --datadir $datadir --latest
+        echo "1" | ./build/bin/erigon snapshots rm-state  --datadir "$datadir" --latest
     fi
 
-    ./build/bin/integration print_stages --datadir $datadir --chain $CHAIN>$logfile
+    ./build/bin/integration print_stages --datadir "$datadir" --chain $CHAIN>"$logfile"
 
     BLOCK_AT=$(cat $logfile|awk '/OtterSync/ {print $2}'|tail -1)
     STATE_AT_TXNUM=$(cat $logfile|awk '/accounts/ {print $3}'|tail -1)
     local logfile2="$LOG_LOCATION/output2.txt"
-    ./build/bin/erigon seg txnum --datadir $datadir  --txnum $STATE_AT_TXNUM > $logfile2 2>&1
+    ./build/bin/erigon seg txnum --datadir "$datadir"  --txnum $STATE_AT_TXNUM > "$logfile2" 2>&1
     STATE_AT=$(cat $logfile2|grep out|awk -F'block=' '{print $2}')
     STATE_TO=$((STATE_AT + 3000))
 
