@@ -24,8 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -35,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
@@ -200,25 +200,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			case <-logInterval.C:
 				logTime := logIntervalTime
 
-				logArgs := []interface{}{}
-				currProgress := cfg.downloader.Progress()
-				blockProgress := float64(prevProgress - currProgress)
-				ratio := float64(logTime / time.Second)
-				speed := blockProgress / ratio
-				prevProgress = currProgress
-
-				pivot := 30.0 // pivot for the speed calculation (if above, we try to increase the block request rate)
-				absoluteDifferenceFromPivot := int64(math.Abs(speed-pivot) / 5.0)
-				if speed > pivot {
-					cfg.downloader.IncrementBlocksPerRequest(absoluteDifferenceFromPivot)
-				} else {
-					cfg.downloader.DecrementBlocksPerRequest(absoluteDifferenceFromPivot)
-				}
-
-				if speed == 0 || initialBeaconBlock == nil {
-					continue
-				}
-
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					if ready, err := cfg.engine.Ready(ctx); !ready {
 						if err != nil {
@@ -227,6 +208,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 						continue
 					}
 
+				}
+				logArgs := []interface{}{}
+				currProgress := cfg.downloader.Progress()
+				blockProgress := float64(prevProgress - currProgress)
+				ratio := float64(logTime / time.Second)
+				speed := blockProgress / ratio
+				prevProgress = currProgress
+
+				if speed == 0 || initialBeaconBlock == nil {
+					continue
 				}
 
 				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
@@ -269,11 +260,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					blocksProcessed := highestBlockSeen - uint64(currEth1Progress.Load())
-					totalBlocksToProcess := highestBlockSeen - lowestBlockToReach
-					remaining := float64(totalBlocksToProcess - blocksProcessed)
+					remaining := float64(highestBlockSeen - lowestBlockToReach)
 					log.Info("Downloading Execution History", "progress",
-						fmt.Sprintf("%d/%d", blocksProcessed, totalBlocksToProcess),
+						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
 						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {

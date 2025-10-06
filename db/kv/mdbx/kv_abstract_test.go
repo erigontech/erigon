@@ -28,16 +28,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 func TestSequence(t *testing.T) {
@@ -45,9 +44,7 @@ func TestSequence(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	writeDBs, _ := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return defaultBuckets
-	})
+	writeDBs, _ := setupDatabases(t, log.New())
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
@@ -99,17 +96,7 @@ func TestManagedTx(t *testing.T) {
 	bucketID := 0
 	bucket1 := kv.ChaindataTables[bucketID]
 	bucket2 := kv.ChaindataTables[bucketID+1]
-	writeDBs, readDBs := setupDatabases(t, logger, func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return map[string]kv.TableCfgItem{
-			bucket1: {
-				//TODO: maybe it is bad to remove both flags but tests fail in another way
-				Flags: 0,
-			},
-			bucket2: {
-				Flags: 0,
-			},
-		}
-	})
+	writeDBs, readDBs := setupDatabases(t, logger)
 
 	ctx := context.Background()
 
@@ -165,8 +152,8 @@ func TestRemoteKvVersion(t *testing.T) {
 	}
 	ctx := context.Background()
 	logger := log.New()
-	writeDB := mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen()
-	defer writeDB.Close()
+	dirs := datadir.New(t.TempDir())
+	writeDB := temporaltest.NewTestDB(t, dirs)
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
@@ -208,7 +195,9 @@ func TestRemoteKvRange(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	logger := log.New()
-	ctx, writeDB := context.Background(), memdb.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	writeDB := temporaltest.NewTestDB(t, dirs)
+	ctx := context.Background()
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
@@ -333,12 +322,16 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(err)
 }
 
-func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB, readDBs []kv.RwDB) {
 	t.Helper()
 	ctx := context.Background()
-	writeDBs = []kv.RwDB{
-		mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").WithTableCfg(f).MustOpen(),
-		mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").WithTableCfg(f).MustOpen(), // for remote db
+	dirs1 := datadir.New(t.TempDir())
+	dirs2 := datadir.New(t.TempDir())
+	writeDBs = []kv.TemporalRwDB{
+		temporaltest.NewTestDB(t, dirs1),
+		temporaltest.NewTestDB(t, dirs2),
+		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(),
+		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)

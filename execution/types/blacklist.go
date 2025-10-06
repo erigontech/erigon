@@ -16,7 +16,7 @@
 
 package types
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 // This is introduced because of the Tendermint IAVL Merkle Proof verification exploitation.
 var NanoBlackList = []common.Address{

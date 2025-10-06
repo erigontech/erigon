@@ -3,8 +3,8 @@ package core
 import (
 	"crypto/ecdsa"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // Pre-calculated version of:

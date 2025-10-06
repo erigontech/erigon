@@ -28,9 +28,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
@@ -330,7 +330,7 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	m.ReceiveWg.Add(1)
 	// Send the hash request and verify the response
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: eth.ToProto[direct.ETH67][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentryproto.InboundMessage{Id: eth.ToProto[direct.ETH68][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 

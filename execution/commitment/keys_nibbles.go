@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/length"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
+	ecrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // KeyToHexNibbleHash hashes plain key with respect to plain key size (part < 20 bytes for account, part >= 20 bytes for storage)
@@ -128,7 +128,7 @@ func updatedNibs(num uint16) string {
 
 // hashes plainKey using keccakState and writes the hashed key nibbles to dest with respect to hashedKeyOffset.
 // Note that this function does not respect plainKey length so hashing it at once without splitting to account/storage part.
-func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int, hashBuf []byte) error {
+func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
 	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
 	keccak.Reset()
 	if _, err := keccak.Write(plainKey); err != nil {

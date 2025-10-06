@@ -24,10 +24,10 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -156,11 +156,12 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
 	for index, bsc := range simulatedBlocks {
-		blockResult, current, err := sim.simulateBlock(ctx, tx, api._txNumReader, sharedDomains, &bsc, headers[index], parent, blockNumber == latestBlockNumber)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, api._txNumReader, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber)
 		if err != nil {
 			return nil, err
 		}
 		simulatedBlockResults = append(simulatedBlockResults, blockResult)
+		headers[index] = current.Header()
 		parent = current.Header()
 	}
 
@@ -378,6 +379,7 @@ func (s *simulator) simulateBlock(
 	bsc *SimulatedBlock,
 	header *types.Header,
 	parent *types.Header,
+	ancestors []*types.Header,
 	latest bool,
 ) (SimulatedBlockResult, *types.Block, error) {
 	header.ParentHash = parent.Hash()
@@ -428,7 +430,7 @@ func (s *simulator) simulateBlock(
 		}
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-		if txNum < commitmentStartingTxNum {
+		if s.commitmentHistory && txNum < commitmentStartingTxNum {
 			return nil, nil, state.PrunedError
 		}
 
@@ -467,7 +469,7 @@ func (s *simulator) simulateBlock(
 	intraBlockState.SoftFinalise()
 
 	// Create a custom block context and apply any custom block overrides
-	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.blockReader, s.chainConfig,
+	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
 	if bsc.BlockOverrides.BlobBaseFee != nil {
 		blockCtx.BlobBaseFee = bsc.BlockOverrides.BlobBaseFee.ToUint256()
@@ -644,6 +646,36 @@ func (s *simulator) simulateCall(
 		txn.SetSender(*call.From)
 	}
 	return &callResult, txn, receipt, nil
+}
+
+type simulatedCanonicalReader struct {
+	canonicalReader services.CanonicalReader
+	headers         []*types.Header
+}
+
+func (s *simulatedCanonicalReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, bool, error) {
+	hash, ok, err := s.canonicalReader.CanonicalHash(ctx, tx, blockNum)
+	if err == nil && ok {
+		return hash, true, nil
+	}
+	for _, header := range s.headers {
+		if header.Number.Uint64() == blockNum {
+			return header.Hash(), true, nil
+		}
+	}
+	return common.Hash{}, false, errors.New("header not found")
+}
+
+func (s *simulatedCanonicalReader) IsCanonical(context.Context, kv.Getter, common.Hash, uint64) (bool, error) {
+	return true, nil
+}
+
+func (s *simulatedCanonicalReader) BadHeaderNumber(context.Context, kv.Getter, common.Hash) (blockHeight *uint64, err error) {
+	return nil, errors.New("bad header not found")
+}
+
+func (s *simulator) newSimulatedCanonicalReader(headers []*types.Header) services.CanonicalReader {
+	return &simulatedCanonicalReader{s.blockReader, headers}
 }
 
 // repairLogs updates the block hash in the logs present in the result of a simulated block.

@@ -631,14 +631,14 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
-func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
+func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
+	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
+	return tx.historyStartFrom(name, tx.Tx)
 }
 func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
+	return tx.historyStartFrom(name, tx.RwTx)
 }
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.Tx)

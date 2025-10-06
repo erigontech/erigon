@@ -11,15 +11,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -266,7 +266,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return blockNum, txNum, true, nil
 	}
 	// handle case when we have no commitment, but have executed blocks
-	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
+	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution"))
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -556,7 +556,7 @@ func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err erro
 	}
 	u = &commitment.Update{
 		Flags:      commitment.DeleteUpdate,
-		StorageLen: len(enc),
+		StorageLen: int8(len(enc)),
 	}
 
 	if u.StorageLen > 0 {

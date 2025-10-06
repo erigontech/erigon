@@ -18,11 +18,10 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -100,6 +99,9 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	stub := make([]any, 0)
 	// remove 0x
 	cutIndex := strings.TrimPrefix(index, "0x")
+	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+		return nil, rpc.ErrFilterNotFound
+	}
 	if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
 		for _, v := range blocks {
 			stub = append(stub, v.Hash())
@@ -121,7 +123,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 		return stub, nil
 	}
-	return nil, errors.New("filter not found")
+	return []any{}, nil
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
@@ -132,10 +134,13 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
+	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+		return nil, rpc.ErrFilterNotFound
+	}
 	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
 		return logs, nil
 	}
-	return nil, errors.New("filter not found")
+	return []*types.Log{}, nil
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.

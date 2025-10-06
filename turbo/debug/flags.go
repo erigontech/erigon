@@ -33,12 +33,12 @@ import (
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 
-	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/fdlimit"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/fdlimit"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
 )

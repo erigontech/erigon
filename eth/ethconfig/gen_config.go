@@ -6,9 +6,8 @@ import (
 	"math/big"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -53,6 +52,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Ethstats                            string
 		InternalCL                          bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
+		KeepStoredChainConfig               bool
 		SilkwormExecution                   bool
 		SilkwormRpcDaemon                   bool
 		SilkwormSentry                      bool
@@ -67,6 +67,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		SilkwormRpcJsonCompatibility        bool
 		PolygonPosSingleSlotFinality        bool
 		PolygonPosSingleSlotFinalityBlockAt uint64
+		AllowAA                             bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -97,6 +98,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
+	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
 	enc.SilkwormExecution = c.SilkwormExecution
 	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
 	enc.SilkwormSentry = c.SilkwormSentry
@@ -111,6 +113,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.SilkwormRpcJsonCompatibility = c.SilkwormRpcJsonCompatibility
 	enc.PolygonPosSingleSlotFinality = c.PolygonPosSingleSlotFinality
 	enc.PolygonPosSingleSlotFinalityBlockAt = c.PolygonPosSingleSlotFinalityBlockAt
+	enc.AllowAA = c.AllowAA
 	return &enc, nil
 }
 
@@ -142,10 +145,10 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		StateStream                         *bool
 		HeimdallURL                         *string
 		WithoutHeimdall                     *bool
-		WithHeimdallWaypointRecording       *bool
 		Ethstats                            *string
 		InternalCL                          *bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
+		KeepStoredChainConfig               *bool
 		SilkwormExecution                   *bool
 		SilkwormRpcDaemon                   *bool
 		SilkwormSentry                      *bool
@@ -160,6 +163,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		SilkwormRpcJsonCompatibility        *bool
 		PolygonPosSingleSlotFinality        *bool
 		PolygonPosSingleSlotFinalityBlockAt *uint64
+		AllowAA                             *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -249,6 +253,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.OverrideOsakaTime != nil {
 		c.OverrideOsakaTime = dec.OverrideOsakaTime
 	}
+	if dec.KeepStoredChainConfig != nil {
+		c.KeepStoredChainConfig = *dec.KeepStoredChainConfig
+	}
 	if dec.SilkwormExecution != nil {
 		c.SilkwormExecution = *dec.SilkwormExecution
 	}
@@ -290,6 +297,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.PolygonPosSingleSlotFinalityBlockAt != nil {
 		c.PolygonPosSingleSlotFinalityBlockAt = *dec.PolygonPosSingleSlotFinalityBlockAt
+	}
+	if dec.AllowAA != nil {
+		c.AllowAA = *dec.AllowAA
 	}
 	return nil
 }
