@@ -293,6 +293,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 	vmConfig := vmCfg
 	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
+	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
 	var txContext evmtypes.TxContext
 	if isBor {
