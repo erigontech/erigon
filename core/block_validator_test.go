@@ -23,8 +23,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
 	libchain "github.com/erigontech/erigon/execution/chain"

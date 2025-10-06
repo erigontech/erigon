@@ -23,8 +23,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"

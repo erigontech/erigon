@@ -6,8 +6,8 @@ import (
 	"math/big"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/prune"
