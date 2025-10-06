@@ -34,58 +34,6 @@ log_warn() {
 LOG_LOCATION="./bench-logs"
 mkdir -p "$LOG_LOCATION"
 
-# Function to gracefully kill a process
-kill_process() {
-    local pid="$1"
-    local process_name="${2:-process}"
-    
-    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
-        return 0  # Process doesn't exist, nothing to do
-    fi
-    
-    log_info "Stopping $process_name (PID: $pid)"
-    
-    # First try graceful termination
-    kill -TERM "$pid" 2>/dev/null || true
-    
-    # Wait up to 5 seconds for graceful shutdown
-    local wait_time=0
-    while [[ $wait_time -lt 5 ]] && kill -0 "$pid" 2>/dev/null; do
-        sleep 1
-        ((wait_time++))
-    done
-    
-    # Force kill if still running
-    if kill -0 "$pid" 2>/dev/null; then
-        log_warn "$process_name didn't terminate gracefully, force killing..."
-        kill -KILL "$pid" 2>/dev/null || true
-    fi
-    
-    # Wait for process to fully terminate
-    wait "$pid" 2>/dev/null || true
-}
-
-# Function to cleanup background processes on exit
-cleanup() {
-    local exit_code=$?
-    log_info "Cleaning up..."
-    
-    # Kill any remaining erigon processes we started
-    if [[ -n "${ERIGON_PID1:-}" ]]; then
-        kill_process "$ERIGON_PID1" "erigon process 1"
-    fi
-    
-    if [[ -n "${ERIGON_PID2:-}" ]]; then
-        kill_process "$ERIGON_PID2" "erigon process 2"
-    fi
-    
-    exit $exit_code
-}
-
-# Set trap for cleanup
-trap cleanup EXIT INT TERM
-
-# Function to check required tools
 check_required_tools() {
     log_info "Checking required tools..."
     
@@ -115,12 +63,21 @@ check_required_tools() {
 # Function to validate command line arguments
 validate_args() {
     SKIP_MIRROR=false
+    CONTINUE_ON_ERIGON_PANIC=false
     
     # Parse command line options
     while [[ $# -gt 0 ]]; do
         case $1 in
             --skip-mirror)
+            ## if you're running with --no-commit etc., the mirrored datadir doesn't change
+            ## and so you can skip this step
                 SKIP_MIRROR=true
+                shift
+                ;;
+            --continue-on-panic)
+            ## some flags like `ERIGON_STOP_AFTER_BLOCK` cause erigon/integration to panic; it is intentional and 
+            ## we want to continue benchmarking in such cases
+                CONTINUE_ON_ERIGON_PANIC=true
                 shift
                 ;;
             *)
@@ -181,7 +138,7 @@ extract_datadir() {
 }
 
 clear_caches() {
-    sync  # Flush file system buffers (works on both)
+    sync  # Flush file system buffers
     
     if [[ "$(uname)" == "Darwin" ]]; then
         # macOS
@@ -252,7 +209,7 @@ parse_config() {
         log_error "Commands must use different datadirs for benchmarking"
         exit 1
     fi
-    
+
     log_info "Configuration loaded:"
     log_info "  source_datadir: $SOURCE_DATADIR"
     log_info "  erigon_cmd1: $ERIGON_CMD1"
@@ -307,18 +264,22 @@ execute_benchmark() {
     EXEC_TO=$((BLOCK_AT < STATE_TO ? BLOCK_AT : STATE_TO))
 
     cmd="$(strip_quotes "$cmd") --block $EXEC_TO"
+    clear_caches
     log_info "Executing Command: $cmd"
 
-    # Create a log file for this run
     local log_file="$LOG_LOCATION/benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
     
-    clear_caches
-    # Start the command in background and capture its PID
+    if [[ "$CONTINUE_ON_ERIGON_PANIC" == "true" ]]; then
+       set +e
+    fi
+    # Start the command in background with timeout
     timeout --preserve-status -k 3600 -s SIGKILL 3600 bash -c "$cmd" 2>&1 | tee "$log_file"
-    if [[ $? -ne 0 ]]; then
+    if [[ $? -ne 0 ]] && [[ "$CONTINUE_ON_ERIGON_PANIC" != "true" ]]; then
         log_error "Benchmark run $run_number failed"
         exit 1
     fi
+
+    set -e
     
     log_info "Benchmark run $run_number completed"
     log_info "Log saved to: $log_file"
@@ -334,17 +295,11 @@ build_erigon() {
     log_info "Build completed successfully"
 }
 
-# Main execution
 main() {
     log_info "Starting execution benchmarking script"
     
-    # Check required tools first
     check_required_tools
-    
-    # Validate arguments
     validate_args "$@"
-    
-    # Parse configuration
     parse_config
 
     build_erigon
@@ -354,7 +309,6 @@ main() {
     log_info "Beginning benchmark execution"
     log_info "========================================="
     
-    # Run 1: datadir1 with erigon_cmd1
     log_info "--- Run 1 ---"
     mirror_datadir "$SOURCE_DATADIR" "$DATADIR1"
     execute_benchmark "$ERIGON_CMD1" "$DATADIR1" 1
@@ -373,5 +327,4 @@ main() {
     log_info "  Run 2: $DATADIR2 - Check benchmark_run2_*.log"
 }
 
-# Run main function
 main "$@"
