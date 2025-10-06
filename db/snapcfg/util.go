@@ -533,7 +533,6 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 			*sh = bytes.Clone(b)
 		}
 	} else {
-		// Can't log in erigon-snapshot repo due to erigon-lib module import path.
 		log.Info("Loading remote snapshot hashes")
 
 		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
