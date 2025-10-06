@@ -1404,6 +1404,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	}
 
 	notifications := shards.NewNotifications(nil)
+	headersCh, unsubscribe := notifications.Events.AddHeaderSubscription()
+	sentryControlServer.SetBlockProgressChannel(headersCh, unsubscribe)
 
 	var signatures *lru.ARCCache[common.Hash, common.Address]
 

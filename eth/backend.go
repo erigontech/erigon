@@ -737,6 +737,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	headersCh, unsubscribe := backend.notifications.Events.AddHeaderSubscription()
+	backend.sentriesClient.SetBlockProgressChannel(headersCh, unsubscribe)
+
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)

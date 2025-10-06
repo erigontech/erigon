@@ -230,3 +230,49 @@ func TestEth66Messages(t *testing.T) {
 		}
 	}
 }
+
+func TestBlockRangeUpdatePacketValidate(t *testing.T) {
+	valid := &BlockRangeUpdatePacket{
+		Earliest:   10,
+		Latest:     42,
+		LatestHash: common.HexToHash("0x1"),
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected valid packet, got error: %v", err)
+	}
+
+	testCases := []struct {
+		name    string
+		packet  *BlockRangeUpdatePacket
+		wantErr bool
+	}{
+		{
+			name:    "nil packet",
+			packet:  nil,
+			wantErr: true,
+		},
+		{
+			name: "earliest greater than latest",
+			packet: &BlockRangeUpdatePacket{
+				Earliest:   50,
+				Latest:     40,
+				LatestHash: common.HexToHash("0x2"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero latest hash",
+			packet: &BlockRangeUpdatePacket{
+				Earliest: 5,
+				Latest:   40,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		if err := tc.packet.Validate(); (err != nil) != tc.wantErr {
+			t.Fatalf("%s: unexpected error state. err=%v", tc.name, err)
+		}
+	}
+}

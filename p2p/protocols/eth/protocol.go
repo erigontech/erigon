@@ -20,6 +20,7 @@
 package eth
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -381,6 +382,19 @@ type ReceiptsRLPPacket66 struct {
 type BlockRangeUpdatePacket struct {
 	Earliest, Latest uint64
 	LatestHash       common.Hash
+}
+
+func (p *BlockRangeUpdatePacket) Validate() error {
+	if p == nil {
+		return errors.New("nil block range update packet")
+	}
+	if p.Earliest > p.Latest {
+		return errors.New("block range update: earliest > latest")
+	}
+	if p.LatestHash == (common.Hash{}) {
+		return errors.New("block range update: zero latest hash")
+	}
+	return nil
 }
 
 func (*StatusPacket) Name() string { return "Status" }

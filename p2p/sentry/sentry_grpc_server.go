@@ -521,6 +521,16 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error("reading msg into bytes", "peerId", hex.EncodeToString(peerID[:]), "err", err)
 			}
+
+			var pkt eth.BlockRangeUpdatePacket
+			if err := rlp.DecodeBytes(b, &pkt); err != nil {
+				logger.Warn("invalid block range update payload", "peerId", hex.EncodeToString(peerID[:]), "err", err)
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "invalid block range update payload")
+			}
+			if err := pkt.Validate(); err != nil {
+				logger.Warn("invalid block range update", "peerId", hex.EncodeToString(peerID[:]), "err", err, "earliest", pkt.Earliest, "latest", pkt.Latest)
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "invalid block range update payload")
+			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
 			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%v", msg.Code, hex.EncodeToString(peerID[:])))
