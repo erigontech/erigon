@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -64,7 +65,7 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 			return parentExcessBlobGas + parentBlobGasUsed*(max-target)/max
 		}
 	}
-	panic(fmt.Sprintln("blob calc", parentExcessBlobGas, parentBlobGasUsed, targetBlobGas))
+	log.Info("blob calc", parentExcessBlobGas, parentBlobGasUsed, targetBlobGas)
 	return parentExcessBlobGas + parentBlobGasUsed - targetBlobGas
 }
 
