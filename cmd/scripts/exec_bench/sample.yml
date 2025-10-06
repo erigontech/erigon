@@ -1,3 +1,6 @@
+## erigon_cmd1 - needs to export metrics on 6061; cmd2 - on 6062 
+## this helps differentiate between the different series coming from the two executions (see prometheus-docker.yml)
+
 source_datadir: /erigon-data/par_eth
 chain: mainnet
 ## --block is added by script to the stage_exec commands
