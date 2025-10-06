@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   mainnet-tip-tracking-test:
-    runs-on: [self-hosted, qa, Ethereum, tip-tracking, qa-internals]
+    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 300 # 5 hours
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.0/datadir
