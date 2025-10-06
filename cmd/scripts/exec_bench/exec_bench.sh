@@ -301,7 +301,7 @@ execute_benchmark() {
     STATE_AT_TXNUM=$(cat $logfile|awk '/accounts/ {print $3}'|tail -1)
     local logfile2="$LOG_LOCATION/output2.txt"
     ./build/bin/erigon seg txnum --datadir "$datadir"  --txnum $STATE_AT_TXNUM > "$logfile2" 2>&1
-    STATE_AT=$(cat $logfile2|grep out|awk -F'block=' '{print $2}')
+    STATE_AT=$(cat "$logfile2"|grep out|awk -F'block=' '{print $2}')
     STATE_TO=$((STATE_AT + 3000))
 
     EXEC_TO=$((BLOCK_AT < STATE_TO ? BLOCK_AT : STATE_TO))
