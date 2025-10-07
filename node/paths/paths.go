@@ -23,7 +23,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
@@ -106,6 +106,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "amoy")
 	case networkname.BorMainnet:
 		return networkDataDirCheckingLegacy(datadir, "bor-mainnet")
+	case networkname.Mumbai:
+		return networkDataDirCheckingLegacy(datadir, "mumbai")
 	case networkname.BorDevnet:
 		return networkDataDirCheckingLegacy(datadir, "bor-devnet")
 	case networkname.Sepolia:

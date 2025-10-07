@@ -24,9 +24,9 @@ import (
 	"io"
 	"slices"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 //(go:generate gencodec -type Log -field-override logMarshaling -out gen_log_json.go)

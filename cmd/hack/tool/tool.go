@@ -19,8 +19,7 @@ package tool
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -34,7 +33,7 @@ func Check(e error) {
 func ChainConfig(tx kv.Tx) *chain.Config {
 	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	Check(err)
-	chainConfig, err := core.ReadChainConfig(tx, genesisBlockHash)
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisBlockHash)
 	Check(err)
 	return chainConfig
 }

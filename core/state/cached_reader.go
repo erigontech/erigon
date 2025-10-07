@@ -19,7 +19,7 @@ package state
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -34,6 +34,10 @@ type CachedReader struct {
 // NewCachedReader wraps a given state reader into the cached reader
 func NewCachedReader(r StateReader, cache *shards.StateCache) *CachedReader {
 	return &CachedReader{r: r, cache: cache}
+}
+
+func (cr *CachedReader) SetTrace(trace bool, tracePrefix string) {
+	cr.r.SetTrace(trace, tracePrefix)
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state

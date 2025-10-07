@@ -17,7 +17,12 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
+	"io"
+	"os"
+
 	//nolint:gosec
 	"errors"
 	"fmt"
@@ -36,13 +41,13 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
@@ -119,7 +124,7 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !skipSeedableCheck && !snaptype.E3Seedable(name) {
+		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -411,4 +416,43 @@ func verifyTorrentComplete(
 		}
 		return
 	})
+}
+
+func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completeBytes *atomic.Uint64) error {
+	info := t.Info()
+	file := info.UpvertedFiles()[0]
+	fPath := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
+	f, err := os.Open(fPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			f.Close()
+		}
+	}()
+
+	hasher := sha1.New()
+	for i := 0; i < info.NumPieces(); i++ {
+		p := info.Piece(i)
+		hasher.Reset()
+		_, err := io.Copy(hasher, io.NewSectionReader(f, p.Offset(), p.Length()))
+		if err != nil {
+			return err
+		}
+		good := bytes.Equal(hasher.Sum(nil), p.V1Hash().Value.Bytes())
+		if !good {
+			err := fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
+			log.Warn("[verify.failfast] ", "err", err)
+			return err
+		}
+
+		completeBytes.Add(uint64(p.V1Length()))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	return nil
 }

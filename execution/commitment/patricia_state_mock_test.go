@@ -29,8 +29,10 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/db/kv"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // In memory commitment and state to use with the tests
@@ -61,7 +63,7 @@ func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
 
-func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
 	// updates already merged by trie
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
@@ -71,7 +73,7 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prev
 	return nil
 }
 
-func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
+func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
@@ -213,7 +215,7 @@ func decodeHex(in string) []byte {
 type UpdateBuilder struct {
 	balances   map[string]*uint256.Int
 	nonces     map[string]uint64
-	codeHashes map[string][length.Hash]byte
+	codeHashes map[string]common.Hash
 	storages   map[string]map[string][]byte
 	deletes    map[string]struct{}
 	deletes2   map[string]map[string]struct{}
@@ -225,7 +227,7 @@ func NewUpdateBuilder() *UpdateBuilder {
 	return &UpdateBuilder{
 		balances:   make(map[string]*uint256.Int),
 		nonces:     make(map[string]uint64),
-		codeHashes: make(map[string][length.Hash]byte),
+		codeHashes: make(map[string]common.Hash),
 		storages:   make(map[string]map[string][]byte),
 		deletes:    make(map[string]struct{}),
 		deletes2:   make(map[string]map[string]struct{}),
@@ -261,7 +263,7 @@ func (ub *UpdateBuilder) CodeHash(addr string, hash string) *UpdateBuilder {
 		panic(fmt.Errorf("code hash should be %d bytes long, got %d", length.Hash, len(hcode)))
 	}
 
-	dst := [length.Hash]byte{}
+	dst := common.Hash{}
 	copy(dst[:32], hcode)
 
 	ub.codeHashes[sk] = dst
@@ -430,8 +432,8 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 			if sm, ok1 := ub.storages[string(key)]; ok1 {
 				if storage, ok2 := sm[string(key2)]; ok2 {
 					u.Flags |= StorageUpdate
-					u.Storage = [length.Hash]byte{}
-					u.StorageLen = len(storage)
+					u.Storage = common.Hash{}
+					u.StorageLen = int8(len(storage))
 					copy(u.Storage[:], storage)
 				}
 			}

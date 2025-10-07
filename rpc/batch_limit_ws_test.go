@@ -6,11 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestBatchLimit_WebSocket_Exceeded(t *testing.T) {
-	t.Skip("TODO: https://github.com/erigontech/erigon/issues/16382")
 	t.Parallel()
 	logger := log.New()
 

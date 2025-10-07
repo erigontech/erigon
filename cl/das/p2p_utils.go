@@ -1,11 +1,11 @@
 package das
 
 import (
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
@@ -38,7 +38,7 @@ func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 	}
 
 	// The commitments and proofs lengths must match
-	if sidecar.KzgCommitments.Len() != sidecar.KzgProofs.Len() {
+	if sidecar.KzgCommitments.Len() != sidecar.KzgProofs.Len() || sidecar.KzgCommitments.Len() != sidecar.Column.Len() {
 		return false
 	}
 

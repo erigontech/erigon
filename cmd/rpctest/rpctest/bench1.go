@@ -21,10 +21,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -285,9 +286,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					break
 				} else {
 					page = sr.Result.Next
-					for k, v := range sr.Result.Accounts {
-						accRangeErigon[k] = v
-					}
+					maps.Copy(accRangeErigon, sr.Result.Accounts)
 				}
 				if needCompare {
 					var srGeth DebugAccountRange
@@ -301,9 +300,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 						break
 					} else {
 						pageGeth = srGeth.Result.Next
-						for k, v := range srGeth.Result.Accounts {
-							accRangeGeth[k] = v
-						}
+						maps.Copy(accRangeGeth, srGeth.Result.Accounts)
 					}
 					if !bytes.Equal(page, pageGeth) {
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)

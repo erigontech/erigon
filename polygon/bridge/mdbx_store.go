@@ -25,14 +25,15 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/execution/rlp"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 /*
@@ -57,7 +58,7 @@ var databaseTablesCfg = kv.TableCfg{
 }
 
 type MdbxStore struct {
-	db *polygoncommon.Database
+	db *polygondb.Database
 }
 
 type txStore struct {
@@ -65,11 +66,11 @@ type txStore struct {
 }
 
 func NewMdbxStore(dataDir string, logger log.Logger, accede bool, roTxLimit int64) *MdbxStore {
-	return &MdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
+	return &MdbxStore{db: polygondb.NewDatabase(dataDir, dbcfg.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
 }
 
 func NewDbStore(db kv.RoDB) *MdbxStore {
-	return &MdbxStore{db: polygoncommon.AsDatabase(db)}
+	return &MdbxStore{db: polygondb.AsDatabase(db)}
 }
 
 func (s *MdbxStore) WithTx(tx kv.Tx) Store {
@@ -342,7 +343,17 @@ func (s *MdbxStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDele
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+	deleted, err = txStore{tx}.PruneEvents(ctx, blocksTo, blocksDeleteLimit)
+	if err != nil {
+		return 0, err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
 }
 
 func NewTxStore(tx kv.Tx) txStore {

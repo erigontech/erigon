@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 var randomness = rand.Intn(10) + 10
@@ -34,14 +34,14 @@ func TestHelperFunctions(t *testing.T) {
 	mvh.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 0, 1}, valueFor(0, 1), true)
 	mvh.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 0, 2}, valueFor(0, 2), true)
 	res := mvh.Read(ap1, AddressPath, common.Hash{}, 0)
-	require.Equal(t, -1, res.DepIdx())
+	require.Equal(t, UnknownDep, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
 	mvh.Write(ap2, AddressPath, common.Hash{}, Version{0, 0, 1, 1}, valueFor(1, 1), true)
 	mvh.Write(ap2, AddressPath, common.Hash{}, Version{0, 0, 1, 2}, valueFor(1, 2), true)
 	res = mvh.Read(ap2, AddressPath, common.Hash{}, 1)
-	require.Equal(t, -1, res.DepIdx())
+	require.Equal(t, UnknownDep, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
@@ -106,12 +106,12 @@ func TestFlushMVWrite(t *testing.T) {
 	mvh.FlushVersionedWrites(wd, true, "")
 
 	res = mvh.Read(ap1, AddressPath, common.Hash{}, 0)
-	require.Equal(t, -1, res.DepIdx())
+	require.Equal(t, UnknownDep, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
 	res = mvh.Read(ap2, AddressPath, common.Hash{}, 1)
-	require.Equal(t, -1, res.DepIdx())
+	require.Equal(t, UnknownDep, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
@@ -161,14 +161,14 @@ func TestMVHashMapBasics(t *testing.T) {
 	mvh := NewVersionMap()
 
 	res := mvh.Read(ap1, AddressPath, common.Hash{}, 5)
-	require.Equal(t, -1, res.depIdx)
+	require.Equal(t, UnknownDep, res.depIdx)
 
 	mvh.Write(ap1, AddressPath, common.Hash{}, Version{0, 0, 10, 1}, valueFor(10, 1), true)
 
 	res = mvh.Read(ap1, AddressPath, common.Hash{}, 9)
-	require.Equal(t, -1, res.depIdx, "reads that should go the the DB return dependency -1")
+	require.Equal(t, UnknownDep, res.depIdx, "reads that should go the the DB return dependency -2")
 	res = mvh.Read(ap1, AddressPath, common.Hash{}, 10)
-	require.Equal(t, -1, res.depIdx, "Read returns entries from smaller txns, not txn 10")
+	require.Equal(t, UnknownDep, res.depIdx, "Read returns entries from smaller txns, not txn 10")
 
 	// Reads for a higher txn return the entry written by txn 10.
 	res = mvh.Read(ap1, AddressPath, common.Hash{}, 15)
@@ -234,10 +234,10 @@ func TestMVHashMapBasics(t *testing.T) {
 
 	// Reads from ap1 and ap3 go to db.
 	res = mvh.Read(ap1, AddressPath, common.Hash{}, 30)
-	require.Equal(t, -1, res.depIdx)
+	require.Equal(t, UnknownDep, res.depIdx)
 
 	res = mvh.Read(ap3, AddressPath, common.Hash{}, 30)
-	require.Equal(t, -1, res.depIdx)
+	require.Equal(t, UnknownDep, res.depIdx)
 
 	// No-op delete at ap2 - doesn't panic because ap2 does exist
 	mvh.Delete(ap2, AddressPath, common.Hash{}, 11, true)

@@ -21,7 +21,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -35,14 +34,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -54,7 +48,10 @@ func TestSnapshotRandom(t *testing.T) {
 
 	t.Parallel()
 	config := &quick.Config{MaxCount: 10}
-	err := quick.Check((*snapshotTest).run, config)
+	ts := &snapshotTest{}
+	err := quick.Check(func() bool {
+		return ts.run(t)
+	}, config)
 	if cerr, ok := err.(*quick.CheckError); ok {
 		test := cerr.In[0].(*snapshotTest)
 		t.Errorf("%v:\n%s", test.err, test)
@@ -239,41 +236,10 @@ func (test *snapshotTest) String() string {
 	return out.String()
 }
 
-func (test *snapshotTest) run() bool {
-	// Run all actions and create snapshots.
-	db := memdb.NewStateDB("")
-	defer db.Close()
+func (test *snapshotTest) run(t *testing.T) bool {
+	_, tx, _ := NewTestRwTx(t)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		test.err = err
-		return false
-	}
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		test.err = err
-		return false
-	}
-	defer tx.Rollback()
-
-	//domains, err := stateLib.NewSharedDomains(tx, log.New())
-	//if err != nil {
-	//	test.err = err
-	//	return false
-	//}
-	//defer domains.Close()
-	//
-	//domains.SetTxNum(1)
-	//domains.SetBlockNum(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		test.err = err
 		return false
@@ -459,23 +425,7 @@ func TestTransientStorage(t *testing.T) {
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
@@ -548,26 +498,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 func TestVersionMapRevert(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewStateDB("")
-	defer db.Close()
+	_, tx, domains := NewTestRwTx(t)
 
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -625,28 +559,10 @@ func TestVersionMapRevert(t *testing.T) {
 
 func TestVersionMapMarkEstimate(t *testing.T) {
 	t.Parallel()
-
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 	states := []*IntraBlockState{s}
@@ -712,28 +628,10 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 func TestVersionMapOverwrite(t *testing.T) {
 	t.Parallel()
-
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -787,6 +685,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[1].versionedWrites = nil
 
 	// Tx2 read should get Tx0's value
+	states[2].versionedReads = nil
 	states[2].GetState(addr, key, &v)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
@@ -808,6 +707,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[0].versionedWrites = nil
 
 	// Tx2 read again should get default vals
+	states[2].versionedReads = nil
 	states[2].GetState(addr, key, &v)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
@@ -817,28 +717,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 func TestVersionMapWriteNoConflict(t *testing.T) {
 	t.Parallel()
-
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
@@ -911,6 +793,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[2].versionedWrites = nil
 
 	// Tx3 read
+	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, val1, v)
 	b, err = states[3].GetBalance(addr)
@@ -923,11 +806,16 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	// map deletes necessary here as they happen in scheduler not ibs
+	states[1].versionMap.Delete(addr, StatePath, key1, 1, true)
+	states[1].versionMap.Delete(addr, StatePath, key2, 1, true)
+	states[1].versionMap.Delete(addr, BalancePath, common.Hash{}, 1, true)
 
 	// Tx3 read
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
 	states[3].stateObjects = map[common.Address]*stateObject{}
+	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
 	states[3].GetState(addr, key2, &v)
@@ -944,6 +832,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[1].versionedWrites = nil
 
 	// Tx3 read
+	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
 	assert.Equal(t, *uint256.NewInt(0), v)
 	states[3].GetState(addr, key2, &v)
@@ -955,27 +844,9 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
-
-	db := memdb.NewStateDB("")
-	defer db.Close()
-
-	agg, err := dbstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
-	assert.NoError(t, err)
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	assert.NoError(t, err)
-
-	tx, err := tdb.BeginTemporalRw(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
-	defer tx.Rollback()
-
-	domains, err := dbstate.NewSharedDomains(tx, log.New())
-	assert.NoError(t, err)
-	defer domains.Close()
+	_, tx, domains := NewTestRwTx(t)
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := NewVersionMap()
 	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 

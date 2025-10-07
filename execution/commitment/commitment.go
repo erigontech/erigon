@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -31,13 +31,14 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -88,6 +89,10 @@ type Trie interface {
 
 	// Makes trie more verbose
 	SetTrace(bool)
+	// Trace domain writes only (no filding etc)
+	SetTraceDomain(bool)
+	SetCapture(capture []string)
+	GetCapture(truncate bool) []string
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -99,16 +104,22 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
+	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error)
+}
+
+type CommitProgress struct {
+	KeyIndex    uint64
+	UpdateCount uint64
+	Metrics     MetricValues
 }
 
 type PatriciaContext interface {
 	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	Branch(prefix []byte) ([]byte, uint64, error)
+	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// store branch data
-	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
+	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error
 	// fetch account with given plain key
 	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
@@ -138,7 +149,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		//fn := func(key []byte) []byte { return hexToBin(key) }
 		//tree := NewUpdateTree(mode, tmpdir, fn)
 		//return trie, tree
-		panic("omg its not supported")
+		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -836,7 +847,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
 
-		medians := make(map[string][]int)
+		medians := make(map[string][]int16)
 		for _, c := range cells {
 			if c == nil {
 				continue
@@ -866,7 +877,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				stat.ExtCount++
 				medians["ext"] = append(medians["ext"], c.extLen)
 			default:
-				panic("unexpected cell " + fmt.Sprintf("%s", c.FullString()))
+				panic("unexpected cell " + c.FullString())
 			}
 			if c.extLen > 0 {
 				switch tv {
@@ -880,7 +891,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		}
 
 		for k, v := range medians {
-			sort.Ints(v)
+			slices.Sort(v)
 			switch k {
 			case "apk":
 				stat.MedianAPK = uint64(v[len(v)/2])
@@ -920,19 +931,6 @@ func (m Mode) String() string {
 	}
 }
 
-func ParseCommitmentMode(s string) Mode {
-	var mode Mode
-	switch s {
-	case "off":
-		mode = ModeDisabled
-	case "update":
-		mode = ModeUpdate
-	default:
-		mode = ModeDirect
-	}
-	return mode
-}
-
 type Updates struct {
 	hasher keyHasher
 	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
@@ -970,7 +968,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	return t
 }
@@ -981,7 +979,7 @@ func (t *Updates) SetMode(m Mode) {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	t.Reset()
 }
@@ -1097,7 +1095,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
-	c.update.StorageLen = len(val)
+	c.update.StorageLen = int8(len(val))
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
@@ -1226,9 +1224,9 @@ func (uf UpdateFlags) String() string {
 }
 
 type Update struct {
-	CodeHash   [length.Hash]byte
-	Storage    [length.Hash]byte
-	StorageLen int
+	CodeHash   common.Hash
+	Storage    common.Hash
+	StorageLen int8
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
@@ -1343,9 +1341,9 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		if len(buf) < pos+int(l) {
 			return 0, errors.New("decode Update: buffer too small for storage")
 		}
-		u.StorageLen = int(l)
-		copy(u.Storage[:], buf[pos:pos+u.StorageLen])
-		pos += u.StorageLen
+		u.StorageLen = int8(l)
+		copy(u.Storage[:], buf[pos:pos+int(u.StorageLen)])
+		pos += int(u.StorageLen)
 	}
 	return pos, nil
 }

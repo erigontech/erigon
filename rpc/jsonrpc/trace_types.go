@@ -19,8 +19,8 @@ package jsonrpc
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -95,10 +95,11 @@ type CallTraceAction struct {
 }
 
 type CreateTraceAction struct {
-	From  common.Address `json:"from"`
-	Gas   hexutil.Big    `json:"gas"`
-	Init  hexutil.Bytes  `json:"init"`
-	Value hexutil.Big    `json:"value"`
+	From           common.Address `json:"from"`
+	CreationMethod string         `json:"creationMethod"`
+	Gas            hexutil.Big    `json:"gas"`
+	Init           hexutil.Bytes  `json:"init"`
+	Value          hexutil.Big    `json:"value"`
 }
 
 type SuicideTraceAction struct {

@@ -26,9 +26,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type LoadNextFunc func(originalK, k, v []byte) error
@@ -83,7 +83,10 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Lo
 	return &Collector{bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 }
 
-func (c *Collector) SortAndFlushInBackground(v bool) { c.sortAndFlushInBackground = v }
+func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
+	c.sortAndFlushInBackground = v
+	return c
+}
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
@@ -129,7 +132,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 				c.buf = c.allocator.Get()
 			} else {
 				prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-				c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()))
+				c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
 				c.buf.Prealloc(prevLen/8, prevSize/8)
 			}
 			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator)
