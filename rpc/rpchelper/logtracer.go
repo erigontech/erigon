@@ -1,11 +1,12 @@
 package rpchelper
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var (
