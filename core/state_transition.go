@@ -75,7 +75,7 @@ func (e ErrExecAbortError) Error() string {
 		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
 	} else {
 		if e.OriginError != nil {
-			return fmt.Sprintf("execution aborted: %s", e.OriginError)
+			return e.OriginError.Error()
 		}
 		return "execution aborted"
 	}
