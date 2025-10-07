@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	btree2 "github.com/tidwall/btree"
@@ -84,6 +83,7 @@ type Domain struct {
 	//
 	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*FilesItem]
+	cache      *domainCache // protected by visibleFiles lock
 
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -92,10 +92,57 @@ type Domain struct {
 	checker *DependencyIntegrityChecker
 }
 
+type domainCache struct {
+	c *DomainGetFromFileCache
+}
+
+func newDomainCache(name kv.Domain) *domainCache {
+	limit := domainGetFromFileCacheLimit
+	if name == kv.CodeDomain {
+		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	if limit == 0 {
+		domainGetFromFileCacheEnabled = false
+		return nil
+	}
+	return &domainCache{c: NewDomainGetFromFileCache(domainGetFromFileCacheLimit)}
+}
+
+func (d *domainCache) Add(key uint64, value domainGetFromFileCacheItem) {
+	d.c.Add(key, value)
+}
+
+func (d *domainCache) Get(key uint64) (value domainGetFromFileCacheItem, ok bool) {
+	return d.c.Get(key)
+}
+
+// func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
+// 	d := &domainVisible{
+// 		name:  name,
+// 		files: files,
+// 	}
+// 	limit := domainGetFromFileCacheLimit
+// 	if name == kv.CodeDomain {
+// 		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+// 	}
+// 	if limit == 0 {
+// 		domainGetFromFileCacheEnabled = false
+// 	}
+// 	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
+// 	return d
+// }
+
+// func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
+// 	if !domainGetFromFileCacheEnabled {
+// 		return nil
+// 	}
+// 	return v.caches.Get().(*DomainGetFromFileCache)
+// }
+
 type domainVisible struct {
-	files  []visibleFile
-	name   kv.Domain
-	caches *sync.Pool
+	files []visibleFile
+	name  kv.Domain
+	//caches *sync.Pool
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -342,6 +389,7 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 		}
 	}
 	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	d.cache = newDomainCache(d.Name) // old value should be GC'ed
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -612,13 +660,14 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 
 	return &DomainRoTx{
-		name:     d.Name,
-		stepSize: d.stepSize,
-		d:        d,
-		ht:       d.History.BeginFilesRo(),
-		visible:  d._visible,
-		files:    d._visible.files,
-		salt:     d.salt.Load(),
+		name:             d.Name,
+		stepSize:         d.stepSize,
+		d:                d,
+		ht:               d.History.BeginFilesRo(),
+		visible:          d._visible,
+		files:            d._visible.files,
+		salt:             d.salt.Load(),
+		getFromFileCache: d.cache.c,
 	}
 }
 
@@ -1391,11 +1440,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 	getFromFileCache := dt.getFromFileCache
 
-	if useCache && getFromFileCache == nil {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.visible.newGetFromFileCache()
-		}
-		getFromFileCache = dt.getFromFileCache
+	if useCache {
+		getFromFileCache = nil
 	}
 	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
 		if cv, ok := getFromFileCache.Get(hi); ok {
@@ -1517,6 +1563,7 @@ func (dt *DomainRoTx) Close() {
 	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
+	dt.getFromFileCache = nil
 	for i := range files {
 		src := files[i].src
 		if src == nil || src.frozen {
@@ -1533,7 +1580,7 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
-	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
+	//dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 // reusableReader - for short read-and-forget operations. Must Reset this reader before use
