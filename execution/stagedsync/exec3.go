@@ -338,8 +338,8 @@ func ExecV3(ctx context.Context,
 					}
 
 					se.lastCommittedBlockNum = lastHeader.Number.Uint64()
-					committedTransactions := inputTxNum - se.lastCommittedTxNum
-					se.lastCommittedTxNum = inputTxNum
+					committedTransactions := se.domains().TxNum() - se.lastCommittedTxNum
+					se.lastCommittedTxNum = se.domains().TxNum()
 
 					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)

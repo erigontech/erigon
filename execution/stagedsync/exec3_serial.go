@@ -57,7 +57,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
-			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "initialTxNum", initialTxNum,
+			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", se.inMemExec)
 	}
