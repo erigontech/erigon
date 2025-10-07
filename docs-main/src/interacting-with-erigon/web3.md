@@ -42,8 +42,6 @@ curl -s --data '{"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":
 | :---- | :---- |
 | STRING | The current client version string including node name and version |
 
-<cite>rpc/jsonrpc/web3_api.go:47-50</cite>
-
 ---
 
 ## **web3_sha3**
