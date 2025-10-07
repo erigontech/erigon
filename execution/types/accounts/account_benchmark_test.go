@@ -444,8 +444,8 @@ func BenchmarkIsEmptyCodeHash(b *testing.B) {
 	}
 
 	var isEmpty bool
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		isEmpty = acc.IsEmptyCodeHash()
 	}
 	b.StopTimer()
@@ -462,8 +462,8 @@ func BenchmarkIsEmptyRoot(b *testing.B) {
 	}
 
 	var isEmpty bool
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		isEmpty = acc.IsEmptyRoot()
 	}
 	b.StopTimer()
