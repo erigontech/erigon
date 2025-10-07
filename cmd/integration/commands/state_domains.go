@@ -437,7 +437,7 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 			if len(layerBytes) == 4 {
 				layer = binary.BigEndian.Uint32(layerBytes)
 			}
-			if layer != uint32(currentLayer) && !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			if layer != uint32(currentLayer) && !(domain == kv.CommitmentDomain && bytes.Equal(k, commitmentdb.KeyCommitmentState)) {
 				skipped++
 				continue
 			}
