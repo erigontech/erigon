@@ -11,7 +11,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/stateless"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -24,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
+	"github.com/erigontech/erigon/p2p/stateless"
 )
 
 func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte, blockNumber uint64) error {
