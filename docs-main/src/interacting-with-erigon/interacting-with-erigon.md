@@ -21,7 +21,7 @@ The RPC Daemon supports various API namespaces, which can be enabled or disabled
 
 ## Erigon RPC Transports
 
-Erigon supports [HTTP](#http), [HTTPS](#https), [WebSockets](#websockets), [IPC](#ipc), [gRPC](grpc) and [GraphQL](#graphql] through its RPC daemon.
+Erigon supports [HTTP](#http), [HTTPS](#https), [WebSockets](#websockets), [IPC](#ipc), [gRPC](grpc) and [GraphQL](#graphql) through its RPC daemon.
 
 ### HTTP
 
