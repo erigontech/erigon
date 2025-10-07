@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0
 pragma solidity >=0.5.0;
 
-// solc --allow-paths ., --abi --bin --overwrite --optimize -o core/state/contracts/build core/state/contracts/poly.sol
-// ./build/bin/abigen -abi core/state/contracts/build/Poly.abi -bin core/state/contracts/build/Poly.bin -pkg contracts -type poly -out core/state/contracts/gen_poly.go
+// solc --allow-paths ., --abi --bin --overwrite --optimize -o execution/state/contracts/build execution/state/contracts/poly.sol
+// ./build/bin/abigen -abi execution/state/contracts/build/Poly.abi -bin execution/state/contracts/build/Poly.bin -pkg contracts -type poly -out execution/state/contracts/gen_poly.go
 contract Poly {
 
     constructor() public {

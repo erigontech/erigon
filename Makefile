@@ -461,7 +461,7 @@ gen:
 ## bindings:                          generate test contracts and core contracts
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./execution/tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/state/contracts/
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:

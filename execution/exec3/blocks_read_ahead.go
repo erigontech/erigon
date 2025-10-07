@@ -5,9 +5,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/turbo/services"
 )
 

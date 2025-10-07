@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	state2 "github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -45,6 +44,7 @@ import (
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	state2 "github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

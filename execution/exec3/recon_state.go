@@ -27,12 +27,11 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/google/btree"
-
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 type reconPair struct {

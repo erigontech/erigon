@@ -1,7 +1,7 @@
 pragma solidity >=0.5.0;
 
-// solc --allow-paths ., --abi --bin --overwrite --optimize -o core/state/contracts/build core/state/contracts/revive.sol
-// ./build/bin/abigen -abi core/state/contracts/build/Revive.abi -bin core/state/contracts/build/Revive.bin -pkg contracts -type revive -out core/state/contracts/gen_revive.go
+// solc --allow-paths ., --abi --bin --overwrite --optimize -o execution/state/contracts/build execution/state/contracts/revive.sol
+// ./build/bin/abigen -abi execution/state/contracts/build/Revive.abi -bin execution/state/contracts/build/Revive.bin -pkg contracts -type revive -out execution/state/contracts/gen_revive.go
 contract Revive {
 
     constructor() public {

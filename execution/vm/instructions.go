@@ -1302,7 +1302,7 @@ func makeLog(size int) executionFunc {
 			Topics:  topics,
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
-			// core/state doesn't know the current block number.
+			// execution/state doesn't know the current block number.
 			BlockNumber: interpreter.evm.Context.BlockNumber,
 		})
 

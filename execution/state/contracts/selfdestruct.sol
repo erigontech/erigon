@@ -1,7 +1,7 @@
 pragma solidity >=0.6.0;
 
-// solc --allow-paths ., --abi --bin --overwrite --optimize -o core/state/contracts/build core/state/contracts/selfdestruct.sol
-// ./build/bin/abigen -abi core/state/contracts/build/Selfdestruct.abi -bin core/state/contracts/build/Selfdestruct.bin -pkg contracts -type selfdestruct -out core/state/contracts/gen_selfdestruct.go
+// solc --allow-paths ., --abi --bin --overwrite --optimize -o execution/state/contracts/build execution/state/contracts/selfdestruct.sol
+// ./build/bin/abigen -abi execution/state/contracts/build/Selfdestruct.abi -bin execution/state/contracts/build/Selfdestruct.bin -pkg contracts -type selfdestruct -out execution/state/contracts/gen_selfdestruct.go
 contract Selfdestruct {
 
     uint256 x;

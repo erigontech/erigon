@@ -1,8 +1,8 @@
 pragma solidity >=0.6.0;
 
-// solc --allow-paths ., --abi --bin --overwrite --optimize -o core/state/contracts/build core/state/contracts/revive2.sol
-// ./build/bin/abigen -abi core/state/contracts/build/Revive2.abi -bin core/state/contracts/build/Revive2.bin -pkg contracts -type revive2 -out core/state/contracts/gen_revive2.go
-// ./build/bin/abigen -abi core/state/contracts/build/Phoenix.abi -bin core/state/contracts/build/Phoenix.bin -pkg contracts -type phoenix -out core/state/contracts/gen_phoenix.go
+// solc --allow-paths ., --abi --bin --overwrite --optimize -o execution/state/contracts/build execution/state/contracts/revive2.sol
+// ./build/bin/abigen -abi execution/state/contracts/build/Revive2.abi -bin execution/state/contracts/build/Revive2.bin -pkg contracts -type revive2 -out execution/state/contracts/gen_revive2.go
+// ./build/bin/abigen -abi execution/state/contracts/build/Phoenix.abi -bin execution/state/contracts/build/Phoenix.bin -pkg contracts -type phoenix -out execution/state/contracts/gen_phoenix.go
 contract Revive2 {
 
     constructor() {
