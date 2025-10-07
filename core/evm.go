@@ -24,16 +24,17 @@ import (
 	"math/big"
 	"sync"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
@@ -42,7 +43,16 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
-		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
+		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
+			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
+
+			// In case the coinbase is not set post Rio, use the default coinbase
+			if beneficiary == (common.Address{}) {
+				beneficiary, _ = engine.Author(header)
+			}
+		} else {
+			beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
+		}
 	} else {
 		beneficiary = *author
 	}
@@ -55,7 +65,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	}
 
 	var prevRandDao *common.Hash
-	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
+	if header.Difficulty != nil && header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = new(common.Hash)
 		*prevRandDao = header.MixDigest
@@ -79,7 +89,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		transferFunc = consensus.Transfer
 		postApplyMessageFunc = nil
 	}
-	return evmtypes.BlockContext{
+	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
 		GetHash:          blockHashFunc,
@@ -87,12 +97,15 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
-		Difficulty:       new(big.Int).Set(header.Difficulty),
 		BaseFee:          &baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 	}
+	if header.Difficulty != nil {
+		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
+	}
+	return blockContext
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.
@@ -188,8 +201,17 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (bool, error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (can bool, err error) {
 	balance, err := db.GetBalance(addr)
+
+	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr) {
+		defer func() {
+			if !can {
+				fmt.Printf("%d (%d.%d) Can't transfer %d from %x: %d\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount, addr, &balance)
+			}
+		}()
+	}
+
 	if err != nil {
 		return false, err
 	}

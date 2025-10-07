@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
@@ -63,7 +63,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(polychain.BorDevnetChainConfig, nil, nil, nil, nil, br, nil)
+	bor := New(polychain.BorDevnet.Config, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),
@@ -89,8 +89,9 @@ func TestCommitStatesIndore(t *testing.T) {
 				nil,
 				nil,
 				nil,
-				false,
-				false,
+				false, // checkNonce
+				false, // checkGas
+				false, // isFree
 				nil,
 			),
 		}, nil,

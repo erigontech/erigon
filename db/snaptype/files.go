@@ -31,12 +31,16 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
 	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
+}
+
+func FileMask(from, to uint64, fileType string) string {
+	return fmt.Sprintf("*-%06d-%06d-%s", from/1_000, to/1_000, fileType)
 }
 
 func SegmentFileName(version Version, from, to uint64, t Enum) string {
@@ -44,6 +48,13 @@ func SegmentFileName(version Version, from, to uint64, t Enum) string {
 }
 func IdxFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
+}
+
+func SegmentFileMask(from, to uint64, t Enum) string {
+	return FileMask(from, to, t.String()) + ".seg"
+}
+func IdxFileMask(from, to uint64, fType string) string {
+	return FileMask(from, to, fType) + ".idx"
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
@@ -323,17 +334,17 @@ func parseStateFile(name string) (from, to uint64, ok bool) {
 	return from, to, true
 }
 
-func E3Seedable(name string) bool {
-	from, to, ok := parseStateFile(name)
-	if !ok {
-		return false
-	}
-	return (to-from)%Erigon3SeedableSteps == 0
+func IsStateFileSeedable(name string) bool {
+	return IsStateFile(name) // all state files are seedable (in the past we seeded only big files)
 }
 
 func IsStateFile(name string) bool {
 	_, _, ok := parseStateFile(name)
 	return ok
+}
+
+func IsTorrentPartial(ext string) bool {
+	return strings.HasPrefix(ext, ".torrent") && len(ext) > len(".torrent")
 }
 
 func SeedableV2Extensions() []string {

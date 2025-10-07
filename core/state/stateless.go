@@ -22,8 +22,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -79,6 +79,10 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 		blockNr:        blockNr,
 		trace:          trace,
 	}, nil
+}
+
+func (s *Stateless) SetTrace(trace bool, _ string) {
+	s.trace = trace
 }
 
 // SetBlockNr changes the block number associated with this

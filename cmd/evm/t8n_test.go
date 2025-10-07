@@ -29,7 +29,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/race"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/internal/reexec"
 	"github.com/erigontech/erigon/turbo/cmdtest"
 )

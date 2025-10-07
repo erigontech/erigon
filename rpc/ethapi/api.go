@@ -27,14 +27,14 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // CallArgs represents the arguments for a call.
@@ -54,6 +54,10 @@ type CallArgs struct {
 	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
+}
+
+func (args *CallArgs) FromOrEmpty() common.Address {
+	return args.from()
 }
 
 // from retrieves the transaction sender address.
@@ -160,8 +164,12 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
+	var nonce uint64
+	if args.Nonce != nil {
+		nonce = args.Nonce.Uint64()
+	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+	msg := types.NewMessage(addr, args.To, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
@@ -196,6 +204,59 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 
 	var tx types.Transaction
 	switch {
+	case args.AuthorizationList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		authorizations := make([]types.Authorization, 0)
+		if args.AuthorizationList != nil {
+			authorizations = make([]types.Authorization, len(args.AuthorizationList))
+			for i, auth := range args.AuthorizationList {
+				authorizations[i], err = auth.ToAuthorization()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		tx = &types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     msg.FeeCap(),
+				TipCap:     msg.TipCap(),
+				AccessList: al,
+			},
+			Authorizations: authorizations,
+		}
+	case args.BlobVersionedHashes != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     msg.FeeCap(),
+				TipCap:     msg.TipCap(),
+				AccessList: al,
+			},
+			MaxFeePerBlobGas:    uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt()),
+			BlobVersionedHashes: args.BlobVersionedHashes,
+		}
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -512,10 +573,12 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	result.S = (*hexutil.Big)(s.ToBig())
 
 	if txn.Type() == types.LegacyTxType {
-		chainId = types.DeriveChainId(v)
-		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-		if !chainId.IsZero() {
-			result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
+			chainId = types.DeriveChainId(v)
+			// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
+			if !chainId.IsZero() {
+				result.ChainID = (*hexutil.Big)(chainId.ToBig())
+			}
 		}
 		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
@@ -534,7 +597,6 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 		}
 
 		if txn.Type() == types.BlobTxType {
-			txn.GetBlobGas()
 			blobTx := txn.(*types.BlobTx)
 			result.MaxFeePerBlobGas = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes

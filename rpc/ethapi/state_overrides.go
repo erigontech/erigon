@@ -23,7 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 )
@@ -35,11 +35,15 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 	for addr, account := range *overrides {
 		// Override account nonce.
 		if account.Nonce != nil {
-			state.SetNonce(addr, uint64(*account.Nonce))
+			if err := state.SetNonce(addr, uint64(*account.Nonce)); err != nil {
+				return err
+			}
 		}
 		// Override account(contract) code.
 		if account.Code != nil {
-			state.SetCode(addr, *account.Code)
+			if err := state.SetCode(addr, *account.Code); err != nil {
+				return err
+			}
 		}
 		// Override account balance.
 		if account.Balance != nil {
@@ -47,7 +51,9 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 			if overflow {
 				return errors.New("account.Balance higher than 2^256-1")
 			}
-			state.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified)
+			if err := state.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
+				return err
+			}
 		}
 		if account.State != nil && account.StateDiff != nil {
 			return fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
@@ -59,14 +65,18 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
 				intState[key] = *intValue
 			}
-			state.SetStorage(addr, intState)
+			if err := state.SetStorage(addr, intState); err != nil {
+				return err
+			}
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
 				key := key
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
-				state.SetState(addr, key, *intValue)
+				if err := state.SetState(addr, key, *intValue); err != nil {
+					return err
+				}
 			}
 		}
 	}

@@ -26,8 +26,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // Compiler contains information about the parsed source

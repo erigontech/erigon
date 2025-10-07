@@ -19,7 +19,7 @@ package aura
 import (
 	"container/list"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // nolint

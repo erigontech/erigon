@@ -31,10 +31,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/mmap"
+	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 )
 
 type word []byte // plain text word associated with code from dictionary
@@ -690,6 +690,10 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
+	if wordLen < 0 {
+		log.Error("invalid wordLen", "filename", g.fName, "pos", savePos, "buf len", len(buf))
+		return nil, 0
+	}
 	if wordLen == 0 {
 		if g.dataBit > 0 {
 			g.dataP++
@@ -708,6 +712,10 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		buf = newBuf
 	} else {
 		// Expand buffer
+		if len(buf)+int(wordLen) < 0 {
+			log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "buf len", len(buf))
+			return nil, 0
+		}
 		buf = buf[:len(buf)+int(wordLen)]
 	}
 

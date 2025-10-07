@@ -20,8 +20,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type BeaconResponse struct {
@@ -30,13 +30,37 @@ type BeaconResponse struct {
 	Version             *clparams.StateVersion
 	ExecutionOptimistic *bool
 
-	Extra map[string]any
+	Extra   map[string]any
+	headers map[string]string
 }
 
 func NewBeaconResponse(data any) *BeaconResponse {
 	return &BeaconResponse{
 		Data: data,
 	}
+}
+
+func (r *BeaconResponse) Headers() map[string]string {
+	if r.headers == nil {
+		return make(map[string]string)
+	}
+	return r.headers
+}
+
+func (r *BeaconResponse) WithHeaders(headers map[string]string) (out *BeaconResponse) {
+	if r.headers == nil {
+		r.headers = make(map[string]string)
+	}
+	r.headers = headers
+	return r
+}
+
+func (r *BeaconResponse) WithHeader(key string, value string) (out *BeaconResponse) {
+	if r.headers == nil {
+		r.headers = make(map[string]string)
+	}
+	r.headers[key] = value
+	return r
 }
 
 func (r *BeaconResponse) With(key string, value any) (out *BeaconResponse) {

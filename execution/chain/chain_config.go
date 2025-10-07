@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/execution/chain/params"
 )
 
@@ -164,6 +164,7 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
+		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
 )
@@ -178,11 +179,12 @@ type BorConfig interface {
 	GetAhmedabadBlock() *big.Int
 	IsBhilai(num uint64) bool
 	GetBhilaiBlock() *big.Int
-	IsVeBlop(num uint64) bool
-	GetVeBlopBlock() *big.Int
+	IsRio(num uint64) bool
+	GetRioBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
+	CalculateCoinbase(number uint64) common.Address
 }
 
 func timestampToTime(unixTime *big.Int) *time.Time {
@@ -197,13 +199,13 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, VeBlop: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Rio: %v, Engine: %v}",
 			c.ChainID,
 			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GetAhmedabadBlock(),
 			c.Bor.GetBhilaiBlock(),
-			c.Bor.GetVeBlopBlock(),
+			c.Bor.GetRioBlock(),
 			engine,
 		)
 	}
@@ -446,6 +448,22 @@ func (c *Config) SecondsPerSlot() uint64 {
 	return 12 // Ethereum
 }
 
+func (c *Config) SlotsPerEpoch() uint64 {
+	if c.Bor != nil {
+		// Polygon does not have slots, this is such that block range is updated ~5 minutes similar to Ethereum
+		return 192
+	}
+	if c.Aura != nil {
+		return 16 // Gnosis
+	}
+	return 32 // Ethereum
+}
+
+// EpochDuration returns the duration of one epoch in seconds
+func (c *Config) EpochDuration() time.Duration {
+	return time.Duration(c.SecondsPerSlot()*c.SlotsPerEpoch()) * time.Second
+}
+
 func (c *Config) SystemContracts(time uint64) map[string]common.Address {
 	contracts := map[string]common.Address{}
 	if c.IsCancun(time) {
@@ -685,34 +703,6 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
-}
-
-// Rules ensures c's ChainID is not nil and returns a new Rules instance
-func (c *Config) Rules(num uint64, time uint64) *Rules {
-	chainID := c.ChainID
-	if chainID == nil {
-		chainID = new(big.Int)
-	}
-
-	return &Rules{
-		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(num),
-		IsTangerineWhistle: c.IsTangerineWhistle(num),
-		IsSpuriousDragon:   c.IsSpuriousDragon(num),
-		IsByzantium:        c.IsByzantium(num),
-		IsConstantinople:   c.IsConstantinople(num),
-		IsPetersburg:       c.IsPetersburg(num),
-		IsIstanbul:         c.IsIstanbul(num),
-		IsBerlin:           c.IsBerlin(num),
-		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
-		IsCancun:           c.IsCancun(time),
-		IsNapoli:           c.IsNapoli(num),
-		IsBhilai:           c.IsBhilai(num),
-		IsPrague:           c.IsPrague(time) || c.IsBhilai(num),
-		IsOsaka:            c.IsOsaka(time),
-		IsAura:             c.Aura != nil,
-	}
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.

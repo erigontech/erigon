@@ -27,7 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -39,14 +38,15 @@ import (
 	"google.golang.org/grpc"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/synctest"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -199,7 +199,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes1, 1)
-		txnsIdFilter.Add(txnsRes1[0].Hash())
 		txnsRes2, err := pool.ProvideTxns(
 			ctx,
 			txnprovider.WithBlockTime(handle.nextBlockTime),
@@ -209,7 +208,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes2, 1)
-		txnsIdFilter.Add(txnsRes2[0].Hash())
 		require.Equal(t, 2, txnsIdFilter.Cardinality())
 	})
 }
@@ -219,10 +217,10 @@ type PoolTest struct {
 }
 
 func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle)) {
-	synctest.Run(func() {
+	synctest.Test(t.T, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		logger := testlog.Logger(t.T, log.LvlTrace)
+		logger := testlog.Logger(t, log.LvlTrace)
 		logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
 		logger.SetHandler(logHandler)
 		config := shuttercfg.ConfigByChainName(networkname.Chiado)
@@ -247,7 +245,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		)
 
 		contractBackend.PrepareMocks()
-		slotCalculator.PrepareMocks(t.T)
+		slotCalculator.PrepareMocks(t)
 		eg := errgroup.Group{}
 		eg.Go(func() error { return pool.Run(ctx) })
 		handle := PoolTestHandle{
@@ -262,7 +260,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		}
 		// wait before calling the test case to ensure all pool background loops and subscriptions have been initialised
 		synctest.Wait()
-		testCase(ctx, t.T, pool, handle)
+		testCase(ctx, t, pool, handle)
 		cancel()
 		err := eg.Wait()
 		require.ErrorIs(t, err, context.Canceled)

@@ -24,10 +24,9 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
@@ -35,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -325,7 +326,11 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 	forkConfig.BlobSchedule = *chainConfig.GetBlobConfig(activationTime)
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
 	forkConfig.ForkId = forkId[:]
-	precompiles := vm.Precompiles(chainConfig.Rules(math.MaxUint64, activationTime))
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: math.MaxUint64,
+		Time:        activationTime,
+	}
+	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
 		forkConfig.Precompiles[precompile.Name()] = addr

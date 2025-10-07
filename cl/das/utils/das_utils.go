@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -62,9 +62,7 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 	}
 
 	// Sort custody groups
-	sort.Slice(custodyGroups, func(i, j int) bool {
-		return custodyGroups[i] < custodyGroups[j]
-	})
+	slices.Sort(custodyGroups)
 
 	return custodyGroups, nil
 }
@@ -204,8 +202,7 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 
 func GetCustodyColumns(nodeID enode.ID, cgc uint64) (map[cltypes.CustodyIndex]bool, error) {
 	// TODO: cache the following computations in terms of custody columns
-	sampleSize := max(clparams.GetBeaconConfig().SamplesPerSlot, cgc)
-	groups, err := GetCustodyGroups(nodeID, sampleSize)
+	groups, err := GetCustodyGroups(nodeID, cgc)
 	if err != nil {
 		return nil, err
 	}

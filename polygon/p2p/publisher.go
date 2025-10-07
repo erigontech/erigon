@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package p2p
+package polygonp2p
 
 import (
 	"context"
@@ -25,12 +25,13 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-func NewPublisher(logger log.Logger, messageSender *MessageSender, peerTracker *PeerTracker) *Publisher {
+func NewPublisher(logger log.Logger, messageSender *p2p.MessageSender, peerTracker *p2p.PeerTracker) *Publisher {
 	return &Publisher{
 		logger:        logger,
 		messageSender: messageSender,
@@ -52,8 +53,8 @@ func NewPublisher(logger log.Logger, messageSender *MessageSender, peerTracker *
 // then newly enqueued publish tasks will get dropped.
 type Publisher struct {
 	logger        log.Logger
-	messageSender *MessageSender
-	peerTracker   *PeerTracker
+	messageSender *p2p.MessageSender
+	peerTracker   *p2p.PeerTracker
 	tasks         chan publishTask
 }
 

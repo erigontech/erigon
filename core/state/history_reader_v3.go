@@ -22,10 +22,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -46,10 +45,10 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
-func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
-func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
-func (hr *HistoryReaderV3) SetTrace(trace bool)    { hr.trace = trace }
+func (hr *HistoryReaderV3) SetTx(tx kv.Tx)                          { hr.ttx = tx.(kv.TemporalTx) }
+func (hr *HistoryReaderV3) SetTxNum(txNum uint64)                   { hr.txNum = txNum }
+func (hr *HistoryReaderV3) GetTxNum() uint64                        { return hr.txNum }
+func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) { hr.trace = trace }
 
 // Gets the txNum where Account, Storage and Code history begins.
 // If the node is an archive node all history will be available therefore
@@ -66,9 +65,7 @@ func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
 	)
 }
 
-func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
-func (hr *HistoryReaderV3) ResetReadSet()                     {}
-func (hr *HistoryReaderV3) DiscardReadList()                  {}
+func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address[:], hr.txNum)
@@ -174,13 +171,4 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint6
 		fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, a.Incarnation-1)
 	}
 	return a.Incarnation - 1, nil
-}
-
-type ResettableStateReader interface {
-	StateReader
-	SetTx(tx kv.TemporalTx)
-	SetTxNum(txn uint64)
-	DiscardReadList()
-	ReadSet() map[string]*state.KvList
-	ResetReadSet()
 }

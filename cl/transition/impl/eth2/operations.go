@@ -28,13 +28,13 @@ import (
 
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -234,7 +234,7 @@ func getPendingBalanceToWithdraw(s abstract.BeaconState, validatorIndex uint64) 
 	ws := s.GetPendingPartialWithdrawals()
 	balance := uint64(0)
 	ws.Range(func(index int, withdrawal *solid.PendingPartialWithdrawal, length int) bool {
-		if withdrawal.Index == validatorIndex {
+		if withdrawal.ValidatorIndex == validatorIndex {
 			balance += withdrawal.Amount
 		}
 		return true
@@ -1141,7 +1141,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(toWithdraw)
 		withdrawableEpoch := exitQueueEpoch + s.BeaconConfig().MinValidatorWithdrawabilityDelay
 		s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
-			Index:             vindex,
+			ValidatorIndex:    vindex,
 			Amount:            toWithdraw,
 			WithdrawableEpoch: withdrawableEpoch,
 		})

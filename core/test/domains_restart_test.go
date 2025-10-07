@@ -31,25 +31,25 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	state2 "github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
-func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
+func testDbAndAggregatorv3(t *testing.T, fpath string, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
 	t.Helper()
 
 	path := t.TempDir()
@@ -57,24 +57,8 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 		path = fpath
 	}
 	dirs := datadir.New(path)
-
-	logger := log.New()
-	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
-	t.Cleanup(db.Close)
-
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	require.NoError(t, err)
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-	err = agg.OpenFolder()
-	agg.DisableFsync()
-	require.NoError(t, err)
-
-	tdb, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	t.Cleanup(tdb.Close)
-	return tdb, agg, path
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 
 func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
@@ -155,7 +139,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 
 		if txNum%blockSize == 0 && interesting {
-			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			fmt.Printf("tx %d bn %d rh %x\n", txNum, txNum/blockSize, rh)
 
@@ -164,7 +148,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 	}
 
-	rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+	rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	t.Logf("executed tx %d root %x datadir %q\n", txs, rh, datadir)
 
@@ -246,7 +230,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	txToStart := domains.TxNum()
 
-	rh, err = domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
+	rh, err = domains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	t.Logf("restart hash %x\n", rh)
 
@@ -267,7 +251,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		i++
 
 		if txNum%blockSize == 0 /*&& txNum >= txs-aggStep */ {
-			rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			fmt.Printf("tx %d rh %x\n", txNum, rh)
 			require.Equal(t, hashes[j], rh)
@@ -344,7 +328,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			require.NoError(t, err)
 
 			if txNum%blockSize == 0 {
-				rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+				rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 				require.NoError(t, err)
 
 				hashes = append(hashes, rh)
@@ -354,7 +338,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			}
 		}
 
-		latestHash, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+		latestHash, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		_ = latestHash
 		//require.EqualValues(t, params.MainnetGenesisHash, common.Hash(latestHash))
@@ -413,9 +397,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.EqualValues(t, 0, txToStart)
 		txToStart = testStartedFromTxNum
 
-		rh, err := domains.ComputeCommitment(ctx, false, blockNum, txNum, "")
+		rh, err := domains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "", nil)
 		require.NoError(t, err)
-		require.Equal(t, chainspec.TestGenesisStateRoot, common.BytesToHash(rh))
+
+		s, err := chainspec.ChainSpecByName(networkname.Test)
+		require.NoError(t, err)
+		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
 		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 		//common.BytesToHash(rh))
 
@@ -435,7 +422,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			i++
 
 			if txNum%blockSize == 0 {
-				rh, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+				rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 				require.NoError(t, err)
 				//fmt.Printf("tx %d rh %x\n", txNum, rh)
 				require.Equal(t, hashes[j], rh)
@@ -495,8 +482,8 @@ func TestCommit(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	domains.SetTrace(false)
-	domainsHash, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+	domains.SetTrace(false, false)
+	domainsHash, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)

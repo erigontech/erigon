@@ -23,8 +23,8 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
@@ -54,7 +54,7 @@ func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMs
 	blockNumberOrHash := BlockNumArg(blockNum)
 	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
 
-	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil)
+	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }
 
 func (b DirectBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
@@ -81,7 +81,7 @@ func (b DirectBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 
 func (b DirectBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
 	callArgs := CallArgsFromCallMsg(call)
-	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil)
+	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil, nil)
 	if err != nil {
 		return 0, err
 	}
