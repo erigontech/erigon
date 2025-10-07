@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"

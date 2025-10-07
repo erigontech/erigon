@@ -28,13 +28,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/kv"
@@ -46,11 +47,11 @@ import (
 	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
-	"golang.org/x/sync/errgroup"
 )
 
 // Cases:
