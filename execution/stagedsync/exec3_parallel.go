@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -110,11 +111,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	applyResults := make(chan applyResult, 100_000)
 
-	maxExecBlockNum := maxBlockNum
-	if blockLimit > 0 && startBlockNum+uint64(blockLimit) < maxBlockNum {
-		maxExecBlockNum = startBlockNum + blockLimit - 1
-	}
-
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "parallel"),
 			"from", startBlockNum, "to", min(startBlockNum+blockLimit, maxBlockNum), "initialTxNum", initialTxNum,
@@ -128,8 +124,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	pe.resetWorkers(ctx, pe.rs, rwTx)
 
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, initialTxNum, readAhead, applyResults); err != nil {
-		return nil, rwTx, err
+	maxExecBlockNum := maxBlockNum
+
+	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, blockLimit, initialTxNum, readAhead, applyResults); err != nil {
+		var errExhausted *stagedsync.ErrLoopExhausted
+		if errors.As(err, &errExhausted) {
+			maxExecBlockNum = errExhausted.To
+		} else {
+			return nil, rwTx, err
+		}
 	}
 
 	var lastExecutedLog time.Time

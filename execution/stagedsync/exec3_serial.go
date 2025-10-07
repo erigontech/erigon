@@ -53,11 +53,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	var uncommitedGas uint64
 	var b *types.Block
 
+	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
+
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
 			"from", blockNum, "to", min(blockNum+blockLimit, maxBlockNum), "initialTxNum", initialTxNum,
-			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
-			"useExternalTx", useExternalTx, "inMem", se.inMemExec)
+			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
+			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", se.inMemExec)
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -281,8 +283,14 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		default:
 		}
 
-		if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
-			return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+		lastExecutedStep := kv.Step((se.lastExecutedTxNum) / se.doms.StepSize())
+
+		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
+		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
+		if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
+			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
+				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+			}
 		}
 	}
 
