@@ -53,7 +53,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	var uncommitedGas uint64
 	var b *types.Block
 
-	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
+	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
@@ -283,7 +283,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		default:
 		}
 
-		lastExecutedStep := kv.Step((se.lastExecutedTxNum) / se.doms.StepSize())
+		lastExecutedStep := kv.Step(uint64(se.lastExecutedTxNum.Load()) / se.doms.StepSize())
 
 		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost

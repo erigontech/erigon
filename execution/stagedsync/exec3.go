@@ -564,7 +564,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, readAhead chan uint64, applyResults chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, blockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
 	inputTxNum, _, offsetFromBlockBeginning, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
 
 	if err != nil {
@@ -586,7 +586,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			}
 		}()
 
-		lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
+		lastFrozenStep := tx.StepsInFiles(kv.CommitmentDomain)
 
 		for ; blockNum <= maxBlockNum; blockNum++ {
 			select {
@@ -668,13 +668,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 				offsetFromBlockBeginning = 0
 			}
 
-			lastExecutedStep := kv.Step(inputTxNum / se.doms.StepSize())
+			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
 
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
 			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
-					return &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
+				if blockLimit > 0 && blockNum-blockNum+1 >= blockLimit {
+					return &ErrLoopExhausted{From: blockNum, To: blockNum, Reason: "block limit reached"}
 				}
 			}
 		}

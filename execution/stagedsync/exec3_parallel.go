@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
-	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -98,7 +97,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
-	var asyncTx kv.Tx
+	var asyncTx kv.TemporalTx
 
 	switch applyTx := rwTx.(type) {
 	case *temporal.RwTx:
@@ -126,8 +125,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	maxExecBlockNum := maxBlockNum
 
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, blockLimit, initialTxNum, readAhead, applyResults); err != nil {
-		var errExhausted *stagedsync.ErrLoopExhausted
+	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
+		var errExhausted *ErrLoopExhausted
 		if errors.As(err, &errExhausted) {
 			maxExecBlockNum = errExhausted.To
 		} else {
