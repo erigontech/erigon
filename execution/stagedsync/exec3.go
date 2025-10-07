@@ -152,7 +152,7 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		defer func() { // need callback - because tx may be committed
+		defer func() {
 			applyTx.Rollback()
 		}()
 	}
@@ -237,9 +237,6 @@ func ExecV3(ctx context.Context,
 	defer resetExecGauges(ctx)
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
-
-	if parallel {
-	}
 
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx)
 	blockNum = doms.BlockNum()
@@ -328,12 +325,13 @@ func ExecV3(ctx context.Context,
 
 		if u != nil && !u.HasUnwindPoint() {
 			if lastHeader != nil {
-				if execErr != nil {
-					if errors.Is(execErr, ErrWrongTrieRoot) {
-						execErr = handleIncorrectRootHashError(
-							lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, maxBlockNum, logger, u)
-					}
-				} else {
+				switch {
+				case errors.Is(execErr, ErrWrongTrieRoot):
+					execErr = handleIncorrectRootHashError(
+						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, maxBlockNum, logger, u)
+				case errors.Is(execErr, context.Canceled):
+					return err
+				default:
 					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 					if err != nil {
 						return err
@@ -356,8 +354,11 @@ func ExecV3(ctx context.Context,
 				}
 			} else {
 				if execErr != nil {
-					if errors.Is(execErr, ErrWrongTrieRoot) {
+					switch {
+					case errors.Is(execErr, ErrWrongTrieRoot):
 						return fmt.Errorf("can't handle incorrect root err: %w", execErr)
+					case errors.Is(execErr, context.Canceled):
+						return err
 					}
 				} else {
 					return fmt.Errorf("last processed block unexpectedly nil")

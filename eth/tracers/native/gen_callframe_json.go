@@ -8,7 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var _ = (*callFrameMarshaling)(nil)

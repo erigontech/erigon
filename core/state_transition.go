@@ -35,12 +35,12 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/fixedgas"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 /*
@@ -75,7 +75,7 @@ func (e ErrExecAbortError) Error() string {
 		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
 	} else {
 		if e.OriginError != nil {
-			return fmt.Sprintf("execution aborted: %s", e.OriginError)
+			return e.OriginError.Error()
 		}
 		return "execution aborted"
 	}

@@ -114,25 +114,25 @@ var (
 )
 
 func BenchmarkLegacySmallList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		legacyDeriveSha(smallTxList)
 	}
 }
 
 func BenchmarkCurrentSmallList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DeriveSha(smallTxList)
 	}
 }
 
 func BenchmarkLegacyLargeList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		legacyDeriveSha(largeTxList)
 	}
 }
 
 func BenchmarkCurrentLargeList(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DeriveSha(largeTxList)
 	}
 }
