@@ -1408,7 +1408,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 	getFromFileCache := dt.getFromFileCache
 
-	if useCache {
+	if !useCache {
 		getFromFileCache = nil
 	}
 	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
@@ -1531,6 +1531,7 @@ func (dt *DomainRoTx) Close() {
 	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
+	dt.getFromFileCache.LogStats(dt.name)
 	dt.getFromFileCache = nil
 	for i := range files {
 		src := files[i].src
@@ -1547,8 +1548,6 @@ func (dt *DomainRoTx) Close() {
 		}
 	}
 	dt.ht.Close()
-
-	//dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 // reusableReader - for short read-and-forget operations. Must Reset this reader before use

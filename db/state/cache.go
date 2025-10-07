@@ -86,20 +86,6 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	return d
 }
 
-// func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-// 	if !domainGetFromFileCacheEnabled {
-// 		return nil
-// 	}
-// 	return v.caches.Get().(*DomainGetFromFileCache)
-// }
-// func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
-// 	if c == nil {
-// 		return
-// 	}
-// 	c.LogStats(v.name)
-// 	v.caches.Put(c)
-// }
-
 var (
 	iiGetFromFileCacheLimit   = uint32(dbg.EnvInt("II_LRU", 4096))
 	iiGetFromFileCacheTrace   = dbg.EnvBool("II_LRU_TRACE", false)
