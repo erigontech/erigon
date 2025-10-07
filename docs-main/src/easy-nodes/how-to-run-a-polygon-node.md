@@ -1,4 +1,5 @@
 # How to run a Polygon node
+*Not officially supported*
 
 ## Prerequisites
 
