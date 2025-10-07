@@ -3,7 +3,6 @@ package syscheck
 import (
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon/common/log/v3"
 	"os"
 	"runtime"
 	"strconv"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // CheckKernelAllocationHints inspects Linux kernel /proc sysctls related to
