@@ -83,7 +83,6 @@ type Domain struct {
 	//
 	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*FilesItem]
-	cache      *domainCache // protected by visibleFiles lock
 
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -92,11 +91,7 @@ type Domain struct {
 	checker *DependencyIntegrityChecker
 }
 
-type domainCache struct {
-	c *DomainGetFromFileCache
-}
-
-func newDomainCache(name kv.Domain) *domainCache {
+func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
 	limit := domainGetFromFileCacheLimit
 	if name == kv.CodeDomain {
 		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
@@ -105,44 +100,13 @@ func newDomainCache(name kv.Domain) *domainCache {
 		domainGetFromFileCacheEnabled = false
 		return nil
 	}
-	return &domainCache{c: NewDomainGetFromFileCache(domainGetFromFileCacheLimit)}
+	return NewDomainGetFromFileCache(domainGetFromFileCacheLimit)
 }
-
-func (d *domainCache) Add(key uint64, value domainGetFromFileCacheItem) {
-	d.c.Add(key, value)
-}
-
-func (d *domainCache) Get(key uint64) (value domainGetFromFileCacheItem, ok bool) {
-	return d.c.Get(key)
-}
-
-// func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
-// 	d := &domainVisible{
-// 		name:  name,
-// 		files: files,
-// 	}
-// 	limit := domainGetFromFileCacheLimit
-// 	if name == kv.CodeDomain {
-// 		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
-// 	}
-// 	if limit == 0 {
-// 		domainGetFromFileCacheEnabled = false
-// 	}
-// 	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
-// 	return d
-// }
-
-// func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-// 	if !domainGetFromFileCacheEnabled {
-// 		return nil
-// 	}
-// 	return v.caches.Get().(*DomainGetFromFileCache)
-// }
 
 type domainVisible struct {
 	files []visibleFile
 	name  kv.Domain
-	//caches *sync.Pool
+	cache *DomainGetFromFileCache
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -389,7 +353,7 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 		}
 	}
 	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
-	d.cache = newDomainCache(d.Name) // old value should be GC'ed
+	d._visible.cache = newDomainCache(d.Name) // old value should be GC'ed
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -659,6 +623,10 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		}
 	}
 
+	if d._visible.cache == nil {
+		d._visible.cache = newDomainCache(d.Name)
+	}
+
 	return &DomainRoTx{
 		name:             d.Name,
 		stepSize:         d.stepSize,
@@ -667,7 +635,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		visible:          d._visible,
 		files:            d._visible.files,
 		salt:             d.salt.Load(),
-		getFromFileCache: d.cache.c,
+		getFromFileCache: d._visible.cache,
 	}
 }
 

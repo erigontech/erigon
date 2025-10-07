@@ -83,7 +83,6 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
 	}
-	//	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
 	return d
 }
 
