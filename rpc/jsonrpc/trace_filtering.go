@@ -685,7 +685,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 	}
 	stream.WriteArrayEnd()
-	return stream.Flush()
+	return nil
 }
 
 func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}, isIntersectionMode bool) bool {

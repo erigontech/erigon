@@ -550,7 +550,6 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		HandleError(err, stream)
 	}
 	stream.WriteObjectEnd()
-	stream.Flush()
 	return nil
 }
 
