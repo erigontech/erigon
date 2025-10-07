@@ -36,8 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
@@ -47,6 +45,8 @@ import (
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type callContext struct {

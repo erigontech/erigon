@@ -23,8 +23,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
-
-	"github.com/erigontech/erigon/core/vm/runtime"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 func ExampleExecute() {

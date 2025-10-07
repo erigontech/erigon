@@ -25,8 +25,8 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 func TestEVMWithNoBaseFeeAndNoTxGasPrice(t *testing.T) {

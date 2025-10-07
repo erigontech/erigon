@@ -26,8 +26,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

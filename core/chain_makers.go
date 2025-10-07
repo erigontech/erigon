@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
@@ -37,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // BlockGen creates blocks for testing.

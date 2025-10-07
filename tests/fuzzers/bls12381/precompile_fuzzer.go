@@ -24,7 +24,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 const (

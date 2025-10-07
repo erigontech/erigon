@@ -11,10 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -26,10 +29,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/stretchr/testify/assert"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 type OpType int

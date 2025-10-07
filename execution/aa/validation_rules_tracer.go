@@ -10,7 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // Implements tracing required for ERC-7562 validation. The rules are as follows:
