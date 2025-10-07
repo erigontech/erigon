@@ -35,9 +35,9 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )
 

@@ -26,8 +26,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/tracing"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
