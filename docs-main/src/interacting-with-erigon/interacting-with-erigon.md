@@ -1,6 +1,8 @@
 # Interacting with Erigon
 
-The RPC daemon is a -  component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component. For detailed instructions on running it remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
+The RPC daemon is a fundamental component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component.
+
+> For detailed instructions on running it remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
 
 The RPC Daemon supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
@@ -19,7 +21,7 @@ The RPC Daemon supports various API namespaces, which can be enabled or disabled
 
 ## Erigon RPC Transports
 
-Erigon supports HTTP, WebSockets, IPC, and gRPC through its RPC daemon.
+Erigon supports [HTTP](#http), [HTTPS](#https), [WebSockets](#websockets), [IPC](#ipc), [gRPC](grpc) and [GraphQL](#graphql] through its RPC daemon.
 
 ### HTTP
 
@@ -69,6 +71,14 @@ Alternatively, if you want to allow any domain, you can pass `*`:
 erigon --http --http.corsdomain "*"
 ```
 
+### HTTPS
+
+Erigon supports HTTPS and HTTP/2 out of the box:
+
+```bash
+rpcdaemon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
+```
+
 ### WebSockets
 
 WebSockets is a bidirectional transport protocol. Most modern browsers support WebSockets.
@@ -108,13 +118,10 @@ Erigon also supports gRPC for high-performance access to blockchain data:
 rpcdaemon --grpc --grpc.addr localhost --grpc.port 9090
 ```
 
-### HTTPS
+#### GraphQL
 
-Erigon supports HTTPS and HTTP/2 out of the box:
+Erigon uses the standard GraphQL documented by Geth at <https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql>.
 
-```bash
-rpcdaemon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
-```
 
 ## Interacting with the RPC
 
