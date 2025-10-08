@@ -4,9 +4,9 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/stateless"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/p2p/stateless"
 )
 
 var ProtocolToString = map[uint]string{
