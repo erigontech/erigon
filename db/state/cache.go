@@ -31,7 +31,7 @@ type domainGetFromFileCacheItem struct {
 }
 
 var (
-	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 1_00_000))
+	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 1_000_000))
 	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
@@ -64,17 +64,13 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
 }
 
-func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
+func newDomainVisible(name kv.Domain, files []visibleFile, resetCache bool) *domainVisible {
 	d := &domainVisible{
 		name:  name,
 		files: files,
 	}
-	limit := domainGetFromFileCacheLimit
-	if name == kv.CodeDomain {
-		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
-	}
-	if limit == 0 {
-		domainGetFromFileCacheEnabled = false
+	if resetCache {
+		d.cache = newDomainCache(name)
 	}
 	return d
 }

@@ -94,7 +94,7 @@ type Domain struct {
 func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
 	limit := domainGetFromFileCacheLimit
 	if name == kv.CodeDomain {
-		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+		limit = limit / 100 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
 	}
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
@@ -120,7 +120,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs, logge
 	d := &Domain{
 		DomainCfg:  cfg,
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newDomainVisible(cfg.Name, []visibleFile{}),
+		_visible:   newDomainVisible(cfg.Name, []visibleFile{}, false),
 	}
 
 	var err error
@@ -352,8 +352,7 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
-	d._visible.cache = newDomainCache(d.Name) // old value should be GC'ed
+	d._visible = newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum), true)
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
