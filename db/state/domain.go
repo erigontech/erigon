@@ -100,7 +100,7 @@ func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
 		domainGetFromFileCacheEnabled = false
 		return nil
 	}
-	return NewDomainGetFromFileCache(domainGetFromFileCacheLimit)
+	return NewDomainGetFromFileCache(limit)
 }
 
 type domainVisible struct {
