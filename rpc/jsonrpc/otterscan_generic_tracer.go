@@ -20,10 +20,10 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )
 

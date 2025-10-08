@@ -21,7 +21,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/event"
 )
