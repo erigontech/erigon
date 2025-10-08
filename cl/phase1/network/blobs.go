@@ -110,14 +110,17 @@ Loop:
 				// this is so we do not get stuck on a side-fork
 				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
 				if err != nil {
+					r.BanPeer(pid)
 					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
 					return
 				}
 				if responses == nil {
+					r.BanPeer(pid)
 					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
 					return
 				}
 				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
+					r.BanPeer(pid)
 					return
 				}
 				atomicResp.Store(&PeerAndSidecars{
