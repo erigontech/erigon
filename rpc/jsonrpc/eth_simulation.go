@@ -572,6 +572,7 @@ func (s *simulator) simulateCall(
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	msg.SetCheckNonce(s.validation)
 	intraBlockState.SetTxContext(header.Number.Uint64(), callIndex)
 	logTracer.Reset(txn.Hash(), uint(callIndex))
 
