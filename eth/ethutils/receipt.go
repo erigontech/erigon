@@ -97,8 +97,12 @@ func MarshalReceipt(
 		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice)
 	}
 
-	// Assign receipt status.
-	fields["status"] = hexutil.Uint64(receipt.Status)
+	if len(receipt.PostState) == 0 {
+		// Assign receipt status.
+		fields["status"] = hexutil.Uint64(receipt.Status)
+	} else {
+		fields["root"] = hexutil.Bytes(receipt.PostState)
+	}
 
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {
