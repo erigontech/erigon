@@ -7,7 +7,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func EnableSyncCfg(chainDB kv.RoDB, syncCfg ethconfig.Sync) (ethconfig.Sync, error) {

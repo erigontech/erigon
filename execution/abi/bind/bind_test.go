@@ -1813,7 +1813,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 	   `,
 		`
 			var (
@@ -1883,7 +1883,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 	   `,
 		`
 			var (
@@ -1935,7 +1935,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 		`,
 		tester: `
 			var (
@@ -1983,7 +1983,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 		`,
 		tester: `
 			var (
@@ -2023,7 +2023,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 		`,
 		tester: `
 			var (
