@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -236,6 +237,31 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
+		// Check if we have commitment history: this is required to know if state root will be computed for historical state.
+		commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		calculatePostState := commitmentHistory && !cfg.IsByzantium(blockNum)
+
+		sharedDomains, err := dbstate.NewSharedDomains(tx, log.Root())
+		if err != nil {
+			return nil, err
+		}
+		defer sharedDomains.Close()
+
+		var stateWriter state.StateWriter
+		if calculatePostState {
+			fmt.Println ("index/txNum/blockNum:",index, txNum, blockNum)
+			stateWriter, err = g.getStateWriter(ctx, tx, sharedDomains, evm, blockNum, txNum, genEnv)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			stateWriter = genEnv.noopWriter
+		}
+
 		evm = core.CreateEVM(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.ibs, genEnv.header, vm.Config{})
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
@@ -244,10 +270,19 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			evm.Cancel()
 		}()
 
-		receipt, _, err = core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
+		receipt, _, err = core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
+
+		if calculatePostState {
+			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "getReceipt", nil)
+			if err != nil {
+				return nil, err
+			}
+			receipt.PostState = stateRoot
+		}
+
 	}
 
 	if evm.Cancelled() {
@@ -323,6 +358,20 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
+	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
+	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	calculatePostState := commitmentHistory && !cfg.IsByzantium(blockNum)
+
+	sharedDomains, err := dbstate.NewSharedDomains(tx, log.Root())
+	if err != nil {
+		return nil, err
+	}
+	defer sharedDomains.Close()
+
 	for i, txn := range block.Transactions() {
 		select {
 		case <-ctx.Done():
@@ -336,14 +385,36 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			evm.Cancel()
 		}()
 
+		var stateWriter state.StateWriter
+		var txNum uint64
+		if calculatePostState {
+			minTxNum, err := g.txNumReader.Min(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+			txNum = minTxNum + 1 + uint64(i)
+			stateWriter, err = g.getStateWriter(ctx, tx, sharedDomains, evm, blockNum, txNum, genEnv)
+		} else {
+			stateWriter = genEnv.noopWriter
+		}
+
 		genEnv.ibs.SetTxContext(blockNum, i)
-		receipt, _, err := core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
+		receipt, _, err := core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
 		}
+
+		if calculatePostState {
+			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "getReceipts", nil)
+			if err != nil {
+				return nil, err
+			}
+			receipt.PostState = stateRoot
+		}
+
 		receipt.BlockHash = blockHash
 		if len(receipt.Logs) > 0 {
 			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
@@ -359,6 +430,24 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
 	return receipts, nil
+}
+
+func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, sharedDomains *dbstate.SharedDomains, evm *vm.EVM, blockNumber uint64, txNum uint64, genEnv *ReceiptEnv) (state.StateWriter, error) {
+	sharedDomains.SetBlockNum(blockNumber)
+	sharedDomains.SetTxNum(txNum)
+
+	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if txNum < commitmentStartingTxNum {
+		return nil, state.PrunedError
+	}
+
+	sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum, false)
+	if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
+		return nil, err
+	}
+
+	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+	return stateWriter, nil
 }
 
 func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
