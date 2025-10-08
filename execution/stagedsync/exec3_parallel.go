@@ -97,7 +97,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
-	var asyncTx kv.Tx
+	var asyncTx kv.TemporalTx
 
 	switch applyTx := rwTx.(type) {
 	case *temporal.RwTx:
@@ -110,14 +110,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	applyResults := make(chan applyResult, 100_000)
 
-	maxExecBlockNum := maxBlockNum
-	if blockLimit > 0 && startBlockNum+uint64(blockLimit) < maxBlockNum {
-		maxExecBlockNum = startBlockNum + blockLimit - 1
-	}
-
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "parallel"),
-			"from", startBlockNum, "to", min(startBlockNum+blockLimit, maxBlockNum), "initialTxNum", initialTxNum,
+			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
 			"inMem", pe.inMemExec)
 	}
@@ -128,8 +123,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	pe.resetWorkers(ctx, pe.rs, rwTx)
 
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, initialTxNum, readAhead, applyResults); err != nil {
-		return nil, rwTx, err
+	maxExecBlockNum := maxBlockNum
+
+	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxExecBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
+		var errExhausted *ErrLoopExhausted
+		if errors.As(err, &errExhausted) {
+			maxExecBlockNum = errExhausted.To
+		} else {
+			return nil, rwTx, err
+		}
 	}
 
 	var lastExecutedLog time.Time
