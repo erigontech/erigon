@@ -38,6 +38,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ inputs.go-version }}
+          
+      - name: Set Go toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
 
       - name: Build Aggkit Docker Image
         run: make build-docker

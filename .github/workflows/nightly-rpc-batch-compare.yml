@@ -27,7 +27,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: '1.23'
+          go-version: '1.25'
+          
+      - name: Set Go toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
 
       - name: Run RPC Batch Compare
         run: go run ./zk/debug_tools/rpc-batch-compare -erigon="${{ matrix.erigon }}" -legacy="${{ matrix.legacy }}" -skip=100 -offset=1

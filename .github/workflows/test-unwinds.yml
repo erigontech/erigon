@@ -21,7 +21,10 @@ jobs:
 
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.24'
+          go-version: '1.25'
+          
+      - name: Set Go toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'

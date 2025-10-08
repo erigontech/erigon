@@ -26,7 +26,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: '1.24'
+          go-version: '1.25'
+          
+      - name: Set Go toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
 
       - name: Install dependencies
         run: go get github.com/google/go-cmp/cmp
