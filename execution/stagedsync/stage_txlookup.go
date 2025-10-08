@@ -119,18 +119,19 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return err
 	}
 
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	if dbg.AssertEnabled {
 		err = txnLookupIntegrity(logPrefix, tx, startBlock, endBlock, ctx, cfg, logger)
 		if err != nil {
 			return fmt.Errorf("txnLookupIntegrity: %w", err)
 		}
 	}
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

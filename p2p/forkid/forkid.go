@@ -216,7 +216,7 @@ func ChecksumToBytes(hash uint32) [4]byte {
 // GatherForks gathers all the known forks and creates a sorted list out of them.
 func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64, timeForks []uint64) {
 	// Gather all the fork block numbers via reflection
-	kind := reflect.TypeOf(chain.Config{})
+	kind := reflect.TypeFor[chain.Config]()
 	conf := reflect.ValueOf(config).Elem()
 
 	for i := 0; i < kind.NumField(); i++ {
