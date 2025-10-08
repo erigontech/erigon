@@ -32,7 +32,7 @@ type domainGetFromFileCacheItem struct {
 
 var (
 	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 1_00_000))
-	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", true)
+	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
 
