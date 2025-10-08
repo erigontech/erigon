@@ -476,7 +476,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	//	defer sdc.mu.Unlock()
 	//}
 
-	if sdc.limitReadAsOfTxNum > 0 {
+	if d == kv.CommitmentDomain && sdc.limitReadAsOfTxNum > 0 {
 		if sdc.withHistory {
 			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 		}
