@@ -241,12 +241,11 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *state.Share
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 
 	if canRunCycleInOneTransaction && !externalTx {
-		tx, err := db.BeginRwNosync(ctx)
+		tx, err = db.BeginTemporalRwNosync(ctx)
 		if err != nil {
 			return false, err
 		}
 		defer tx.Rollback()
-		tx = tx
 	}
 
 	if err = hook.BeforeRun(tx, isSynced); err != nil {
@@ -262,12 +261,11 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *state.Share
 	if canRunCycleInOneTransaction && !externalTx {
 		//tableSizes = stagedsync.CollectDBMetrics(db, txc.Tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
-		errTx := tx.Commit()
-		tx = nil
-		if errTx != nil {
-			return false, errTx
+		if err := tx.Commit(); err != nil {
+			return false, err
 		}
 		commitTime = time.Since(commitStart)
+		tx = nil
 	}
 
 	// -- send notifications START

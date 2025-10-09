@@ -287,7 +287,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx.(kv.TemporalRwTx), header, body.RawBody(), e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
