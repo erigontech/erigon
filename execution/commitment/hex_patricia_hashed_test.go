@@ -1907,7 +1907,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 
 	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, addrToWitness []byte) {
 		t.Helper()
@@ -2008,7 +2008,6 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	})
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
-		// t.Skip("flaky test with partially fixed edge case")
 		t.Logf("StorageSubtrieWithCommonPrefix\n")
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
