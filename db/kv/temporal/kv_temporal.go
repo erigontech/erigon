@@ -144,7 +144,6 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 		return nil, err
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
-
 	tx.aggtx = db.stateFiles.BeginFilesRo()
 	return tx, nil
 }
@@ -182,7 +181,9 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
-	tx.aggtx = db.stateFiles.BeginFilesRo()
+	if db.stateFiles != nil {
+		tx.aggtx = db.stateFiles.BeginFilesRo()
+	}
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -212,8 +213,11 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	tb.Helper()
 	db := memdb.NewTestDB(tb, label)
-	// TODO - probably need a dummy agg here
-	tdb, _ := New(db, nil)
+	dirs := datadir.New(tb.TempDir())
+	stepSize := uint64(1000)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(context.Background(), db)
+	tb.Cleanup(agg.Close)
+	tdb, _ := New(db, agg)
 	return tdb
 }
 
