@@ -122,6 +122,13 @@ jobs:
             ${{ github.workspace }}/erigon_data/logs/
             ${{ github.workspace }}/consensus/data/beacon.log
 
+      - name: Upload metric plots
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: metric-plots-${{ env.CHAIN }}
+          path: ${{ github.workspace }}/metrics-${{ matrix.chain }}-plots*
+
       - name: Clean up Erigon data directory
         if: always()
         run: |
