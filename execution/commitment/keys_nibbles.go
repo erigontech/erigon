@@ -34,6 +34,17 @@ func KeyToHexNibbleHash(key []byte) []byte {
 	return nibblized
 }
 
+func KeyToNibblizedHash(key []byte) []byte {
+	nibblized := make([]byte, 64) // nibblized hash
+	hashed := nibblized[32:]
+	copy(hashed, ecrypto.Keccak256(key))
+	for i, b := range hashed {
+		nibblized[i*2] = (b >> 4) & 0xf
+		nibblized[i*2+1] = b & 0xf
+	}
+	return nibblized
+}
+
 // hexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
 func hexNibblesToCompactBytes(key []byte) []byte {
 	var compactZeroByte byte
