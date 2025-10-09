@@ -27,9 +27,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -39,6 +41,7 @@ type Dumper struct {
 	tx           kv.TemporalTx
 	hashedState  bool
 	txNumsReader rawdbv3.TxNumsReader
+	latest       bool
 }
 
 // DumpAccount represents tan account in the state.
@@ -126,12 +129,17 @@ func (d iterativeDump) OnRoot(root common.Hash) {
 	}{root})
 }
 
-func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
+func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest ...bool) *Dumper {
+	var l bool
+	if len(latest) > 0 {
+		l = latest[0]
+	}
 	return &Dumper{
 		tx:           db,
 		blockNumber:  blockNumber,
 		hashedState:  false,
 		txNumsReader: txNumsReader,
+		latest:       l,
 	}
 }
 
@@ -160,7 +168,13 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	}
 
 	var nextKey []byte
-	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
+	var it stream.KV
+	if d.latest {
+		log.Info("--- debug --- [dumper] using range latest for accounts domain")
+		it, err = ttx.Debug().RangeLatest(kv.AccountsDomain, startAddress[:], nil, kv.Unlim)
+	} else {
+		it, err = ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +227,13 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if !excludeStorage {
 			t := trie.New(common.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
-			r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
+			var r stream.KV
+			if d.latest {
+				log.Info("--- debug --- [dumper] using range latest for storage domain")
+				r, err = ttx.Debug().RangeLatest(kv.StorageDomain, addr[:], nextAcc, kv.Unlim)
+			} else {
+				r, err = ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
+			}
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 			}

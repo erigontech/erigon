@@ -79,8 +79,8 @@ type HasAgg interface {
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
-		//trace:   true,
-		mem: newTemporalMemBatch(tx),
+		trace:  true,
+		mem:    newTemporalMemBatch(tx),
 	}
 	sd.stepSize = tx.Debug().StepSize()
 

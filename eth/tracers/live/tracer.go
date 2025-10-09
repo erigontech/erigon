@@ -2,7 +2,6 @@ package live
 
 import (
 	"encoding/json"
-	"errors"
 
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -34,5 +33,5 @@ func lookup(name string, ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tr
 	if ctor, ok := ctors[name]; ok {
 		return ctor(ctx, cfg)
 	}
-	return nil, errors.New("no tracer found")
+	return nil, tracers.ErrTracerNotFound
 }

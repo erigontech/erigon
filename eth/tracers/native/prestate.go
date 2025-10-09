@@ -24,6 +24,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
+	"path"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -31,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -74,12 +77,26 @@ type prestateTracer struct {
 	reason    error  // Textual reason for the interruption
 	created   map[common.Address]bool
 	deleted   map[common.Address]bool
+	blockNum  uint64
+	blockHash common.Hash
+	results   []txResult
+}
+
+type txResult struct {
+	TxHash common.Hash `json:"txHash"`
+	Result result      `json:"result"`
+}
+
+type result struct {
+	Post *state `json:"post"`
+	Pre  *state `json:"pre"`
 }
 
 type prestateTracerConfig struct {
-	DiffMode       bool `json:"diffMode"`       // If true, this tracer will return state modifications
-	DisableCode    bool `json:"disableCode"`    // If true, this tracer will not return the contract code
-	DisableStorage bool `json:"disableStorage"` // If true, this tracer will not return the contract storage
+	DiffMode       bool   `json:"diffMode"`       // If true, this tracer will return state modifications
+	DisableCode    bool   `json:"disableCode"`    // If true, this tracer will not return the contract code
+	DisableStorage bool   `json:"disableStorage"` // If true, this tracer will not return the contract storage
+	LiveModeDir    string `json:"liveModeDir"`    // If not empty, it means we are running this tracer in live mode, flush on each block end
 }
 
 func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
@@ -99,9 +116,11 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnOpcode:  t.OnOpcode,
+			OnTxStart:    t.OnTxStart,
+			OnTxEnd:      t.OnTxEnd,
+			OnOpcode:     t.OnOpcode,
+			OnBlockStart: t.OnBlockStart,
+			OnBlockEnd:   t.OnBlockEnd,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -198,6 +217,39 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 }
 
 func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	if t.config.LiveModeDir != "" {
+		defer func() {
+			post, pre := t.post, t.pre
+			if t.config.DiffMode {
+				t.results = append(t.results, txResult{
+					TxHash: receipt.TxHash,
+					Result: result{
+						Post: &post,
+						Pre:  &pre,
+					},
+				})
+			} else {
+				t.results = append(t.results, txResult{
+					TxHash: receipt.TxHash,
+					Result: result{
+						Post: &post,
+					},
+				})
+			}
+
+			refresh := prestateTracer{
+				config:    t.config,
+				pre:       state{},
+				post:      state{},
+				created:   map[common.Address]bool{},
+				deleted:   map[common.Address]bool{},
+				blockNum:  t.blockNum,
+				blockHash: t.blockHash,
+				results:   t.results,
+			}
+			*t = refresh
+		}()
+	}
 	if !t.config.DiffMode {
 		return
 	}
@@ -329,10 +381,48 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 		return
 	}
 
+	if _, ok := t.pre[addr]; !ok {
+		return
+		//t.pre[addr] = &account{Storage: make(map[common.Hash]common.Hash)}
+		// still fails below because we dont have t.env available for SystemTxns - need to pass it in for system txns too
+	}
 	if _, ok := t.pre[addr].Storage[key]; ok {
 		return
 	}
 	var val uint256.Int
 	t.env.IntraBlockState.GetState(addr, key, &val)
 	t.pre[addr].Storage[key] = val.Bytes32()
+}
+
+func (t *prestateTracer) OnBlockStart(event tracing.BlockEvent) {
+	t.blockNum = event.Block.NumberU64()
+	t.blockHash = event.Block.Hash()
+}
+
+func (t *prestateTracer) OnBlockEnd(err error) {
+	if t.config.LiveModeDir == "" {
+		return
+	}
+	type result struct {
+		Jsonrpc string     `json:"jsonrpc"`
+		Id      uint64     `json:"id"`
+		Result  []txResult `json:"result"`
+	}
+	r := result{
+		Jsonrpc: "2.0",
+		Id:      1,
+		Result:  t.results,
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		log.Debug("failed to marshal result for live prestateTracer", "err", err)
+		return
+	}
+	outputFile := path.Join(t.config.LiveModeDir, fmt.Sprintf("prestateTracer_live_%d_%s.json", t.blockNum, t.blockHash))
+	err = os.WriteFile(outputFile, b, 0644)
+	if err != nil {
+		log.Debug("failed to write result for live prestateTracer", "outputFile", outputFile, "err", err)
+	} else {
+		log.Debug("wrote result for live prestateTracer", "outputFile", outputFile)
+	}
 }

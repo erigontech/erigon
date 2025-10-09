@@ -22,6 +22,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
+	"path"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -902,6 +904,9 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 	if cfg.badBlockHalt {
 		return false, fmt.Errorf("%w: wrong trie root", consensus.ErrInvalidBlock)
 	}
+	if dbg.EnvBool("DUMP_STATE_ON_BAD_BLOCK", false) {
+		dumpState(logger, applyTx, cfg, header)
+	}
 	if cfg.hd != nil && cfg.hd.POSSync() {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 	}
@@ -935,6 +940,24 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 		}
 	}
 	return false, nil
+}
+
+func dumpState(logger log.Logger, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, header *types.Header) {
+	logger.Info("dumping state for bad block...")
+	dumper := state.NewDumper(applyTx, cfg.blockReader.TxnumReader(context.TODO()), header.Number.Uint64(), true /* latest */)
+	dump := dumper.Dump(true /* excludeCode */, false /* excludeStorage */)
+	dumpDir := path.Join(cfg.dirs.DataDir, "badblocks")
+	if err := os.MkdirAll(dumpDir, 0755); err != nil { // idempotent, creates a dir if it doesn't already exist
+		logger.Warn("could not create dir for dump", "dir", dumpDir, "err", err)
+		return
+	}
+	dumpFilePath := path.Join(cfg.dirs.DataDir, "badblocks", fmt.Sprintf("state_dump_bad_block_%d_%s.json", header.Number.Uint64(), header.Hash()))
+	dumpFilePath = "/Users/taratorio/prysm-erigon-2.fusaka-devnet-3-recent-pure-wrong-trie-root-at-canonical-tip-v2/erigon/wrong-state-dump.json"
+	if err := os.WriteFile(dumpFilePath, dump, 0644); err != nil {
+		logger.Warn("could not dump state for bad block", "err", err)
+	} else {
+		logger.Info("dumped state for bad block at", "path", dumpFilePath)
+	}
 }
 
 type FlushAndComputeCommitmentTimes struct {

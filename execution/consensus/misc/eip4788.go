@@ -17,6 +17,8 @@
 package misc
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
@@ -33,6 +35,7 @@ func ApplyBeaconRootEip4788(parentBeaconBlockRoot *common.Hash, syscall consensu
 		defer tracer.OnSystemCallEnd()
 	}
 
+	fmt.Println("--- DEBUG --- ApplyBeaconRootEip4788 called at ", parentBeaconBlockRoot, " with ", parentBeaconBlockRoot.Hex())
 	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot.Bytes())
 	if err != nil {
 		log.Warn("Failed to call beacon roots contract", "err", err)

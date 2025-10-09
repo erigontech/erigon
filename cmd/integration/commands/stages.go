@@ -463,7 +463,6 @@ var cmdRunMigrations = &cobra.Command{
 func init() {
 	withConfig(cmdPrintStages)
 	withDataDir(cmdPrintStages)
-	withChain(cmdPrintStages)
 	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 

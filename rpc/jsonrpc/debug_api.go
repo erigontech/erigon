@@ -204,7 +204,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	}
 
 	// is endNum too big?
-	if endNum > latestBlock {
+	if endNum > latestBlock+1 {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
 

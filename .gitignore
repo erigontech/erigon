@@ -111,3 +111,6 @@ mdbx.lck
 /*/**/nodekey
 
 .my
+
+state-dump-correct.json
+state-dump-wrong.json

@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 )
 
+var ErrTracerNotFound = errors.New("tracer not found")
+
 // Context contains some contextual infos for a transaction execution that is not
 // available from within the EVM object.
 type Context struct {
@@ -67,9 +69,14 @@ func RegisterLookup(wildcard bool, lookup lookupFunc) {
 // registered lookups.
 func New(code string, ctx *Context, cfg json.RawMessage) (*Tracer, error) {
 	for _, lookup := range lookups {
-		if tracer, err := lookup(code, ctx, cfg); err == nil {
+		tracer, err := lookup(code, ctx, cfg)
+		if err == nil {
 			return tracer, nil
 		}
+		if errors.Is(err, ErrTracerNotFound) {
+			continue
+		}
+		return nil, err
 	}
-	return nil, errors.New("tracer not found")
+	return nil, ErrTracerNotFound
 }

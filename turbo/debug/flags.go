@@ -41,6 +41,10 @@ import (
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/turbo/logging"
+
+	// Force-load native and js packages, to trigger registration
+	_ "github.com/erigontech/erigon/eth/tracers/js"
+	_ "github.com/erigontech/erigon/eth/tracers/native"
 )
 
 var (

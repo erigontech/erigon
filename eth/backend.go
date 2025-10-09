@@ -138,7 +138,9 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+	_ "github.com/erigontech/erigon/eth/tracers/live"   // Register tracers
+	_ "github.com/erigontech/erigon/eth/tracers/native" // Register tracers
+	_ "github.com/erigontech/erigon/polygon/chain"      // Register Polygon chains
 )
 
 // Config contains the configuration options of the ETH protocol.
