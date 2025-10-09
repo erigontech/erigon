@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"math/big"
 	"slices"
@@ -308,7 +309,11 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	ctx := context.Background()
 
 	// some users creating > 1Gb custome genesis by `erigon init`
-	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
+	mapSize := 2 * datasize.TB
+	if flag.Lookup("test.v") != nil {
+		mapSize = 64 * datasize.GB
+	}
+	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
 	agg, err := dbstate.New(dirs).Logger(logger).Open(ctx, genesisTmpDB)
