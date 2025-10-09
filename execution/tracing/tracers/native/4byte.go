@@ -27,8 +27,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -75,7 +75,7 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer
 	}, nil
 }
 
-// isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in eth/tracers/js/tracer.go
+// isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in execution/tracing/tracers/js/tracer.go
 func (t *fourByteTracer) isPrecompiled(addr common.Address) bool {
 	for _, p := range t.activePrecompiles {
 		if p == addr {

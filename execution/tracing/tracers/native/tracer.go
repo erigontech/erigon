@@ -37,7 +37,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 )
 
 // init registers itself this packages as a lookup for tracers.

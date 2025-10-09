@@ -14,7 +14,7 @@ A tool for generating a test case for a given tracer. It communicates to a node 
 # Usage
 
 ```
-cd eth/tracers/internal/tracetest/testgenerator
+cd execution/tracing/tracers/internal/tracetest/testgenerator
 npm install
 npm start -- \
 --rpcUrl=http://localhost:8545 \
