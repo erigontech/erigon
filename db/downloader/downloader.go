@@ -662,7 +662,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			noMetadata = append(noMetadata, t.Name())
 			continue
 		}
-		stats.FilesTotal += len(t.Files())
 
 		torrentName := t.Name()
 		torrentComplete := t.Complete().Bool()
