@@ -211,8 +211,7 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	tb.Helper()
-	tmpDir := tb.TempDir()
-	db := memdb.New(tb, tmpDir, label)
+	db := memdb.NewTestDB(tb, label)
 	tb.Cleanup(db.Close)
 	// TODO - probably need a dummy agg here
 	tdb, _ := New(db, nil)
