@@ -29,10 +29,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 )
 
 const sampleNumber = 3 // Number of transactions sampled in a block

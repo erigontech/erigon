@@ -26,9 +26,9 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/eth/gasprice"
-	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/gasprice"
+	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )

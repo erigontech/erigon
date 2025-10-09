@@ -37,12 +37,12 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
