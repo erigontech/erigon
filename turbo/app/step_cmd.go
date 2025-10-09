@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -131,7 +132,7 @@ func stepRebase(cliCtx *cli.Context) error {
 
 	// Perform deletions
 	for _, p := range dels {
-		if err := os.RemoveAll(p); err != nil {
+		if err := dir.RemoveAll(p); err != nil {
 			return fmt.Errorf("delete %s: %w", p, err)
 		}
 		fmt.Printf("Deleted: %s\n", p)
@@ -184,8 +185,7 @@ func collectRenameList(domainPath string, re *regexp.Regexp, decr bool, factor u
 		}
 
 		newPath := fmt.Sprintf("v%s-%s.%d-%d.%s", matches[1], matches[2], from, to, matches[5])
-		renList = append(renList, filepath.Join(domainPath, path))
-		renList = append(renList, filepath.Join(domainPath, newPath))
+		renList = append(renList, filepath.Join(domainPath, path), filepath.Join(domainPath, newPath))
 
 		return nil
 	})
