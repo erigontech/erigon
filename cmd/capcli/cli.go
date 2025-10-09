@@ -380,7 +380,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if c.Blobs {
+		if c.Blobs && currentBlock.Block.Body.BlobKzgCommitments.Len() > 0 {
 			ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{currentBlock}, beaconConfig)
 			if err != nil {
 				// Return an error if blob identifiers could not be retrieved
