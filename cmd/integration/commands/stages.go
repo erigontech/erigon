@@ -58,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/wrap"
-	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
@@ -67,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	stages2 "github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -606,7 +606,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	dirs := datadir.New(datadirCli)
-	if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
 	domains, err := dbstate.NewSharedDomains(tx, logger)
@@ -659,7 +659,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+			if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -763,7 +763,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, tx) })
+		return db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetSenders(ctx, tx) })
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -846,7 +846,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	_, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
-		if err := reset2.ResetExec(ctx, db); err != nil {
+		if err := rawdbreset.ResetExec(ctx, db); err != nil {
 			return err
 		}
 		return nil
@@ -1012,7 +1012,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		if err := stagedsync.StageCustomTraceReset(ctx, db, cfg.Produce); err != nil {
 			return err
 		}
-		//if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
+		//if err := rawdbreset.Reset(ctx, db, stages.CustomTrace); err != nil {
 		//	return err
 		//}
 		return nil
@@ -1090,7 +1090,7 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if reset {
-		return reset2.Reset(ctx, db, stages.Execution)
+		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
 
 	br, _ := blocksIO(db, logger)
@@ -1143,7 +1143,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
-		return db.Update(ctx, reset2.ResetTxLookup)
+		return db.Update(ctx, rawdbreset.ResetTxLookup)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
