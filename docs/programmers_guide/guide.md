@@ -54,10 +54,10 @@ the tree by calling member functions
 Binary 32-byte (256-bit) string.
 
 Hash of the bytecode (deployed code) of a smart contract. The computation of the code hash is performed in the `SetCode`
-member function of the type `IntraBlockState` [code/state/intra_block_state.go](../../core/state/intra_block_state.go).
+member function of the type `IntraBlockState` [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go).
 Since a non-contract account has no bytecode, code hash only makes sense for smart contract accounts. For non-contract
 accounts, the code hash is assumed to be equal to the hash of `nil`, which is hard-coded in the variable `emptyCode`
-in [code/state/intra_block_state.go](../../core/state/intra_block_state.go)
+in [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go)
 
 ### Address - identifier of an account
 
@@ -78,13 +78,13 @@ file [crypto/crypto.go](../../common/crypto/crypto.go)
 
 In many places in the code, sets of accounts are represented by mappings from account addresses to the objects
 representing the accounts themselves, for example, field `stateObjects` in the
-type `IntraBlockState` [core/state/intra_block_state.go](../../core/state/intra_block_state.go). Member functions of the
+type `IntraBlockState` [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go). Member functions of the
 type `IntraBlockState` that are for querying and modifying one of the components of an accounts, are all accepting
 address as their first argument, see functions `GetBalance`, `GetNonce`, `GetCode`, `GetCodeSize`, `GetCodeHash`
 , `GetState` (this one queries an item in the contract storage), `GetCommittedState`, `AddBalance`, `SubBalance`
 , `SetBalance`, `SetNonce`,
 `SetCode`, `SetState` (this one modifies an item in the contract
-storage) [core/state/intra_block_state.go](../../core/state/intra_block_state.go).
+storage) [execution/state/intra_block_state.go](../../execution/state/intra_block_state.go).
 
 Organising Ethereum State into a Merkle Tree
 --------------------------------------------

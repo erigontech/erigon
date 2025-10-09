@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/types"
 )
 

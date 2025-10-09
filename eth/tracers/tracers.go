@@ -25,7 +25,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // Context contains some contextual infos for a transaction execution that is not
