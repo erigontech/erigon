@@ -56,7 +56,6 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/features"
@@ -894,20 +893,19 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 	}
 
-	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
+	var tx kv.TemporalRwTx //nil - means lower-level code (each stage) will manage transactions
 	if noCommit {
 		var err error
-		tx, err = db.BeginRw(ctx)
+		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
-	txc := wrap.NewTxContainer(tx, nil)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, logger)
+		err := stagedsync.UnwindExecutionStage(u, s, nil, tx, ctx, cfg, logger)
 		if err != nil {
 			return err
 		}
@@ -961,16 +959,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 			defer tx.Rollback()
 			for bn := execProgress; bn < block; bn++ {
-				txc = wrap.NewTxContainer(tx, txc.Doms)
-				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
 					return err
 				}
 			}
 		} else {
-			if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 				for bn := execProgress; bn < block; bn++ {
-					txc = wrap.NewTxContainer(tx, txc.Doms)
-					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
 						return err
 					}
 				}
@@ -983,7 +979,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	for {
-		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
+		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, block, ctx, cfg, logger); err != nil {
 			var errExhausted *stagedsync.ErrLoopExhausted
 			if errors.As(err, &errExhausted) {
 				continue // has more blocks to exec

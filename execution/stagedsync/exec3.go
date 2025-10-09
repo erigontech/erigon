@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/core"
@@ -120,7 +119,8 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 }
 
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg,
+	doms *dbstate.SharedDomains, rwTx kv.TemporalRwTx,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
@@ -128,21 +128,13 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) (execErr error) {
-	inMemExec := txc.Doms != nil
+	inMemExec := doms != nil
 
-	useExternalTx := txc.Tx != nil
+	useExternalTx := rwTx != nil
 	var applyTx kv.TemporalRwTx
 
 	if useExternalTx {
-		var ok bool
-		applyTx, ok = txc.Tx.(kv.TemporalRwTx)
-		if !ok {
-			applyTx, ok = txc.Ttx.(kv.TemporalRwTx)
-
-			if !ok {
-				return errors.New("txc.Tx is not a temporal tx")
-			}
-		}
+		applyTx = rwTx
 	} else {
 		var err error
 		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
@@ -168,10 +160,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	var err error
-	var doms *dbstate.SharedDomains
-	if inMemExec {
-		doms = txc.Doms
-	} else {
+	if !inMemExec {
 		var err error
 		doms, err = dbstate.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
@@ -266,6 +255,13 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	if parallel {
+		if !inMemExec {
+			// this is becuase for parallel execution the shared domain needs to
+			// be co-ordinated between exec and unwind - otherwise unwound state
+			// is not visible to parallel workers
+			return fmt.Errorf("parallel exec only supports inmem exec")
+		}
+
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
 				cfg:                   cfg,

@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -97,7 +96,6 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: latestBlockNr}
 	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
 
-	txc := wrap.NewTxContainer(batch, nil)
 	batchSizeStr := "512M"
 	var batchSize datasize.ByteSize
 	err := batchSize.UnmarshalText([]byte(batchSizeStr))
@@ -116,7 +114,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil)
 
-	if err := UnwindExecutionStage(unwindState, stageState, txc, ctx, execCfg, logger); err != nil {
+	if err := UnwindExecutionStage(unwindState, stageState, nil, batch, ctx, execCfg, logger); err != nil {
 		return err
 	}
 
