@@ -212,7 +212,6 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	tb.Helper()
 	db := memdb.NewTestDB(tb, label)
-	tb.Cleanup(db.Close)
 	// TODO - probably need a dummy agg here
 	tdb, _ := New(db, nil)
 	return tdb
@@ -221,8 +220,6 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tb.Helper()
 	db := NewTestDB(tb, dbcfg.ChainDB)
-	tb.Cleanup(db.Close)
-
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
