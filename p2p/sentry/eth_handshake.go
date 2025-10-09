@@ -172,10 +172,12 @@ func encodeStatusPacket(status *sentryproto.StatusData, version uint) eth.Status
 }
 
 func encodeStatusPacket69(status *sentryproto.StatusData, version uint) eth.StatusPacket69 {
+	ourTD := gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	return eth.StatusPacket69{
 		ProtocolVersion: uint32(version),
 		NetworkID:       status.NetworkId,
+		TD:              ourTD.ToBig(),
 		Genesis:         genesisHash,
 		ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),
 		MinimumBlock:    status.MinimumBlockHeight,
