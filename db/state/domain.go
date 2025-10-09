@@ -367,6 +367,10 @@ func (d *Domain) Close() {
 	}
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
+	if d._visible != nil && d._visible.cache != nil {
+		d._visible.cache.Purge()
+
+	}
 }
 
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
