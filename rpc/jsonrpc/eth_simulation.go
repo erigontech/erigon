@@ -630,7 +630,7 @@ func (s *simulator) simulateCall(
 				callResult.Error = rpc.NewJsonError(rpc.ErrCodeReverted, revertError.Error(), revertError.ErrorData().(string))
 			} else {
 				// Otherwise, we just capture the error message.
-				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), "")
+				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), nil)
 			}
 		} else {
 			// If the call was successful, we capture the return data, the gas used and logs.
