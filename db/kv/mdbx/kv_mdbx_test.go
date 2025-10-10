@@ -43,7 +43,7 @@ import (
 //   - run: go test -bench=BenchmarkSyncPeriodDefault -run=BenchmarkSyncPeriodDefault -count=2 -benchtime=15s ./db/kv/mdbx
 //   - -benchtime can't be smaller than SyncPeriod
 func BenchmarkSyncPeriodDefault(b *testing.B) {
-	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
+	keys, vals := make([][]byte, 1_000_000), make([][]byte, 1_000_000)
 	for i := range keys {
 		keys[i] = []byte(fmt.Sprintf("key %d", i))
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
