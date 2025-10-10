@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
@@ -36,14 +37,13 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/turbo/services"
 )
 

@@ -28,9 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/shards"
 )

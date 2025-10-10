@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/turbo/services"

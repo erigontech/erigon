@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 )

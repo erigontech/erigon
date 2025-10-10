@@ -28,11 +28,11 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -585,11 +585,7 @@ func (s *simulator) simulateCall(
 		evm.Cancel()
 	}()
 
-	// Treat gas and blob gas as part of the same pool.
-	err = s.gasPool.AddBlobGas(msg.BlobGas()).SubGas(msg.BlobGas())
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	s.gasPool.AddBlobGas(msg.BlobGas())
 	result, err := core.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"

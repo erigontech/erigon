@@ -20,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -30,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type OpType int

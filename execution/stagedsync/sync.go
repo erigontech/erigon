@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type Sync struct {

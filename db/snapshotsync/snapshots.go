@@ -47,8 +47,8 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type SortedRange interface {
