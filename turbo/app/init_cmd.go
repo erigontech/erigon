@@ -25,10 +25,10 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/genesiswrite"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"

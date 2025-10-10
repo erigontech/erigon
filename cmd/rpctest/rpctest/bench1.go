@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 var routes map[string]string

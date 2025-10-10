@@ -27,11 +27,11 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/syscheck"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/diagnostics/syscheck"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"

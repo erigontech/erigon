@@ -292,7 +292,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -347,7 +347,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -393,7 +393,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -451,7 +451,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/common"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -499,7 +499,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -565,7 +565,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -611,7 +611,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/common"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 		`,
 		`
 			// Create a simulator and wrap a non-deployed contract
@@ -650,7 +650,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/common"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 		`,
 		`
 			// Create a simulator and wrap a non-deployed contract
@@ -697,7 +697,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -747,7 +747,7 @@ var bindTests = []struct {
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
 			"github.com/erigontech/erigon/common"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -822,7 +822,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -916,7 +916,7 @@ var bindTests = []struct {
 				"github.com/erigontech/erigon/execution/abi/bind"
 				"github.com/erigontech/erigon/execution/abi/bind/backends"
 				"github.com/erigontech/erigon/common"
-				"github.com/erigontech/erigon/core"
+				"github.com/erigontech/erigon/execution/core"
 				"github.com/erigontech/erigon/common/crypto"
 			`,
 		`
@@ -1106,7 +1106,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -1241,7 +1241,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 
@@ -1383,7 +1383,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -1449,7 +1449,7 @@ var bindTests = []struct {
 
 		"github.com/erigontech/erigon/execution/abi/bind"
 		"github.com/erigontech/erigon/execution/abi/bind/backends"
-		"github.com/erigontech/erigon/core"
+		"github.com/erigontech/erigon/execution/core"
 		"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -1538,7 +1538,7 @@ var bindTests = []struct {
 		"github.com/erigontech/erigon/execution/abi/bind"
 		"github.com/erigontech/erigon/execution/abi/bind/backends"
 		"github.com/erigontech/erigon/common/crypto"
-		"github.com/erigontech/erigon/core"
+		"github.com/erigontech/erigon/execution/core"
 		`,
 		`
 		// Initialize test accounts
@@ -1601,7 +1601,7 @@ var bindTests = []struct {
 		"github.com/erigontech/erigon/execution/abi/bind"
 		"github.com/erigontech/erigon/execution/abi/bind/backends"
 		"github.com/erigontech/erigon/common/crypto"
-		"github.com/erigontech/erigon/core"
+		"github.com/erigontech/erigon/execution/core"
         `,
 		`
 		key, _ := crypto.GenerateKey()
@@ -1662,7 +1662,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 		`,
 		`
@@ -1723,7 +1723,7 @@ var bindTests = []struct {
 
 			"github.com/erigontech/erigon/execution/abi/bind"
 			"github.com/erigontech/erigon/execution/abi/bind/backends"
-			"github.com/erigontech/erigon/core"
+			"github.com/erigontech/erigon/execution/core"
 			"github.com/erigontech/erigon/common/crypto"
 	   `,
 		`
@@ -1813,7 +1813,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 	   `,
 		`
 			var (
@@ -1883,7 +1883,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 	   `,
 		`
 			var (
@@ -1935,7 +1935,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 		`,
 		tester: `
 			var (
@@ -1983,7 +1983,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 		`,
 		tester: `
 			var (
@@ -2023,7 +2023,7 @@ var bindTests = []struct {
 			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
-			"github.com/ethereum/go-ethereum/eth/ethconfig"
+			"github.com/ethereum/go-ethereum/node/ethconfig"
 		`,
 		tester: `
 			var (

@@ -29,14 +29,14 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 )
 
 /*

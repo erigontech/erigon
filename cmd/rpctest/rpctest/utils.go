@@ -30,7 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 func compareBlocks(b, bg *EthBlockByNumber) bool {
