@@ -91,13 +91,21 @@ type Domain struct {
 	checker *DependencyIntegrityChecker
 }
 
+var TEST_MODE = false
+
 func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
 	limit := domainGetFromFileCacheLimit
 	// if flag.Lookup("test.v") != nil {
 	// 	limit = 10_000
 	// }
+	if name == kv.CommitmentDomain {
+		return nil
+	}
 	if name == kv.CodeDomain {
 		limit = limit / 100 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	if name == kv.RCacheDomain {
+		limit = limit / 100
 	}
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
@@ -367,10 +375,6 @@ func (d *Domain) Close() {
 	}
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
-	if d._visible != nil && d._visible.cache != nil {
-		d._visible.cache.Purge()
-
-	}
 }
 
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
