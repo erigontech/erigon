@@ -39,7 +39,7 @@ import (
 )
 
 // BenchmarkSyncPeriodDefault:
-//   - go test -bench=BenchmarkSyncPeriodDefault/10mb_1sec -run=BenchmarkSyncPeriodDefault -count=20 -benchtime=15s ./db/kv/mdbx
+//   - go test -bench=BenchmarkSyncPeriodDefault/10mb_1sec -run=BenchmarkSyncPeriodDefault -count=10 -benchtime=15s ./db/kv/mdbx
 //   - -benchtime can't be smaller than SyncPeriod
 func BenchmarkSyncPeriodDefault(b *testing.B) {
 	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
