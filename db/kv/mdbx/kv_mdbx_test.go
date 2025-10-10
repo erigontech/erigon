@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync/atomic"
 	"testing"
@@ -36,6 +37,154 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
+
+func BenchmarkSyncPeriodDefault(b *testing.B) {
+	keys, vals := make([][]byte, 1000), make([][]byte, 1000)
+	for i := range keys {
+		keys[i] = []byte(fmt.Sprintf("key %d", i))
+		vals[i] = []byte(fmt.Sprintf("val %d", i))
+	}
+	cfg := New(dbcfg.ChainDB, log.New()).
+		MapSize(8 * datasize.GB).
+		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
+		SyncBytes(20 * datasize.MB).
+		SyncPeriod(2 * time.Second).
+		DirtySpace(uint64(32 * datasize.MB)).
+		PageSize(4 * datasize.KB)
+
+	b.Run("20kb", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(20 * datasize.KB).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+	b.Run("200kb", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(200 * datasize.KB).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+	b.Run("2mb", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(2 * datasize.MB).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+
+	b.Run("10mb 1sec", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(10 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+
+	b.Run("10mb 2sec", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(10 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+	b.Run("10mb 5sec", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(10 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+
+	b.Run("20mb 1sec", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(20 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+
+	b.Run("20mb 2sec", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(20 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+	b.Run("20mb 5sec", func(b *testing.B) {
+		b.ReportAllocs()
+		path := b.TempDir()
+		db := cfg.Path(path).SyncBytes(20 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
+		defer db.Close()
+
+		i := 0
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+			_ = tx.Commit()
+		}
+	})
+
+}
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
 	t.Helper()

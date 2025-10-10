@@ -66,7 +66,7 @@ const (
 	dbNodeExpiration     = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle       = time.Hour      // Time period for running the expiration task.
 	dbVersion            = 10
-	dbSyncBytesThreshold = 20_000 // if we have about 20kb of dirty data , then flush to disk
+	dbSyncBytesThreshold = 20 * datasize.MB
 )
 
 var (
