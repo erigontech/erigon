@@ -585,11 +585,7 @@ func (s *simulator) simulateCall(
 		evm.Cancel()
 	}()
 
-	// Treat gas and blob gas as part of the same pool.
-	err = s.gasPool.AddBlobGas(msg.BlobGas()).SubGas(msg.BlobGas())
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	s.gasPool.AddBlobGas(msg.BlobGas())
 	result, err := core.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)
