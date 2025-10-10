@@ -29,8 +29,101 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 )
+
+// BenchmarkSyncPeriodDefault for `dbSyncBytesThreshold` constant
+//   - run: go test -bench=BenchmarkSyncPeriodDefault -run=BenchmarkSyncPeriodDefault -count=2 -benchtime=15s ./db/kv/mdbx
+//   - -benchtime can't be smaller than SyncPeriod
+func BenchmarkSyncPeriodDefault(b *testing.B) {
+	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
+	for i := range keys {
+		keys[i] = []byte(fmt.Sprintf("key %d", i))
+		vals[i] = []byte(fmt.Sprintf("val %d", i))
+	}
+	cfg := mdbx.New(dbcfg.ChainDB, log.New()).
+		MapSize(18 * datasize.GB).
+		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
+		SyncBytes(20 * datasize.MB).
+		SyncPeriod(2 * time.Second).
+		DirtySpace(uint64(32 * datasize.MB)).
+		PageSize(16 * datasize.KB)
+
+	doBench := func(b *testing.B, db kv.RwDB) {
+		//b.ReportAllocs()
+		b.ResetTimer()
+		var worst time.Duration
+		var i int
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+
+			t := time.Now()
+			_ = tx.Commit()
+			worst = max(worst, time.Since(t))
+		}
+		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
+	}
+
+	b.Run("20kb", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.KB).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+	b.Run("200kb", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(200 * datasize.KB).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+	b.Run("2mb", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(2 * datasize.MB).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+
+	b.Run("10mb 1sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+
+	b.Run("10mb 2sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+	b.Run("10mb 5sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+
+	b.Run("20mb 1sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+
+	b.Run("20mb 2sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+	b.Run("20mb 5sec", func(b *testing.B) {
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
+		defer db.Close()
+		doBench(b, db)
+	})
+
+}
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
 
