@@ -354,7 +354,7 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 	return nil
 }
 
-func (e *EthereumExecutionModule) Start(ctx context.Context) {
+func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stages.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
@@ -363,7 +363,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, nil); err != nil {
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
