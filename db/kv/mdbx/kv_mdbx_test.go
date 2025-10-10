@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/diagnostics/mem"
 )
 
 // BenchmarkSyncPeriodDefault for `dbSyncBytesThreshold` constant
@@ -48,6 +49,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		keys[i] = []byte(fmt.Sprintf("key %d", i))
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
 	}
+	mem.LogMemStats(b.Context(), log.Root())
 	cfg := New(dbcfg.ChainDB, log.New()).
 		MapSize(18 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
