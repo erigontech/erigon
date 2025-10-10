@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -93,7 +94,13 @@ type Domain struct {
 
 func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
 	limit := domainGetFromFileCacheLimit
-	if name == kv.CodeDomain {
+	if flag.Lookup("test.v") != nil {
+		limit = 10_000
+	}
+	if name == kv.CommitmentDomain {
+		return nil
+	}
+	if name == kv.CodeDomain || name == kv.RCacheDomain {
 		limit = limit / 100 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
 	}
 	if limit == 0 {
