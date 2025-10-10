@@ -49,10 +49,9 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		keys[i] = []byte(fmt.Sprintf("key %d", i))
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
 	}
-	mem.LogMemStats(b.Context(), log.Root())
 	cfg := New(dbcfg.ChainDB, log.New()).
 		MapSize(18 * datasize.GB).
-		GrowthStep(16 * datasize.MB).
+		GrowthStep(1 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
 		SyncBytes(20 * datasize.MB).
 		SyncPeriod(2 * time.Second).

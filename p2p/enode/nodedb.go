@@ -127,7 +127,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		Path(path).
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
-		GrowthStep(16 * datasize.MB).
+		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
 		SyncBytes(dbSyncBytesThreshold).
 		SyncPeriod(dbSyncPeriod).
