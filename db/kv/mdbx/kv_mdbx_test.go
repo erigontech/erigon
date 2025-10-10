@@ -58,7 +58,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		PageSize(16 * datasize.KB)
 
 	doBench := func(b *testing.B, db kv.RwDB) {
-		b.ReportAllocs()
+		//b.ReportAllocs()
 		b.ResetTimer()
 		var worst time.Duration
 		var i int
