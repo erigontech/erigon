@@ -601,7 +601,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 	}
 
-	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
+	if dbg.TraceGas || st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
 		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
@@ -718,7 +718,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 func (st *StateTransition) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
-	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
+	if dbg.TraceGas || st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
 		fmt.Printf("(%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining)
 	}
 
