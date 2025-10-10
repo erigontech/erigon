@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
+var randSrc *rand.Rand = rand.New(rand.NewSource(42)) // fixed seed
+
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Parallel()
 
@@ -1856,9 +1858,9 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefix []byte, keyL
 		if constPrefix != nil {
 			copy(key, constPrefix)
 		}
-		rand.Read(key[len(constPrefix):])
+		randSrc.Read(key[len(constPrefix):])
 
-		hashed := KeyToHexNibbleHash(key)
+		hashed := KeyToNibblizedHash(key)
 		if len(plainKeys) == 0 {
 			plainKeys = append(plainKeys, key)
 			hashedKeys = append(hashedKeys, hashed)
@@ -1905,7 +1907,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
-	//t.Parallel()
+	// t.Parallel()
 
 	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, addrToWitness []byte) {
 		t.Helper()
@@ -2006,13 +2008,16 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	})
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
-		t.Skip("flaky test with partially fixed edge case")
-		t.Logf("StorageSubtrieWithCommonPrefix")
+		t.Logf("StorageSubtrieWithCommonPrefix\n")
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		// generate 2 storage slots HAVING common prefix of len >=4
-		storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+		storageKeysList, storageHashedKeys := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+
+		for i := 0; i < len(storageHashedKeys); i++ {
+			fmt.Printf("storageHashedKeys[%d] = %x\n", i, storageHashedKeys[i])
+		}
 
 		builder := NewUpdateBuilder()
 		for i := 0; i < len(plainKeysList); i++ {
