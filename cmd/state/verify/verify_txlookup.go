@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/turbo/services"
 )
 

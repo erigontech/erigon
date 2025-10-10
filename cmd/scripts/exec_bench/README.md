@@ -3,6 +3,8 @@
 1. sync a minimal node...once synced kill the process
 
 2. in `cmd/scripts/exec_bench/sample.yml` (or create a copy so you're not bothered by git), update the source_dir (from 1.)
+  2.1 you can also remove the entry for erigon_cmd2 or erigon_cmd1 (the other one will be executed)
+
 
 3. create directory and set permissions:
 
