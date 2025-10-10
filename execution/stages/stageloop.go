@@ -504,7 +504,7 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	}
 	defer sd.Close()
 
-	hasMore, err := mining.Run(nil, sd, nil, false /* firstCycle */, false)
+	hasMore, err := mining.Run(nil, sd, mb, false /* firstCycle */, false)
 	if err != nil {
 		return err
 	}

@@ -180,10 +180,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error
 		return nil, err
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
-
-	if db.stateFiles != nil {
-		tx.aggtx = db.stateFiles.BeginFilesRo()
-	}
+	tx.aggtx = db.stateFiles.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
