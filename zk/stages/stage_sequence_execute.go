@@ -161,7 +161,7 @@ func sequencingBatchStep(
 
 	// injected batch
 	if executionAt == 0 {
-		if cfg.chainConfig.DebugDisableZkevmStateChanges {
+		if cfg.chainConfig.SovereignMode {
 			// sealed empty block batch
 			if err = processEmptyInitialBatch(batchContext, batchState); err != nil {
 				return err
@@ -471,16 +471,18 @@ func sequencingBatchStep(
 
 			select {
 			case <-infoTreeTicker.C:
-				processedLogs, err := cfg.infoTreeUpdater.CheckForInfoTreeUpdates(logPrefix, sdb.tx)
-				if err != nil {
-					return err
+				if !cfg.chainConfig.SovereignMode {
+					processedLogs, err := cfg.infoTreeUpdater.CheckForInfoTreeUpdates(logPrefix, sdb.tx)
+					if err != nil {
+						return err
+					}
+					var latestIndex uint64
+					latest := cfg.infoTreeUpdater.GetLatestUpdate()
+					if latest != nil {
+						latestIndex = latest.Index
+					}
+					log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", processedLogs, "latestIndex", latestIndex)
 				}
-				var latestIndex uint64
-				latest := cfg.infoTreeUpdater.GetLatestUpdate()
-				if latest != nil {
-					latestIndex = latest.Index
-				}
-				log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", processedLogs, "latestIndex", latestIndex)
 			default:
 			}
 

@@ -126,10 +126,10 @@ type Config struct {
 	FreeInjectedBatch     bool   `json:"freeInjectedBatch,omitempty"`
 	ZkDefaultGasPrice     uint64 `json:"zkDefaultGasFee,omitempty"`
 
-	// used for debugging, will turn off IBS interaction for info tree / GER / etc.
-	// this option should only be used in conjunction with normalcy, it is designed for testing
-	// vanilla EVM execution for comparison of state roots only and not to be used in production
-	DebugDisableZkevmStateChanges bool `json:"debugDisableZkevmStateChanges,omitempty"`
+	// used for sovereign chains, will turn off IBS interaction for info tree / GER / etc.
+	// this option should only be used in conjunction with normalcy.  This should only
+	// be used on a chain from genesis otherwise expect problems!
+	SovereignMode bool `json:"sovereignMode,omitempty"`
 }
 
 type BlobConfig struct {

@@ -38,7 +38,7 @@ func handleStateForNewBlockStarting(
 
 	ibs.PreExecuteStateSet(chainConfig, blockNumber, timestamp, stateRoot)
 
-	if chainConfig.DebugDisableZkevmStateChanges {
+	if chainConfig.SovereignMode {
 		// we don't want to write anything to the GER contract when debugging emulating ethereum
 		return nil
 	}
