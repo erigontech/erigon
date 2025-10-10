@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
@@ -79,6 +80,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx) *TrieCo
 		withHistory:        sdc.withHistory,
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
+	fmt.Println ("trieContext: limit/txNum/stepSize:  ", sdc.limitReadAsOfTxNum, sdc.sharedDomains.TxNum(), sdc.sharedDomains.StepSize())
 	return mainTtx
 }
 
@@ -220,6 +222,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	}
 
 	txNum, blockNum = _decodeTxBlockNums(state)
+	fmt.Printf ("LatestCommitmentState: bn %d txn %d limit %d state: %s\n",blockNum,txNum, trieContext.limitReadAsOfTxNum, hexutil.Encode(state))
 	return blockNum, txNum, state, nil
 }
 
@@ -258,6 +261,8 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
 			}
 		}
+		rootHash, err := sdc.patriciaTrie.RootHash()
+		fmt.Println ("impl: SeekCommitment1: ", blockNum, txNum, hexutil.Encode(rootHash))	
 		sdc.sharedDomains.SetBlockNum(blockNum)
 		sdc.sharedDomains.SetTxNum(txNum)
 		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
@@ -273,10 +278,13 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	if len(bnBytes) == 8 {
 		blockNum = binary.BigEndian.Uint64(bnBytes)
 		txNum, err = rawdbv3.TxNums.Max(tx, blockNum)
+		fmt.Println ("len(bnBytes)==8: ",blockNum, txNum)
 		if err != nil {
 			return 0, 0, false, err
 		}
 	}
+	fmt.Println ("impl: SeekCommitment2: ", blockNum, txNum)
+
 	sdc.sharedDomains.SetBlockNum(blockNum)
 	sdc.sharedDomains.SetTxNum(txNum)
 	if blockNum == 0 && txNum == 0 {
@@ -362,6 +370,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
+		fmt.Println ("step1")
 		if len(value) > 0 {
 			return 0, 0, fmt.Errorf("failed to decode previous stored commitment state: %w", err)
 		}
@@ -398,7 +407,9 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
 		}
 		log.Debug(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
+		fmt.Println(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
 	}
+	fmt.Println ("restorePatriciaState: ", cs.blockNum, cs.txNum)
 	return cs.blockNum, cs.txNum, nil
 }
 
@@ -449,6 +460,7 @@ type TrieContext struct {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+	fmt.Printf ("Branch: Prefix: %v \n", hexutil.Encode(pref))
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
@@ -475,13 +487,21 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
 	//}
+	
 
 	if d == kv.CommitmentDomain && sdc.limitReadAsOfTxNum > 0 {
+                var foundInHistory bool
 		if sdc.withHistory {
-			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+                        enc, foundInHistory, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+			if err != nil {
+				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			}
+			if !foundInHistory {
+				return enc, 0, nil
+			}
 		}
 
-		if enc == nil {
+		if !foundInHistory { // !sdc.withHistory is implied by the earlier return
 			var ok bool
 			// reading from domain files this way will dereference domain key correctly,
 			// rotx.GetAsOf itself does not dereference keys in commitment domain values
