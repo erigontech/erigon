@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/length"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
+	ecrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // KeyToHexNibbleHash hashes plain key with respect to plain key size (part < 20 bytes for account, part >= 20 bytes for storage)

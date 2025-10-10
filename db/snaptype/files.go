@@ -31,7 +31,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/version"
 )
 

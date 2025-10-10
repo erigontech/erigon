@@ -20,13 +20,13 @@ import (
 	"context"
 	"slices"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/ethutils"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
