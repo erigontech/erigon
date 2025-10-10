@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -71,6 +72,8 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 			worst = max(worst, time.Since(t))
 		}
 		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
+		db.Close()
+		os.RemoveAll(db.(*MdbxKV).path)
 	}
 
 	b.Run("20kb", func(b *testing.B) {
