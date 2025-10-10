@@ -693,6 +693,13 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 				}
 				tx.SetTimeboosted(timeboosted)
 			}
+
+			// get the effective gas used from the receipt for this type of tx
+			if arbitrumTx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+				if gasUsed, ok := receipt["gasUsed"].(uint64); ok {
+					arbitrumTx.EffectiveGasUsed = gasUsed
+				}
+			}
 		}
 
 		txs = append(txs, tx)
