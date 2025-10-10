@@ -599,6 +599,7 @@ func (w *Writer) UpdateAccountData(address common.Address, original, account *ac
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 
+    fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x TxNum: %d}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, w.txNum)
 	if err := w.tx.DomainPut(kv.AccountsDomain, address[:], value, w.txNum, nil, 0); err != nil {
 		return err
 	}
