@@ -66,9 +66,9 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 			tx, _ := db.BeginRw(context.Background())
 			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
 
-			//t := time.Now()
+			t := time.Now()
 			_ = tx.Commit()
-			//worst = max(worst, time.Since(t))
+			worst = max(worst, time.Since(t))
 		}
 		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
 	}
