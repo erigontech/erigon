@@ -484,7 +484,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
 			}
 			if !foundInHistory {
-				return enc, 0, err
+				return enc, 0, nil
 			}
 		}
 
