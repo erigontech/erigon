@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/shards"
+//        "github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 type serialExecutor struct {
@@ -381,6 +382,16 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
+
+
+/*
+                        rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, false, txTask.BlockNumber(), txTask.TxNum, se.logPrefix, nil)
+                        if err != nil {
+                            return err
+                        }
+                        fmt.Printf("executeBlock blockNum=%d txNum=%d stateRoot=%s\n", txTask.BlockNumber(), txTask.TxNum, hexutil.Encode(rh))
+*/
+
 
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
