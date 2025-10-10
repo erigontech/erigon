@@ -220,5 +220,4 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteObjectEnd()
 	}
 	l.stream.WriteObjectEnd()
-	_ = l.stream.Flush()
 }

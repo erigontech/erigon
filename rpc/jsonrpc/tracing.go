@@ -216,10 +216,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 
 	stream.WriteArrayEnd()
-	if err := stream.Flush(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
