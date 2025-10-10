@@ -39,8 +39,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
+// BenchmarkSyncPeriodDefault:
+//   - go test -bench=BenchmarkSyncPeriodDefault/10mb_1sec -run=BenchmarkSyncPeriodDefault -count=20 -benchtime=15s ./db/kv/mdbx
+//   - -benchtime can't be smaller than SyncPeriod
 func BenchmarkSyncPeriodDefault(b *testing.B) {
-	keys, vals := make([][]byte, 10_000), make([][]byte, 10_000)
+	keys, vals := make([][]byte, 100_000), make([][]byte, 100_000)
 	for i := range keys {
 		keys[i] = []byte(fmt.Sprintf("key %d", i))
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
@@ -54,145 +57,81 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		DirtySpace(uint64(32 * datasize.MB)).
 		PageSize(16 * datasize.KB)
 
-	b.Run("20kb", func(b *testing.B) {
+	doBench := func(b *testing.B, db kv.RwDB) {
 		b.ReportAllocs()
+		b.ResetTimer()
+		var worst time.Duration
+		var i int
+		for b.Loop() {
+			i++
+			tx, _ := db.BeginRw(context.Background())
+			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
+
+			t := time.Now()
+			_ = tx.Commit()
+			worst = max(worst, time.Since(t))
+		}
+		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
+	}
+
+	b.Run("20kb", func(b *testing.B) {
 		path := b.TempDir()
-		defer os.RemoveAll(path) // benchmarks are not reliable without removing files (seems go's sub-tests do cleanup after all sub-tests are done)
 		db := cfg.Path(path).SyncBytes(20 * datasize.KB).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 	b.Run("200kb", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
-
 		db := cfg.Path(path).SyncBytes(200 * datasize.KB).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 	b.Run("2mb", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
 		db := cfg.Path(path).SyncBytes(2 * datasize.MB).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 
 	b.Run("10mb 1sec", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
 		db := cfg.Path(path).SyncBytes(10 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 
 	b.Run("10mb 2sec", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
 		db := cfg.Path(path).SyncBytes(10 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 	b.Run("10mb 5sec", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
 		defer os.RemoveAll(path)
 		db := cfg.Path(path).SyncBytes(10 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 
 	b.Run("20mb 1sec", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
 		db := cfg.Path(path).SyncBytes(20 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 
 	b.Run("20mb 2sec", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
 		db := cfg.Path(path).SyncBytes(20 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 	b.Run("20mb 5sec", func(b *testing.B) {
-		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
 		db := cfg.Path(path).SyncBytes(20 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
 		defer db.Close()
-
-		i := 0
-		for b.Loop() {
-			i++
-			tx, _ := db.BeginRw(context.Background())
-			_ = tx.Put(kv.Headers, keys[i%len(keys)], vals[i%len(vals)])
-			_ = tx.Commit()
-		}
+		doBench(b, db)
 	})
 
 }
