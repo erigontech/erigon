@@ -29,13 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
-
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
