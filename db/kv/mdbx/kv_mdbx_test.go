@@ -57,7 +57,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 	b.Run("20kb", func(b *testing.B) {
 		b.ReportAllocs()
 		path := b.TempDir()
-		defer os.RemoveAll(path)
+		defer os.RemoveAll(path) // benchmarks are not reliable without removing files (seems go's sub-tests do cleanup after all sub-tests are done)
 		db := cfg.Path(path).SyncBytes(20 * datasize.KB).MustOpen()
 		defer db.Close()
 
