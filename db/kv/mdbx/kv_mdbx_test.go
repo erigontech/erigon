@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/diagnostics/mem"
 )
 
 // BenchmarkSyncPeriodDefault for `dbSyncBytesThreshold` constant
