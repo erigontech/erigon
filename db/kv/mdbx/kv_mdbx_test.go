@@ -47,7 +47,7 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		keys[i] = []byte(fmt.Sprintf("key %d", i))
 		vals[i] = []byte(fmt.Sprintf("val %d", i))
 	}
-	cfg := mdbx.New(dbcfg.ChainDB, log.New()).
+	cfg := New(dbcfg.ChainDB, log.New()).
 		MapSize(18 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
@@ -122,7 +122,6 @@ func BenchmarkSyncPeriodDefault(b *testing.B) {
 		defer db.Close()
 		doBench(b, db)
 	})
-
 }
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
