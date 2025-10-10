@@ -11,19 +11,22 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/zk/l1infotree"
 	"github.com/erigontech/erigon/zk/sequencer"
+	"github.com/erigontech/erigon-lib/chain"
 )
 
 type L1InfoTreeCfg struct {
-	db      kv.RwDB
-	zkCfg   *ethconfig.Zk
-	updater *l1infotree.Updater
+	db          kv.RwDB
+	zkCfg       *ethconfig.Zk
+	updater     *l1infotree.Updater
+	chainConfig *chain.Config
 }
 
-func StageL1InfoTreeCfg(db kv.RwDB, zkCfg *ethconfig.Zk, updater *l1infotree.Updater) L1InfoTreeCfg {
+func StageL1InfoTreeCfg(db kv.RwDB, zkCfg *ethconfig.Zk, updater *l1infotree.Updater, chainConfig *chain.Config) L1InfoTreeCfg {
 	return L1InfoTreeCfg{
-		db:      db,
-		zkCfg:   zkCfg,
-		updater: updater,
+		db:          db,
+		zkCfg:       zkCfg,
+		updater:     updater,
+		chainConfig: chainConfig,
 	}
 }
 
@@ -36,6 +39,14 @@ func SpawnL1InfoTreeStage(
 	logger log.Logger,
 ) (funcErr error) {
 	logPrefix := s.LogPrefix()
+
+	// if we are running in sovereign mode, then we don't need to track the L1 info tree at all so we can just safely
+	// skip the stage
+	if cfg.chainConfig.SovereignMode {
+		log.Info(fmt.Sprintf("[%s] Skipping L1 Info Tree stage - SovereignMode enabled", logPrefix))
+		return nil
+	}
+
 	log.Info(fmt.Sprintf("[%s] Starting L1 Info Tree stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 Info Tree stage", logPrefix))
 
