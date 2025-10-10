@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/compress"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -379,6 +380,15 @@ var snapshotCommand = cli.Command{
 				&cli.PathFlag{Name: "first", Required: true},
 				&cli.PathFlag{Name: "second", Required: true},
 				&cli.BoolFlag{Name: "skip-size-check", Required: false, Value: false},
+			}),
+		},
+		{
+			Name:        "step-rebase",
+			Action:      stepRebase,
+			Description: "Rebase snapshots step size",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "new-step-size", Required: true, DefaultText: strconv.FormatUint(config3.DefaultStepSize, 10)},
 			}),
 		},
 	},
