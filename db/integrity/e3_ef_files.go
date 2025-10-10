@@ -33,7 +33,6 @@ func E3EfFiles(ctx context.Context, db kv.TemporalRwDB, failFast bool, fromStep 
 	defer logEvery.Stop()
 	g := &errgroup.Group{}
 	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.ReceiptHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
-		idx := idx
 		g.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx)
 			if err != nil {
