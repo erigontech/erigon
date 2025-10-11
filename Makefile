@@ -208,7 +208,7 @@ test-short:
 ## test-all:                  run all tests with a 1h timeout
 test-all:
 	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
+		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out; \
 		STATUS=$$?; \
 		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
 		exit $$STATUS; \
