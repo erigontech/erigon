@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"time"
 
@@ -99,9 +100,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 		blockCtx.GasLimit = uint64(*o.GasLimit)
 	}
 	if o.BlockHash != nil {
-		for blockNum, hash := range *o.BlockHash {
-			overrideBlockHash[blockNum] = hash
-		}
+		maps.Copy(overrideBlockHash, *o.BlockHash)
 	}
 }
 

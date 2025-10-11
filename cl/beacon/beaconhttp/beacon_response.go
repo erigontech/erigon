@@ -18,6 +18,7 @@ package beaconhttp
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -111,9 +112,7 @@ func (b *BeaconResponse) MarshalJSON() ([]byte, error) {
 	if b.ExecutionOptimistic != nil {
 		o["execution_optimistic"] = *b.ExecutionOptimistic
 	}
-	for k, v := range b.Extra {
-		o[k] = v
-	}
+	maps.Copy(o, b.Extra)
 	return json.Marshal(o)
 }
 

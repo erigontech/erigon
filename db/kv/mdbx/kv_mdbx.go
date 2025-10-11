@@ -386,9 +386,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
-	for name, cfg := range customBuckets { // copy map to avoid changing global variable
-		db.buckets[name] = cfg
-	}
+	// copy map to avoid changing global variable
+	maps.Copy(db.buckets, customBuckets)
 
 	buckets := bucketSlice(db.buckets)
 	if err := db.openDBIs(buckets); err != nil {
