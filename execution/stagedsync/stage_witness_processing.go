@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
@@ -158,9 +157,8 @@ func SpawnStageWitnessProcessing(s *StageState, tx kv.RwTx, cfg WitnessProcessin
 }
 
 // UnwindWitnessProcessingStage handles unwind operations for witness processing
-func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg WitnessProcessingCfg, logger log.Logger) error {
-	var tx kv.RwTx
-	useExternalTx := txc.Tx != nil
+func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg WitnessProcessingCfg, logger log.Logger) error {
+	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
 		tx, err = cfg.db.BeginRw(ctx)
@@ -168,8 +166,6 @@ func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, txc wrap.TxCont
 			return err
 		}
 		defer tx.Rollback()
-	} else {
-		tx = txc.Tx
 	}
 
 	if err := cleanupWitnessesForUnwind(tx, u.UnwindPoint+1); err != nil {
