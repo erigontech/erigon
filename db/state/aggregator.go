@@ -621,7 +621,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
-		logEvery      = time.NewTicker(time.Second * 30)
 		txFrom        = a.FirstTxNumOfStep(step)
 		txTo          = a.FirstTxNumOfStep(step + 1)
 		stepStartedAt = time.Now()
@@ -631,8 +630,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		collListMu      = sync.Mutex{}
 		collations      = make([]Collation, 0)
 	)
-
-	defer logEvery.Stop()
 	defer func() {
 		if !closeCollations {
 			return
