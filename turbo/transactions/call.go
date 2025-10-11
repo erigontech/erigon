@@ -84,7 +84,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 		blockCtx.BlockNumber = uint64(*o.BlockNumber)
 	}
 	if o.BaseFee != nil {
-		blockCtx.BaseFee = o.BaseFee
+		blockCtx.BaseFee = *o.BaseFee
 	}
 	if o.Coinbase != nil {
 		blockCtx.Coinbase = *o.Coinbase

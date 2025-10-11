@@ -15,24 +15,24 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/jwt"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon-lib/types"
-	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/common/jwt"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/genesiswrite"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/eth"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/tests/testports"
-	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -107,7 +107,7 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 			NoDownloader: true,
 		},
 		TxPool: txPoolConfig,
-		Miner: params.MiningConfig{
+		Miner: buildercfg.MiningConfig{
 			EnabledPOS: true,
 		},
 	}
@@ -126,9 +126,9 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 	t.Cleanup(cleanNode(ethNode))
 
 	// init genesis
-	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), kv.ChainDB, "", false, logger)
+	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), dbcfg.ChainDB, "", false, logger)
 	require.NoError(t, err)
-	_, _, err = core.CommitGenesisBlock(chainDB, eat.Genesis, ethNode.Config().Dirs, logger)
+	_, _, err = genesiswrite.CommitGenesisBlock(chainDB, eat.Genesis, ethNode.Config().Dirs, logger)
 	require.NoError(t, err)
 	chainDB.Close()
 

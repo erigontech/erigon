@@ -14,11 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-<<<<<<<< HEAD:tests/testports/free_port.go
-package testports
-========
 package testutil
->>>>>>>> main:execution/tests/testutil/free_port.go
 
 import (
 	"context"
