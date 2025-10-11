@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
-
 )
 
 type Generator struct {
@@ -255,7 +254,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 		var stateWriter state.StateWriter
 		if calculatePostState {
-			fmt.Println ("index/txNum/blockNum:",index, txNum, blockNum)
+			fmt.Println("index/txNum/blockNum:", index, txNum, blockNum)
 			stateWriter, err = g.getStateWriter(ctx, tx, sharedDomains, evm, blockNum, txNum, genEnv)
 			if err != nil {
 				return nil, err
@@ -277,7 +276,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
 			if err != nil {
 				return nil, err
-			}			
+			}
 
 			for txnIndex := 0; txnIndex < index; txnIndex++ {
 
@@ -287,7 +286,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				}
 			}
 
-			
 		}
 
 		receipt, _, err = core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
@@ -298,9 +296,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if calculatePostState {
 
 			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-					return nil, fmt.Errorf("CommitBlock failed: %w", err)
+				return nil, fmt.Errorf("CommitBlock failed: %w", err)
 			}
-			fmt.Println ("ComputeCommitment: ",blockNum,txNum)
+			fmt.Println("ComputeCommitment: ", blockNum, txNum)
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -420,6 +418,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 			txNum = minTxNum + 1 + uint64(i)
 			stateWriter, err = g.getStateWriter(ctx, tx, sharedDomains, evm, blockNum, txNum, genEnv)
+			if err != nil {
+				return nil, err
+			}
 		} else {
 			stateWriter = genEnv.noopWriter
 		}
@@ -465,26 +466,30 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, sharedDomains *dbstate.SharedDomains, evm *vm.EVM, blockNumber uint64, txNum uint64, genEnv *ReceiptEnv) (state.StateWriter, error) {
 
-	minTxNum, err := g.txNumReader.Min(tx, blockNumber)
+	commitmentHistoryTxNum, err := g.txNumReader.Min(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false) 
-	
-    fmt.Println ("Set BlockNum e txNum in sharedDomain (before seekCommitment) bn/txNum/minTxNum:", blockNumber, txNum, minTxNum)
+	sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(commitmentHistoryTxNum, false)
+
+	fmt.Println("Set BlockNum e txNum in sharedDomain (before seekCommitment) bn/txNum/minTxNum:", blockNumber, txNum, commitmentHistoryTxNum)
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 	if txNum < commitmentStartingTxNum {
 		return nil, state.PrunedError
 	}
-	
+
 	if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
 	}
-	
-	sharedDomains.SetBlockNum(blockNumber)
+
+	fmt.Printf("After SeekCommitment locate at bn/txn: %d/%d request on bn/txn: %d/%d\n", sharedDomains.BlockNum(), sharedDomains.TxNum(), blockNumber, txNum)
+
+	if sharedDomains.BlockNum() != blockNumber-1 {
+		return nil, fmt.Errorf("SeekComitment doesn't seek (%d) in correct block %d", blockNumber, sharedDomains.BlockNum)
+	}
 	sharedDomains.SetTxNum(txNum)
-	fmt.Println ("Set BlockNum e txNum in sharedDomain (dopo SeekCommitment):", blockNumber, txNum, sharedDomains.TxNum())
+	sharedDomains.SetBlockNum(blockNumber)
 
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 	return stateWriter, nil
