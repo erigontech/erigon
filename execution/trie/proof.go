@@ -344,7 +344,7 @@ func VerifyStorageProof(storageRoot common.Hash, proof accounts.StorProofResult)
 	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
 }
 
-// VerifyAccountProofByHash will verify a storage proof under the assumption
+// VerifyStorageProofByHash will verify a storage proof under the assumption
 // that the pre-image of the storage key hashes to the provided keyHash.
 // Consequently, the Key of the proof is ignored in the validation.
 func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proof accounts.StorProofResult) error {
