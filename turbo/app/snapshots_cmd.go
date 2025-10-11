@@ -1076,7 +1076,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	sort.Slice(accFiles, func(i, j int) bool {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
-
+	if len(accFiles) == 0 {
+		return fmt.Errorf("no account snapshot files (.kv) found in %s", dirs.SnapDomain)
+	}
 	if accFiles[0].From != 0 {
 		return fmt.Errorf("gap at start: state snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
 	}
@@ -1176,6 +1178,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	sort.Slice(accFiles, func(i, j int) bool {
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
+	if len(accFiles) == 0 {
+		return fmt.Errorf("no account inverted index files (.ef) found in %s", dirs.SnapIdx)
+	}
 	if accFiles[0].From != 0 {
 		return fmt.Errorf("gap at start: state ef snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
 	}
