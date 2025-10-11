@@ -257,7 +257,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	hph.SetTrace(false)
 
 	// generate list of updates diverging from first nibble (good case for parallelization))
-	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 0, 150)
+	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 150)
 	builder := NewUpdateBuilder()
 	for i := 0; i < len(plainKeysList); i++ {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
@@ -505,7 +505,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	t.Parallel()
 
 	// generate subtrie with 4 keys with the same prefix
-	plainKeysList, hashedKeysList := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 4, 4)
+	plainKeysList, hashedKeysList := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 4)
 
 	builder := NewUpdateBuilder()
 
@@ -515,7 +515,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	}
 
 	// generate another 4 keys with the same prefix
-	plainKeysList, hashedKeysList = generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 4, 4)
+	plainKeysList, hashedKeysList = generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 4)
 
 	for i := 0; i < len(plainKeysList); i++ {
 		fmt.Printf("added %x -> %x\n", plainKeysList[i], hashedKeysList[i])
@@ -1851,7 +1851,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 }
 
 // longer prefixLen - harder to find required keys
-func generatePlainKeysWithSameHashPrefix(tb testing.TB, rnd *rand.Rand, constPrefix []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
+func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefix []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
 	tb.Helper()
 	plainKeys = make([][]byte, 0, keyCount)
 	hashedKeys = make([][]byte, 0, keyCount)
@@ -1861,7 +1861,7 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, rnd *rand.Rand, constPre
 			copy(key, constPrefix)
 		}
 		randMu.Lock()
-		rnd.Read(key[len(constPrefix):])
+		randSrc.Read(key[len(constPrefix):])
 		randMu.Unlock()
 
 		hashed := KeyToNibblizedHash(key)
@@ -1956,7 +1956,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	//	buildTrieAndWitness(t, builder, addrWithSingleton)
 	//})
 	t.Run("RandomAccountsOnly", func(t *testing.T) {
-		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 0, 5)
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		builder := NewUpdateBuilder()
@@ -1967,7 +1967,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		buildTrieAndWitness(t, builder, addrWithSingleton)
 	})
 	t.Run("RandomAccountsOnlyWithCPrefix", func(t *testing.T) {
-		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 4, 5)
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 4, 5)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		builder := NewUpdateBuilder()
@@ -1979,7 +1979,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	})
 
 	t.Run("RandomAccountsOnly-Many", func(t *testing.T) {
-		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 0, 25)
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 25)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		builder := NewUpdateBuilder()
@@ -1990,7 +1990,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		buildTrieAndWitness(t, builder, addrWithSingleton)
 	})
 	t.Run("StorageSingleton", func(t *testing.T) {
-		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 0, 2)
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		//storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
@@ -2013,11 +2013,11 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
 		t.Logf("StorageSubtrieWithCommonPrefix\n")
-		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Addr, 0, 2)
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		// generate 2 storage slots HAVING common prefix of len >=4
-		storageKeysList, storageHashedKeys := generatePlainKeysWithSameHashPrefix(t, randSrc, nil, length.Hash, 4, 2)
+		storageKeysList, storageHashedKeys := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
 
 		for i := 0; i < len(storageHashedKeys); i++ {
 			fmt.Printf("storageHashedKeys[%d] = %x\n", i, storageHashedKeys[i])
