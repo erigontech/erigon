@@ -477,11 +477,18 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	//}
 
 	if sdc.limitReadAsOfTxNum > 0 {
+		var foundInHistory bool
 		if sdc.withHistory {
-			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+			enc, foundInHistory, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+			if err != nil {
+				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			}
+			if !foundInHistory {
+				return enc, 0, nil
+			}
 		}
 
-		if enc == nil {
+		if !foundInHistory { // !sdc.withHistory is implied by the earlier return
 			var ok bool
 			// reading from domain files this way will dereference domain key correctly,
 			// rotx.GetAsOf itself does not dereference keys in commitment domain values
