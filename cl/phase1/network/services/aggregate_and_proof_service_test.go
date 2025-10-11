@@ -77,7 +77,9 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	p := pool.OperationsPool{}
 	p.AttestationsPool = pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")
-	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	verifierCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
 	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier)
 	return blockService, syncedDataManager, forkchoiceMock
