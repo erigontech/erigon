@@ -338,6 +338,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
+    blockNum := block.NumberU64()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptsFromDB types.Receipts
@@ -352,35 +353,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
 	defer g.blockExecMutex.unlock(mu, blockHash)
-	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
-		return receipts, nil
-	}
-
-	if !rpcDisableRCache {
-		var err error
-		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
-		if err != nil {
-			return nil, err
-		}
-		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
-			g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
-			return receiptsFromDB, nil
-		}
-	}
-
-	genEnv, err := g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
-	if err != nil {
-		return nil, err
-	}
-	//genEnv.ibs.SetTrace(true)
-	blockNum := block.NumberU64()
-
-	vmCfg := vm.Config{
-		JumpDestCache: vm.NewJumpDestCache(16),
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
-	defer cancel()
 
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
 	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
@@ -388,7 +360,42 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 
+
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
+		return receipts, nil
+	}
+	
 	calculatePostState := commitmentHistory && !cfg.IsByzantium(blockNum)
+
+	// the snapshot does't contains postState field so re-calculate it
+	if !calculatePostState {
+			
+		if !rpcDisableRCache {
+			var err error
+			receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+			if err != nil {
+				return nil, err
+			}
+			if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+				g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
+				return receiptsFromDB, nil
+			}
+		}
+
+	}
+
+	genEnv, err := g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
+	if err != nil {
+		return nil, err
+	}
+	//genEnv.ibs.SetTrace(true)
+	
+	vmCfg := vm.Config{
+		JumpDestCache: vm.NewJumpDestCache(16),
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+	defer cancel()
 
 	sharedDomains, err := dbstate.NewSharedDomains(tx, log.Root())
 	if err != nil {
@@ -485,7 +492,7 @@ func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, shared
 
 	fmt.Printf("After SeekCommitment locate at bn/txn: %d/%d request on bn/txn: %d/%d\n", sharedDomains.BlockNum(), sharedDomains.TxNum(), blockNumber, txNum)
 
-	if sharedDomains.BlockNum() != blockNumber-1 {
+	if sharedDomains.BlockNum() != blockNumber - 1 {
 		return nil, fmt.Errorf("SeekComitment doesn't seek (%d) in correct block %d", blockNumber, sharedDomains.BlockNum)
 	}
 	sharedDomains.SetTxNum(txNum)
