@@ -493,7 +493,7 @@ func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, shared
 	fmt.Printf("After SeekCommitment locate at bn/txn: %d/%d request on bn/txn: %d/%d\n", sharedDomains.BlockNum(), sharedDomains.TxNum(), blockNumber, txNum)
 
 	if sharedDomains.BlockNum() != blockNumber - 1 {
-		return nil, fmt.Errorf("SeekComitment doesn't seek (%d) in correct block %d", blockNumber, sharedDomains.BlockNum)
+		return nil, fmt.Errorf("SeekComitment doesn't seek (%d) in correct block %d", blockNumber, sharedDomains.BlockNum())
 	}
 	sharedDomains.SetTxNum(txNum)
 	sharedDomains.SetBlockNum(blockNumber)
