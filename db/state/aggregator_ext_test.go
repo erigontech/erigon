@@ -243,7 +243,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		acc := accounts.Account{
 			Nonce:       1,
-			Balance:     *uint256.NewInt(0),
+			Balance:     uint256.Int{},
 			CodeHash:    common.Hash{},
 			Incarnation: 0,
 		}
@@ -327,7 +327,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.Equal(t, length.Hash, n)
 		acc := accounts.Account{
 			Nonce:       1,
-			Balance:     *uint256.NewInt(0),
+			Balance:     uint256.Int{},
 			CodeHash:    common.Hash{},
 			Incarnation: 0,
 		}

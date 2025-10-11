@@ -66,7 +66,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, state.New(state.NewNoopReader()), chaincfg, vm.Config{Tracer: tracer.Hooks})
 		gasLimit uint64 = 31000
 		startGas uint64 = 10000
-		value           = *uint256.NewInt(0)
+		value           = uint256.Int{}
 		contract        = vm.NewContract(account{}, common.Address{}, value, startGas, c)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
@@ -191,7 +191,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	}
 	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
 	scope := &vm.ScopeContext{
-		Contract: vm.NewContract(&account{}, common.Address{}, *uint256.NewInt(0), 0, c),
+		Contract: vm.NewContract(&account{}, common.Address{}, uint256.Int{}, 0, c),
 	}
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil), common.Address{})
 	tracer.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, false, []byte{}, 0, uint256.Int{}, []byte{})
@@ -285,7 +285,7 @@ func TestEnterExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := &vm.ScopeContext{
-		Contract: vm.NewContract(&account{}, common.Address{}, *uint256.NewInt(0), 0, c),
+		Contract: vm.NewContract(&account{}, common.Address{}, uint256.Int{}, 0, c),
 	}
 	tracer.OnEnter(1, byte(vm.CALL), scope.Contract.Caller(), scope.Contract.Address(), false, []byte{}, 1000, uint256.Int{}, []byte{})
 	tracer.OnExit(1, []byte{}, 400, nil, false)

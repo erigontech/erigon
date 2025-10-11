@@ -224,7 +224,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
 		}
 		if bundle.BlockOverride.BlockHash != nil {
-			for blockNum, hash := range bundle.BlockOverride.BlockHash {
+			for blockNum, hash := range *bundle.BlockOverride.BlockHash {
 				overrideBlockHash[blockNum] = hash
 			}
 		}

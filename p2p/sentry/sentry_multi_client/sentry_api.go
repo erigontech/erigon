@@ -78,23 +78,13 @@ func (cs *MultiClient) SendBodyRequest(ctx context.Context, req *bodydownload.Bo
 			Data: &sentryproto.OutboundMessageData{
 				Id:   sentryproto.MessageId_GET_BLOCK_BODIES_66,
 				Data: bytes,
-			}
-
-			sentPeers, err = cs.sentries[i].SendMessageToAll(ctx, &outreq, &grpc.EmptyCallOption{})
-		} else {
-			outreq := proto_sentry.SendMessageByMinBlockRequest{
-				MinBlock: req.BlockNums[len(req.BlockNums)-1],
-				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_BODIES_66,
-					Data: bytes,
-				},
-				MaxPeers: 1,
-			}
-
-			sentPeers, err = cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+			},
+			MaxPeers: 1,
 		}
-		if err != nil {
-			cs.logger.Error("Could not send block bodies request", "err", err)
+
+		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err1 != nil {
+			cs.logger.Error("Could not send block bodies request", "err", err1)
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {
@@ -155,30 +145,19 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			cs.logger.Error("Could not encode header request", "err", err)
 			return [64]byte{}, false
 		}
+		minBlock := req.Number
 
 		outreq := sentryproto.SendMessageByMinBlockRequest{
 			MinBlock: minBlock,
 			Data: &sentryproto.OutboundMessageData{
 				Id:   sentryproto.MessageId_GET_BLOCK_HEADERS_66,
 				Data: bytes,
-			}
-
-			sentPeers, err = cs.sentries[i].SendMessageToAll(ctx, &outreq, &grpc.EmptyCallOption{})
-		} else {
-			minBlock := req.Number
-			outreq := proto_sentry.SendMessageByMinBlockRequest{
-				MinBlock: minBlock,
-				Data: &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
-					Data: bytes,
-				},
-				MaxPeers: 5,
-			}
-
-			sentPeers, err = cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+			},
+			MaxPeers: 5,
 		}
-		if err != nil {
-			cs.logger.Error("Could not send header request", "err", err)
+		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
+		if err1 != nil {
+			cs.logger.Error("Could not send header request", "err", err1)
 			return [64]byte{}, false
 		}
 		if sentPeers == nil || len(sentPeers.Peers) == 0 {

@@ -82,7 +82,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
-		BaseFee:     *uint256.NewInt(0),
+		BaseFee:     uint256.Int{},
 		BlobBaseFee: *uint256.NewInt(50000),
 	}
 	alloc := types.GenesisAlloc{}

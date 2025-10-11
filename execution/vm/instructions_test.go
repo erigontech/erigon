@@ -632,7 +632,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	env.interpreter = evmInterpreter
 	mem.Resize(32)
 	pc := uint64(0)
-	start := *uint256.NewInt(0)
+	start := uint256.Int{}
 
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {

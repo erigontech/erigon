@@ -1,4 +1,4 @@
-package tests
+package executiontests
 
 import (
 	"context"
@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/genesiswrite"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/eth"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/tests/testports"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -71,7 +71,7 @@ func (eat *EngineApiTest) Run(ctx context.Context, t *testing.T) error {
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
 	dirs := datadir.New(dataDir)
-	engineApiPort, err := testports.NextFreePort()
+	engineApiPort, err := testutil.NextFreePort()
 	require.NoError(t, err)
 
 	httpConfig := httpcfg.HttpCfg{

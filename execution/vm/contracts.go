@@ -766,13 +766,6 @@ func runBn254Pairing(input []byte) ([]byte, error) {
 	if success {
 		return true32Byte, nil
 	}
-	success, err = bn254.PairingCheck(cs, ts)
-	if err != nil {
-		return nil, err
-	}
-	if success {
-		return true32Byte, nil
-	}
 
 	return false32Byte, nil
 }

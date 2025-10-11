@@ -417,7 +417,7 @@ func TestTransientStorage(t *testing.T) {
 	// revert the transient state being set and then check that the
 	// value is now the empty hash
 	state.journal.revert(state, 0)
-	if got, exp := state.GetTransientState(addr, key), (*uint256.NewInt(0)); exp != got {
+	if got, exp := state.GetTransientState(addr, key), (uint256.Int{}); exp != got {
 		t.Fatalf("transient storage mismatch: have %x, want %x", got, exp)
 	}
 }
@@ -452,7 +452,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Tx0 read
 	states[0].GetState(addr, key, &v)
 
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx1 write
 	states[1].GetOrNewStateObject(addr)
@@ -484,15 +484,15 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// After finalizing Tx 3, the state will change
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	states[3].GetState(addr, key, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(false), true, "")
 
 	// Tx4 read
 	states[4].GetState(addr, key, &v)
 	b, err = states[4].GetBalance(addr)
 	assert.NoError(t, err)
-	assert.Equal(t, *uint256.NewInt(0), v)
-	assert.Equal(t, *uint256.NewInt(0), b)
+	assert.Equal(t, uint256.Int{}, v)
+	assert.Equal(t, uint256.Int{}, b)
 }
 
 func TestVersionMapRevert(t *testing.T) {
@@ -583,7 +583,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 
 	// Tx0 read
 	states[0].GetState(addr, key, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx0 write
 	states[0].SetState(addr, key, val)
@@ -711,8 +711,8 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[2].GetState(addr, key, &v)
 	b, err = states[2].GetBalance(addr)
 	assert.NoError(t, err)
-	assert.Equal(t, *uint256.NewInt(0), v)
-	assert.Equal(t, *uint256.NewInt(0), b)
+	assert.Equal(t, uint256.Int{}, v)
+	assert.Equal(t, uint256.Int{}, b)
 }
 
 func TestVersionMapWriteNoConflict(t *testing.T) {
@@ -764,7 +764,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 	// Tx1 should see empty value in key2
 	states[1].GetState(addr, key2, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx2 read
 	states[2].GetState(addr, key2, &v)
@@ -801,7 +801,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 	// Tx3 should see empty value in key2
 	states[3].GetState(addr, key2, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
@@ -817,12 +817,12 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	states[3].stateObjects = map[common.Address]*stateObject{}
 	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 	states[3].GetState(addr, key2, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 	b, err = states[3].GetBalance(addr)
 	assert.NoError(t, err)
-	assert.Equal(t, *uint256.NewInt(0), b)
+	assert.Equal(t, uint256.Int{}, b)
 
 	// Tx1 delete
 	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
@@ -834,12 +834,12 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx3 read
 	states[3].versionedReads = nil
 	states[3].GetState(addr, key1, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 	states[3].GetState(addr, key2, &v)
-	assert.Equal(t, *uint256.NewInt(0), v)
+	assert.Equal(t, uint256.Int{}, v)
 	b, err = states[3].GetBalance(addr)
 	assert.NoError(t, err)
-	assert.Equal(t, *uint256.NewInt(0), b)
+	assert.Equal(t, uint256.Int{}, b)
 }
 
 func TestApplyVersionedWrites(t *testing.T) {
