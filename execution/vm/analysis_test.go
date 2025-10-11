@@ -91,7 +91,7 @@ func BenchmarkJumpDest(b *testing.B) {
 	pc := new(uint256.Int)
 	hash := common.Hash{1, 2, 3, 4, 5}
 
-	contractRef := dummyContractRef{}
+	contractRef := common.Address{}
 
 	c := NewJumpDestCache(16)
 	b.ResetTimer()

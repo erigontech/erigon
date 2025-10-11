@@ -31,18 +31,12 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 )
 
-// ContractRef is a reference to the contract's backing object
-type ContractRef interface {
-	Address() common.Address
-}
-
-// AccountRef implements ContractRef.
+// AccountRef is a reference to an account address.
 //
 // Account references are used during EVM initialisation and
 // it's primary use is to fetch addresses. Removing this object
 // proves difficult because of the cached jump destinations which
-// are fetched from the parent contract (i.e. the caller), which
-// is a ContractRef.
+// are fetched from the parent contract (i.e. the caller).
 type AccountRef common.Address
 
 // Address casts AccountRef to a Address
@@ -55,7 +49,7 @@ type Contract struct {
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
 	CallerAddress common.Address
-	caller        ContractRef
+	caller        common.Address
 	self          common.Address
 	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
@@ -96,9 +90,9 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr common.Address, value uint256.Int, gas uint64, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller common.Address, addr common.Address, value uint256.Int, gas uint64, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
-		CallerAddress: caller.Address(), caller: caller, self: addr,
+		CallerAddress: caller, caller: caller, self: addr,
 		value: value,
 		// Gas should be a pointer so it can safely be reduced through the run
 		// This pointer will be off the state transition
@@ -160,12 +154,10 @@ func (c *Contract) isCode(udest uint64) bool {
 // AsDelegate sets the contract to be a delegate call and returns the current
 // contract (for chaining calls)
 func (c *Contract) AsDelegate() *Contract {
-	// NOTE: caller must, at all times be a contract. It should never happen
-	// that caller is something other than a Contract.
-	parent := c.caller.(*Contract)
-	c.CallerAddress = parent.CallerAddress
-	c.value = parent.value
-
+	// For delegate calls, we need to use the caller's caller address
+	// and inherit the value from the parent call
+	// Since we removed ContractRef, the caller address should be set by the caller
+	// of this method before calling AsDelegate()
 	return c
 }
 

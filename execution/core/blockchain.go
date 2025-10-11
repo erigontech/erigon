@@ -304,7 +304,7 @@ func SysCallContractWithBlockContext(contract common.Address, data []byte, chain
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
-		vm.AccountRef(msg.From()),
+		msg.From(),
 		*msg.To(),
 		msg.Data(),
 		msg.Gas(),
@@ -341,7 +341,7 @@ func SysCreate(contract common.Address, data []byte, chainConfig *chain.Config, 
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.SysCreate(
-		vm.AccountRef(msg.From()),
+		msg.From(),
 		msg.Data(),
 		msg.Gas(),
 		*msg.Value(),

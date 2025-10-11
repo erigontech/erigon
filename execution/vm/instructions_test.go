@@ -592,8 +592,7 @@ func TestOpTstore(t *testing.T) {
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		caller         = common.Address{}
 		to             = common.Address{1}
-		contractRef    = contractRef{caller}
-		contract       = NewContract(contractRef, to, uint256.Int{}, 0, NewJumpDestCache(16))
+		contract       = NewContract(caller, to, uint256.Int{}, 0, NewJumpDestCache(16))
 		scopeContext   = ScopeContext{mem, stack, contract}
 		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
