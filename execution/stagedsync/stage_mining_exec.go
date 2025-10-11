@@ -118,17 +118,15 @@ func SpawnMiningExecStage(s *StageState, sd *dbstate.SharedDomains, tx kv.Tempor
 		return execCfg.blockReader.Header(ctx, tx, hash, number)
 	}
 
-	if sd == nil {
-		mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
-		defer mb.Close()
-		sd, err = dbstate.NewSharedDomains(mb, logger)
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
+	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	defer mb.Close()
+	simSd, err := dbstate.NewSharedDomains(mb, logger)
+	if err != nil {
+		return err
 	}
+	defer simSd.Close()
 
-	txNum := sd.TxNum()
+	txNum := simSd.TxNum()
 
 	if len(preparedTxns) > 0 {
 		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
@@ -142,8 +140,8 @@ func SpawnMiningExecStage(s *StageState, sd *dbstate.SharedDomains, tx kv.Tempor
 		var simStateReader state.StateReader
 		var simStateWriter state.StateWriter
 
-		simStateWriter = state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-		simStateReader = state.NewReaderV3(sd.AsGetter(tx))
+		simStateWriter = state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
+		simStateReader = state.NewReaderV3(simSd.AsGetter(tx))
 
 		executionAt, err := s.ExecutionAt(tx)
 		if err != nil {
