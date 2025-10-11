@@ -159,7 +159,7 @@ func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
-func (evm *EVM) call(typ OpCode, caller common.Address, addr common.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) call(typ OpCode, caller common.Address, parent *Contract, addr common.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	if evm.abort.Load() {
 		return ret, leftOverGas, nil
 	}
@@ -189,9 +189,6 @@ func (evm *EVM) call(typ OpCode, caller common.Address, addr common.Address, inp
 		if typ == STATICCALL {
 			v = uint256.Int{}
 		} else if typ == DELEGATECALL {
-			// NOTE: caller must, at all times be a contract. It should never happen
-			// that caller is something other than a Contract.
-			parent := caller.(*Contract)
 			// DELEGATECALL inherits value from parent call
 			v = parent.value
 		}
@@ -301,7 +298,7 @@ func (evm *EVM) call(typ OpCode, caller common.Address, addr common.Address, inp
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller common.Address, addr common.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALL, caller, addr, input, gas, value, bailout)
+	return evm.call(CALL, caller, nil, addr, input, gas, value, bailout)
 }
 
 // CallCode executes the contract associated with the addr with the given input
@@ -312,7 +309,7 @@ func (evm *EVM) Call(caller common.Address, addr common.Address, input []byte, g
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (evm *EVM) CallCode(caller common.Address, addr common.Address, input []byte, gas uint64, value uint256.Int) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALLCODE, caller, addr, input, gas, value, false)
+	return evm.call(CALLCODE, caller, nil, addr, input, gas, value, false)
 }
 
 // DelegateCall executes the contract associated with the addr with the given input
@@ -320,8 +317,8 @@ func (evm *EVM) CallCode(caller common.Address, addr common.Address, input []byt
 //
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
-func (evm *EVM) DelegateCall(caller common.Address, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(DELEGATECALL, caller, addr, input, gas, uint256.Int{}, false)
+func (evm *EVM) DelegateCall(caller *Contract, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(DELEGATECALL, caller.Address(), caller, addr, input, gas, uint256.Int{}, false)
 }
 
 // StaticCall executes the contract associated with the addr with the given input
@@ -329,7 +326,7 @@ func (evm *EVM) DelegateCall(caller common.Address, addr common.Address, input [
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller common.Address, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(STATICCALL, caller, addr, input, gas, uint256.Int{}, false)
+	return evm.call(STATICCALL, caller, nil, addr, input, gas, uint256.Int{}, false)
 }
 
 type codeAndHash struct {
