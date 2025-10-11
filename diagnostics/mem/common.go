@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 var ErrorUnsupportedPlatform = errors.New("unsupported platform")
@@ -84,13 +83,6 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 			v := VirtualMemStat{vm}
 			l := v.Fields()
 			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
-			diaglib.Send(diaglib.MemoryStats{
-				Alloc:       m.Alloc,
-				Sys:         m.Sys,
-				OtherFields: v.Fields(),
-				Timestamp:   time.Now(),
-			})
 
 			logger.Info("[mem] memory stats", l...)
 			UpdatePrometheusVirtualMemStats(vm)

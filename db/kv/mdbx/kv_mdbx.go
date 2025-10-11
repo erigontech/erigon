@@ -68,8 +68,8 @@ type MdbxOpts struct {
 	log             log.Logger
 	bucketsCfg      TableCfgFunc
 	path            string
-	syncPeriod      time.Duration // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
-	syncBytes       *uint         // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
+	syncPeriod      time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
+	syncBytes       *datasize.ByteSize // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
 	mapSize         datasize.ByteSize
 	growthStep      datasize.ByteSize
 	shrinkThreshold int
@@ -123,12 +123,15 @@ func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSiz
 func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
-func (opts MdbxOpts) SyncBytes(threshold uint) MdbxOpts           { opts.syncBytes = &threshold; return opts }
-func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosity = v; return opts }
-func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
-func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
-func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
-func (opts MdbxOpts) WithMetrics() MdbxOpts                       { opts.metrics = true; return opts }
+func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
+	opts.syncBytes = &threshold
+	return opts
+}
+func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts { opts.verbosity = v; return opts }
+func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts    { opts.mapSize = sz; return opts }
+func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts    { opts.mergeThreshold = v; return opts }
+func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts     { opts.bucketsCfg = f; return opts }
+func (opts MdbxOpts) WithMetrics() MdbxOpts                    { opts.metrics = true; return opts }
 
 // Flags
 func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
@@ -355,7 +358,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
-		if err = env.SetSyncBytes(*opts.syncBytes); err != nil {
+		if err = env.SetSyncBytes(uint(opts.syncBytes.Bytes())); err != nil {
 			env.Close()
 			return nil, err
 		}
