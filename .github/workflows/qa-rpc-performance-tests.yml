@@ -13,26 +13,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  performance-test-suite:
-    strategy:
-      matrix:
-        include:
-          - chain: mainnet
-            backend: RpcSpecific
-          #- chain: bor-mainnet
-          #  backend: Polygon
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
+  mainnet-rpc-perf-tests:
+    runs-on: [ self-hosted, qa, Ethereum, rpc-performance ]
     env:
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      CHAIN: ${{ matrix.chain }}
+      CHAIN: mainnet
 
     steps:
       - name: Checkout Erigon repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
           fetch-depth: "0"
@@ -40,7 +33,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.58.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.78.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
 
       - name: Clean Erigon Build Directory

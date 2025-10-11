@@ -3,8 +3,8 @@ package stages
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // cleanupAndPruning cleans up the database and prunes old data.
@@ -25,5 +25,7 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return cfg.blobStore.Prune()
+	cfg.blobStore.Prune()
+	cfg.peerDas.Prune(pruneDistance)
+	return nil
 }

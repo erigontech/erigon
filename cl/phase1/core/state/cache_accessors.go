@@ -25,12 +25,12 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -126,12 +126,35 @@ func (b *CachingBeaconState) ComputeCommittee(
 
 // GetBeaconProposerIndex updates cache and gets the beacon proposer index
 func (b *CachingBeaconState) GetBeaconProposerIndex() (uint64, error) {
+	if b.Version() >= clparams.FuluVersion {
+		p := b.GetProposerLookahead()
+		index := int(b.Slot() % b.BeaconConfig().SlotsPerEpoch)
+		return p.Get(index), nil
+	}
+
 	if b.proposerIndex == nil {
 		if err := b._updateProposerIndex(); err != nil {
 			return 0, err
 		}
 	}
 	return *b.proposerIndex, nil
+}
+
+// GetBeaconProposerIndices returns the proposer indices for the given epoch
+func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, error) {
+	indices := b.GetActiveValidatorsIndices(epoch)
+	beaconConfig := b.BeaconConfig()
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	// Input for the seed hash.
+	mix := b.GetRandaoMix(int(mixPosition))
+	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+
+	// Write the seed to an array.
+	seedArray := [32]byte{}
+	copy(seedArray[:], seed[:])
+
+	return shuffling.ComputeProposerIndices(b.BeaconState, epoch, seedArray, indices)
 }
 
 // GetBeaconProposerIndexForSlot compute the proposer index for a specific slot
@@ -199,12 +222,9 @@ func (b *CachingBeaconState) SyncRewards() (proposerReward, participantReward ui
 
 // CommitteeCount returns current number of committee for epoch.
 func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
-	committeCount := uint64(
+	committeCount := min(b.BeaconConfig().MaxCommitteesPerSlot, uint64(
 		len(b.GetActiveValidatorsIndices(epoch)),
-	) / b.BeaconConfig().SlotsPerEpoch / b.BeaconConfig().TargetCommitteeSize
-	if b.BeaconConfig().MaxCommitteesPerSlot < committeCount {
-		committeCount = b.BeaconConfig().MaxCommitteesPerSlot
-	}
+	)/b.BeaconConfig().SlotsPerEpoch/b.BeaconConfig().TargetCommitteeSize)
 	if committeCount < 1 {
 		committeCount = 1
 	}

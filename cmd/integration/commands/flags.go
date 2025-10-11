@@ -20,7 +20,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/turbo/cli"
 )
 
@@ -32,7 +33,7 @@ var (
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
-	reset, noCommit              bool
+	reset, noCommit, squeeze     bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string
@@ -65,7 +66,7 @@ func withConfig(cmd *cobra.Command) {
 func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
-	cmd.Flags().Uint64("miner.gaslimit", ethconfig.DefaultMinerGasLimit, "Target gas limit for mined blocks")
+	cmd.Flags().Uint64("miner.gaslimit", ethconfig.DefaultBlockGasLimit, "Target gas limit for mined blocks")
 	cmd.Flags().Int64("miner.gasprice", ethconfig.Defaults.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
@@ -112,6 +113,10 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 }
 
+func withSqueeze(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+}
+
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
@@ -137,6 +142,10 @@ func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+}
+
+func withConcurrentCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

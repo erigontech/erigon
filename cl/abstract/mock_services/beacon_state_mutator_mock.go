@@ -12,10 +12,10 @@ package mock_services
 import (
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	solid "github.com/erigontech/erigon/cl/cltypes/solid"
+	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -1803,6 +1803,42 @@ func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) Do(f func(sol
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall) DoAndReturn(f func(solid.Checkpoint)) *MockBeaconStateMutatorSetPreviousJustifiedCheckpointCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetProposerLookahead mocks base method.
+func (m *MockBeaconStateMutator) SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetProposerLookahead", proposerLookahead)
+}
+
+// SetProposerLookahead indicates an expected call of SetProposerLookahead.
+func (mr *MockBeaconStateMutatorMockRecorder) SetProposerLookahead(proposerLookahead any) *MockBeaconStateMutatorSetProposerLookaheadCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetProposerLookahead", reflect.TypeOf((*MockBeaconStateMutator)(nil).SetProposerLookahead), proposerLookahead)
+	return &MockBeaconStateMutatorSetProposerLookaheadCall{Call: call}
+}
+
+// MockBeaconStateMutatorSetProposerLookaheadCall wrap *gomock.Call
+type MockBeaconStateMutatorSetProposerLookaheadCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateMutatorSetProposerLookaheadCall) Return() *MockBeaconStateMutatorSetProposerLookaheadCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateMutatorSetProposerLookaheadCall) Do(f func(solid.Uint64VectorSSZ)) *MockBeaconStateMutatorSetProposerLookaheadCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateMutatorSetProposerLookaheadCall) DoAndReturn(f func(solid.Uint64VectorSSZ)) *MockBeaconStateMutatorSetProposerLookaheadCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

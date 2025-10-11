@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type mockDifficultyCalculator struct{}
@@ -44,6 +44,8 @@ type mockHeaderValidator struct{}
 func (v *mockHeaderValidator) ValidateHeader(_ context.Context, _ *types.Header, _ *types.Header, _ time.Time) error {
 	return nil
 }
+
+func (v *mockHeaderValidator) UpdateLatestVerifiedHeader(header *types.Header) {}
 
 func makeRoot() *types.Header {
 	return &types.Header{
@@ -95,6 +97,10 @@ func (test *connectCCBTest) makeHeaders(parent *types.Header, difficulties []uin
 		parent = header
 	}
 	return headers
+}
+
+func (test *connectCCBTest) PruneRoot(newRootNum uint64) error {
+	return test.builder.PruneRoot(newRootNum)
 }
 
 func (test *connectCCBTest) testConnect(
@@ -222,6 +228,28 @@ func TestCCBConnectOverlapPartialSome(t *testing.T) {
 	expectedTip := overlapHeaders[len(overlapHeaders)-1]
 	expectedHeaders := append([]*types.Header{root, headers[0]}, overlapHeaders...)
 	test.testConnect(ctx, overlapHeaders, expectedTip, expectedHeaders, headers45)
+}
+
+// connect 2-3-4-5-6-7 to 4-5-6
+func TestCCBConnectFirstHeaderBehindRoot(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	test, root := newConnectCCBTest(t)
+	headers := test.makeHeaders(root, []uint64{1, 2, 3, 4, 5, 6})
+	_, err := test.builder.Connect(ctx, headers)
+	require.NoError(t, err)
+	// 2-3-4-5-6
+	headersToConnect := headers[1:]
+	header7 := test.makeHeaders(headersToConnect[len(headersToConnect)-1], []uint64{7})
+	// 2-3-4-5-6-7
+	headersToConnect = append(headersToConnect, header7[0])
+	// prune root to 4
+	err = test.PruneRoot(4)
+	require.NoError(t, err)
+	// 4-5-6-7
+	expectedHeaders := headersToConnect[2:]
+	test.testConnect(ctx, headersToConnect, header7[0], expectedHeaders, header7)
 }
 
 // connect 2 to 0-1 at 0, then connect 10 to 0-1

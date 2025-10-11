@@ -25,8 +25,8 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 func TestParseRoot(t *testing.T) {

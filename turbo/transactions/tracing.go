@@ -24,22 +24,22 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-db/interfaces"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/tracers"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type BlockGetter interface {
@@ -52,7 +52,7 @@ type BlockGetter interface {
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader interfaces.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
 	if err != nil {
@@ -67,7 +67,7 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	}
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
-	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
+	rules := blockContext.Rules(cfg)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)
@@ -177,9 +177,11 @@ func AssembleTracer(
 
 		return tracer, false, cancel, nil
 	case config == nil:
-		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, func() {}, nil
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, cancel, nil
 	default:
-		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, func() {}, nil
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, cancel, nil
 	}
 }
 
@@ -203,18 +205,9 @@ func ExecuteTraceTx(
 		refunds = false
 	}
 
-	if streaming {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("structLogs")
-		stream.WriteArrayStart()
-	}
-
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		if streaming {
-			stream.WriteArrayEnd()
-			stream.WriteObjectEnd()
-		} else {
+		if !streaming {
 			stream.WriteNil()
 		}
 		return fmt.Errorf("tracing failed: %w", err)
@@ -236,7 +229,7 @@ func ExecuteTraceTx(
 			returnVal = hex.EncodeToString(result.Revert())
 		}
 		stream.WriteObjectField("returnValue")
-		stream.WriteString(returnVal)
+		stream.WriteString("0x" + returnVal)
 		stream.WriteObjectEnd()
 	} else {
 		r, err := tracer.GetResult()

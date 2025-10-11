@@ -19,13 +19,13 @@ package state
 import (
 	"sort"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func (b *CachingBeaconState) UpgradeToAltair() error {
@@ -242,5 +242,38 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		return true
 	})
 	log.Info("Upgrade to Electra complete")
+	return nil
+}
+
+func (b *CachingBeaconState) UpgradeToFulu() error {
+	b.previousStateRoot = common.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().FuluForkVersion))
+	b.SetFork(fork)
+	// Update the payload header.
+	header := b.LatestExecutionPayloadHeader()
+	header.SetVersion(clparams.FuluVersion)
+	b.SetLatestExecutionPayloadHeader(header)
+	// Update the state root cache
+	b.SetVersion(clparams.FuluVersion)
+
+	// initialize the proposer lookahead
+	lookahead := solid.NewUint64VectorSSZ(int((b.BeaconConfig().MinSeedLookahead + 1) * b.BeaconConfig().SlotsPerEpoch))
+	for i := 0; i < int(b.BeaconConfig().MinSeedLookahead+1); i++ {
+		proposerIndices, err := b.GetBeaconProposerIndices(epoch + uint64(i))
+		if err != nil {
+			return err
+		}
+		for j := 0; j < len(proposerIndices); j++ {
+			lookahead.Set(i*int(b.BeaconConfig().SlotsPerEpoch)+j, proposerIndices[j])
+		}
+	}
+	b.SetProposerLookahead(lookahead)
+
+	log.Info("Upgrade to Fulu complete")
 	return nil
 }

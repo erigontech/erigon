@@ -50,6 +50,8 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 		err = preState.UpgradeToDeneb()
 	case clparams.DenebVersion:
 		err = preState.UpgradeToElectra()
+	case clparams.ElectraVersion:
+		err = preState.UpgradeToFulu()
 	default:
 		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}

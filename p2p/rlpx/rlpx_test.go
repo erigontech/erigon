@@ -34,10 +34,10 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/ecies"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-p2p/pipes"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/ecies"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/p2p/pipes"
 )
 
 type message struct {

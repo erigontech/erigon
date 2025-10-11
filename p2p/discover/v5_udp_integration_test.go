@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-p2p/discover/v5wire"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/discover/v5wire"
 )
 
 // This test checks that pending calls are re-sent when a handshake happens.

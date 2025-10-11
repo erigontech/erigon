@@ -20,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -31,9 +30,8 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 	if lc == nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
-	version := lc.AttestedHeader.Version()
 	// Read the fork digest
-	forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
+	forkDigest, err := c.ethClock.ComputeForkDigest(lc.AttestedHeader.Beacon.Slot / c.beaconConfig.SlotsPerEpoch)
 	if err != nil {
 		return err
 	}
@@ -52,7 +50,7 @@ func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) e
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(lc.AttestedHeader.Version())))
+	forkDigest, err := c.ethClock.ComputeForkDigest(lc.AttestedHeader.Beacon.Slot / c.beaconConfig.SlotsPerEpoch)
 	if err != nil {
 		return err
 	}
@@ -77,7 +75,7 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(lc.Header.Version())))
+	forkDigest, err := c.ethClock.ComputeForkDigest(lc.Header.Beacon.Slot / c.beaconConfig.SlotsPerEpoch)
 	if err != nil {
 		return err
 	}
@@ -125,9 +123,8 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 			return err
 		}
 
-		version := update.AttestedHeader.Version()
 		// Read the fork digest
-		forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
+		forkDigest, err := c.ethClock.ComputeForkDigest(update.AttestedHeader.Beacon.Slot / c.beaconConfig.SlotsPerEpoch)
 		if err != nil {
 			return err
 		}

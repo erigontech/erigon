@@ -20,10 +20,16 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type readerMock struct{}
@@ -63,11 +69,7 @@ func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
 func (r readerMock) FrozenBlocks() uint64 {
 	return 0
 }
-func (r readerMock) FrozenBorBlocks() uint64 { return 0 }
-
-func (r readerMock) BorSpan(spanId uint64) []byte {
-	return nil
-}
+func (r readerMock) FrozenBorBlocks(align bool) uint64 { return 0 }
 
 // The thing only that changes between normal ethash checks other than POW, is difficulty
 // and nonce so we are gonna test those
@@ -112,4 +114,22 @@ func TestVerifyHeaderNonce(t *testing.T) {
 			t.Fatalf("Merge engine should not accept non-zero difficulty")
 		}
 	}
+}
+
+func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
+	chainConfig := chainspec.Mainnet.Config
+	header := &types.Header{ // fake PoS header *after* Cancun fork
+		Difficulty: misc.ProofOfStakeDifficulty,
+		Time:       chainConfig.CancunTime.Uint64() + 1,
+	}
+	logger := log.New()
+	chainReader := consensuschain.NewReader(chainConfig, nil, nil, logger) // tx and blockReader don't care
+	systemCallCustom := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		return nil, nil
+	}
+	var intraBlockState state.IntraBlockState // don't care
+	var tracer tracing.Hooks                  // don't care
+	var eth1Engine consensus.Engine
+	mergeEngine := New(eth1Engine)
+	mergeEngine.Initialize(chainConfig, chainReader, header, &intraBlockState, systemCallCustom, logger, &tracer)
 }

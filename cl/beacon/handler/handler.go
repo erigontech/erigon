@@ -23,10 +23,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -36,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -48,16 +45,21 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
 
+// Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob
-	KzgProof   common.Bytes48
+	KzgProofs  []common.Bytes48
 }
 
 type ApiHandler struct {
@@ -73,11 +75,13 @@ type ApiHandler struct {
 	operationsPool       pool.OperationsPool
 	syncedData           synced_data.SyncedData
 	stateReader          *historical_states_reader.HistoricalStatesReader
-	sentinel             sentinel.SentinelClient
+	sentinel             sentinelproto.SentinelClient
 	blobStoage           blob_storage.BlobStorage
+	columnStorage        blob_storage.DataColumnStorage
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
+	peerDas das.PeerDas
 	version string // Node's version
 
 	// pools
@@ -123,11 +127,12 @@ func NewApiHandler(
 	rcsn freezeblocks.BeaconSnapshotReader,
 	syncedData synced_data.SyncedData,
 	stateReader *historical_states_reader.HistoricalStatesReader,
-	sentinel sentinel.SentinelClient,
+	sentinel sentinelproto.SentinelClient,
 	version string,
 	routerCfg *beacon_router_configuration.RouterConfiguration,
 	emitters *beaconevents.EventEmitter,
 	blobStoage blob_storage.BlobStorage,
+	columnStorage blob_storage.DataColumnStorage,
 	caplinSnapshots *freezeblocks.CaplinSnapshots,
 	validatorParams *validator_params.ValidatorParams,
 	attestationProducer attestation_producer.AttestationDataProducer,
@@ -150,6 +155,7 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
@@ -177,6 +183,7 @@ func NewApiHandler(
 		routerCfg:                        routerCfg,
 		emitters:                         emitters,
 		blobStoage:                       blobStoage,
+		columnStorage:                    columnStorage,
 		caplinSnapshots:                  caplinSnapshots,
 		attestationProducer:              attestationProducer,
 		blobBundles:                      blobBundles,
@@ -235,6 +242,7 @@ func (a *ApiHandler) init() {
 
 			if a.routerCfg.Debug {
 				r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
+				r.Get("/debug/data_column_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1DebugBeaconDataColumnSidecars))
 			}
 			if a.routerCfg.Config {
 				r.Route("/config", func(r chi.Router) {
@@ -248,6 +256,7 @@ func (a *ApiHandler) init() {
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV1BlindedBlocks))
 					}
+					r.Get("/blobs/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlobs))
 					r.Route("/rewards", func(r chi.Router) {
 						r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsSyncCommittees))
 						r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconRewardsBlocks))
@@ -295,10 +304,14 @@ func (a *ApiHandler) init() {
 							r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
 							r.Get("/validators", a.GetEthV1BeaconStatesValidators)
 							r.Post("/validators", a.PostEthV1BeaconStatesValidators)
-							r.Get("/validator_balances", a.GetEthV1BeaconValidatorsBalances)
-							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
+							r.Get("/validator_balances", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconValidatorsBalances))
+							r.Post("/validator_balances", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconValidatorsBalances))
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
+							r.Get("/pending_consolidations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingConsolidations))
+							r.Get("/pending_deposits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingDeposits))
+							r.Get("/pending_partial_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingPartialWithdrawals))
+							r.Get("/proposer_lookahead", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesProposerLookahead))
 						})
 					})
 				})
