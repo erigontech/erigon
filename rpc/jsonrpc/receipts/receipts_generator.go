@@ -257,7 +257,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}()
 
 		var stateWriter state.StateWriter
-		if calculatePostState  &&  index != 0 {
+		if calculatePostState && index != 0 {
 
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
 			if err != nil {
@@ -279,7 +279,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				}
 
 				genEnv.ibs.SetTxContext(blockNum, txnIndex)
-		  	    oldReceipts, _, err := core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
+				oldReceipts, _, err := core.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
 				if err != nil {
 					return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockForPostState.NumberU64(), txnIndex, err)
 				}
@@ -294,7 +294,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				if err != nil {
 					return nil, err
 				}
-				fmt.Printf("GetReceipt (from OLD TX) blockNum=%d txNum=%d stateRoot=%s logLen=%d\n", blockNum, currTxNum, hexutil.Encode(stateRoot), len(oldReceipts.Logs) )
+				fmt.Printf("GetReceipt (from OLD TX) blockNum=%d txNum=%d stateRoot=%s logLen=%d\n", blockNum, currTxNum, hexutil.Encode(stateRoot), len(oldReceipts.Logs))
 
 			}
 
