@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 
+        "github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -237,6 +238,7 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
+        fmt.Printf ("CollectUpdate: calls putBranch: %s\n ",hexutil.Encode(prefix))
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}

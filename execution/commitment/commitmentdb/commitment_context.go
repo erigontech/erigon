@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -23,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
@@ -178,6 +178,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
+		fmt.Println ("call encodeAndStoreCommitmentState: ", saveState)
 		if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum, rootHash); err != nil {
 			return nil, err
 		}
@@ -460,11 +461,12 @@ type TrieContext struct {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	fmt.Printf ("Branch: Prefix: %v \n", hexutil.Encode(pref))
+	//	fmt.Printf ("Branch: calls readDomain(commitmentDomain): Prefix: %v Domain %d\n", hexutil.Encode(pref),kv.CommitmentDomain )
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+    fmt.Printf ("PutBranch: limit: %d Prefix: %v\n", sdc.limitReadAsOfTxNum, hexutil.Encode(prefix))
 	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
 		return nil
 	}
@@ -487,12 +489,14 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
 	//}
-	
 
+	if (d == kv.AccountsDomain && len(plainKey) != 0) { 
+    	fmt.Printf ("ReadDomain: Limit %d Domain %d key %s\n", sdc.limitReadAsOfTxNum, d, hexutil.Encode(plainKey))
+    }
 	if d == kv.CommitmentDomain && sdc.limitReadAsOfTxNum > 0 {
-                var foundInHistory bool
+         var foundInHistory bool
 		if sdc.withHistory {
-                        enc, foundInHistory, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+            enc, foundInHistory, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 			if err != nil {
 				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
 			}
@@ -526,6 +530,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 }
 
 func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+	fmt.Printf ("Account: calls ReadDomain1: %s\n", hexutil.Encode(plainKey))
 	encAccount, _, err := sdc.readDomain(kv.AccountsDomain, plainKey)
 	if err != nil {
 		return nil, err

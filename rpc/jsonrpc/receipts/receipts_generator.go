@@ -496,6 +496,7 @@ func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, shared
 		return nil, err
 	}
 	sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(commitmentHistoryTxNum, false)
+	/*
 	fmt.Println("Set BlockNum e txNum in sharedDomain (before seekCommitment) bn/txNum/minTxNum:", blockNumber, txNum, commitmentHistoryTxNum)
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
@@ -514,7 +515,7 @@ func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, shared
 	}
 	sharedDomains.SetTxNum(txNum)
 	sharedDomains.SetBlockNum(blockNumber)
-
+*/
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 	return stateWriter, nil
 }

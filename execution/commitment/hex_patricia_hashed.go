@@ -34,6 +34,7 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -1797,6 +1798,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
+					fmt.Printf ("fold: cell.accountAddr %s len %d\n",cell.accountAddr, cell.accountAddrLen )
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
@@ -1987,15 +1989,15 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	}
 	// Now unfold until we step on an empty cell
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
+		//printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
 		unfoldDone := hph.metrics.StartUnfolding(plainKey)
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
 		unfoldDone()
-		if printLater {
+		//if printLater {
 			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
-		}
+		//}
 		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	}
 
@@ -2003,6 +2005,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		// Update the cell
 		if int16(len(plainKey)) == hph.accountKeyLen {
 			hph.metrics.AccountLoad(plainKey)
+			fmt.Printf ("followAndUpdate: update Cell Account: %s \n", hexutil.Encode(plainKey))
 			stateUpdate, err = hph.ctx.Account(plainKey)
 			if err != nil {
 				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
