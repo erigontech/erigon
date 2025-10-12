@@ -19,10 +19,11 @@ import (
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
 type AggOpts struct { //nolint:gocritic
-	schema   statecfg.SchemaGen // biz-logic
-	dirs     datadir.Dirs
-	logger   log.Logger
-	stepSize uint64
+	schema               statecfg.SchemaGen // biz-logic
+	dirs                 datadir.Dirs
+	logger               log.Logger
+	stepSize             uint64
+	maxStepsInFrozenFile uint64
 
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
@@ -31,13 +32,14 @@ type AggOpts struct { //nolint:gocritic
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return AggOpts{ //Defaults
-		logger:          log.Root(),
-		schema:          statecfg.Schema,
-		dirs:            dirs,
-		stepSize:        config3.DefaultStepSize,
-		genSaltIfNeed:   false,
-		sanityOldNaming: false,
-		disableFsync:    false,
+		logger:               log.Root(),
+		schema:               statecfg.Schema,
+		dirs:                 dirs,
+		stepSize:             config3.DefaultStepSize,
+		maxStepsInFrozenFile: config3.DefaultMaxStepsInFrozenFile,
+		genSaltIfNeed:        false,
+		sanityOldNaming:      false,
+		disableFsync:         false,
 	}
 }
 
@@ -58,7 +60,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, opts.maxStepsInFrozenFile, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +100,11 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 
 // Setters
 
-func (opts AggOpts) StepSize(s uint64) AggOpts    { opts.stepSize = s; return opts }        //nolint:gocritic
+func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+func (opts AggOpts) MaxStepsInFrozenFile(s uint64) AggOpts { //nolint:gocritic
+	opts.maxStepsInFrozenFile = s
+	return opts
+}
 func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
 func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic

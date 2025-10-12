@@ -19,9 +19,9 @@ package config3
 // Default number of transactions (txNums) in one "step". One static file can have [1, 64] steps.
 const DefaultStepSize = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
 
-// StepsInFrozenFile - files of this size are completely frozen/immutable.
+// DefaultMaxStepsInFrozenFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
-const StepsInFrozenFile = 64
+const DefaultMaxStepsInFrozenFile = 64
 
 const EnableHistoryV4InTest = true
 

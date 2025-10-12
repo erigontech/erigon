@@ -273,6 +273,9 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	// ErigonDB geometry settings
+	ErigonDBMaxStepsInFrozenSnapshots int
 }
 
 type Sync struct {

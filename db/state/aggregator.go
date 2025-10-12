@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
@@ -56,11 +55,12 @@ import (
 )
 
 type Aggregator struct {
-	db       kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
-	d        [kv.DomainLen]*Domain
-	iis      []*InvertedIndex
-	dirs     datadir.Dirs
-	stepSize uint64
+	db                   kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
+	d                    [kv.DomainLen]*Domain
+	iis                  []*InvertedIndex
+	dirs                 datadir.Dirs
+	stepSize             uint64
+	maxStepsInFrozenFile uint64
 
 	dirtyFilesLock           sync.Mutex
 	visibleFilesLock         sync.RWMutex
@@ -95,7 +95,7 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, maxStepsInFrozenFile uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -104,6 +104,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db k
 		onFilesDelete:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		stepSize:               stepSize,
+		maxStepsInFrozenFile:   maxStepsInFrozenFile,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
@@ -169,7 +170,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 }
 
 func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, dirs, logger)
+	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, a.maxStepsInFrozenFile, dirs, logger)
 	if err != nil {
 		return err
 	}
@@ -182,7 +183,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 	if ii := a.searchII(cfg.Name); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", cfg.Name)
 	}
-	ii, err := NewInvertedIndex(cfg, a.stepSize, dirs, logger)
+	ii, err := NewInvertedIndex(cfg, a.stepSize, a.maxStepsInFrozenFile, dirs, logger)
 	if err != nil {
 		return err
 	}
@@ -196,8 +197,9 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesDelete = onDel
 }
 
-func (a *Aggregator) StepSize() uint64   { return a.stepSize }
-func (a *Aggregator) Dirs() datadir.Dirs { return a.dirs }
+func (a *Aggregator) StepSize() uint64             { return a.stepSize }
+func (a *Aggregator) MaxStepsInFrozenFile() uint64 { return a.maxStepsInFrozenFile }
+func (a *Aggregator) Dirs() datadir.Dirs           { return a.dirs }
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
 	a.d[domain].ReplaceKeysInValues = v
@@ -804,7 +806,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	mxRunningMerges.Inc()
 	defer mxRunningMerges.Dec()
 
-	maxSpan := config3.StepsInFrozenFile * a.StepSize()
+	maxSpan := a.maxStepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		a.cleanAfterMerge(nil)

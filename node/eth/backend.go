@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
@@ -1584,7 +1585,14 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if _, err := snaptype.LoadSalt(dirs.Snap, createNewSaltFileIfNeeded, logger); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).Open(ctx, db)
+
+	if snConfig.ErigonDBMaxStepsInFrozenSnapshots == config3.DefaultMaxStepsInFrozenFile {
+		logger.Info("Using max steps in frozen snapshots", "steps", snConfig.ErigonDBMaxStepsInFrozenSnapshots)
+	} else {
+		logger.Warn("OVERRIDING MAX STEPS IN FROZEN SNAPSHOTS; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", snConfig.ErigonDBMaxStepsInFrozenSnapshots, "default", config3.DefaultMaxStepsInFrozenFile)
+	}
+
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).MaxStepsInFrozenFile(uint64(snConfig.ErigonDBMaxStepsInFrozenSnapshots)).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

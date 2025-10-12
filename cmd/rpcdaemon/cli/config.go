@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -181,6 +182,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketSubscribeLogsChannelSize, utils.WSSubscribeLogsChannelSize.Name, utils.WSSubscribeLogsChannelSize.Value, utils.WSSubscribeLogsChannelSize.Usage)
+
+	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBMaxStepsInFrozenSnapshots, utils.ErigonDBMaxStepsInFrozenSnapshotsFlag.Name, utils.ErigonDBMaxStepsInFrozenSnapshotsFlag.Value, utils.ErigonDBMaxStepsInFrozenSnapshotsFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -427,7 +430,14 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).Open(ctx, rawDB)
+
+		if cfg.ErigonDBMaxStepsInFrozenSnapshots == config3.DefaultMaxStepsInFrozenFile {
+			logger.Info("Using max steps in frozen snapshots", "steps", cfg.ErigonDBMaxStepsInFrozenSnapshots)
+		} else {
+			logger.Warn("OVERRIDING MAX STEPS IN FROZEN SNAPSHOTS; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", cfg.ErigonDBMaxStepsInFrozenSnapshots, "default", config3.DefaultMaxStepsInFrozenFile)
+		}
+
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).MaxStepsInFrozenFile(cfg.ErigonDBMaxStepsInFrozenSnapshots).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}

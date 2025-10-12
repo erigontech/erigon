@@ -62,7 +62,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	salt := uint32(1)
 	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, Version: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
-	ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
+	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultMaxStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(ii.Close)
 	ii.salt.Store(&salt)
@@ -522,7 +522,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			var found bool
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
-			maxSpan := ii.stepSize * config3.StepsInFrozenFile
+			maxSpan := ii.stepSize * config3.DefaultMaxStepsInFrozenFile
 
 			for {
 				if stop := func() bool {
@@ -611,7 +611,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	cfg := ii.InvIdxCfg
 
 	var err error
-	ii, err = NewInvertedIndex(cfg, 16, ii.dirs, logger)
+	ii, err = NewInvertedIndex(cfg, 16, config3.DefaultMaxStepsInFrozenFile, ii.dirs, logger)
 	require.NoError(err)
 	defer ii.Close()
 	ii.salt.Store(&salt)
