@@ -330,9 +330,7 @@ func ExecV3(ctx context.Context,
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
 						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, maxBlockNum, logger, u)
-				case errors.Is(execErr, context.Canceled):
-					return err
-				default:
+				case errors.Is(execErr, &ErrLoopExhausted{}):
 					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 					if err != nil {
 						return err
@@ -352,13 +350,17 @@ func ExecV3(ctx context.Context,
 					if !useExternalTx {
 						se.LogCommitted(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
+				default:
+					return err
 				}
 			} else {
 				if execErr != nil {
 					switch {
 					case errors.Is(execErr, ErrWrongTrieRoot):
 						return fmt.Errorf("can't handle incorrect root err: %w", execErr)
-					case errors.Is(execErr, context.Canceled):
+					case errors.Is(execErr, &ErrLoopExhausted{}):
+						break
+					default:
 						return err
 					}
 				} else {
