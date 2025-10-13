@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"unsafe"
 
@@ -108,9 +109,8 @@ func (opts remoteOpts) Open() (*DB, error) {
 		roTxsLimiter: semaphore.NewWeighted(targetSemCount), // 1 less than max to allow unlocking
 	}
 	customBuckets := opts.bucketsCfg
-	for name, cfg := range customBuckets { // copy map to avoid changing global variable
-		db.buckets[name] = cfg
-	}
+	// copy map to avoid changing global variable
+	maps.Copy(db.buckets, customBuckets)
 
 	return db, nil
 }
