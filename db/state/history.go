@@ -349,7 +349,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
 	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
 	for _, item := range historyFiles.missedMapAccessors() {
-		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
 		})

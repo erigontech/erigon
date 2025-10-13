@@ -826,6 +826,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				}
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
+				storageRootHashIsSet = true
 			} else if cell.hashLen > 0 {
 				storageRootHash = cell.hash
 				storageRootHashIsSet = true

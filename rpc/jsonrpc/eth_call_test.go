@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -152,6 +153,13 @@ func TestGetProof(t *testing.T) {
 			stateVal:    2,
 		},
 		{
+			name:        "currentBlockWithStateAndShortKeys",
+			addr:        contractAddr,
+			blockNum:    3,
+			storageKeys: []hexutil.Bytes{{0x0}, {0x4}, {0x8}, {0x0a}},
+			stateVal:    2,
+		},
+		{
 			name:        "currentBlockWithMissingState",
 			addr:        contractAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
@@ -217,10 +225,10 @@ func TestGetProof(t *testing.T) {
 			for _, storageKey := range tt.storageKeys {
 				found := false
 				for _, storageProof := range proof.StorageProof {
-					var proofKeyHash, storageKeyHash common.Hash
-					proofKeyHash.SetBytes(hexutil.FromHex(storageProof.Key))
-					storageKeyHash.SetBytes(uint256.NewInt(0).SetBytes(storageKey).Bytes())
-					if proofKeyHash != storageKeyHash {
+					var proofKeyHashBytes, storageKeyBytes []byte
+					proofKeyHashBytes = hexutil.FromHex(storageProof.Key)
+					storageKeyBytes = storageKey
+					if !bytes.Equal(proofKeyHashBytes, storageKeyBytes) {
 						continue
 					}
 					found = true
