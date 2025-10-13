@@ -79,7 +79,6 @@ type FilesItem struct {
 
 //var _ FilesItem = (*filesItem)(nil)
 
-// TODO: understand and map this variant
 func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
 	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
