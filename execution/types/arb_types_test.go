@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -105,4 +106,66 @@ func TestArbitrumDepsitTx(t *testing.T) {
 	require.NoError(t, tx.MarshalBinary(&b))
 
 	require.Equal(t, rawInitial, b.Bytes())
+}
+
+func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
+	gasUsedVals := []uint64{0, 32000}
+
+	for _, gasUsed := range gasUsedVals {
+		two := big.NewInt(2)
+		chainID := big.NewInt(1)
+
+		requestId := common.HexToHash("0x0123")
+		from := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		retryTo := common.HexToAddress("0x0000000000000000000000000000000000000002")
+		beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000B5")
+		feeRefund := common.HexToAddress("0x0000000000000000000000000000000000000003")
+
+		tx := &ArbitrumSubmitRetryableTx{
+			ChainId:          chainID,
+			RequestId:        requestId,
+			From:             from,
+			L1BaseFee:        big.NewInt(0),
+			DepositValue:     big.NewInt(1000),
+			GasFeeCap:        two,
+			Gas:              60000,
+			RetryTo:          &retryTo,
+			RetryValue:       two,
+			Beneficiary:      beneficiary,
+			MaxSubmissionFee: big.NewInt(7),
+			FeeRefundAddr:    feeRefund,
+			RetryData:        []byte("data"),
+			EffectiveGasUsed: gasUsed,
+		}
+
+		var buf bytes.Buffer
+		require.NoError(t, tx.EncodeRLP(&buf))
+
+		// Decode using your generic RLP transaction decoder
+		stream := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		decoded, err := DecodeRLPTransaction(stream, false)
+		require.NoError(t, err)
+
+		tx2, ok := decoded.(*ArbitrumSubmitRetryableTx)
+		require.True(t, ok, "decoded type should be *ArbitrumSubmitRetryableTx")
+
+		// Field-by-field equality
+		require.EqualValues(t, tx.ChainId, tx2.ChainId)
+		require.EqualValues(t, tx.RequestId, tx2.RequestId)
+		require.EqualValues(t, tx.From, tx2.From)
+		require.EqualValues(t, tx.L1BaseFee, tx2.L1BaseFee)
+		require.EqualValues(t, tx.DepositValue, tx2.DepositValue)
+		require.EqualValues(t, tx.GasFeeCap, tx2.GasFeeCap)
+		require.EqualValues(t, tx.Gas, tx2.Gas)
+		require.EqualValues(t, tx.RetryTo, tx2.RetryTo)
+		require.EqualValues(t, tx.RetryValue, tx2.RetryValue)
+		require.EqualValues(t, tx.Beneficiary, tx2.Beneficiary)
+		require.EqualValues(t, tx.MaxSubmissionFee, tx2.MaxSubmissionFee)
+		require.EqualValues(t, tx.FeeRefundAddr, tx2.FeeRefundAddr)
+		require.EqualValues(t, tx.RetryData, tx2.RetryData)
+		require.EqualValues(t, tx.EffectiveGasUsed, tx2.EffectiveGasUsed)
+
+		// With NoTimeBoosted embedded, this should be false.
+		require.False(t, tx2.IsTimeBoosted())
+	}
 }

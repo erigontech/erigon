@@ -137,6 +137,15 @@ func MarshalReceipt(
 				fields["l1BlockNumber"] = hexutil.Uint64(arbTx.L1BlockNumber)
 			}
 		}
+
+		// For ArbitrumSubmitRetryableTx we have to take the effective gas used from txn itself and correct cumulativeGasUsed
+		if arbitrumTx, ok := txn.(*types.ArbitrumSubmitRetryableTx); ok {
+			// Find the cumulative gas used by subtracting the gas used from receipt
+			cumulativeGasUSed := receipt.CumulativeGasUsed - receipt.GasUsed
+			fields["effectiveGasPrice"] = hexutil.Uint64(cumulativeGasUSed + arbitrumTx.EffectiveGasUsed)
+			// gasUsed is what transaction keeps
+			fields["gasUsed"] = hexutil.Uint64(arbitrumTx.EffectiveGasUsed)
+		}
 	}
 	return fields
 }

@@ -1396,6 +1396,7 @@ type ArbitrumSubmitRetryableTx struct {
 	MaxSubmissionFee *big.Int
 	FeeRefundAddr    common.Address
 	RetryData        []byte // contract invocation input data
+	EffectiveGasUsed uint64
 }
 
 func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
@@ -1413,6 +1414,7 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 		MaxSubmissionFee: new(big.Int),
 		FeeRefundAddr:    tx.FeeRefundAddr,
 		RetryData:        common.CopyBytes(tx.RetryData),
+		EffectiveGasUsed: tx.EffectiveGasUsed,
 	}
 	if tx.ChainId != nil {
 		cpy.ChainId.Set(tx.ChainId)
@@ -1533,6 +1535,9 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize() (payloadSize int, gasLen int)
 	size += 20
 	size += rlp.StringLen(tx.RetryData)
 
+	size++
+	size += rlp.IntLenExcludingHead(tx.EffectiveGasUsed)
+
 	return size, gasLen
 }
 
@@ -1631,6 +1636,10 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 
 	// RetryData ([]byte)
 	if err := rlp.EncodeString(tx.RetryData, w, b); err != nil {
+		return err
+	}
+
+	if err := rlp.EncodeInt(tx.EffectiveGasUsed, w, b); err != nil {
 		return err
 	}
 
@@ -1843,6 +1852,12 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	// Decode RetryData ([]byte)
 	if tx.RetryData, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read RetryData: %w", err)
+	}
+
+	if s.MoreDataInList() {
+		if tx.EffectiveGasUsed, err = s.Uint(); err != nil {
+			return fmt.Errorf("read EffectiveGasUSed: %w", err)
+		}
 	}
 
 	// End the RLP list.
