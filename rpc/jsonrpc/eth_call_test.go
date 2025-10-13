@@ -513,14 +513,14 @@ func contractInvocationData(val byte) []byte {
 
 func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
 	var (
-		signer           = types.LatestSignerForChainID(nil)
-		bankKey, _       = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		bankAddress      = crypto.PubkeyToAddress(bankKey.PublicKey)
-		receiverKey, err = crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
-		receiverAddress  = crypto.PubkeyToAddress(receiverKey.PublicKey)
-		bankFunds        = big.NewInt(1e9)
-		contract         = hexutil.MustDecode(contractHexString)
-		gspec            = &types.Genesis{
+		signer          = types.LatestSignerForChainID(nil)
+		bankKey, _      = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		bankAddress     = crypto.PubkeyToAddress(bankKey.PublicKey)
+		receiverKey, _  = crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
+		receiverAddress = crypto.PubkeyToAddress(receiverKey.PublicKey)
+		bankFunds       = big.NewInt(1e9)
+		contract        = hexutil.MustDecode(contractHexString)
+		gspec           = &types.Genesis{
 			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 			//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
