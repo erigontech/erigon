@@ -68,7 +68,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
-	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultMaxStepsInFrozenFile, dirs, logger)
+	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultFrozenStepsThreshold, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Close)
 	h.salt.Store(&salt)
@@ -916,7 +916,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxSpan := h.stepSize * config3.DefaultMaxStepsInFrozenFile
+	maxSpan := h.stepSize * config3.DefaultFrozenStepsThreshold
 
 	for {
 		if stop := func() bool {

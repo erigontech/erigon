@@ -65,7 +65,7 @@ type InvertedIndex struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
 	stepSize             uint64 // amount of transactions inside single aggregation step
-	maxStepsInFrozenFile uint64 // starting from this number of steps, the file is considered frozen
+	frozenStepsThreshold uint64 // starting from this number of steps, the file is considered frozen
 
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
@@ -92,7 +92,7 @@ type iiVisible struct {
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, maxStepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
+func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, frozenStepsThreshold uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -114,7 +114,7 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, maxStepsInFrozenFile uin
 		logger:     logger,
 
 		stepSize:             stepSize,
-		maxStepsInFrozenFile: maxStepsInFrozenFile,
+		frozenStepsThreshold: frozenStepsThreshold,
 	}
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
@@ -210,7 +210,7 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.maxStepsInFrozenFile, ii.FilenameBase, "ef", ii.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.frozenStepsThreshold, ii.FilenameBase, "ef", ii.logger) {
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
 			ii.dirtyFiles.Set(dirtyFile)
 		}
@@ -440,7 +440,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		visible:              ii._visible,
 		files:                files,
 		stepSize:             ii.stepSize,
-		maxStepsInFrozenFile: ii.maxStepsInFrozenFile,
+		frozenStepsThreshold: ii.frozenStepsThreshold,
 		name:                 ii.Name,
 		salt:                 ii.salt.Load(),
 	}
@@ -513,7 +513,7 @@ type InvertedIndexRoTx struct {
 	// ef *multiencseq.SequenceBuilder // re-usable
 	salt                 *uint32
 	stepSize             uint64
-	maxStepsInFrozenFile uint64
+	frozenStepsThreshold uint64
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -1210,7 +1210,7 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
-	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize, ii.maxStepsInFrozenFile)
+	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize, ii.frozenStepsThreshold)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence

@@ -58,8 +58,8 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// Frozen: file containing Aggregator.maxStepsInFrozenFile steps. Completely immutable.
-	// Cold: file containing < Aggregator.maxStepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
+	// Frozen: file containing Aggregator.frozenStepsThreshold steps. Completely immutable.
+	// Cold: file containing < Aggregator.frozenStepsThreshold steps. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
 	frozen   bool         // immutable, don't need atomic
 	refcount atomic.Int32 // only for `frozen=false`
@@ -84,10 +84,10 @@ func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *Snapsho
 	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
 
-func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
+func newFilesItem(startTxNum, endTxNum, stepSize uint64, frozenStepsThreshold uint64) *FilesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep >= stepsInFrozenFile
+	frozen := endStep-startStep >= frozenStepsThreshold
 	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
@@ -223,7 +223,7 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 }
 
-func filterDirtyFiles(fileNames []string, stepSize, maxStepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
+func filterDirtyFiles(fileNames []string, stepSize, frozenStepsThreshold uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
 	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
@@ -257,7 +257,7 @@ func filterDirtyFiles(fileNames []string, stepSize, maxStepsInFrozenFile uint64,
 		//   1-2.kv: [8, 16)
 		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
 
-		var newFile = newFilesItem(startTxNum, endTxNum, stepSize, maxStepsInFrozenFile)
+		var newFile = newFilesItem(startTxNum, endTxNum, stepSize, frozenStepsThreshold)
 		res = append(res, newFile)
 	}
 	return res

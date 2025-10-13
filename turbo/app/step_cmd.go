@@ -143,13 +143,13 @@ func stepRebase(cliCtx *cli.Context) error {
 	fmt.Printf("\nMANUAL CHANGES REQUIRED:\n\n")
 	fmt.Printf("On db/config3/config3.go, change the following constants:\n\n")
 	fmt.Printf("const DefaultStepSize = %d\n", newStepSize)
-	newFrozenSteps := config3.DefaultMaxStepsInFrozenFile / factor
+	newFrozenSteps := config3.DefaultFrozenStepsThreshold / factor
 	if decr {
-		newFrozenSteps = config3.DefaultMaxStepsInFrozenFile * factor
+		newFrozenSteps = config3.DefaultFrozenStepsThreshold * factor
 	}
-	fmt.Printf("const DefaultMaxStepsInFrozenFile = %d\n", newFrozenSteps)
+	fmt.Printf("const DefaultFrozenStepsThreshold = %d\n", newFrozenSteps)
 	fmt.Printf("\nCompile erigon binary with those settings before running the rebased datadir.\n")
-	fmt.Printf("\nIf the erigon binary from the branch you are running supports, you can use the: --%s %d flag instead of modifying the DefaultMaxStepsInFrozenFile constant.", utils.ErigonDBMaxStepsInFrozenSnapshotsFlag.Name, newFrozenSteps)
+	fmt.Printf("\nIf the erigon binary from the branch you are running supports, you can use the: --%s %d flag instead of modifying the DefaultFrozenStepsThreshold constant.", utils.ErigonDBFrozenStepsThresholdFlag.Name, newFrozenSteps)
 
 	return nil
 }

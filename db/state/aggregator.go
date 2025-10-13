@@ -60,7 +60,7 @@ type Aggregator struct {
 	iis                  []*InvertedIndex
 	dirs                 datadir.Dirs
 	stepSize             uint64
-	maxStepsInFrozenFile uint64
+	frozenStepsThreshold uint64
 
 	dirtyFilesLock           sync.Mutex
 	visibleFilesLock         sync.RWMutex
@@ -95,7 +95,7 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, maxStepsInFrozenFile uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, frozenStepsThreshold uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -104,7 +104,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, maxStepsInF
 		onFilesDelete:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		stepSize:               stepSize,
-		maxStepsInFrozenFile:   maxStepsInFrozenFile,
+		frozenStepsThreshold:   frozenStepsThreshold,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
@@ -170,7 +170,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 }
 
 func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, a.maxStepsInFrozenFile, dirs, logger)
+	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, a.frozenStepsThreshold, dirs, logger)
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 	if ii := a.searchII(cfg.Name); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", cfg.Name)
 	}
-	ii, err := NewInvertedIndex(cfg, a.stepSize, a.maxStepsInFrozenFile, dirs, logger)
+	ii, err := NewInvertedIndex(cfg, a.stepSize, a.frozenStepsThreshold, dirs, logger)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 }
 
 func (a *Aggregator) StepSize() uint64             { return a.stepSize }
-func (a *Aggregator) MaxStepsInFrozenFile() uint64 { return a.maxStepsInFrozenFile }
+func (a *Aggregator) FrozenStepsThreshold() uint64 { return a.frozenStepsThreshold }
 func (a *Aggregator) Dirs() datadir.Dirs           { return a.dirs }
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
@@ -806,7 +806,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	mxRunningMerges.Inc()
 	defer mxRunningMerges.Dec()
 
-	maxSpan := a.maxStepsInFrozenFile * a.StepSize()
+	maxSpan := a.frozenStepsThreshold * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		a.cleanAfterMerge(nil)

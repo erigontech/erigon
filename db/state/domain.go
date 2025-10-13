@@ -98,7 +98,7 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
-func NewDomain(cfg statecfg.DomainCfg, stepSize, maxStepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg statecfg.DomainCfg, stepSize, frozenStepsThreshold uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -113,7 +113,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, maxStepsInFrozenFile uint64, di
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.Hist, stepSize, maxStepsInFrozenFile, dirs, logger); err != nil {
+	if d.History, err = NewHistory(cfg.Hist, stepSize, frozenStepsThreshold, dirs, logger); err != nil {
 		return nil, err
 	}
 
@@ -299,7 +299,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	l := filterDirtyFiles(fileNames, d.stepSize, d.maxStepsInFrozenFile, d.FilenameBase, "kv", d.logger)
+	l := filterDirtyFiles(fileNames, d.stepSize, d.frozenStepsThreshold, d.FilenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
 		dirtyFile.frozen = false
 
@@ -544,7 +544,7 @@ type DomainRoTx struct {
 	visible              *domainVisible
 	name                 kv.Domain
 	stepSize             uint64
-	maxStepsInFrozenFile uint64
+	frozenStepsThreshold uint64
 	ht                   *HistoryRoTx
 	salt                 *uint32
 
@@ -615,7 +615,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	return &DomainRoTx{
 		name:                 d.Name,
 		stepSize:             d.stepSize,
-		maxStepsInFrozenFile: d.maxStepsInFrozenFile,
+		frozenStepsThreshold: d.frozenStepsThreshold,
 		d:                    d,
 		ht:                   d.History.BeginFilesRo(),
 		visible:              d._visible,
@@ -1295,7 +1295,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.maxStepsInFrozenFile)
+	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.frozenStepsThreshold)
 	fi.frozen = false
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx

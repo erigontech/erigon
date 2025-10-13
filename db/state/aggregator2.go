@@ -23,7 +23,7 @@ type AggOpts struct { //nolint:gocritic
 	dirs                 datadir.Dirs
 	logger               log.Logger
 	stepSize             uint64
-	maxStepsInFrozenFile uint64
+	frozenStepsThreshold uint64
 
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
@@ -36,7 +36,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 		schema:               statecfg.Schema,
 		dirs:                 dirs,
 		stepSize:             config3.DefaultStepSize,
-		maxStepsInFrozenFile: config3.DefaultMaxStepsInFrozenFile,
+		frozenStepsThreshold: config3.DefaultFrozenStepsThreshold,
 		genSaltIfNeed:        false,
 		sanityOldNaming:      false,
 		disableFsync:         false,
@@ -60,7 +60,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, opts.maxStepsInFrozenFile, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, opts.frozenStepsThreshold, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -101,8 +101,8 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 // Setters
 
 func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
-func (opts AggOpts) MaxStepsInFrozenFile(s uint64) AggOpts { //nolint:gocritic
-	opts.maxStepsInFrozenFile = s
+func (opts AggOpts) FrozenStepsThreshold(steps uint64) AggOpts { //nolint:gocritic
+	opts.frozenStepsThreshold = steps
 	return opts
 }
 func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic

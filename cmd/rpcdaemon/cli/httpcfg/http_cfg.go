@@ -107,5 +107,5 @@ type HttpCfg struct {
 
 	RPCSlowLogThreshold time.Duration
 
-	ErigonDBMaxStepsInFrozenSnapshots uint64
+	ErigonDBFrozenStepsThreshold uint64
 }

@@ -183,7 +183,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketSubscribeLogsChannelSize, utils.WSSubscribeLogsChannelSize.Name, utils.WSSubscribeLogsChannelSize.Value, utils.WSSubscribeLogsChannelSize.Usage)
 
-	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBMaxStepsInFrozenSnapshots, utils.ErigonDBMaxStepsInFrozenSnapshotsFlag.Name, utils.ErigonDBMaxStepsInFrozenSnapshotsFlag.Value, utils.ErigonDBMaxStepsInFrozenSnapshotsFlag.Usage)
+	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBFrozenStepsThreshold, utils.ErigonDBFrozenStepsThresholdFlag.Name, utils.ErigonDBFrozenStepsThresholdFlag.Value, utils.ErigonDBFrozenStepsThresholdFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -431,13 +431,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 
-		if cfg.ErigonDBMaxStepsInFrozenSnapshots == config3.DefaultMaxStepsInFrozenFile {
-			logger.Info("Using max steps in frozen snapshots", "steps", cfg.ErigonDBMaxStepsInFrozenSnapshots)
+		if cfg.ErigonDBFrozenStepsThreshold == config3.DefaultFrozenStepsThreshold {
+			logger.Info("Using frozen steps threshold", "steps", cfg.ErigonDBFrozenStepsThreshold)
 		} else {
-			logger.Warn("OVERRIDING MAX STEPS IN FROZEN SNAPSHOTS; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", cfg.ErigonDBMaxStepsInFrozenSnapshots, "default", config3.DefaultMaxStepsInFrozenFile)
+			logger.Warn("OVERRIDING FROZEN STEPS THRESHOLD; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", cfg.ErigonDBFrozenStepsThreshold, "default", config3.DefaultFrozenStepsThreshold)
 		}
 
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).MaxStepsInFrozenFile(cfg.ErigonDBMaxStepsInFrozenSnapshots).Open(ctx, rawDB)
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).FrozenStepsThreshold(cfg.ErigonDBFrozenStepsThreshold).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
