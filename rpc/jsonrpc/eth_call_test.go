@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -27,22 +28,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -152,6 +153,13 @@ func TestGetProof(t *testing.T) {
 			stateVal:    2,
 		},
 		{
+			name:        "currentBlockWithStateAndShortKeys",
+			addr:        contractAddr,
+			blockNum:    3,
+			storageKeys: []hexutil.Bytes{{0x0}, {0x4}, {0x8}, {0x0a}},
+			stateVal:    2,
+		},
+		{
 			name:        "currentBlockWithMissingState",
 			addr:        contractAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
@@ -217,10 +225,10 @@ func TestGetProof(t *testing.T) {
 			for _, storageKey := range tt.storageKeys {
 				found := false
 				for _, storageProof := range proof.StorageProof {
-					var proofKeyHash, storageKeyHash common.Hash
-					proofKeyHash.SetBytes(hexutil.FromHex(storageProof.Key))
-					storageKeyHash.SetBytes(uint256.NewInt(0).SetBytes(storageKey).Bytes())
-					if proofKeyHash != storageKeyHash {
+					var proofKeyHashBytes, storageKeyBytes []byte
+					proofKeyHashBytes = hexutil.FromHex(storageProof.Key)
+					storageKeyBytes = storageKey
+					if !bytes.Equal(proofKeyHashBytes, storageKeyBytes) {
 						continue
 					}
 					found = true

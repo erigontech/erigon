@@ -26,8 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func TestBloom(t *testing.T) {
@@ -85,7 +85,7 @@ func TestBloomExtensively(t *testing.T) {
 
 func BenchmarkBloom9(b *testing.B) {
 	test := []byte("testestestest")
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Bloom9(test)
 	}
 }
@@ -93,7 +93,7 @@ func BenchmarkBloom9(b *testing.B) {
 func BenchmarkBloom9Lookup(b *testing.B) {
 	toTest := []byte("testtest")
 	bloom := new(Bloom)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		bloom.Test(toTest)
 	}
 }

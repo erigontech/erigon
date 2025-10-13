@@ -28,11 +28,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common/dir"
+
 	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func prepareLoremDict(t *testing.T) *Decompressor {

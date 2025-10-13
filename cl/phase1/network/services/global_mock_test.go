@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type mockFuncs struct {

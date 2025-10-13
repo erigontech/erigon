@@ -58,7 +58,7 @@ There're two mods of bumper: `CLI` and `TUI`:
 run tool with `go run ./cmd/bumper bump`
 
 ```
-Schema Versions                                                                                                     
+Bumper 1.0.1                                                                                                     
 ╭────────────────────╮  ╭──────────────────────────────────────────────────╮                                        
 │Schemas             │  │accounts                                          │                                        
 │ Schemas            │  │ Part      Key     Current   Min     Status       │                                        

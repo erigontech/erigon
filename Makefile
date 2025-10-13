@@ -46,6 +46,12 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
+CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
+ifeq ($(CGO_CXXFLAGS),)
+	CGO_CXXFLAGS += -g
+	CGO_CXXFLAGS += -O2
+endif
+
 BUILD_TAGS =
 
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
@@ -68,7 +74,7 @@ GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLA
 GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
 DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
 GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
-GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
+GOTEST = $(GO_BUILD_ENV) CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GODEBUG=cgocheck=0 GOTRACEBACK=1 GOEXPERIMENT=synctest $(GO) test $(GO_FLAGS) ./...
 
 GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
 
@@ -187,20 +193,11 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib-short:
-	@cd erigon-lib && $(MAKE) test-short
-
-test-erigon-lib-all:
-	@cd erigon-lib && $(MAKE) test-all
-
-test-erigon-lib-all-race:
-	@cd erigon-lib && $(MAKE) test-all-race
-
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short
+test-short:
 	@{ \
 		$(GOTEST) -short > run.log 2>&1; \
 		STATUS=$$?; \
@@ -209,7 +206,7 @@ test-short: test-erigon-lib-short
 	}
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all
+test-all:
 	@{ \
 		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
 		STATUS=$$?; \
@@ -218,7 +215,7 @@ test-all: test-erigon-lib-all
 	}
 
 ## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race
+test-all-race:
 	@{ \
 		$(GOTEST) --timeout 60m -race > run.log 2>&1; \
 		STATUS=$$?; \
@@ -331,22 +328,19 @@ kurtosis-cleanup:
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
+	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:
-	@cd erigon-lib && $(MAKE) lintci
-	@./erigon-lib/tools/golangci_lint.sh
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 ## lint:                              run all linters
-lint:
-	@cd erigon-lib && $(MAKE) lint
-	@./erigon-lib/tools/golangci_lint.sh
-	@./erigon-lib/tools/mod_tidy_check.sh
+lint: 
+	@./tools/golangci_lint.sh
+	@./tools/mod_tidy_check.sh
 
 ## tidy:                              `go mod tidy`
 tidy:
-	cd erigon-lib && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
@@ -467,7 +461,7 @@ gen:
 ## bindings:                          generate test contracts and core contracts
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./execution/tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/state/contracts/
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:

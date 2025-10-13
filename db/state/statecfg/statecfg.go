@@ -90,6 +90,16 @@ type InvIdxCfg struct {
 	Accessors Accessors
 }
 
+type BlockDataFilesCfg struct {
+	Version BlockDataVersionTypes
+	Name    string
+}
+
+type BlockIdxFilesCfg struct {
+	Version BlockIdxVersionTypes
+	Name    string
+}
+
 func (ii InvIdxCfg) GetVersions() VersionTypes {
 	return VersionTypes{
 		II: &ii.Version,
@@ -113,8 +123,34 @@ type IIVersionTypes struct {
 	AccessorEFI version.Versions
 }
 
+type BlockDataVersionTypes struct {
+	AccessorIdx version.Versions
+	DataSeg     version.Versions
+}
+
+type BlockIdxVersionTypes struct {
+	AccessorIdx version.Versions
+}
+
+func (b BlockDataFilesCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		BlockData: &b.Version,
+		BlockIdx: &BlockIdxVersionTypes{
+			b.Version.AccessorIdx,
+		},
+	}
+}
+
+func (b BlockIdxFilesCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		BlockIdx: &b.Version,
+	}
+}
+
 type VersionTypes struct {
-	Hist   *HistVersionTypes
-	Domain *DomainVersionTypes
-	II     *IIVersionTypes
+	Hist      *HistVersionTypes
+	Domain    *DomainVersionTypes
+	II        *IIVersionTypes
+	BlockData *BlockDataVersionTypes
+	BlockIdx  *BlockIdxVersionTypes
 }

@@ -56,10 +56,10 @@ import (
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/anacrolix/torrent/webseed"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
@@ -662,7 +662,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			noMetadata = append(noMetadata, t.Name())
 			continue
 		}
-		stats.FilesTotal += len(t.Files())
 
 		torrentName := t.Name()
 		torrentComplete := t.Complete().Bool()
@@ -867,7 +866,6 @@ func (d *Downloader) VerifyData(
 		// set limit here just to make load predictable, not to control Disk/CPU consumption
 		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 		for _, t := range toVerify {
-			t := t
 			g.Go(func() error {
 				defer completedFiles.Add(1)
 				return VerifyFileFailFast(ctx, t, d.SnapDir(), &completedBytes)
