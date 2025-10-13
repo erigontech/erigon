@@ -157,7 +157,7 @@ func TestGetProof(t *testing.T) {
 		{
 			name:        "currentBlockWithStateAndShortKeys",
 			addr:        contractAddr,
-			blockNum:    3,
+			blockNum:    4,
 			storageKeys: []hexutil.Bytes{{0x0}, {0x4}, {0x8}, {0x0a}},
 			stateVal:    2,
 		},
