@@ -31,17 +31,18 @@ import (
 	"github.com/erigontech/erigon/execution/chain/params"
 )
 
-// See https://github.com/ethereum/execution-spec-tests/pull/2050
+// See BPO1 and so on in
+// https://github.com/ethereum/execution-spec-tests/blob/main/src/ethereum_test_forks/forks/forks.py
 var blobSchedule = map[string]*params.BlobConfig{
 	"bpo1": {
-		Target:                9,
-		Max:                   14,
-		BaseFeeUpdateFraction: 8832827,
+		Target:                10,
+		Max:                   15,
+		BaseFeeUpdateFraction: 8346193,
 	},
 	"bpo2": {
 		Target:                14,
 		Max:                   21,
-		BaseFeeUpdateFraction: 13739630,
+		BaseFeeUpdateFraction: 11684671,
 	},
 	"bpo3": {
 		Target:                21,
