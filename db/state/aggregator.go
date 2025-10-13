@@ -418,12 +418,12 @@ func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
-		d.CompressCfg.Workers = i
-		d.History.CompressorCfg.Workers = i
-		d.History.InvertedIndex.CompressorCfg.Workers = i
+		d.CompressCfg.WordLvlCfg.Workers = i
+		d.History.CompressorCfg.WordLvlCfg.Workers = i
+		d.History.InvertedIndex.CompressorCfg.WordLvlCfg.Workers = i
 	}
 	for _, ii := range a.iis {
-		ii.CompressorCfg.Workers = i
+		ii.CompressorCfg.WordLvlCfg.Workers = i
 	}
 }
 
@@ -618,7 +618,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
+	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.WordLvlCfg.Workers)
 
 	var (
 		txFrom        = a.FirstTxNumOfStep(step)
@@ -794,7 +794,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) 
 }
 
 func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
-	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
+	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.WordLvlCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
@@ -936,6 +936,7 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	if dbg.NoPrune() {
 		return false
 	}
+
 	for _, d := range at.d {
 		if d.CanPruneUntil(tx, untilTx) {
 			return true
@@ -999,7 +1000,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		}
 		if stat == nil || stat.PrunedNothing() {
 			if !fullStat.PrunedNothing() {
-				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
+				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String()) //, "stat", fullStat.String())
 			}
 			return false, nil
 		}

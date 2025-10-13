@@ -17,18 +17,18 @@
 package seg
 
 //Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
+//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `WordLevelCompression` passed to constructor
 
 // Maybe in future will add support of io.Reader/Writer interfaces to this decorators
 // Maybe in future will merge decorators into it's parents
 
 type Reader struct {
 	*Getter
-	nextValue bool            // if nextValue true then getter.Next() expected to return value
-	c         FileCompression // compressed
+	nextValue bool                 // if nextValue true then getter.Next() expected to return value
+	c         WordLevelCompression // compressed
 }
 
-func NewReader(g *Getter, c FileCompression) *Reader {
+func NewReader(g *Getter, c WordLevelCompression) *Reader {
 	return &Reader{Getter: g, c: c}
 }
 
@@ -90,10 +90,10 @@ func (g *Reader) Skip() (uint64, int) {
 type Writer struct {
 	*Compressor
 	keyWritten bool
-	c          FileCompression
+	c          WordLevelCompression
 }
 
-func NewWriter(kv *Compressor, compress FileCompression) *Writer {
+func NewWriter(kv *Compressor, compress WordLevelCompression) *Writer {
 	return &Writer{kv, false, compress}
 }
 
@@ -129,7 +129,7 @@ func (c *Writer) Close() {
 	}
 }
 
-func DetectCompressType(getter *Getter) (compressed FileCompression) {
+func DetectCompressType(getter *Getter) (compressed WordLevelCompression) {
 	keyCompressed := func() (compressed bool) {
 		defer func() {
 			if rec := recover(); rec != nil {

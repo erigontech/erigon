@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func makeSegFilePath(path string, suffix string) string {
@@ -38,7 +40,7 @@ func makeSegFilePath(path string, suffix string) string {
 }
 
 func SegZipEx(ctx context.Context, words *RawWordsFile, outPath string, tmpDirPath string, logger log.Logger) error {
-	compressor, err := NewCompressor(ctx, "SegZip", outPath, tmpDirPath, DefaultCfg, log.LvlDebug, logger)
+	compressor, err := NewCompressor(ctx, "SegZip", outPath, tmpDirPath, DefaultWordLvlCfg, log.LvlDebug, logger)
 	if err != nil {
 		return err
 	}

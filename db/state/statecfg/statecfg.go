@@ -10,7 +10,7 @@ type DomainCfg struct {
 	Hist HistCfg
 
 	Name        kv.Domain
-	Compression seg.FileCompression
+	Compression seg.WordLevelCompression
 	CompressCfg seg.Cfg
 	Accessors   Accessors // list of indexes for given domain
 	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
@@ -60,8 +60,8 @@ type HistCfg struct {
 	HistoryValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 
 	Accessors     Accessors
-	CompressorCfg seg.Cfg             // Compression settings for history files
-	Compression   seg.FileCompression // defines type of Compression for history files
+	CompressorCfg seg.Cfg                  // Compression settings for history files
+	Compression   seg.WordLevelCompression // defines type of Compression for history files
 	HistoryIdx    kv.InvertedIdx
 
 	Version HistVersionTypes
@@ -84,8 +84,8 @@ type InvIdxCfg struct {
 	ValuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	Name         kv.InvertedIdx
 
-	Compression   seg.FileCompression // compression type for inverted index keys and values
-	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
+	Compression   seg.WordLevelCompression // compression type for inverted index keys and values
+	CompressorCfg seg.Cfg                  // advanced configuration for compressor encodings
 
 	Accessors Accessors
 }

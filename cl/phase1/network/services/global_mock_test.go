@@ -19,6 +19,7 @@ package services
 import (
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common/ssz"
 )
