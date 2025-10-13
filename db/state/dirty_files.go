@@ -79,17 +79,12 @@ type FilesItem struct {
 
 //var _ FilesItem = (*filesItem)(nil)
 
-// TODO: inline this function
-func newFilesItem(startTxNum, endTxNum, stepSize, maxStepsInFrozenFile uint64) *FilesItem {
-	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, maxStepsInFrozenFile)
-}
-
 // TODO: understand and map this variant
 func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
-	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
+	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
 
-func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
+func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep >= stepsInFrozenFile
