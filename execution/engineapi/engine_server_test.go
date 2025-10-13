@@ -18,29 +18,31 @@ package engineapi
 
 import (
 	"bytes"
+	"context"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -111,8 +113,17 @@ func TestGetBlobsV1(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
-	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool)
+	ctx, cancel := context.WithCancel(ctx)
+	var eg errgroup.Group
+	t.Cleanup(func() {
+		err := eg.Wait() // wait for clean exit
+		require.ErrorIs(err, context.Canceled)
+	})
+	t.Cleanup(cancel)
+	eg.Go(func() error {
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)
@@ -152,8 +163,17 @@ func TestGetBlobsV2(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, mockSentry.HeaderDownload(), nil, false, true, false, true)
-	engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, txPool, nil)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool)
+	ctx, cancel := context.WithCancel(ctx)
+	var eg errgroup.Group
+	t.Cleanup(func() {
+		err := eg.Wait() // wait for clean exit
+		require.ErrorIs(err, context.Canceled)
+	})
+	t.Cleanup(cancel)
+	eg.Go(func() error {
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
 	require.NoError(err)

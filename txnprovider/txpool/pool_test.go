@@ -29,13 +29,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -45,9 +43,11 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/testutil"
+	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -314,7 +314,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Prague"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Prague"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
 	require.NotEqual(t, pool, nil)
 
@@ -915,9 +915,9 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			cfg := txpoolcfg.DefaultConfig
 
-			chainConfig := testutil.Forks["Paris"]
+			chainConfig := testforks.Forks["Paris"]
 			if test.isShanghai {
-				chainConfig = testutil.Forks["Shanghai"]
+				chainConfig = testforks.Forks["Shanghai"]
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -1039,7 +1039,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, testutil.Forks["Prague"])
+	copier.Copy(&chainConfig, testforks.Forks["Prague"])
 	chainConfig.ChainID = maxUint256.ToBig()
 	cache := kvcache.NewDummy()
 	logger := log.New()
@@ -1093,7 +1093,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
 	require.NotEqual(pool, nil)
@@ -1277,7 +1277,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Shanghai"], nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Shanghai"], nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(txnPool, nil)
 
@@ -1388,7 +1388,7 @@ func TestBlobSlots(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -1471,7 +1471,7 @@ func TestGetBlobsV1(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testutil.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	pool.blockGasLimit.Store(30000000)

@@ -25,9 +25,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/event"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 )
@@ -37,10 +38,11 @@ const (
 )
 
 type ServiceConfig struct {
-	Store     Store
-	BorConfig *borcfg.BorConfig
-	Client    Client
-	Logger    log.Logger
+	Store       Store
+	ChainConfig *chain.Config
+	BorConfig   *borcfg.BorConfig
+	Client      Client
+	Logger      log.Logger
 }
 
 type Service struct {
@@ -57,6 +59,7 @@ type Service struct {
 
 func NewService(config ServiceConfig) *Service {
 	logger := config.Logger
+	chainConfig := config.ChainConfig
 	borConfig := config.BorConfig
 	store := config.Store
 	client := config.Client
@@ -100,11 +103,11 @@ func NewService(config ServiceConfig) *Service {
 	return &Service{
 		logger:                    logger,
 		store:                     store,
-		reader:                    NewReader(borConfig, store, logger),
+		reader:                    NewReader(chainConfig, borConfig, store, logger),
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
 		spanScraper:               spanScraper,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, chainConfig, borConfig, store.SpanBlockProducerSelections()),
 		client:                    client,
 	}
 }
@@ -191,6 +194,7 @@ func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 		return err
 	}
 	if !ok {
+		s.logger.Debug(heimdallLogPrefix("synchronizing because last span not found"), "blockNum", blockNum)
 		return s.synchronizeSpans(ctx)
 	}
 
@@ -199,13 +203,15 @@ func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 		return err
 	}
 	if !ok {
+		s.logger.Debug(heimdallLogPrefix("synchronizing because last producer selection not found"), "blockNum", blockNum)
 		return s.synchronizeSpans(ctx)
 	}
 
 	if lastSpan.EndBlock < blockNum || lastProducerSelection.EndBlock < blockNum {
+		s.logger.Debug(heimdallLogPrefix("synchronizing because last span or producer selection is behind"), "blockNum", blockNum, "lastSpan", lastSpan, "lastProducerSlection", lastProducerSelection)
 		return s.synchronizeSpans(ctx)
 	}
-
+	s.logger.Debug(heimdallLogPrefix("no need to synchronize"), "blockNum", blockNum, "lastSpan", lastSpan)
 	return nil
 }
 
@@ -222,6 +228,37 @@ func (s *Service) synchronizeSpans(ctx context.Context) error {
 		return err
 	}
 
+	return nil
+}
+
+// wait until heimdall CatchingUp status is false
+func (s *Service) WaitUntilHeimdallIsSynced(ctx context.Context, retryInterval time.Duration) error {
+	logInterval := 10 * time.Second
+	var lastLogTime time.Time
+
+	catchingUp, err := s.IsCatchingUp(ctx)
+	if err != nil {
+		return err
+	}
+	if !catchingUp {
+		return nil
+	}
+	for catchingUp {
+		if time.Since(lastLogTime) >= logInterval {
+			s.logger.Warn("waiting for heimdall to be synced")
+			lastLogTime = time.Now()
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryInterval):
+			catchingUp, err = s.IsCatchingUp(ctx)
+			if err != nil {
+				return err
+			}
+		}
+
+	}
 	return nil
 }
 

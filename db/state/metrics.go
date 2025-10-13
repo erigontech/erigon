@@ -17,8 +17,8 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (

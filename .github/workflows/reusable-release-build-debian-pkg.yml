@@ -34,10 +34,13 @@ jobs:
           sudo dpkg --clear-avail
 
       - name: Extract archives and rename amd64v2 to amd64
+        env:
+          APPLICATION: ${{ inputs.application }}
+          VERSION: ${{ inputs.version }}
         run: |
-          tar xvf ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar
-          mv -v ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64
-          tar xvf ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar
+          tar xvf ${APPLICATION}_v${VERSION}_linux_amd64v2.tar
+          mv -v ${APPLICATION}_v${VERSION}_linux_amd64v2 ${APPLICATION}_v${VERSION}_linux_amd64
+          tar xvf ${APPLICATION}_v${VERSION}_linux_arm64.tar
           cat <<-END > postinst.template
           #!/bin/bash
           echo "WARNING: erigon package does not install any configurations nor services."
@@ -51,13 +54,15 @@ jobs:
       - name: Build debian package for amd64
         env:
           ARCH: "amd64"
+          APPLICATION: ${{ inputs.application }}
+          VERSION: ${{ inputs.version }}
         run: |
-          mkdir -p deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin \
-                   deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN
-          install postinst.template deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/postinst
-          cat <<-END  > deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
-          Package: ${{ inputs.application }}
-          Version: ${{ inputs.version }}
+          mkdir -p deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin \
+                   deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN
+          install postinst.template deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/postinst
+          cat <<-END  > deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/control
+          Package: ${APPLICATION}
+          Version: ${VERSION}
           Section: misc
           Priority: optional
           Architecture: ${ARCH}
@@ -66,20 +71,22 @@ jobs:
           Vcs-Git: https://github.com/erigontech/erigon.git
           Vcs-Browser: https://github.com/erigontech/erigon 
           END
-          install -v -p ${{ inputs.application }}_v${{ inputs.version }}_linux_${ARCH}/* \
-                      deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin
-          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}
+          install -v -p ${APPLICATION}_v${VERSION}_linux_${ARCH}/* \
+                      deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin
+          dpkg-deb --build --root-owner-group deb-pkg/${APPLICATION}_${VERSION}_${ARCH}
 
       - name: Build debian package for arm64
         env:
           ARCH: "arm64"
+          APPLICATION: ${{ inputs.application }}
+          VERSION: ${{ inputs.version }}
         run: |
-          mkdir -p deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin \
-                    deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN
-          install postinst.template deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/postinst
-          cat <<-END  > deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
-          Package: ${{ inputs.application }}
-          Version: ${{ inputs.version }}
+          mkdir -p deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin \
+                    deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN
+          install postinst.template deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/postinst
+          cat <<-END  > deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/control
+          Package: ${APPLICATION}
+          Version: ${VERSION}
           Section: misc
           Priority: optional
           Architecture: ${ARCH}
@@ -89,17 +96,20 @@ jobs:
           Vcs-Browser: https://github.com/erigontech/erigon 
           END
           echo "debug start"
-          cat deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
+          cat deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/control
           echo "debug end"
-          install -v -p ${{ inputs.application }}_v${{ inputs.version }}_linux_${ARCH}/* \
-                      deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin
-          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}
+          install -v -p ${APPLICATION}_v${VERSION}_linux_${ARCH}/* \
+                      deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin
+          dpkg-deb --build --root-owner-group deb-pkg/${APPLICATION}_${VERSION}_${ARCH}
 
       - name: Debug output
+        env:
+          APPLICATION: ${{ inputs.application }}
+          VERSION: ${{ inputs.version }}
         run: |
           cd ./deb-pkg
-          sha256sum ${{ inputs.application }}_${{ inputs.version }}_amd64.deb > ${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
-          sha256sum ${{ inputs.application }}_${{ inputs.version }}_arm64.deb > ${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
+          sha256sum ${APPLICATION}_${VERSION}_amd64.deb > ${APPLICATION}_${VERSION}_amd64.deb.checksum
+          sha256sum ${APPLICATION}_${VERSION}_arm64.deb > ${APPLICATION}_${VERSION}_arm64.deb.checksum
           ls -l *deb *.checksum
 
       - name: Upload artifact amd64.deb

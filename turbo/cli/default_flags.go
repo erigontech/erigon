@@ -138,6 +138,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.StaticPeersFlag,
 	&utils.TrustedPeersFlag,
 	&utils.MaxPeersFlag,
+	&utils.MaxPendingPeersFlag,
 	&utils.ChainFlag,
 	&utils.DeveloperPeriodFlag,
 	&utils.VMEnableDebugFlag,
@@ -178,6 +179,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
+	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
@@ -254,5 +256,4 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
-	&utils.ElBlockDownloaderV2,
 }

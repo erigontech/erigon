@@ -27,11 +27,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 /*
@@ -390,7 +390,9 @@ type (
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
+	StepsInFiles(entitySet ...Domain) Step
 }
+
 type TemporalTx interface {
 	Tx
 	TemporalGetter

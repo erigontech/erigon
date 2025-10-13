@@ -24,7 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -60,6 +60,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		data:       stx.Data,
 		accessList: stx.AccessList,
 		checkNonce: true,
+		checkGas:   true,
 	}
 	if !rules.IsCancun {
 		return nil, errors.New("BlobTx transactions require Cancun")

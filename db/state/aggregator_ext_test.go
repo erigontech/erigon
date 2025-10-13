@@ -31,10 +31,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -44,6 +44,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -74,6 +76,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
+	hph := commitment.NewHexPatriciaHashed(1, nil)
+
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
@@ -98,6 +102,16 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
+
+		if (txNum+1)%stepSize == 0 {
+			trieState, err := hph.EncodeCurrentState(nil)
+			require.NoError(t, err)
+			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
+			encodedState, err := cs.Encode()
+			require.NoError(t, err)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, KeyCommitmentState, encodedState, txNum, nil, 0)
+			require.NoError(t, err)
+		}
 	}
 
 	// flush and build files
@@ -592,7 +606,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	}
 
 	// 3. calculate commitment with all data +removed key
-	expectedHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "")
+	expectedHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 	domains.Close()
 
@@ -620,7 +634,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
 	require.NoError(t, err)
 
-	resultHash, err := domains.ComputeCommitment(context.Background(), false, txNum/stepSize, txNum, "")
+	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, txNum/stepSize, txNum, "", nil)
 	require.NoError(t, err)
 
 	t.Logf("result hash: %x", resultHash)
@@ -677,7 +691,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, txNum, "")
+			_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, txNum, "", nil)
 			require.NoError(t, err)
 		}
 
@@ -753,7 +767,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *state.SharedDomains, tx
 		}
 		if txNum%commitEvery == 0 {
 			// domains.SetTrace(true)
-			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, txNum, "")
+			rh, err := domains.ComputeCommitment(context.Background(), tx, true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			t.Logf("commitment %x txn=%d", rh, txNum)
 		}

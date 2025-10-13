@@ -24,16 +24,16 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 const reorgTooDeepDepth = 3
@@ -185,7 +185,7 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 	return cc.chainRW.HasBlock(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }
 

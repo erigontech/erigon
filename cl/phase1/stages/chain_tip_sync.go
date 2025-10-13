@@ -6,13 +6,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.

@@ -37,22 +37,15 @@ import (
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -65,16 +58,23 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig/features"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -89,8 +89,8 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 )
 
 var rootCmd = &cobra.Command{
@@ -650,8 +650,19 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 	if err != nil {
 		return err
 	}
-	go stopAuthenticatedRpcServer(ctx, engineInfo, logger)
-	return nil
+	<-ctx.Done()
+	logger.Info("Exiting Engine...")
+	engineInfo.Srv.Stop()
+	if engineInfo.EngineSrv != nil {
+		engineInfo.EngineSrv.Stop()
+	}
+	if engineInfo.EngineListener != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownErr := engineInfo.EngineListener.Shutdown(shutdownCtx)
+		logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint, "shutdownErr", shutdownErr)
+	}
+	return ctx.Err()
 }
 
 func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -848,24 +859,6 @@ func startAuthenticatedRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger 
 		return nil, fmt.Errorf("could not start RPC api for engine: %w", err)
 	}
 	return &engineInfo{Srv: srv, EngineSrv: engineSrv, EngineListener: engineListener, EngineHttpEndpoint: engineHttpEndpoint}, nil
-}
-
-func stopAuthenticatedRpcServer(ctx context.Context, engineInfo *engineInfo, logger log.Logger) {
-	defer func() {
-		engineInfo.Srv.Stop()
-		if engineInfo.EngineSrv != nil {
-			engineInfo.EngineSrv.Stop()
-		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if engineInfo.EngineListener != nil {
-			_ = engineInfo.EngineListener.Shutdown(shutdownCtx)
-			logger.Info("Engine HTTP endpoint close", "url", engineInfo.EngineHttpEndpoint)
-		}
-	}()
-	<-ctx.Done()
-	logger.Info("Exiting Engine...")
 }
 
 // isWebsocket checks the header of a http request for a websocket upgrade request.

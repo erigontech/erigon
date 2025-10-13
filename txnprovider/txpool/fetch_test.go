@@ -30,15 +30,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 func TestFetch(t *testing.T) {
@@ -51,7 +51,8 @@ func TestFetch(t *testing.T) {
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient := direct.NewSentryClientDirect(direct.ETH67, m)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	require.NoError(t, err)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
@@ -60,13 +61,13 @@ func TestFetch(t *testing.T) {
 	// Send one transaction id
 	wg.Add(1)
 	errs := m.Send(&sentryproto.InboundMessage{
-		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
 		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
 		PeerId: peerID,
 	})
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("sending new pool txn hashes 66 (%d): %v", i, err)
+			t.Errorf("sending new pool txn hashes 68 (%d): %v", i, err)
 		}
 	}
 	wg.Wait()
@@ -99,7 +100,9 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -129,7 +132,9 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -164,7 +169,9 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
 		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
@@ -204,7 +211,9 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, log.New())
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
@@ -321,7 +330,7 @@ func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sent
 	return &sentryproto.SetStatusReply{}, nil
 }
 func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
-	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil
+	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	ms.lock.Lock()

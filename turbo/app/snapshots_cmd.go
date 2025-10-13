@@ -39,18 +39,20 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/compress"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -66,11 +68,10 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/features"
-	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig/features"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -381,6 +382,15 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "skip-size-check", Required: false, Value: false},
 			}),
 		},
+		{
+			Name:        "step-rebase",
+			Action:      stepRebase,
+			Description: "Rebase snapshots step size",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "new-step-size", Required: true, DefaultText: strconv.FormatUint(config3.DefaultStepSize, 10)},
+			}),
+		},
 	},
 }
 
@@ -547,6 +557,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
+		_maxFrom = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -915,6 +926,23 @@ func CheckBorChain(chainName string) bool {
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	var sum uint64
 	var maxTo uint64
+	verMap := map[string]map[string]version.Versions{
+		"headers": {
+			"seg": snaptype2.Headers.Versions(),
+			"idx": snaptype2.Headers.Indexes()[0].Version,
+		},
+		"transactions": {
+			"seg": snaptype2.Transactions.Versions(),
+			"idx": snaptype2.Transactions.Indexes()[0].Version,
+		},
+		"bodies": {
+			"seg": snaptype2.Bodies.Versions(),
+			"idx": snaptype2.Bodies.Indexes()[0].Version,
+		},
+		"transactions-to-block": {
+			"idx": snaptype2.Transactions.Indexes()[1].Version,
+		},
+	}
 	// Check block sanity
 	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
@@ -938,22 +966,44 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		}
 		sum += res.To - res.From
 		headerSegName := info.Name()
+		headerSegVer := res.Version
+		if !headerSegVer.Eq(verMap["headers"]["seg"].Current) {
+			return fmt.Errorf("expected version %s, filename: %s", verMap["header"]["seg"].Current.String(), info.Name())
+		}
+		idxHeaderName := strings.Replace(headerSegName, ".seg", ".idx", 1)
+		headerIdxVer := verMap["headers"]["idx"].Current
+		idxHeaderName = strings.Replace(idxHeaderName, headerSegVer.String(), headerIdxVer.String(), 1)
+		if _, err := os.Stat(filepath.Join(snapDir, idxHeaderName)); err != nil {
+			return fmt.Errorf("missing index file %s", idxHeaderName)
+		}
 		// check that all files exist
 		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
+			segVer := verMap[snapType]["seg"].Current
+			segName = strings.Replace(segName, headerSegVer.String(), segVer.String(), 1)
 			// check that the file exist
-			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, segName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing file %s", segName)
 			}
 			// check that the index file exist
 			idxName := strings.Replace(segName, ".seg", ".idx", 1)
-			if _, err := os.Stat(filepath.Join(snapDir, idxName)); err != nil {
+			idxVer := verMap[snapType]["idx"].Current
+			idxName = strings.Replace(idxName, segVer.String(), idxVer.String(), 1)
+			if exists, err := dir2.FileExist(filepath.Join(snapDir, idxName)); err != nil {
+				return err
+			} else if !exists {
 				return fmt.Errorf("missing index file %s", idxName)
 			}
 			if snapType == "transactions" {
 				// check that the tx index file exist
 				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-				if _, err := os.Stat(filepath.Join(snapDir, txIdxName)); err != nil {
+				txIdxVer := verMap["transactions-to-block"]["idx"].Current
+				txIdxName = strings.Replace(txIdxName, segVer.String(), txIdxVer.String(), 1)
+				if exists, err := dir2.FileExist(filepath.Join(snapDir, txIdxName)); err != nil {
+					return err
+				} else if !exists {
 					return fmt.Errorf("missing tx index file %s", txIdxName)
 				}
 			}

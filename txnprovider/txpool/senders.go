@@ -24,12 +24,12 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 

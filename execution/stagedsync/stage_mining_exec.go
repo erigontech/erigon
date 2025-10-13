@@ -26,25 +26,25 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/polygon/aa"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -244,7 +244,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		return err
 	}
 
-	rh, err := txc.Doms.ComputeCommitment(ctx, true, blockHeight, txNum, s.LogPrefix())
+	rh, err := txc.Doms.ComputeCommitment(ctx, txc.Tx.(kv.TemporalTx), true, blockHeight, txNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}

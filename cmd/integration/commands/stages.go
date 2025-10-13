@@ -37,17 +37,15 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/core/genesiswrite"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -60,22 +58,24 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/features"
-	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/eth/integrity"
-	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	stages2 "github.com/erigontech/erigon/execution/stages"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/eth"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig/features"
+	"github.com/erigontech/erigon/node/ethconsensusconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -606,7 +606,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	dirs := datadir.New(datadirCli)
-	if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
 	domains, err := dbstate.NewSharedDomains(tx, logger)
@@ -659,7 +659,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+			if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -763,7 +763,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, tx) })
+		return db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetSenders(ctx, tx) })
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -846,7 +846,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	_, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
-		if err := reset2.ResetExec(ctx, db); err != nil {
+		if err := rawdbreset.ResetExec(ctx, db); err != nil {
 			return err
 		}
 		return nil
@@ -1012,7 +1012,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		if err := stagedsync.StageCustomTraceReset(ctx, db, cfg.Produce); err != nil {
 			return err
 		}
-		//if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
+		//if err := rawdbreset.Reset(ctx, db, stages.CustomTrace); err != nil {
 		//	return err
 		//}
 		return nil
@@ -1090,7 +1090,7 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if reset {
-		return reset2.Reset(ctx, db, stages.Execution)
+		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
 
 	br, _ := blocksIO(db, logger)
@@ -1143,7 +1143,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
-		return db.Update(ctx, reset2.ResetTxLookup)
+		return db.Update(ctx, rawdbreset.ResetTxLookup)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -1368,7 +1368,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
-	borSn.DownloadComplete() // mark as ready
+	if borSn != nil {
+		borSn.DownloadComplete() // mark as ready
+	}
 	engine := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
@@ -1377,6 +1379,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 		genesisBlock,
 		chainConfig.ChainID.Uint64(),
 		logger,
+		blockReader,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }

@@ -24,17 +24,17 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/forkid"
 )
 
 var ProtocolToString = map[uint]string{
-	direct.ETH67: "eth67",
 	direct.ETH68: "eth68",
+	direct.ETH69: "eth69",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -44,6 +44,8 @@ const ProtocolName = "eth"
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
+
+var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18}
 
 const (
 	// Protocol messages in eth/64
@@ -62,23 +64,10 @@ const (
 	NewPooledTransactionHashesMsg = 0x08
 	GetPooledTransactionsMsg      = 0x09
 	PooledTransactionsMsg         = 0x0a
+	BlockRangeUpdateMsg           = 0x11
 )
 
 var ToProto = map[uint]map[uint64]sentryproto.MessageId{
-	direct.ETH67: {
-		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
-		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
-		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
-		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
-		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_66,
-		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_66,
-		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
-		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
-		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
-		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
-		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
-	},
 	direct.ETH68: {
 		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
 		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
@@ -93,23 +82,25 @@ var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 	},
+	direct.ETH69: {
+		StatusMsg:                     sentryproto.MessageId_STATUS_69,
+		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_69, // Modified in eth/69
+		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, // Modified in eth/69
+	},
 }
 
 var FromProto = map[uint]map[sentryproto.MessageId]uint64{
-	direct.ETH67: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
-		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
-		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
-		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
-		sentryproto.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
-		sentryproto.MessageId_RECEIPTS_66:                      ReceiptsMsg,
-		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
-		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
-		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
-		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
-	},
 	direct.ETH68: {
 		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
@@ -123,6 +114,21 @@ var FromProto = map[uint]map[sentryproto.MessageId]uint64{
 		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
 		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+	},
+	direct.ETH69: {
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		sentryproto.MessageId_GET_RECEIPTS_69:                  GetReceiptsMsg,
+		sentryproto.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            BlockRangeUpdateMsg,
 	},
 }
 
@@ -140,6 +146,16 @@ type StatusPacket struct {
 	Head            common.Hash
 	Genesis         common.Hash
 	ForkID          forkid.ID
+}
+
+// StatusPacket69 is the network packet for the status message for eth/69 and later.
+type StatusPacket69 struct {
+	ProtocolVersion           uint32
+	NetworkID                 uint64
+	Genesis                   common.Hash
+	ForkID                    forkid.ID
+	MinimumBlock, LatestBlock uint64
+	LatestBlockHash           common.Hash
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
@@ -280,8 +296,8 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 }
 
 // SanityCheck verifies that the values are reasonable, as a DoS protection
-func (request *NewBlockPacket) SanityCheck() error {
-	return request.Block.SanityCheck()
+func (nbp *NewBlockPacket) SanityCheck() error {
+	return nbp.Block.SanityCheck()
 }
 
 // GetBlockBodiesPacket represents a block body query.
@@ -362,9 +378,16 @@ type ReceiptsRLPPacket66 struct {
 	RequestId uint64
 	ReceiptsRLPPacket
 }
+type BlockRangeUpdatePacket struct {
+	Earliest, Latest uint64
+	LatestHash       common.Hash
+}
 
 func (*StatusPacket) Name() string { return "Status" }
 func (*StatusPacket) Kind() byte   { return StatusMsg }
+
+func (*StatusPacket69) Name() string { return "Status" }
+func (*StatusPacket69) Kind() byte   { return StatusMsg }
 
 func (*NewBlockHashesPacket) Name() string { return "NewBlockHashes" }
 func (*NewBlockHashesPacket) Kind() byte   { return NewBlockHashesMsg }
@@ -389,3 +412,6 @@ func (*GetReceiptsPacket) Kind() byte   { return GetReceiptsMsg }
 
 func (*ReceiptsPacket) Name() string { return "Receipts" }
 func (*ReceiptsPacket) Kind() byte   { return ReceiptsMsg }
+
+func (*BlockRangeUpdatePacket) Name() string { return "BlockRangeUpdate" }
+func (*BlockRangeUpdatePacket) Kind() byte   { return BlockRangeUpdateMsg }

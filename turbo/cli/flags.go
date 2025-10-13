@@ -25,16 +25,16 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -257,33 +257,30 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 
 	cfg.Prune = mode
-	if ctx.String(BatchSizeFlag.Name) != "" {
-		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
-		if err != nil {
+
+	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
+		if err := cfg.BatchSize.UnmarshalText([]byte(batchSize)); err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
 
-	if ctx.String(EtlBufferSizeFlag.Name) != "" {
+	if bufsize := ctx.String(EtlBufferSizeFlag.Name); bufsize != "" {
 		sizeVal := datasize.ByteSize(0)
-		size := &sizeVal
-		err := size.UnmarshalText([]byte(ctx.String(EtlBufferSizeFlag.Name)))
-		if err != nil {
+		if err := (&sizeVal).UnmarshalText([]byte(bufsize)); err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
-		etl.BufferOptimalSize = *size
+		etl.BufferOptimalSize = sizeVal
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
-	if ctx.String(BodyCacheLimitFlag.Name) != "" {
-		err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(ctx.String(BodyCacheLimitFlag.Name)))
-		if err != nil {
+	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
+		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
 		}
 	}
 
-	if ctx.String(SyncLoopThrottleFlag.Name) != "" {
-		syncLoopThrottle, err := time.ParseDuration(ctx.String(SyncLoopThrottleFlag.Name))
+	if loopThrottle := ctx.String(SyncLoopThrottleFlag.Name); loopThrottle != "" {
+		syncLoopThrottle, err := time.ParseDuration(loopThrottle)
 		if err != nil {
 			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}

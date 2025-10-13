@@ -5,12 +5,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -21,94 +21,26 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	executiontests "github.com/erigontech/erigon/execution/tests"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 )
 
-type Transactor struct {
-	rpcApiClient requests.RequestGenerator
-	chainId      *big.Int
-}
-
-func NewTransactor(rpcApiClient requests.RequestGenerator, chainId *big.Int) Transactor {
-	return Transactor{
-		rpcApiClient: rpcApiClient,
-		chainId:      chainId,
-	}
-}
-
-func (t Transactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to common.Address, amount *big.Int) (types.Transaction, error) {
-	signedTxn, err := t.createSimpleTransfer(from, to, amount)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create a simple transfer: %w", err)
-	}
-
-	_, err = t.rpcApiClient.SendTransaction(signedTxn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send a transaction: %w", err)
-	}
-
-	return signedTxn, nil
-}
-
-func (t Transactor) createSimpleTransfer(
-	from *ecdsa.PrivateKey,
-	to common.Address,
-	amount *big.Int,
-) (types.Transaction, error) {
-	amountU256, _ := uint256.FromBig(amount)
-	fromAddr := crypto.PubkeyToAddress(from.PublicKey)
-	txnCount, err := t.rpcApiClient.GetTransactionCount(fromAddr, rpc.PendingBlock)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction count: %w", err)
-	}
-
-	gasPrice, err := t.rpcApiClient.GasPrice()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get gas price: %w", err)
-	}
-
-	gasPriceU256, _ := uint256.FromBig(gasPrice)
-	nonce := txnCount.Uint64()
-	txn := &types.LegacyTx{
-		CommonTx: types.CommonTx{
-			Nonce:    nonce,
-			GasLimit: 21_000,
-			To:       &to,
-			Value:    amountU256,
-		},
-		GasPrice: gasPriceU256,
-	}
-
-	signer := types.LatestSignerForChainID(t.chainId)
-	signedTxn, err := types.SignTx(txn, *signer, from)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign a transaction: %w", err)
-	}
-
-	return signedTxn, nil
-}
-
 type EncryptedTransactor struct {
-	Transactor
+	base             executiontests.Transactor
 	encryptorPrivKey *ecdsa.PrivateKey
 	sequencer        *shuttercontracts.Sequencer
 }
 
 func NewEncryptedTransactor(
-	base Transactor,
+	base executiontests.Transactor,
 	encryptorPrivKey *ecdsa.PrivateKey,
 	sequencerAddr string,
 	cb bind.ContractBackend,
@@ -119,10 +51,14 @@ func NewEncryptedTransactor(
 	}
 
 	return EncryptedTransactor{
-		Transactor:       base,
+		base:             base,
 		encryptorPrivKey: encryptorPrivKey,
 		sequencer:        sequencer,
 	}
+}
+
+func (et EncryptedTransactor) SubmitSimpleTransfer(from *ecdsa.PrivateKey, to common.Address, amount *big.Int) (types.Transaction, error) {
+	return et.base.SubmitSimpleTransfer(from, to, amount)
 }
 
 func (et EncryptedTransactor) SubmitEncryptedTransfer(
@@ -132,7 +68,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 	amount *big.Int,
 	eon shutter.Eon,
 ) (EncryptedSubmission, error) {
-	signedTxn, err := et.createSimpleTransfer(from, to, amount)
+	signedTxn, err := et.base.CreateSimpleTransfer(from, to, amount)
 	if err != nil {
 		return EncryptedSubmission{}, err
 	}
@@ -148,13 +84,13 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 		return EncryptedSubmission{}, err
 	}
 
-	block, err := et.rpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+	block, err := et.base.RpcClient().GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 	if err != nil {
 		return EncryptedSubmission{}, err
 	}
 
 	gasLimit := new(big.Int).SetUint64(signedTxn.GetGasLimit())
-	opts, err := bind.NewKeyedTransactorWithChainID(et.encryptorPrivKey, et.chainId)
+	opts, err := bind.NewKeyedTransactorWithChainID(et.encryptorPrivKey, et.base.ChainId())
 	if err != nil {
 		return EncryptedSubmission{}, err
 	}

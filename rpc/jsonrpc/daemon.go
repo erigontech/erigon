@@ -17,13 +17,13 @@
 package jsonrpc
 
 import (
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/clique"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"

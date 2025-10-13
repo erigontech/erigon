@@ -22,12 +22,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
@@ -74,8 +74,10 @@ type TransitionConfiguration struct {
 	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
-// BlobsBundleV1 holds the blobs of an execution payload
-type BlobsBundleV1 struct {
+// BlobsBundle holds the blobs of an execution payload.
+// It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
+// and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
+type BlobsBundle struct {
 	Commitments []hexutil.Bytes `json:"commitments" gencodec:"required"`
 	Proofs      []hexutil.Bytes `json:"proofs"      gencodec:"required"`
 	Blobs       []hexutil.Bytes `json:"blobs"       gencodec:"required"`
@@ -113,7 +115,7 @@ type ForkChoiceUpdatedResponse struct {
 type GetPayloadResponse struct {
 	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
 	BlockValue            *hexutil.Big      `json:"blockValue"`
-	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
+	BlobsBundle           *BlobsBundle      `json:"blobsBundle"`
 	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
 	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
 }
@@ -241,11 +243,11 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 	return res
 }
 
-func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundleV1) *BlobsBundleV1 {
+func ConvertBlobsFromRpc(bundle *typesproto.BlobsBundle) *BlobsBundle {
 	if bundle == nil {
 		return nil
 	}
-	res := &BlobsBundleV1{
+	res := &BlobsBundle{
 		Commitments: make([]hexutil.Bytes, len(bundle.Commitments)),
 		Proofs:      make([]hexutil.Bytes, len(bundle.Proofs)),
 		Blobs:       make([]hexutil.Bytes, len(bundle.Blobs)),

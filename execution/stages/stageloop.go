@@ -25,13 +25,10 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -40,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -49,7 +44,12 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/turbo/services"
@@ -195,6 +195,19 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 		if !more {
 			break
 		}
+	}
+	if hook != nil {
+		var headerStageProgress uint64
+		if err := db.View(ctx, func(tx kv.Tx) (err error) {
+			headerStageProgress, err = stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		hook.LastNewBlockSeen(headerStageProgress)
 	}
 	return nil
 }
@@ -486,13 +499,13 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync uint64) error {
 	return nil
 }
 
-func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
+func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	tx, err := db.BeginRo(ctx)
+	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}

@@ -26,12 +26,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -42,13 +40,14 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -88,8 +87,6 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
-
-	applyWorker, applyWorkerMining *exec3.Worker
 }
 
 func StageExecuteBlocksCfg(
@@ -115,24 +112,22 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:                db,
-		prune:             pm,
-		batchSize:         batchSize,
-		chainConfig:       chainConfig,
-		engine:            engine,
-		vmConfig:          vmConfig,
-		dirs:              dirs,
-		notifications:     notifications,
-		stateStream:       stateStream,
-		badBlockHalt:      badBlockHalt,
-		blockReader:       blockReader,
-		hd:                hd,
-		genesis:           genesis,
-		historyV3:         true,
-		syncCfg:           syncCfg,
-		silkworm:          silkworm,
-		applyWorker:       exec3.NewWorker(nil, log.Root(), vmConfig.Tracer, context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
-		applyWorkerMining: exec3.NewWorker(nil, log.Root(), vmConfig.Tracer, context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+		db:            db,
+		prune:         pm,
+		batchSize:     batchSize,
+		chainConfig:   chainConfig,
+		engine:        engine,
+		vmConfig:      vmConfig,
+		dirs:          dirs,
+		notifications: notifications,
+		stateStream:   stateStream,
+		badBlockHalt:  badBlockHalt,
+		blockReader:   blockReader,
+		hd:            hd,
+		genesis:       genesis,
+		historyV3:     true,
+		syncCfg:       syncCfg,
+		silkworm:      silkworm,
 	}
 }
 
@@ -140,9 +135,6 @@ func StageExecuteBlocksCfg(
 
 func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
-	if !initialCycle {
-		workersCount = 1
-	}
 
 	prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
 	if err != nil {
@@ -157,8 +149,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return nil
 	}
 
-	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, dbg.Exec3Parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil
@@ -221,7 +212,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		}
 	}
 	if err := unwindExec3State(ctx, tx, domains, u.UnwindPoint, txNum, accumulator, changeSet, logger); err != nil {
-		return fmt.Errorf("ParallelExecutionState.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
+		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
@@ -230,6 +221,8 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 }
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
+
+const trace bool = true
 
 func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedDomains,
 	blockUnwindTo, txUnwindTo uint64,
@@ -243,22 +236,29 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedD
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {
-				var acc accounts.Account
-				if err := accounts.DeserialiseV3(&acc, v); err != nil {
+				var account accounts.Account
+				if err := accounts.DeserialiseV3(&account, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
 				var address common.Address
 				copy(address[:], k)
 
-				newV := accounts.SerialiseV3(&acc)
+				if dbg.TraceUnwinds {
+					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+				}
+
+				newV := accounts.SerialiseV3(&account)
 				if accumulator != nil {
-					accumulator.ChangeAccount(address, acc.Incarnation, newV)
+					accumulator.ChangeAccount(address, account.Incarnation, newV)
 				}
 			} else {
 				var address common.Address
 				copy(address[:], k)
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
+				}
+				if dbg.TraceUnwinds {
+					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x\n", blockUnwindTo, txUnwindTo, address)
 				}
 			}
 			return nil
@@ -270,6 +270,13 @@ func unwindExec3State(ctx context.Context, tx kv.TemporalRwTx, sd *state.SharedD
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
 			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
+		}
+		if dbg.TraceUnwinds {
+			if v == nil {
+				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [empty]\n", blockUnwindTo, txUnwindTo, address, location)
+			} else {
+				fmt.Printf("unwind (Block:%d,Tx:%d): storage [%x %x] => [%x]\n", blockUnwindTo, txUnwindTo, address, location, v)
+			}
 		}
 		return nil
 	}
@@ -361,8 +368,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		defer tx.Rollback()
 		txc.SetTx(tx)
 	}
-	logPrefix := u.LogPrefix()
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
+
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Ttx)
 	if err != nil {
@@ -438,7 +445,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
 	quickPruneTimeout := 250 * time.Millisecond
 
-	if s.ForwardProgress > uint64(dbg.MaxReorgDepth) && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
@@ -451,7 +458,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if err := rawdb.PruneTable(
 			tx,
 			kv.ChangeSets3,
-			s.ForwardProgress-uint64(dbg.MaxReorgDepth),
+			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
 			ctx,
 			pruneDiffsLimitOnChainTip,
 			pruneTimeout,

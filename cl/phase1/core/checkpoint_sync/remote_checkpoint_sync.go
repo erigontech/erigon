@@ -6,23 +6,28 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/log/v3"
 )
+
+const CheckpointHttpTimeout = 60 * time.Second
 
 // RemoteCheckpointSync is a CheckpointSyncer that fetches the checkpoint state from a remote endpoint.
 type RemoteCheckpointSync struct {
 	beaconConfig *clparams.BeaconChainConfig
 	net          clparams.NetworkType
+	timeout      time.Duration
 }
 
 func NewRemoteCheckpointSync(beaconConfig *clparams.BeaconChainConfig, net clparams.NetworkType) CheckpointSyncer {
 	return &RemoteCheckpointSync{
 		beaconConfig: beaconConfig,
 		net:          net,
+		timeout:      CheckpointHttpTimeout,
 	}
 }
 
@@ -33,8 +38,11 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 	}
 
 	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {
+		ctxWithTimeout, cancel := context.WithTimeout(ctx, r.timeout)
+		defer cancel()
+
 		log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+		req, err := http.NewRequestWithContext(ctxWithTimeout, http.MethodGet, uri, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -69,6 +77,7 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		if err != nil {
 			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
 		}
+		log.Info("[Checkpoint Sync] Beacon state retrieved", "slot", slot)
 		return beaconState, nil
 	}
 
@@ -83,5 +92,4 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		log.Warn("[Checkpoint Sync] Failed to fetch beacon state", "uri", uri, "err", err)
 	}
 	return nil, err
-
 }

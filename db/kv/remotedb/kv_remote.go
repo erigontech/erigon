@@ -29,15 +29,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // generate the messages and services
@@ -50,6 +50,7 @@ type remoteOpts struct {
 }
 
 var _ kv.TemporalTx = (*tx)(nil)
+var _ kv.TemporalRoDB = (*DB)(nil)
 
 type DB struct {
 	remoteKV     remoteproto.KVClient
@@ -239,9 +240,10 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo { panic("not implemented") }
+func (tx *tx) AggTx() any                                  { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx                   { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo                   { panic("not implemented") }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step { panic("not implemented") }
 
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
 func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }

@@ -1,28 +1,36 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-
 const acceptedWorkflows = [
-    'QA - RPC Integration Tests',
-    'QA - RPC Integration Tests (Polygon)',
-    'QA - RPC Integration Tests (Gnosis)',
-    'QA - RPC Performance Tests',
-    'QA - Snapshot Download',
-    'QA - Sync from scratch',
-    'QA - Sync from scratch (minimal node)',
-    'QA - Sync with external CL',
-    'QA - Tip tracking',
-    'QA - Tip tracking & migration',
-    'QA - Tip tracking (Gnosis)',
-    'QA - Tip tracking (Polygon)',
-    'QA - Constrained Tip tracking',
-    'QA - TxPool performance test',
-    'QA - Clean exit (block downloading)',
-    'Kurtosis Assertoor GitHub Action',
-    'Hive EEST tests',
-    'Consensus spec',
+    '.github/workflows/ci.yml',
+    //'.github/workflows/lint.yml',
+    //'.github/workflows/manifest.yml',
+    '.github/workflows/qa-clean-exit-block-downloading.yml',
+    '.github/workflows/qa-clean-exit-snapshot-downloading.yml',
+    '.github/workflows/qa-constrained-tip-tracking.yml',
+    '.github/workflows/qa-rpc-integration-tests-gnosis.yml',
+    '.github/workflows/qa-rpc-integration-tests-latest.yml',
+    '.github/workflows/qa-rpc-integration-tests-polygon.yml',
+    '.github/workflows/qa-rpc-integration-tests.yml',
+    '.github/workflows/qa-rpc-performance-tests.yml',
+    '.github/workflows/qa-snap-download.yml',
+    '.github/workflows/qa-sync-from-scratch-minimal-node.yml',
+    '.github/workflows/qa-sync-from-scratch.yml',
+    '.github/workflows/qa-sync-with-externalcl.yml',
+    '.github/workflows/qa-tip-tracking-gnosis.yml',
+    '.github/workflows/qa-tip-tracking-polygon.yml',
+    '.github/workflows/qa-tip-tracking.yml',
+    '.github/workflows/qa-txpool-performance-test.yml',
+    '.github/workflows/test-all-erigon-race.yml',
+    //'.github/workflows/test-all-erigon.yml',
+    //'.github/workflows/test-erigon-is-library.yml',
+    '.github/workflows/test-hive-eest.yml',
+    '.github/workflows/test-hive.yml',
+    '.github/workflows/test-integration-caplin.yml',
+    '.github/workflows/test-kurtosis-assertoor.yml'
 ];
 
+// Represents a row in the summary table, which can contain strings or header objects
 type SummaryRow = (string | { data: string; header?: true })[];
 
 // Represents a result of a job in a workflow run, containing its date, SHA, conclusion, run ID, and job ID
@@ -89,6 +97,46 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     }
 }
 
+function legend() {
+    return `
+    <ul>
+        <li>${mapConclusionToIcon('success', null)} success</li>
+        <li>${mapConclusionToIcon('failure', null)} failure</li>
+        <li>${mapConclusionToIcon('cancelled', null)} cancelled due to a subsequent commit</li>
+        <li>${mapConclusionToIcon('cancelled_after_start', null)} cancelled (manually or automatically) before completion</li>
+        <li>${mapConclusionToIcon('skipped', null)} skipped</li>
+        <li>${mapConclusionToIcon('timed_out', null)} timed out</li>
+        <li>${mapConclusionToIcon('neutral', null)} ended with a neutral result</li>
+        <li>${mapConclusionToIcon('stale', null)} it took too long</li>
+        <li>${mapConclusionToIcon('action_required', null)} action required</li>
+        <li>${mapConclusionToIcon(null, 'requested')} requested</li>
+        <li>${mapConclusionToIcon(null, 'in_progress')} in progress</li>
+        <li>${mapConclusionToIcon(null, 'queued')} waiting for a runner</li>
+        <li>${mapConclusionToIcon(null, 'waiting')} waiting for a deployment protection rule to be satisfied</li>
+        <li>${mapConclusionToIcon(null, 'pending')} pending (the run is at the front of the queue but the concurrency limit has been reached)</li>
+        <li>${mapConclusionToIcon(null, 'expected')} expected (the run is waiting for a status to be reported)</li>
+        <li>${mapConclusionToIcon(null, 'startup_failure')} startup failure (the run failed during startup, not applicable here)</li>
+        <li>${mapConclusionToIcon(null, null)} unknown status or conclusion</li>
+    </ul>`;
+}
+
+// To build a legend of applied conclusions and statuses
+const applied_conclusions_and_statuses: { conclusion: string | null; status: string | null }[] = [];
+
+// Modified mapConclusionToIcon to track applied conclusions and statuses
+function mapConclusionToIconWithTracking(conclusion: string | null, status: string | null): string {
+    // Check if this conclusion/status pair is already tracked
+    const alreadyTracked = applied_conclusions_and_statuses.some(
+        (item) => item.conclusion === conclusion && item.status === status
+    );
+
+    // If not tracked, add it to the list
+    if (!alreadyTracked) {
+        applied_conclusions_and_statuses.push({ conclusion, status });
+    }
+
+    // Return the icon using the original mapping function
+    return mapConclusionToIcon(conclusion, status);}
 // Maps a job name to a more readable format, including chain information
 function mapChain(chain: string | null): string {
     if (!chain) return '';
@@ -101,6 +149,7 @@ function mapChain(chain: string | null): string {
     if (chainLowerCaseString.includes('ethereum')) return '⬢ ethereum';
     if (chainLowerCaseString.includes('sepolia')) return '🔹 sepolia';
     if (chainLowerCaseString.includes('holesky')) return '🔸 holesky';
+    if (chainLowerCaseString.includes('hoodi')) return '🔸 hoodi';
     if (chainLowerCaseString.includes('amoy')) return '🟣 amoy';
     if (chainLowerCaseString.includes('chiado')) return '🟢 chiado';
     if (chainLowerCaseString.includes('lighthouse, gnosis')) return '🟢 gnosis / lighthouse';
@@ -117,6 +166,7 @@ function cleanJobName(jobName: string): string {
         .replace(/\s*\(Mainnet\)/i, '')
         .replace(/\s*\(Ethereum\)/i, '')
         .replace(/\s*\(Holesky\)/i, '')
+        .replace(/\s*\(Hoodi\)/i, '')
         .replace(/\s*\(Sepolia\)/i, '')
         .replace(/\s*\(Amoy\)/i, '')
         .replace(/\s*\(Chiado\)/i, '')
@@ -170,8 +220,8 @@ export async function run() {
                 const runDate = new Date(run.created_at);
                 if (runDate < startDate || runDate > endDate) continue;
 
-                // Skip runs that are not in the accepted workflows
-                if (!acceptedWorkflows.includes(run.name ?? '')) {
+                // Include only tests
+                if (!acceptedWorkflows.includes(run.path ?? '')) {
                     core.info(`Skipping workflow run: ${run.name} (${run.id})`);
                     continue;
                 }
@@ -315,13 +365,19 @@ export async function run() {
             // Otherwise, sort normally
             if (a[0] < b[0]) return -1;
             if (a[0] > b[0]) return 1;
+            // If the first columns are equal (Workflow name), sort by the second column (Job name)
+            if (a[1] < b[1]) return -1;
+            if (a[1] > b[1]) return 1;
             return 0;
         });
+
+        core.info(`Legend: ${legend()}`);
 
         // Write the summary table to the GitHub Actions summary
         await core.summary
             .addHeading('Test Report - Branch ' + branch)
             .addTable(table)
+            .addDetails('Status Icon Legend', legend())
             .write();
 
     }
@@ -329,7 +385,7 @@ export async function run() {
         core.setFailed(err.message);
     }
 }
-
+ 
 // If this script is run directly, execute the run function
 if (import.meta.url === `file://${process.argv[1]}`) {
     run();

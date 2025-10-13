@@ -25,19 +25,19 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 type ChainReaderWriterEth1 struct {
@@ -417,7 +417,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 	return resp.Id, nil
 }
 
-func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
+func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &executionproto.GetAssembledBlockRequest{
 		Id: id,
 	})

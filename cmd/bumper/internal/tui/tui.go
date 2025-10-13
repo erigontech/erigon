@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"github.com/erigontech/erigon/db/version"
+	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -138,6 +139,7 @@ func (m *model) rebuildRight() {
 	add("domain", cat.Domain)
 	add("hist", cat.Hist)
 	add("ii", cat.Ii)
+	add("block", cat.Block)
 
 	cols := []table.Column{
 		{Title: "Part", Width: 8},
@@ -189,6 +191,8 @@ func (m *model) get(cat, part, key string) schema.TwoVers {
 		return c.Domain[key]
 	case "hist":
 		return c.Hist[key]
+	case "block":
+		return c.Block[key]
 	default:
 		return c.Ii[key]
 	}
@@ -205,6 +209,10 @@ func (m *model) set(cat, part, key string, fn func(*schema.TwoVers)) {
 		v := c.Hist[key]
 		fn(&v)
 		c.Hist[key] = v
+	case "block":
+		v := c.Block[key]
+		fn(&v)
+		c.Block[key] = v
 	default:
 		v := c.Ii[key]
 		fn(&v)
@@ -375,7 +383,7 @@ func (m *model) beginEdit() {
 }
 
 func (m *model) View() string {
-	title := lipgloss.NewStyle().Bold(true).Render("Schema Versions")
+	title := lipgloss.NewStyle().Bold(true).Render("Bumper 1.0.1")
 	left := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
 		lipgloss.JoinVertical(lipgloss.Left, "Schemas", m.left.View()),
 	)
@@ -448,16 +456,12 @@ func clone(s schema.Schema) schema.Schema {
 			Domain: make(schema.Group, len(c.Domain)),
 			Hist:   make(schema.Group, len(c.Hist)),
 			Ii:     make(schema.Group, len(c.Ii)),
+			Block:  make(schema.Group, len(c.Block)),
 		}
-		for k2, v := range c.Domain {
-			cc.Domain[k2] = v
-		}
-		for k2, v := range c.Hist {
-			cc.Hist[k2] = v
-		}
-		for k2, v := range c.Ii {
-			cc.Ii[k2] = v
-		}
+		maps.Copy(cc.Domain, c.Domain)
+		maps.Copy(cc.Hist, c.Hist)
+		maps.Copy(cc.Ii, c.Ii)
+		maps.Copy(cc.Block, c.Block)
 		out[k] = cc
 	}
 	return out
@@ -472,7 +476,7 @@ func equal(a, b schema.Schema) bool {
 		if !ok {
 			return false
 		}
-		if !eqGroup(ca.Domain, cb.Domain) || !eqGroup(ca.Hist, cb.Hist) || !eqGroup(ca.Ii, cb.Ii) {
+		if !eqGroup(ca.Domain, cb.Domain) || !eqGroup(ca.Hist, cb.Hist) || !eqGroup(ca.Ii, cb.Ii) || !eqGroup(ca.Block, cb.Block) {
 			return false
 		}
 	}

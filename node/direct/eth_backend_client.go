@@ -23,8 +23,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 type EthBackendClientDirect struct {
@@ -263,4 +263,8 @@ func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remotepro
 
 func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remoteproto.BlockForTxNumRequest, opts ...grpc.CallOption) (*remoteproto.BlockForTxNumResponse, error) {
 	return s.server.BlockForTxNum(ctx, in)
+}
+
+func (s *EthBackendClientDirect) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.MinimumBlockAvailableReply, error) {
+	return s.server.MinimumBlockAvailable(ctx, in)
 }
