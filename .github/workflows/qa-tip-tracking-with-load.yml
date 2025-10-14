@@ -12,10 +12,10 @@ concurrency:
 
 jobs:
   mainnet-tip-tracking-test:
-    runs-on: [self-hosted, qa, Ethereum, tip-tracking]
+    runs-on: [self-hosted, qa, tip-tracking-ext]
     timeout-minutes: 300 # 5 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.0/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.3/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 1800 # 0.5 hours
@@ -45,7 +45,7 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Run previous Erigon version and wait for sync (stabilization step)
+    - name: Run Erigon and wait for sync (stabilization step)
       id: pre_test_step
       run: |
         set +e # Disable exit on error
@@ -79,30 +79,7 @@ jobs:
           exit 1
         fi
 
-    - name: Restore Erigon Testbed Data Directory & Erigon binary
-      id: save_chaindata_step
-      run: |
-        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
-        cp $ERIGON_REFERENCE_DATA_DIR/../erigon $ERIGON_TESTBED_DATA_DIR/../
-
-    - name: Print datadir contents before upgrade (for debugging)
-      working-directory: ${{ github.workspace }}
-      run: |
-        find $ERIGON_TESTBED_DATA_DIR
-
-    # The following task runs the datadir upgrade procedure explicitly.
-    # It is unnecessary and is executed automatically by erigon when it detects the old format.
-    - name: Run the datadir upgrade procedure
-      working-directory: ${{ github.workspace }}
-      run: |
-        ./build/bin/erigon snapshots update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
-
-    - name: Print datadir contents after upgrade (for debugging)
-      working-directory: ${{ github.workspace }}
-      run: |
-        find $ERIGON_TESTBED_DATA_DIR
-
-    - name: Run Erigon, wait sync and check ability to maintain sync
+    - name: Run Erigon, wait sync and check ability to maintain sync with load
       id: test_step
       run: |
         set +e # Disable exit on error
@@ -132,15 +109,18 @@ jobs:
         fi
 
         # Check test runner script exit status
-        if [ $test_exit_status -eq 0 ]; then
-          echo "Upgrade & tip-tracking test completed successfully"
-          echo "::notice::Upgrade & tip-tracking test completed successfully"
-          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-        else
-          echo "Upgrade & tip-tracking test encountered an error"
-          echo "::error::Upgrade & tip-tracking test encountered an error"
-          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-        fi
+        #if [ $test_exit_status -eq 0 ]; then
+        #  echo "Upgrade & tip-tracking test completed successfully"
+        #  echo "::notice::Upgrade & tip-tracking test completed successfully"
+        #  echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        #else
+        #  echo "Upgrade & tip-tracking test encountered an error"
+        #  echo "::error::Upgrade & tip-tracking test encountered an error"
+        #  echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+        #fi
+        echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+        echo "::notice::This is a load test that looks for the breaking point, so it makes no sense (for now) to consider the correct outcome of the test (=ability to track the tip)"
+        echo "::notice::To see the result of the test, please check the 'sync-with-load-combined' plot in the plots artifact"
 
     - name: Upload Downloader Torrent Client Status
       if: always()
