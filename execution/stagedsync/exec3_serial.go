@@ -54,7 +54,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	var b *types.Block
 
 	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
-	lastFrozenTxNum := uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize())) - 1
+
+	var lastFrozenTxNum uint64
+	if lastFrozenStep > 0 {
+		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize())) - 1
+	}
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "serial"),
@@ -116,7 +120,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
 				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: inputTxNum <= lastFrozenTxNum,
+				HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 				Trace:            dbg.TraceTx(blockNum, txIndex),
 				Hooks:            se.hooks,
 				Logger:           se.logger,
