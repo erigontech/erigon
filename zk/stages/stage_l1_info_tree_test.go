@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
@@ -82,7 +83,7 @@ func newStageEnv(t *testing.T) *stageEnv {
 
 	l1 := syncer.NewL1Syncer(ctx, []syncer.IEtherman{em}, cntrcts, topics, 10000, 0, "latest", latest)
 	updater := l1infotree.NewUpdater(ctx, &ethconfig.Zk{L1FirstBlock: latest + 1}, l1, nil)
-	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, updater)
+	cfg := StageL1InfoTreeCfg(db1, &ethconfig.Zk{}, updater, &chain.Config{})
 
 	return &stageEnv{
 		ctx:         ctx,
