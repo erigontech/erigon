@@ -33,7 +33,7 @@ type domainGetFromFileCacheItem struct {
 
 var (
 	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 10_000))
-	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
+	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", true)
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
 
@@ -71,6 +71,8 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
 }
 
+var index uint64
+
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	d := &domainVisible{
 		name:  name,
@@ -83,7 +85,13 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
 	}
-	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
+	d.caches = &sync.Pool{New: func() any {
+		if name == kv.AccountsDomain {
+			fmt.Printf("creating cache: %d\n", index)
+			index++
+		}
+		return NewDomainGetFromFileCache(limit)
+	}}
 	return d
 }
 

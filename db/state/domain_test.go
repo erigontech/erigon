@@ -28,6 +28,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -489,6 +490,9 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 		defer tx.Rollback()
 	}
+	if txs/d.stepSize == 0 {
+		require.Fail(t, "not enough steps")
+	}
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
 		c, err := d.collate(ctx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, tx)
@@ -756,6 +760,101 @@ func TestNewSegStreamReader(t *testing.T) {
 		count++
 	}
 	require.Equal(t, keyCount, count)
+}
+
+func TestDomainCache(t *testing.T) {
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+
+	logger := log.New()
+	keyCount, txCount := uint64(4), uint64(48)
+	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
+	require.NotNil(t, data)
+	defer db.Close()
+	defer dom.Close()
+	collateAndMerge(t, db, nil, dom, txCount)
+	//maxFrozenFiles := (txCount / dom.stepSize) / config3.StepsInFrozenFile
+
+	ctx := context.Background()
+
+	rwtx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwtx.Rollback()
+
+	rwtx.ClearTable(statecfg.Schema.AccountsDomain.ValuesTable) // clear all db data (so reading is from files only)
+	rwtx.Commit()
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	// Check domain
+	dc := dom.BeginFilesRo()
+	defer dc.Close()
+
+	var k [8]byte
+	binary.BigEndian.PutUint64(k[:], 2)
+
+	for i := 0; i < 100; i++ {
+		v, _, found, err := dc.GetLatest(k[:], roTx)
+		require.NoError(t, err)
+		require.True(t, found)
+		vv := binary.BigEndian.Uint64(v)
+		require.Equal(t, uint64(31), vv)
+		dc.visible.returnGetFromFileCache(dc.getFromFileCache)
+		dc.getFromFileCache = nil
+	}
+
+	roTx.Rollback()
+	dc.Close()
+
+	// not let's populate 2-3 step and collate/prune
+	// only for keyNum=2
+
+	rwtx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwtx.Rollback()
+
+	dc = dom.BeginFilesRo()
+	writer := dc.NewWriter()
+	var k2 [8]byte
+	var v2, prevVal [8]byte
+	binary.BigEndian.PutUint64(prevVal[:], 31)
+
+	key := uint64(2)
+
+	for txNum := uint64(32); txNum < 48; txNum++ {
+		binary.BigEndian.PutUint64(k2[:], key)
+		binary.BigEndian.PutUint64(v2[:], txNum)
+
+		err = writer.PutWithPrev(k2[:], v2[:], txNum, prevVal[:], 0)
+		require.NoError(t, err)
+		prevVal = ([8]byte)(bytes.Clone(v2[:]))
+	}
+
+	err = writer.Flush(ctx, rwtx)
+	require.NoError(t, err)
+	require.NoError(t, rwtx.Commit())
+	dc.Close()
+
+	collateAndMerge(t, db, nil, dom, 64) // 64 because last step is left un-collated (but we want to collate [32-48))
+
+	roTx, err = db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	dc = dom.BeginFilesRo()
+	defer dc.Close()
+	for {
+		v, _, found, err := dc.GetLatest(k[:], roTx)
+		require.NoError(t, err)
+		require.True(t, found)
+		vv := binary.BigEndian.Uint64(v)
+		require.Equal(t, uint64(47), vv)
+		dc.getFromFileCache = nil
+	}
+
+	roTx.Rollback()
+	dc.Close()
 }
 
 // firstly we write all the data to domain
