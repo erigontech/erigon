@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	zkutils "github.com/erigontech/erigon/zk/utils"
 )
 
 type BlockGetter interface {
@@ -72,12 +73,17 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		txn := block.Transactions()[txIndex]
 		statedb.Init(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if msg.FeeCap().IsZero() && engine != nil {
+		isFree := false
+		if zkutils.IsTxFreeByZkEgps(cfg, txn) {
+			isFree = true
+		} else if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
 			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+			isFree = engine.IsServiceTransaction(msg.From(), syscall)
 		}
+
+		msg.SetIsFree(isFree)
 
 		TxContext := core.NewEVMTxContext(msg)
 		return msg, blockContext, TxContext, statedb, reader, nil
@@ -105,12 +111,17 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		effectiveGasPricePercentage, _ := hermezReader.GetEffectiveGasPricePercentage(txn.Hash())
 		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 
-		if msg.FeeCap().IsZero() && engine != nil {
+		isFree := false
+		if zkutils.IsTxFreeByZkEgps(cfg, txn) {
+			isFree = true
+		} else if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
 			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+			isFree = engine.IsServiceTransaction(msg.From(), syscall)
 		}
+
+		msg.SetIsFree(isFree)
 
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == txIndex {

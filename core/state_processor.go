@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 // applyTransaction attempts to apply a transaction to the given state database
@@ -46,13 +47,18 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		msg.SetGasPrice(CalculateEffectiveGas(msg.GasPrice(), effectiveGasPricePercentage))
 	}
 
-	if msg.FeeCap().IsZero() && engine != nil {
+	isFree := false
+	if utils.IsTxFreeByZkEgps(config, tx) {
+		isFree = true
+	} else if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
 		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		isFree = engine.IsServiceTransaction(msg.From(), syscall)
 	}
+
+	msg.SetIsFree(isFree)
 
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {

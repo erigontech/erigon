@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon-lib/types"
+	coretypes "github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/zk/utils"
 	"github.com/holiman/uint256"
 )
@@ -156,6 +157,45 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	for _, mt := range toDel {
 		discard(mt, NonceTooLow)
 	}
+}
+
+// shouldSkipBaseFee determines if a transaction falls under a zero-effective-gas category
+// configured in ZK settings, in which case it should be promoted to Pending regardless
+// of the current pending base fee.
+func (p *TxPool) shouldSkipBaseFee(mt *metaTx) bool {
+	if mt.skipBaseFeeEvaluated {
+		return mt.skipBaseFeePromotion
+	}
+
+	zkCfg := p.ethCfg.Zk
+	decision := false
+
+	// Contract deployment (To == nil)
+	if zkCfg.EffectiveGasPriceForContractDeployment == 0 && mt.Tx.Creation {
+		decision = true
+	} else {
+		// ETH transfer (non-creation with empty calldata)
+		isEthTransfer := !mt.Tx.Creation && mt.Tx.DataLen == 0
+		if zkCfg.EffectiveGasPriceForEthTransfer == 0 && isEthTransfer {
+			decision = true
+		} else if !mt.Tx.Creation && mt.Tx.DataLen > 0 {
+			// If all contract invocations are zero-effective
+			if zkCfg.EffectiveGasPriceForContractInvocation == 0 {
+				decision = true
+			} else if zkCfg.EffectiveGasPriceForErc20Transfer == 0 && mt.Tx.Rlp != nil && mt.Tx.DataLen >= 4 {
+				if tx, err := coretypes.DecodeTransaction(mt.Tx.Rlp); err == nil {
+					data := tx.GetData()
+					if utils.HasSelector(data, utils.SelectorERC20Transfer) || utils.HasSelector(data, utils.SelectorERC20TransferFrom) {
+						decision = true
+					}
+				}
+			}
+		}
+	}
+
+	mt.skipBaseFeePromotion = decision
+	mt.skipBaseFeeEvaluated = true
+	return decision
 }
 
 // zk: the implementation of best here is changed only to not take into account block gas limits as we don't care about

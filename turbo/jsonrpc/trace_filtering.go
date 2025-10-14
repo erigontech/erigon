@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 // Transaction implements trace_transaction
@@ -987,13 +988,18 @@ func (api *TraceAPIImpl) callManyTransactions_deprecated(
 			// }
 			// msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 
-			// gnosis might have a fee free account here
-			if msg.FeeCap().IsZero() && engine != nil {
+			isFree := false
+			if utils.IsTxFreeByZkEgps(cfg, tx) {
+				isFree = true
+			} else if msg.FeeCap().IsZero() && engine != nil {
+				// gnosis might have a fee free account here
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
 					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
 				}
-				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+				isFree = engine.IsServiceTransaction(msg.From(), syscall)
 			}
+
+			msg.SetIsFree(isFree)
 		}
 
 		callParams = append(callParams, TraceCallParam{

@@ -218,6 +218,13 @@ type metaTx struct {
 	minedBlockNum             uint64
 	sortKey                   []byte // Pre-computed binary sort key for fast comparison
 	sortKeyValid              bool   // Whether the sort key is up-to-date
+
+	// If true, this transaction should be promoted to Pending regardless of
+	// the current pending base fee. This is used to support ZK effective
+	// gas price categories that are configured as zero.
+	skipBaseFeePromotion bool
+	// Whether skipBaseFeePromotion has been evaluated for this metaTx.
+	skipBaseFeeEvaluated bool
 }
 
 func newMetaTx(slot *types.TxSlot, isLocal bool, timestamp uint64) *metaTx {
@@ -1733,7 +1740,7 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 // being promoted to the pending or basefee pool, for re-broadcasting
 func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcements *types.Announcements) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
-	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.Tx.Type == types.BlobTxType && worst.Tx.BlobFeeCap.LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
+	for worst := p.pending.Worst(); p.pending.Len() > 0 && !p.shouldSkipBaseFee(worst) && (worst.subPool < BaseFeePoolBits || ((!p.shouldSkipBaseFee(worst)) && worst.minFeeCap.LtUint64(pendingBaseFee)) || (worst.Tx.Type == types.BlobTxType && worst.Tx.BlobFeeCap.LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
 		if worst.subPool >= BaseFeePoolBits {
 			tx := p.pending.PopWorst()
 			announcements.Append(tx.Tx.Type, tx.Tx.Size, tx.Tx.IDHash[:])
@@ -1744,7 +1751,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	}
 
 	// Promote best transactions from base fee pool to pending pool while they qualify
-	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (best.Tx.Type != types.BlobTxType || best.Tx.BlobFeeCap.CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
+	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && (best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 || p.shouldSkipBaseFee(best)) && (best.Tx.Type != types.BlobTxType || best.Tx.BlobFeeCap.CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
 		announcements.Append(tx.Tx.Type, tx.Tx.Size, tx.Tx.IDHash[:])
 		p.pending.Add(tx)
@@ -1757,7 +1764,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
-		if best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 {
+		if p.shouldSkipBaseFee(best) || best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 {
 			tx := p.queued.PopBest()
 			announcements.Append(tx.Tx.Type, tx.Tx.Size, tx.Tx.IDHash[:])
 			p.pending.Add(tx)

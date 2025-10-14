@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	zkutils "github.com/erigontech/erigon/zk/utils"
 )
 
 type TxEnv struct {
@@ -72,12 +73,17 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 		// todo: upstream merge
 		// statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if msg.FeeCap().IsZero() && engine != nil {
+		isFree := false
+		if zkutils.IsTxFreeByZkEgps(cfg, txn) {
+			isFree = true
+		} else if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
 			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+			isFree = engine.IsServiceTransaction(msg.From(), syscall)
 		}
+
+		msg.SetIsFree(isFree)
 
 		TxContext := core.NewEVMTxContext(msg)
 		txEnv := TxEnv{

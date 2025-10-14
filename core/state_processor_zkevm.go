@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/zk/utils"
 )
 
 func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *state.IntraBlockState, header *types.Header, tx types.Transaction, evm *vm.EVM, effectiveGasPricePercentage uint8) (types.Message, evmtypes.TxContext, error) {
@@ -46,15 +47,21 @@ func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *stat
 	if evm.ChainRules().IsForkID5Dragonfruit {
 		msg.SetGasPrice(CalculateEffectiveGas(msg.GasPrice(), effectiveGasPricePercentage))
 		msg.SetFeeCap(CalculateEffectiveGas(msg.FeeCap(), effectiveGasPricePercentage))
+		msg.SetTip(CalculateEffectiveGas(msg.Tip(), effectiveGasPricePercentage))
 	}
 
-	if msg.FeeCap().IsZero() && engine != nil {
+	isFree := false
+	if utils.IsTxFreeByZkEgps(config, tx) {
+		isFree = true
+	} else if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
 		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		isFree = engine.IsServiceTransaction(msg.From(), syscall)
 	}
+
+	msg.SetIsFree(isFree)
 
 	// some zk networks need to ensure the injected batch is free, the transaction for this lives on the
 	// L1 or on a disk on file as part of launching the ZK contracts so can't be changed which means
