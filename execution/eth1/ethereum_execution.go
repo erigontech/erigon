@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -203,7 +202,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return canonical, nil
 }
 
-func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *types.Header) error {
+func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
@@ -222,7 +221,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(nil, wrap.NewTxContainer(tx, nil)); err != nil {
+	if err := e.executionPipeline.RunUnwind(nil, nil, tx); err != nil {
 		return err
 	}
 	return nil
@@ -277,7 +276,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, nil
 	}
 
-	tx, err := e.db.BeginRwNosync(ctx)
+	tx, err := e.db.BeginTemporalRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +293,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
 	tx.Rollback()
-	tx, err = e.db.BeginRwNosync(ctx)
+	tx, err = e.db.BeginTemporalRwNosync(ctx)
 	if err != nil {
 		return nil, err
 	}
