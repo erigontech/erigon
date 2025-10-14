@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/stages/bodydownload"
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
-	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -46,7 +45,7 @@ type BodiesCfg struct {
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
-	blockPropagator adapter.BlockPropagator
+	blockPropagator bodydownload.BlockPropagator
 	timeout         int
 	chanConfig      *chain.Config
 	blockReader     services.FullBlockReader
@@ -55,7 +54,7 @@ type BodiesCfg struct {
 
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
-	blockPropagator adapter.BlockPropagator, timeout int,
+	blockPropagator bodydownload.BlockPropagator, timeout int,
 	chanConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
