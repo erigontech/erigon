@@ -81,12 +81,17 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
 		case "eth":
-			list = append(list, rpc.API{
+			rapi := rpc.API{
 				Namespace: "eth",
 				Public:    true,
-				Service:   EthAPI(ethImpl),
 				Version:   "1.0",
-			})
+			}
+			if cfg.IsArbitrum {
+				rapi.Service = EthAPI(&ArbAPIImpl{APIImpl: ethImpl})
+			} else {
+				rapi.Service = EthAPI(ethImpl)
+			}
+			list = append(list, rapi)
 		case "debug":
 			list = append(list, rpc.API{
 				Namespace: "debug",
@@ -95,21 +100,18 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 				Version:   "1.0",
 			})
 		case "net":
-			if !cfg.IsArbitrum {
-				list = append(list, rpc.API{
-					Namespace: "net",
-					Public:    true,
-					Service:   NetAPI(netImpl),
-					Version:   "1.0",
-				})
-			} else {
-				list = append(list, rpc.API{
-					Namespace: "net",
-					Public:    true,
-					Service:   NetAPIArb(NewNetAPIArbImpl(eth)),
-					Version:   "1.0",
-				})
+			rapi := rpc.API{
+				Namespace: "net",
+				Public:    true,
+				Version:   "1.0",
 			}
+			if cfg.IsArbitrum {
+				rapi.Service = NetAPIArb(NewNetAPIArbImpl(eth))
+			} else {
+				rapi.Service = NetAPI(netImpl)
+			}
+
+			list = append(list, rapi)
 		case "txpool":
 			list = append(list, rpc.API{
 				Namespace: "txpool",
