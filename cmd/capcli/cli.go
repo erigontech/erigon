@@ -368,6 +368,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		defer tx.Rollback()
 
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
+
 		// Let's fetch the head first
 		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
 		if err != nil {
