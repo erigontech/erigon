@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 	erigoncli "github.com/erigontech/erigon/node/cli"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/turbo/node"
 )
 

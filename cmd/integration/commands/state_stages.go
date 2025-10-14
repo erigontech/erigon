@@ -45,9 +45,9 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	erigoncli "github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/shards"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains

@@ -38,10 +38,10 @@ import (
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/services"
 )

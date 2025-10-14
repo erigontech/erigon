@@ -51,9 +51,9 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
 	erigoncli "github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/debug"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
