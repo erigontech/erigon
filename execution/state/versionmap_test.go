@@ -270,7 +270,7 @@ func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
 	ap2 := getCommonAddress(2)
 	txIdxSlice := []int{}
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		txIdx := rand.Intn(1000000000000000)
 		txIdxSlice = append(txIdxSlice, txIdx)
 		mvh2.Write(ap2, AddressPath, common.Hash{}, Version{0, 0, txIdx, 1}, valueFor(txIdx, 1), true)
