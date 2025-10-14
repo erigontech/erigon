@@ -16,8 +16,16 @@ runs:
         ref: v0.2.24
         path: kurtosis-cdk
 
+    - name: Hack kurtosis stuff
+      shell: bash
+      run: |
+        sed -i 's#leovct/toolbox:0.0.8#europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/toolbox:0.0.12#g' ./kurtosis-cdk/src/package_io/constants.star
+
     - name: Install Kurtosis CDK tools
       uses: ./kurtosis-cdk/.github/actions/setup-kurtosis-cdk
+      with:
+        docker_username: ${{ env.DOCKERHUB_USERNAME }}
+        docker_token: ${{ env.DOCKERHUB_TOKEN }}
 
     - name: Install Foundry
       uses: foundry-rs/foundry-toolchain@v1
@@ -75,16 +83,21 @@ runs:
       run: |
         echo 'args:' > params.yml
         echo '  cdk_erigon_node_image: cdk-erigon:local' >> params.yml
+        echo '  erigon_strict_mode: false' >> params.yml
         echo '  el-1-geth-lighthouse: ethpandaops/lighthouse@sha256:4902d9e4a6b6b8d4c136ea54f0e51582a32f356f3dec7194a1adee13ed2d662e' >> params.yml
+        echo '  zkevm_bridge_ui_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/zkevm-bridge-ui:0006445' >> params.yml
+        echo '  test_runner_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/e2e:9fe80e1' >> params.yml
         /usr/local/bin/yq -i '.args.data_availability_mode = "${{ matrix.da-mode }}"' params.yml
         sed -i 's/"londonBlock": [0-9]\+/"londonBlock": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"normalcyBlock": [0-9]\+/"normalcyBlock": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"shanghaiTime": [0-9]\+/"shanghaiTime": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"cancunTime": [0-9]\+/"cancunTime": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i '/"terminalTotalDifficulty"/d' ./templates/cdk-erigon/chainspec.json
+        echo "Kurtosis params file:"
+        cat params.yml
 
     - name: Deploy Kurtosis CDK package
       working-directory: ./kurtosis-cdk
       shell: bash
       run: |
-        kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always . '{"args": {"erigon_strict_mode": false, "cdk_erigon_node_image": "cdk-erigon:local"}}'
+        kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .

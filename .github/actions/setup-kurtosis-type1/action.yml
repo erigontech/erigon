@@ -25,9 +25,18 @@ runs:
         ref: v0.4.7
         path: kurtosis-cdk
 
+    - name: Hack kurtosis stuff
+      if: env.SKIP_ENCLAVE_SETUP != 'true'
+      shell: bash
+      run: |
+        sed -i 's#leovct/toolbox:0.0.8#europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/toolbox:0.0.12#g' ./kurtosis-cdk/src/package_io/constants.star
+
     - name: Install Kurtosis CDK tools
       if: env.SKIP_ENCLAVE_SETUP != 'true'
       uses: ./kurtosis-cdk/.github/actions/kurtosis-pre-run
+      with:
+        docker_username: ${{ env.DOCKERHUB_USERNAME }}
+        docker_token: ${{ env.DOCKERHUB_TOKEN }}
 
     - name: Install Foundry
       if: env.SKIP_ENCLAVE_SETUP != 'true'
@@ -113,6 +122,8 @@ runs:
         echo '  zkevm_use_real_verifier: false' >> params.yml
         echo '  enable_normalcy: true' >> params.yml
         echo '  sequencer_type: erigon' >> params.yml
+        echo '  zkevm_bridge_ui_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/zkevm-bridge-ui:0006445' >> params.yml
+        echo '  test_runner_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/e2e:9fe80e1' >> params.yml
         echo "Kurtosis params file:"
         cat params.yml
 

@@ -329,7 +329,9 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.gasFeeCap.IsZero() && st.tip.IsZero()
 		if !skipCheck {
-			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+			// Consider tx free if explicitly marked, or if its recorded effective gas percentage is zero
+			isEffectivelyFree := st.msg.IsFree() || st.msg.EffectiveGasPricePercentage() == 0
+			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context.BaseFee, isEffectivelyFree); err != nil {
 				return err
 			}
 		}

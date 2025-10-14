@@ -122,9 +122,13 @@ type Config struct {
 	// The block at which the PMT is enabled over the SMT.
 	PmtEnabledBlock *big.Int `json:"pmtEnabledBlock,omitempty"`
 
-	AllowFreeTransactions bool   `json:"allowFreeTransactions,omitempty"`
-	FreeInjectedBatch     bool   `json:"freeInjectedBatch,omitempty"`
-	ZkDefaultGasPrice     uint64 `json:"zkDefaultGasFee,omitempty"`
+	AllowFreeTransactions                  bool   `json:"allowFreeTransactions,omitempty"`
+	FreeInjectedBatch                      bool   `json:"freeInjectedBatch,omitempty"`
+	ZkDefaultGasPrice                      uint64 `json:"zkDefaultGasFee,omitempty"`
+	EffectiveGasPriceForEthTransfer        uint8  `json:"effectiveGasPriceForEthTransfer,omitempty"`
+	EffectiveGasPriceForErc20Transfer      uint8  `json:"effectiveGasPriceForErc20Transfer,omitempty"`
+	EffectiveGasPriceForContractInvocation uint8  `json:"effectiveGasPriceForContractInvocation,omitempty"`
+	EffectiveGasPriceForContractDeployment uint8  `json:"effectiveGasPriceForContractDeployment,omitempty"`
 
 	// used for sovereign chains, will turn off IBS interaction for info tree / GER / etc.
 	// this option should only be used in conjunction with normalcy.  This should only
