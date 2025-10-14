@@ -484,14 +484,14 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 var sink interface{}
 
 func BenchmarkIntsize(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		sink = intsize(0x12345678)
 	}
 }
 
 func BenchmarkPutint(b *testing.B) {
 	buf := make([]byte, 8)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		putint(buf, 0x12345678)
 		sink = buf
 	}
@@ -503,10 +503,10 @@ func BenchmarkEncodeBigInts(b *testing.B) {
 		ints[i] = math.BigPow(2, int64(i))
 	}
 	out := bytes.NewBuffer(make([]byte, 0, 4096))
-	b.ResetTimer()
+
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		out.Reset()
 		if err := Encode(out, ints); err != nil {
 			b.Fatal(err)
