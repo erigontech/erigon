@@ -13,7 +13,7 @@ runs:
       uses: actions/checkout@v4
       with:
         repository: 0xPolygon/kurtosis-cdk
-        ref: v0.2.24
+        ref: v0.5.2
         path: kurtosis-cdk
 
     - name: Hack kurtosis stuff
@@ -22,10 +22,7 @@ runs:
         sed -i 's#leovct/toolbox:0.0.8#europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/toolbox:0.0.12#g' ./kurtosis-cdk/src/package_io/constants.star
 
     - name: Install Kurtosis CDK tools
-      uses: ./kurtosis-cdk/.github/actions/setup-kurtosis-cdk
-      with:
-        docker_username: ${{ env.DOCKERHUB_USERNAME }}
-        docker_token: ${{ env.DOCKERHUB_TOKEN }}
+      uses: ./kurtosis-cdk/.github/actions/kurtosis-pre-run
 
     - name: Install Foundry
       uses: foundry-rs/foundry-toolchain@v1
@@ -81,13 +78,21 @@ runs:
       working-directory: ./kurtosis-cdk
       shell: bash
       run: |
-        echo 'args:' > params.yml
+        echo 'deployment_stages:' > params.yml
+        echo '  deploy_l2_contracts: true' >> params.yml
+        echo '  deploy_optimism_rollup: false' >> params.yml
+        echo '  deploy_op_succinct: false' >> params.yml
+        echo 'args:' >> params.yml
         echo '  cdk_erigon_node_image: cdk-erigon:local' >> params.yml
-        echo '  erigon_strict_mode: false' >> params.yml
+        echo '  agglayer_contracts_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/agglayer-contracts:v11.0.0-rc.3' >> params.yml
+        echo '  aggkit_image: ghcr.io/agglayer/aggkit:0.7.0-beta8' >> params.yml
+        echo '  aggkit_components: aggsender' >> params.yml
+        echo '  gas_token_enabled: false' >> params.yml
         echo '  el-1-geth-lighthouse: ethpandaops/lighthouse@sha256:4902d9e4a6b6b8d4c136ea54f0e51582a32f356f3dec7194a1adee13ed2d662e' >> params.yml
-        echo '  zkevm_bridge_ui_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/zkevm-bridge-ui:0006445' >> params.yml
-        echo '  test_runner_image: europe-west2-docker.pkg.dev/prj-polygonlabs-devtools-dev/public/e2e:9fe80e1' >> params.yml
-        /usr/local/bin/yq -i '.args.data_availability_mode = "${{ matrix.da-mode }}"' params.yml
+        echo '  sequencer_type: erigon' >> params.yml
+        echo '  erigon_strict_mode: false' >> params.yml
+        echo '  zkevm_prover_image: hermeznetwork/zkevm-prover:v8.0.0-RC16-fork.12' >> params.yml
+        /usr/local/bin/yq -i '.args.consensus_contract_type = "${{ matrix.da-mode }}"' params.yml
         sed -i 's/"londonBlock": [0-9]\+/"londonBlock": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"normalcyBlock": [0-9]\+/"normalcyBlock": 0/' ./templates/cdk-erigon/chainspec.json
         sed -i 's/"shanghaiTime": [0-9]\+/"shanghaiTime": 0/' ./templates/cdk-erigon/chainspec.json
