@@ -38,11 +38,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -397,7 +397,6 @@ func (a *Aggregator) Close() {
 func (a *Aggregator) closeDirtyFiles() {
 	wg := &sync.WaitGroup{}
 	for _, d := range a.d {
-		d := d
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -405,7 +404,6 @@ func (a *Aggregator) closeDirtyFiles() {
 		}()
 	}
 	for _, ii := range a.iis {
-		ii := ii
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -623,7 +621,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
-		logEvery      = time.NewTicker(time.Second * 30)
 		txFrom        = a.FirstTxNumOfStep(step)
 		txTo          = a.FirstTxNumOfStep(step + 1)
 		stepStartedAt = time.Now()
@@ -633,8 +630,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		collListMu      = sync.Mutex{}
 		collations      = make([]Collation, 0)
 	)
-
-	defer logEvery.Stop()
 	defer func() {
 		if !closeCollations {
 			return
@@ -915,12 +910,12 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
+func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	txNumInFiles := at.TxNumsInFiles(entitySet...)
 	if txNumInFiles > 0 {
 		txNumInFiles--
 	}
-	return txNumInFiles / at.StepSize()
+	return kv.Step(txNumInFiles / at.StepSize())
 }
 
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
@@ -1638,8 +1633,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 }
 
 // Returns the first known txNum found in history files of a given domain
-func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return at.d[name].HistoryStartFrom()
+func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) uint64 {
+	return at.d[name].HistoryStartFrom(tx)
 }
 
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
@@ -1762,8 +1757,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
+	return at.getLatest(domain, k, tx, nil, time.Time{})
+}
+
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].GetLatest(k, tx)
+		return at.d[domain].getLatest(k, tx, metrics, start)
 	}
 
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
@@ -1771,6 +1770,9 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 		return nil, kv.Step(0), false, err
 	}
 	if ok {
+		if metrics != nil {
+			metrics.updateDbReads(domain, start)
+		}
 		return v, step, true, nil
 	}
 
@@ -1778,7 +1780,9 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	if !found {
 		return nil, kv.Step(0), false, err
 	}
-
+	if metrics != nil {
+		metrics.updateFileReads(domain, start)
+	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
 }

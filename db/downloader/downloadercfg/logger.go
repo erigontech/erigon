@@ -22,7 +22,7 @@ import (
 
 	analog "github.com/anacrolix/log"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func init() {
@@ -111,24 +111,4 @@ func (b adapterHandler) Handle(r analog.Record) {
 	log.Log(lvl, msg)
 }
 
-// TODO: Ditch this.
-type RetryableHttpLogger struct {
-	l log.Logger
-}
-
-func NewRetryableHttpLogger(l log.Logger) *RetryableHttpLogger {
-	return &RetryableHttpLogger{l: l}
-}
-
-func (l *RetryableHttpLogger) Error(msg string, keysAndValues ...interface{}) {
-	l.l.Debug(msg, keysAndValues...)
-}
-func (l *RetryableHttpLogger) Warn(msg string, keysAndValues ...interface{}) {
-	l.l.Debug(msg, keysAndValues...)
-}
-func (l *RetryableHttpLogger) Info(msg string, keysAndValues ...interface{}) {
-	l.l.Debug(msg, keysAndValues...)
-}
-func (l *RetryableHttpLogger) Debug(msg string, keysAndValues ...interface{}) {
-	l.l.Trace(msg, keysAndValues...)
-}
+// Removed RetryableHttpLogger: retryablehttp logging is disabled at call sites
