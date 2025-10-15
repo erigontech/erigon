@@ -658,8 +658,7 @@ func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[strin
 			return nil, errors.New("missing tx type")
 		}
 
-		wg, ctx := errgroup.WithContext(context.Background())
-		_ = ctx
+		var wg errgroup.Group
 
 		// For Arbitrum, certain transaction types may have a "timeboosted" field in their receipt.
 		// Retryable tx type on other side got to check gasUsed amount in receipt to get correct value (tx.gas is its gas limit actually, not spent gas)
