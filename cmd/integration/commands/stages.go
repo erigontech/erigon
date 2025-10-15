@@ -902,11 +902,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	if noCommit {
-		defer tx.Rollback()
-	} else {
-		defer tx.Commit()
-	}
+	defer func() {
+		if noCommit {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, db, true)
@@ -958,11 +960,23 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 					return err
 				}
-				doms.Flush(ctx, tx)
-				doms.ClearRam(true)
+				if !noCommit {
+					if err := doms.Flush(ctx, tx); err != nil {
+						return err
+					}
+					doms.ClearRam(true)
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+					if tx, err = db.BeginTemporalRw(ctx); err != nil {
+						return err
+					}
+				}
 			}
 		}
-		doms.Flush(ctx, tx)
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
 		doms.ClearRam(true)
 		return nil
 	}
@@ -972,9 +986,23 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
 			}
-			doms.Flush(ctx, tx)
-			doms.ClearRam(true)
+			if !noCommit {
+				if err := doms.Flush(ctx, tx); err != nil {
+					return err
+				}
+				doms.ClearRam(true)
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				if tx, err = db.BeginTemporalRw(ctx); err != nil {
+					return err
+				}
+			}
 		}
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		doms.ClearRam(true)
 		return nil // Exec finished
 	}
 }

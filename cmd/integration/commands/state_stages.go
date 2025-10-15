@@ -192,19 +192,10 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, doms *state.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error {
-			for {
-				if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, doms, rwTx, execToBlock, ctx, execCfg, logger); err != nil {
-					if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-						return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
-					}
-					doms.Flush(ctx, tx)
-					doms.ClearRam(true)
-					continue
-				}
-				sd.Flush(ctx, tx)
-				sd.ClearRam(true)
-				return nil
+			if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, doms, rwTx, execToBlock, ctx, execCfg, logger); err != nil {
+				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
+			return nil
 		}
 	}
 	senderAtBlock := progress(tx, stages.Senders)
@@ -288,20 +279,26 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if _, err := stateStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
-			return err
+		for more := true; more; {
+			if more, err = stateStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
+				return err
+			}
+
+			if err = sd.Flush(ctx, tx); err != nil {
+				return err
+			}
+			sd.ClearRam(true)
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+			defer tx.Rollback()
 		}
 
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
-
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		tx, err = db.BeginTemporalRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 
 		execAtBlock = progress(tx, stages.Execution)
 
@@ -429,19 +426,10 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, sd *state.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-		for {
-			if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, sd, tx, to, ctx, cfg, logger); err != nil {
-				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-					return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
-				}
-				sd.Flush(ctx, tx)
-				sd.ClearRam(true)
-				continue
-			}
-			sd.Flush(ctx, tx)
-			sd.ClearRam(true)
-			return nil
+		if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, sd, tx, to, ctx, cfg, logger); err != nil {
+			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 		}
+		return nil
 	})
 
 	for {

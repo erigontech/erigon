@@ -398,12 +398,11 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-func (s *Sync) Run(db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (bool, error) {
+func (s *Sync) Run(db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
 	var errBadBlock error
-	hasMore := false
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
@@ -452,7 +451,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRw
 			return false, err
 		}
 		if stageHasMore {
-			hasMore = true
+			more = true
 		}
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
@@ -474,11 +473,11 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRw
 
 				if ptx != nil {
 					if progress, err := stages.GetStageProgress(ptx, stage.ID); err == nil {
-						hasMore = progress < *s.posTransition
+						more = progress < *s.posTransition
 					}
 				}
 			} else {
-				hasMore = true
+				more = true
 			}
 			break
 		}
@@ -491,7 +490,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *state.SharedDomains, tx kv.TemporalRw
 	}
 
 	s.currentStage = 0
-	return hasMore, errBadBlock
+	return more, errBadBlock
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage

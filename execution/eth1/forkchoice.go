@@ -447,8 +447,22 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	// Run the forkchoice
 	initialCycle := limitedBigJump
 	firstCycle := false
+
+	sendError := func(msg string, err error) {
+		err = fmt.Errorf("%s: %w", msg, err)
+		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+
+	}
+
+	sd, err := state.NewSharedDomains(tx, e.logger)
+	if err != nil {
+		return
+	}
+	defer sd.Close()
+
 	for {
-		hasMore, err := e.executionPipeline.Run(e.db, nil, tx, initialCycle, firstCycle)
+		hasMore, err := e.executionPipeline.Run(e.db, sd, tx, initialCycle, firstCycle)
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
@@ -468,24 +482,21 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		err = e.executionPipeline.RunPrune(e.db, tx, initialCycle)
 		if err != nil {
-			err = fmt.Errorf("updateForkChoice: RunPrune after hasMore: %w", err)
-			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			sendError("updateForkChoice: RunPrune after hasMore", err)
 			return
 		}
 
-		err = tx.Commit()
-		if err != nil {
-			err = fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
-			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		if err := sd.Flush(ctx, tx); err != nil {
+			sendError("updateForkChoice:flush sd after hasMore", err)
+			return
+		}
+		if err = tx.Commit(); err != nil {
+			sendError("updateForkChoice: tx commit after hasMore", err)
 			return
 		}
 		tx, err = e.db.BeginTemporalRw(ctx)
 		if err != nil {
-			err = fmt.Errorf("updateForkChoice: begin tx after has more %w", err)
-			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			sendError("updateForkChoice: begin tx after has more", err)
 			return
 		}
 		// note we already have defer tx.Rollback() on stack from earlier
