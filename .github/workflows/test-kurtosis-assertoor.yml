@@ -27,7 +27,7 @@ jobs:
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
         # have access to our Docker secrets.
-        if: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME != '' }}
+        if: github.repository_owner == 'erigontech'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
@@ -57,7 +57,7 @@ jobs:
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
         # have access to our Docker secrets.
-        if: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME != '' }}
+        if: github.repository_owner == 'erigontech'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
