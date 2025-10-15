@@ -322,7 +322,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
 				return nil, fmt.Errorf("CommitBlock failed: %w", err)
 			}
+			
 			fmt.Println("ComputeCommitment: ", blockNum, txNum)
+			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -464,6 +467,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
 				return nil, fmt.Errorf("CommitBlock failed: %w", err)
 			}
+
+			fmt.Println("ComputeCommitment: ", blockNum, txNum)
+			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+	
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "getReceipts", nil)
 			if err != nil {
 				return nil, err
@@ -496,7 +503,8 @@ func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, shared
 		return nil, err
 	}
 	sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(commitmentHistoryTxNum, false)
-	/*
+	
+	
 	fmt.Println("Set BlockNum e txNum in sharedDomain (before seekCommitment) bn/txNum/minTxNum:", blockNumber, txNum, commitmentHistoryTxNum)
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
@@ -508,14 +516,15 @@ func (g *Generator) getStateWriter(ctx context.Context, tx kv.TemporalTx, shared
 		return nil, err
 	}
 
-	fmt.Printf("After SeekCommitment locate at bn/txn: %d/%d request on bn/txn: %d/%d\n", sharedDomains.BlockNum(), sharedDomains.TxNum(), blockNumber, txNum)
+	fmt.Printf("After SeekCommitment locate at bn/txn: %d/%d request on bn/txn: %d/%d\n", sharedDomains.BlockNum(), sharedDomains.TxNum(), blockNumber)
 
 	if sharedDomains.BlockNum() != blockNumber-1 {
 		return nil, fmt.Errorf("SeekComitment doesn't seek (%d) in correct block %d", blockNumber, sharedDomains.BlockNum())
 	}
 	sharedDomains.SetTxNum(txNum)
 	sharedDomains.SetBlockNum(blockNumber)
-*/
+	
+
 	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
 	return stateWriter, nil
 }
