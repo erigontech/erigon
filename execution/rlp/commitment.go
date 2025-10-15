@@ -16,7 +16,11 @@
 
 package rlp
 
-import "io"
+import (
+	"io"
+
+        "github.com/erigontech/erigon-lib/common/hexutil"
+)
 
 // RLP-related utilities necessary for computing commitments for state root hash
 
@@ -204,9 +208,11 @@ type RlpSerializable interface {
 	ToDoubleRLP(io.Writer, []byte) error
 	DoubleRLPLen() int
 	RawBytes() []byte
+	Hex() string
 }
 
 type RlpSerializableBytes []byte
+
 
 func (b RlpSerializableBytes) ToDoubleRLP(w io.Writer, prefixBuf []byte) error {
 	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLenDouble, prefixBuf)
@@ -214,6 +220,10 @@ func (b RlpSerializableBytes) ToDoubleRLP(w io.Writer, prefixBuf []byte) error {
 
 func (b RlpSerializableBytes) RawBytes() []byte {
 	return b
+}
+
+func (b RlpSerializableBytes) Hex() string {
+	return hexutil.Encode(b)
 }
 
 func (b RlpSerializableBytes) DoubleRLPLen() int {
@@ -233,6 +243,10 @@ func (b RlpEncodedBytes) RawBytes() []byte {
 	return b
 }
 
+func (b RlpEncodedBytes) Hex() string {
+	return hexutil.Encode(b)
+}
+
 func (b RlpEncodedBytes) DoubleRLPLen() int {
 	return generateRlpPrefixLen(len(b)) + len(b)
 }
@@ -246,7 +260,6 @@ func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]b
 			return err
 		}
 	}
-
 	_, err := w.Write(source)
 	return err
 }
