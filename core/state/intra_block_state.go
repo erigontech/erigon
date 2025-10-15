@@ -329,7 +329,12 @@ func (sdb *IntraBlockState) SubRefund(gas uint64) error {
 
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for suicided accounts.
-func (sdb *IntraBlockState) Exist(addr common.Address) (bool, error) {
+func (sdb *IntraBlockState) Exist(addr common.Address) (exists bool, err error) {
+	if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
+		defer func() {
+			fmt.Printf("%d (%d.%d) Exists %x: %v (%s)\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, exists, dbg.Stack())
+		}()
+	}
 	s, err := sdb.getStateObject(addr)
 	if err != nil {
 		return false, err
@@ -339,7 +344,12 @@ func (sdb *IntraBlockState) Exist(addr common.Address) (bool, error) {
 
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
-func (sdb *IntraBlockState) Empty(addr common.Address) (bool, error) {
+func (sdb *IntraBlockState) Empty(addr common.Address) (empty bool, err error) {
+	if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
+		defer func() {
+			fmt.Printf("%d (%d.%d) Empty %x: %v\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, empty)
+		}()
+	}
 	so, err := sdb.getStateObject(addr)
 	if err != nil {
 		return false, err
@@ -1139,9 +1149,29 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //  2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
-func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) error {
+func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) (err error) {
 	var prevInc uint64
-	previous, err := sdb.getStateObject(addr)
+	var previous *stateObject
+
+	if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
+		defer func() {
+			var creatingContract string
+			if contractCreation {
+				creatingContract = " (contract)"
+			}
+			if err != nil {
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, err=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, err)
+			} else {
+				var bal uint256.Int
+				if previous != nil {
+					bal = previous.data.Balance
+				}
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, &bal)
+			}
+		}()
+	}
+
+	previous, err = sdb.getStateObject(addr)
 	if err != nil {
 		return err
 	}
@@ -1233,7 +1263,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 		}
 	}
 
-	if traced && sdb.txIndex == 8 && sdb.version == 1 {
+	if traced {
 		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", sdb.blockNum, sdb.txIndex, sdb.version, revid, snapshot)
 	}
 }
