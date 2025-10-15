@@ -642,7 +642,7 @@ var timeboostedTxTypes = []string{
 }
 
 // unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
-func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
+func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	var txs types.Transactions
 
 	for _, rawTx := range rawTxs {
@@ -666,13 +666,13 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 		//
 		var timeboosted bool
 		var effectiveGasUsed *big.Int
-		if isArbitrum && typeTx == "0x69" || slices.Contains(timeboostedTxTypes, typeTx) {
+		if isArbitrum && typeTx == "0x69" || slices.Contains(timeboostedTxTypes, typeTx) && receiptClient != nil {
 			wg.Go(func() error {
 				var receipt map[string]interface{}
 				if rawTx["hash"] == "" {
 					return errors.New("missing tx hash for receipt fetch")
 				}
-				err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
+				err = receiptClient.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
 				if err != nil {
 					return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
 				}
@@ -754,14 +754,14 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 }
 
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func GetBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool, isArbitrum bool) (*types.Block, error) {
+func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, verify bool, isArbitrum bool) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(context.Background(), &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(client, block.Transactions, verify, isArbitrum)
+	txs, err := unMarshalTransactions(client, receiptClient, block.Transactions, verify, isArbitrum)
 	if err != nil {
 		return nil, err
 	}
@@ -820,9 +820,19 @@ func genFromRPc(cliCtx *cli.Context) error {
 		log.Warn("Error connecting to RPC", "err", err)
 		return err
 	}
-
 	verification := cliCtx.Bool(Verify.Name)
 	isArbitrum := cliCtx.Bool(Arbitrum.Name)
+
+	var receiptClient *rpc.Client
+	if isArbitrum {
+		urlReciept := "https://sepolia-rollup.arbitrum.io/rpc"
+		// urlReciept:='https://arb1.arbitrum.io/rpc',
+		receiptClient, err = rpc.Dial(urlReciept, log.Root())
+		if err != nil {
+			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
+			return err
+		}
+	}
 
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
@@ -869,7 +879,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 		err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 			for blockNum := i; blockNum < latestBlock.Uint64(); blockNum++ {
 				blockNumber.SetUint64(blockNum)
-				blk, err := GetBlockByNumber(client, &blockNumber, verification, isArbitrum)
+				blk, err := GetBlockByNumber(client, receiptClient, &blockNumber, verification, isArbitrum)
 				if err != nil {
 					return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 				}

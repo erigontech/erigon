@@ -146,6 +146,20 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Warn("Error connecting to RPC", "err", err)
 		return err
 	}
+
+	var urlReciept string
+	if cfg.chainConfig.ChainName == "arb-sepolia" {
+		urlReciept = "https://sepolia-rollup.arbitrum.io/rpc"
+	} else if cfg.chainConfig.ChainName == "arb1" {
+		urlReciept = "https://arb1.arbitrum.io/rpc"
+	}
+
+	receiptClient, err := rpc.Dial(urlReciept, log.Root())
+	if err != nil {
+		log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
+		return err
+	}
+
 	var curBlock uint64
 	curBlock, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
@@ -182,7 +196,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	// latestBlock.SetUint64(curBlock + 6000)
 	for blockNum := curBlock; blockNum < latestBlock.Uint64(); blockNum++ {
 		blockNumber.SetUint64(blockNum)
-		blk, err := snapshots.GetBlockByNumber(client, &blockNumber, false, cfg.chainConfig.IsArbitrum())
+		blk, err := snapshots.GetBlockByNumber(client, receiptClient, &blockNumber, false, cfg.chainConfig.IsArbitrum())
 		if err != nil {
 			return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 		}
