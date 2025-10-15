@@ -157,9 +157,9 @@ func TestCreation(t *testing.T) {
 				{4100419, 1684934220, ID{Hash: ChecksumToBytes(0xa15a4252), Activation: 1684934220, Next: 1706724940}},  // First Shanghai block
 				{8021277, 1706724930, ID{Hash: ChecksumToBytes(0xa15a4252), Activation: 1684934220, Next: 1706724940}},  // Last Shanghai block
 				{8021278, 1706724940, ID{Hash: ChecksumToBytes(0x5fbc16bc), Activation: 1706724940, Next: 1741254220}},  // First Cancun block
-				{14655798, 1741254215, ID{Hash: ChecksumToBytes(0x5fbc16bc), Activation: 1706724940, Next: 1741254220}}, // Last Cancun block (approx)
-				{14655799, 1741254220, ID{Hash: ChecksumToBytes(0x8ba51786), Activation: 1741254220, Next: 0}},          // First Prague block (approx)
-				{20000000, 1800000000, ID{Hash: ChecksumToBytes(0x8ba51786), Activation: 1741254220, Next: 0}},          // Future Prague block (mock)
+				{14642216, 1741254215, ID{Hash: ChecksumToBytes(0x5fbc16bc), Activation: 1706724940, Next: 1741254220}}, // Last Cancun block
+				{14642217, 1741254220, ID{Hash: ChecksumToBytes(0x8ba51786), Activation: 1741254220, Next: 1761037900}}, // First Prague block
+				{18379846, 1761037900, ID{Hash: ChecksumToBytes(0x82612523), Activation: 1761037900, Next: 0}},          // First Osaka block (approx)
 			},
 		},
 		{
