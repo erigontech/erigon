@@ -298,7 +298,9 @@ func ExecV3(ctx context.Context,
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
-	agg.BuildFilesInBackground(outputTxNum.Load())
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		agg.BuildFilesInBackground(outputTxNum.Load())
+	}
 
 	var count uint64
 
@@ -435,7 +437,9 @@ func ExecV3(ctx context.Context,
 			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
-	agg.BuildFilesInBackground(outputTxNum.Load())
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		agg.BuildFilesInBackground(outputTxNum.Load())
+	}
 
 	var readAhead chan uint64
 	if !isMining && !inMemExec && execStage.CurrentSyncCycle.IsInitialCycle {
@@ -641,7 +645,9 @@ Loop:
 				return err
 			}
 
-			agg.BuildFilesInBackground(outputTxNum.Load())
+			if execStage.SyncMode() == stages.ModeApplyingBlocks {
+				agg.BuildFilesInBackground(outputTxNum.Load())
+			}
 		} else {
 			se := executor.(*serialExecutor)
 
@@ -821,7 +827,9 @@ Loop:
 		}
 	}
 
-	agg.BuildFilesInBackground(outputTxNum.Load())
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		agg.BuildFilesInBackground(outputTxNum.Load())
+	}
 
 	if errExhausted != nil && blockNum < maxBlockNum {
 		// special err allows the loop to continue, caller will call us again to continue from where we left off
