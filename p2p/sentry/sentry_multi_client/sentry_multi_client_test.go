@@ -2,7 +2,10 @@ package sentry_multi_client
 
 import (
 	"context"
+	"math/big"
+	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -10,6 +13,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -178,7 +182,7 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build block range packet: %v", err)
 	}
-	send := cs.shouldAnnounceBlockRange(packet)
+	send := cs.blockRange.decide(packet)
 	if !send {
 		t.Fatal("expected block range to be announced")
 	}
@@ -296,7 +300,7 @@ func TestMultiClient_DoAnnounceBlockRangeSkipsUntilThreshold(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to build block range packet: %v", err)
 		}
-		send := cs.shouldAnnounceBlockRange(packet)
+		send := cs.blockRange.decide(packet)
 		if !send {
 			return false
 		}
@@ -348,6 +352,136 @@ func TestMultiClient_DoAnnounceBlockRangeSkipsUntilThreshold(t *testing.T) {
 	}
 	if sentCount != 3 {
 		t.Fatalf("expected regression to trigger announcement, got %d", sentCount)
+	}
+}
+
+func TestMultiClient_BlockRangeChannelLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testMinimumBlockHeight := uint64(10)
+	testLatestBlockHeight := uint64(20)
+	testBestHash := common.HexToHash("0xabc")
+
+	var (
+		sentMu    sync.Mutex
+		sentCount int
+	)
+
+	mockSentry := &mockSentryClient{
+		sendMessageToAllFunc: func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			sentMu.Lock()
+			sentCount++
+			sentMu.Unlock()
+			return &proto_sentry.SentPeers{}, nil
+		},
+		handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+			return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH69}, nil
+		},
+	}
+
+	statusMu := sync.Mutex{}
+	currentLatest := testLatestBlockHeight
+	currentHash := testBestHash
+
+	mockStatus := &mockStatusDataProvider{
+		getStatusDataFunc: func(ctx context.Context) (*proto_sentry.StatusData, error) {
+			statusMu.Lock()
+			defer statusMu.Unlock()
+			return &proto_sentry.StatusData{
+				MinimumBlockHeight: testMinimumBlockHeight,
+				MaxBlockHeight:     currentLatest,
+				BestHash:           gointerfaces.ConvertHashToH256(currentHash),
+			}, nil
+		},
+	}
+
+	advanceStatus := func() {
+		statusMu.Lock()
+		defer statusMu.Unlock()
+		currentLatest++
+		currentHash = common.BigToHash(new(big.Int).SetUint64(currentLatest))
+	}
+
+	readyReader := &mockFullBlockReader{
+		readyFunc: func(ctx context.Context) <-chan error {
+			ch := make(chan error, 1)
+			ch <- nil
+			return ch
+		},
+	}
+
+	progressCh := make(chan [][]byte, 1)
+	unsubCalled := make(chan struct{}, 1)
+	unsub := func() { unsubCalled <- struct{}{} }
+
+	cs := &MultiClient{
+		sentries:           []proto_sentry.SentryClient{mockSentry},
+		statusDataProvider: mockStatus,
+		blockReader:        readyReader,
+		ChainConfig:        &chain.Config{},
+		logger:             log.New(),
+	}
+
+	cs.SetBlockProgressChannel(progressCh, unsub)
+
+	done := make(chan struct{})
+	go func() {
+		cs.AnnounceBlockRangeLoop(ctx)
+		close(done)
+	}()
+
+	if !waitFor(func() bool { return currentSentCount(&sentMu, &sentCount) >= 1 }, time.Second) {
+		t.Fatal("expected initial block range announcement")
+	}
+
+	baseline := currentSentCount(&sentMu, &sentCount)
+
+	for i := 0; i < int(blockRangeEpochBlocks-1); i++ {
+		advanceStatus()
+		progressCh <- [][]byte{{0x01}}
+	}
+
+	if waitFor(func() bool { return currentSentCount(&sentMu, &sentCount) > baseline }, 200*time.Millisecond) {
+		t.Fatalf("unexpected announcement before reaching threshold")
+	}
+
+	advanceStatus()
+	progressCh <- [][]byte{{0x01}}
+
+	if !waitFor(func() bool { return currentSentCount(&sentMu, &sentCount) == baseline+1 }, time.Second) {
+		t.Fatalf("expected announcement after %d blocks", blockRangeEpochBlocks)
+	}
+
+	cancel()
+	<-done
+
+	select {
+	case <-unsubCalled:
+	default:
+		t.Fatal("expected unsubscribe to be invoked on shutdown")
+	}
+}
+
+func currentSentCount(mu *sync.Mutex, count *int) int {
+	mu.Lock()
+	defer mu.Unlock()
+	return *count
+}
+
+func waitFor(cond func() bool, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if cond() {
+			return true
+		}
+		select {
+		case <-deadline:
+			return false
+		case <-ticker.C:
+		}
 	}
 }
 

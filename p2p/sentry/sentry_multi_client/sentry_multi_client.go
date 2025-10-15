@@ -77,7 +77,7 @@ func (t *blockRangeTracker) decide(next eth.BlockRangeUpdatePacket) bool {
 	prev := t.last
 
 	if next.Latest < prev.Latest {
-		return true // unwind has occurred
+		return true
 	}
 
 	if next.Latest-prev.Latest >= blockRangeEpochBlocks {
@@ -166,8 +166,6 @@ func (cs *MultiClient) RecvMessageLoop(
 }
 
 func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
-	frequency := cs.ChainConfig.EpochDuration()
-
 	headerInDB := func() bool {
 		var done bool
 		_ = cs.db.View(ctx, func(tx kv.Tx) error {
@@ -178,45 +176,79 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 		return done
 	}
 
-	if err := cs.waitForPrerequisites(ctx, frequency, headerInDB); err != nil {
+	if cs.getBlockProgressChannel() == nil {
+		cs.logger.Warn("block progress channel not configured; block range announcements disabled")
 		return
 	}
 
+	cs.announceBlockRangeFromChannel(ctx, headerInDB)
+}
+
+func (cs *MultiClient) getBlockProgressChannel() <-chan [][]byte {
+	cs.blockProgressMu.Lock()
+	defer cs.blockProgressMu.Unlock()
+	return cs.blockProgressCh
+}
+
+func (cs *MultiClient) announceBlockRangeFromChannel(ctx context.Context, headerInDB func() bool) {
+	if err := cs.waitForPrerequisites(ctx, headerInDB); err != nil {
+		return
+	}
+
+	cs.blockProgressMu.Lock()
+	progressCh := cs.blockProgressCh
+	unsubscribe := cs.blockProgressUnsubscribe
+	cs.blockProgressMu.Unlock()
+
+	if progressCh == nil {
+		return
+	}
+
+	cleanup := func() {
+		if unsubscribe != nil {
+			unsubscribe()
+		}
+		cs.blockProgressMu.Lock()
+		cs.blockProgressCh = nil
+		cs.blockProgressUnsubscribe = nil
+		cs.blockProgressMu.Unlock()
+	}
+	defer cleanup()
+
 	if packet, err := cs.buildBlockRangePacket(ctx); err == nil {
-		if send := cs.shouldAnnounceBlockRange(packet); send {
+		if send := cs.blockRange.decide(packet); send {
 			cs.broadcastBlockRange(ctx, packet)
 		}
 	} else {
 		cs.logger.Error("blockRangeUpdate", "err", err)
 	}
 
-	broadcastEvery := time.NewTicker(frequency)
-	defer broadcastEvery.Stop()
-
 	for {
 		select {
-		case <-broadcastEvery.C:
+		case <-ctx.Done():
+			return
+		case headers, ok := <-progressCh:
+			if !ok {
+				return
+			}
+			if len(headers) == 0 {
+				continue
+			}
+
 			packet, err := cs.buildBlockRangePacket(ctx)
 			if err != nil {
 				cs.logger.Error("blockRangeUpdate", "err", err)
 				continue
 			}
 
-			send := cs.shouldAnnounceBlockRange(packet)
-			if !send {
+			if !cs.blockRange.decide(packet) {
 				cs.logger.Trace("block range unchanged; skipping broadcast", "earliest", packet.Earliest, "latest", packet.Latest)
 				continue
 			}
 
 			cs.broadcastBlockRange(ctx, packet)
-		case <-ctx.Done():
-			return
 		}
 	}
-}
-
-func (cs *MultiClient) shouldAnnounceBlockRange(update eth.BlockRangeUpdatePacket) bool {
-	return cs.blockRange.decide(update)
 }
 
 func (cs *MultiClient) buildBlockRangePacket(ctx context.Context) (eth.BlockRangeUpdatePacket, error) {
@@ -267,13 +299,12 @@ func (cs *MultiClient) broadcastBlockRange(ctx context.Context, request eth.Bloc
 //
 // Parameters:
 //   - ctx: context for cancellation
-//   - pollFrequency: the time interval between checking if a header is available
 //   - isHeaderAvailable: function that checks if a header is available in the database
 //
 // Returns:
 //   - nil when both blockReader is ready and a header is available
 //   - error if blockReader fails to become ready or context is cancelled
-func (cs *MultiClient) waitForPrerequisites(ctx context.Context, pollFrequency time.Duration, isHeaderAvailable func() bool) error {
+func (cs *MultiClient) waitForPrerequisites(ctx context.Context, isHeaderAvailable func() bool) error {
 	cs.logger.Debug("Waiting for blockreader to be ready")
 	if err := <-cs.blockReader.Ready(ctx); err != nil {
 		return err
@@ -285,7 +316,7 @@ func (cs *MultiClient) waitForPrerequisites(ctx context.Context, pollFrequency t
 		return nil
 	}
 
-	timer := time.NewTicker(pollFrequency)
+	timer := time.NewTicker(cs.ChainConfig.EpochDuration())
 	defer timer.Stop()
 
 	for {
@@ -337,6 +368,9 @@ type MultiClient struct {
 	sendHeaderRequestsToMultiplePeers bool
 	maxBlockBroadcastPeers            func(*types.Header) uint
 	blockRange                        blockRangeTracker
+	blockProgressMu                   sync.Mutex
+	blockProgressCh                   <-chan [][]byte
+	blockProgressUnsubscribe          func()
 
 	// disableBlockDownload is meant to be used temporarily for astrid until work to
 	// decouple sentry multi client from header and body downloading logic is done
@@ -426,6 +460,21 @@ func NewMultiClient(
 }
 
 func (cs *MultiClient) Sentries() []sentryproto.SentryClient { return cs.sentries }
+
+func (cs *MultiClient) SetBlockProgressChannel(ch <-chan [][]byte, unsubscribe func()) {
+	cs.blockProgressMu.Lock()
+	prevUnsubscribe := cs.blockProgressUnsubscribe
+	cs.blockProgressMu.Unlock()
+
+	if prevUnsubscribe != nil {
+		prevUnsubscribe()
+	}
+
+	cs.blockProgressMu.Lock()
+	cs.blockProgressCh = ch
+	cs.blockProgressUnsubscribe = unsubscribe
+	cs.blockProgressMu.Unlock()
+}
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	if cs.disableBlockDownload {
