@@ -187,7 +187,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
 	}
 
-	// the snapshot does't contains postState field so re-calculate it
+	// Now the snapshot lacks the `postState` field. Therefore, for pre-Byzantium blocks, 
+    // we must skip persistent receipts and re-calculate 
+    // If/when receipts are saved to the DB *with* the `postState` field, 
+    // this check on `calculatePostState` should be removed to utilize the stored receipt.
 	if !rpcDisableRCache && !calculatePostState {
 
 		var ok bool
