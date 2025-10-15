@@ -451,8 +451,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			panic(err)
 		}
 	}
-	headersCh, unsubscribe := mock.Notifications.Events.AddHeaderSubscription()
-	mock.sentriesClient.SetBlockProgressChannel(headersCh, unsubscribe)
 	mock.sentriesClient.IsMock = true
 
 	snapDownloader := mockDownloader(ctrl)
