@@ -65,8 +65,11 @@ import (
 const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
-	handshakeTimeout  = 5 * time.Second
-	maxPermitsPerPeer = 4 // How many outstanding requests per peer we may have
+	handshakeTimeout = 5 * time.Second
+	// ethProtocolTimeout is the maximum allowed time for the ETH protocol to be ready
+	// before dropping the connection. This prevents goroutine leaks and DOS attacks.
+	ethProtocolTimeout = 30 * time.Second
+	maxPermitsPerPeer  = 4 // How many outstanding requests per peer we may have
 )
 
 // PeerInfo collects various extra bits of information about the peer,
@@ -227,13 +230,16 @@ func (pi *PeerInfo) WaitForEth(ctx context.Context) *p2p.PeerError {
 		return nil
 	}
 
+	timeoutCtx, cancel := context.WithTimeout(ctx, ethProtocolTimeout)
+	defer cancel()
+
 	select {
 	case <-readyCh:
 		return nil
 	case <-pi.removed:
 		return pi.RemoveReason()
-	case <-ctx.Done():
-		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "wit protocol waiting for eth handshake cancelled")
+	case <-timeoutCtx.Done():
+		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, timeoutCtx.Err(), "wit protocol waiting for eth handshake cancelled")
 	}
 }
 
