@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -49,15 +48,16 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/logging"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )

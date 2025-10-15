@@ -59,11 +59,11 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 

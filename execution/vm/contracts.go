@@ -41,9 +41,9 @@ import (
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/crypto/secp256r1"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/tracing"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"

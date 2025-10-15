@@ -340,7 +340,6 @@ func Test2Tuple(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		test := test
 		t.Run(fmt.Sprintf("testcase %d", i), func(t *testing.T) {
 			tuples := NewTuples(len(test.putsBucket), 2, 1)
 			for _, value := range test.putsBucket {
@@ -702,7 +701,6 @@ func Test3Tuple(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		test := test
 		t.Run(fmt.Sprintf("testcase %d", i), func(t *testing.T) {
 			tuples := NewTuples(len(test.putsBucket), 3, 1)
 			for _, value := range test.putsBucket {

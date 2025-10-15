@@ -29,8 +29,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -1302,7 +1302,7 @@ func makeLog(size int) executionFunc {
 			Topics:  topics,
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
-			// core/state doesn't know the current block number.
+			// execution/state doesn't know the current block number.
 			BlockNumber: interpreter.evm.Context.BlockNumber,
 		})
 

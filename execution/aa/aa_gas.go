@@ -8,10 +8,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 )
 

@@ -9,7 +9,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm"
 )
 

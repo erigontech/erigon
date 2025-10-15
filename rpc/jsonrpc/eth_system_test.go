@@ -33,11 +33,11 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestGasPrice(t *testing.T) {

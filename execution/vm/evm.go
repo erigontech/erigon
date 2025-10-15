@@ -31,10 +31,10 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
