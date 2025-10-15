@@ -9,6 +9,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -629,13 +630,13 @@ func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{
 // - SetCodeTx
 // - BlobTx
 // - ArbitrumRetryTx
-var timeboostedTxTypes = []string{
-	"0x0",
-	"0x1",
-	"0x2",
-	"0x3",
-	"0x4",
-	"0x68",
+var timeboostedTxTypes = map[string]bool{
+	"0x0":  true,
+	"0x1":  true,
+	"0x2":  true,
+	"0x3":  true,
+	"0x4":  true,
+	"0x68": true,
 }
 
 // unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
@@ -655,47 +656,47 @@ func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[strin
 			return nil, errors.New("missing tx type")
 		}
 
-		// var wg errgroup.Group
+		var wg errgroup.Group
 
 		// For Arbitrum, certain transaction types may have a "timeboosted" field in their receipt.
 		// Retryable tx type on other side got to check gasUsed amount in receipt to get correct value (tx.gas is its gas limit actually, not spent gas)
 		//
 		var timeboosted bool
 		var effectiveGasUsed *big.Int
-		// if isArbitrum && typeTx == "0x69" || slices.Contains(timeboostedTxTypes, typeTx) && receiptClient != nil {
-		// 	// wg.Go(func() error {
-		// 	var receipt map[string]interface{}
-		// 	if rawTx["hash"] == "" {
-		// 		return nil, errors.New("missing tx hash for receipt fetch")
-		// 		// return errors.New("missing tx hash for receipt fetch")
-		// 	}
-		// 	err = receiptClient.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
-		// 	if err != nil {
-		// 		// return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
-		// 		return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
-		// 	}
+		if isArbitrum && typeTx == "0x69" || timeboostedTxTypes[typeTx] {
+			wg.Go(func() error {
+				var receipt map[string]interface{}
+				if rawTx["hash"] == "" {
+					// return nil, errors.New("missing tx hash for receipt fetch")
+					return errors.New("missing tx hash for receipt fetch")
+				}
+				err = receiptClient.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
+				if err != nil {
+					return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
+					// return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
+				}
 
-		// 	// Get timeboosted field from receipt, default to false if not present
-		// 	// Value could be missing (not present), false, or true. If not present but tx type supports it - means value not set yet on arb side
-		// 	if tb, ok := receipt["timeboosted"].(bool); ok && tb {
-		// 		// if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
-		// 		// 	fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
-		// 		// }
-		// 		timeboosted = tb
-		// 	}
-		// 	if typeTx == "0x69" {
-		// 		// get the effective gas used from the receipt for retryable
-		// 		gasStr, ok := receipt["gasUsed"].(string)
-		// 		if !ok {
-		// 			// return errors.New("missing gasUsed")
-		// 			return nil, errors.New("missing gasUsed")
-		// 		}
-		// 		effectiveGasUsed = convertHexToBigInt(gasStr)
-		// 	}
+				// Get timeboosted field from receipt, default to false if not present
+				// Value could be missing (not present), false, or true. If not present but tx type supports it - means value not set yet on arb side
+				if tb, ok := receipt["timeboosted"].(bool); ok && tb {
+					// if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
+					// 	fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
+					// }
+					timeboosted = tb
+				}
+				if typeTx == "0x69" {
+					// get the effective gas used from the receipt for retryable
+					gasStr, ok := receipt["gasUsed"].(string)
+					if !ok {
+						return errors.New("missing gasUsed")
+						// return nil, errors.New("missing gasUsed")
+					}
+					effectiveGasUsed = convertHexToBigInt(gasStr)
+				}
 
-		// 	// 		return nil
-		// 	// 	})
-		// }
+				return nil
+			})
+		}
 
 		switch typeTx {
 		case "0x0": // Legacy
@@ -735,9 +736,9 @@ func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[strin
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
 
-		// if err := wg.Wait(); err != nil { // Ensure the receipt fetch is complete before proceeding
-		// 	return nil, err
-		// }
+		if err := wg.Wait(); err != nil { // Ensure the receipt fetch is complete before proceeding
+			return nil, err
+		}
 		if timeboosted {
 			tx.SetTimeboosted(true)
 		}
