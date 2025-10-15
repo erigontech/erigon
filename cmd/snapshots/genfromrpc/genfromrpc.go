@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -623,6 +625,22 @@ func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{
 	return tx
 }
 
+// Transaction types that can have the timeboosted flag set
+// - LegacyTx
+// - AccessListTx
+// - DynamicFeeTx
+// - SetCodeTx
+// - BlobTx
+// - ArbitrumRetryTx
+var timeboostedTxTypes = []string{
+	"0x0",
+	"0x1",
+	"0x2",
+	"0x3",
+	"0x4",
+	"0x68",
+}
+
 // unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
 func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	var txs types.Transactions
@@ -638,6 +656,46 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 		typeTx, ok := rawTx["type"].(string)
 		if !ok {
 			return nil, errors.New("missing tx type")
+		}
+
+		wg, ctx := errgroup.WithContext(context.Background())
+		_ = ctx
+
+		// For Arbitrum, certain transaction types may have a "timeboosted" field in their receipt.
+		// Retryable tx type on other side got to check gasUsed amount in receipt to get correct value (tx.gas is its gas limit actually, not spent gas)
+		//
+		var timeboosted bool
+		var effectiveGasUsed *big.Int
+		if isArbitrum && typeTx == "0x69" || slices.Contains(timeboostedTxTypes, typeTx) {
+			wg.Go(func() error {
+				var receipt map[string]interface{}
+				if rawTx["hash"] == "" {
+					return errors.New("missing tx hash for receipt fetch")
+				}
+				err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
+				if err != nil {
+					return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
+				}
+
+				// Get timeboosted field from receipt, default to false if not present
+				// Value could be missing (not present), false, or true. If not present but tx type supports it - means value not set yet on arb side
+				if tb, ok := receipt["timeboosted"].(bool); ok && tb {
+					if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
+						fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
+					}
+					timeboosted = tb
+				}
+				if typeTx == "0x69" {
+					// get the effective gas used from the receipt for retryable
+					gasStr, ok := receipt["gasUsed"].(string)
+					if !ok {
+						return errors.New("missing gasUsed")
+					}
+					effectiveGasUsed = convertHexToBigInt(gasStr)
+				}
+
+				return nil
+			})
 		}
 
 		switch typeTx {
@@ -678,27 +736,15 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
 		}
 
-		if isArbitrum {
-			// Query receipt// TODO request only if txtype supports timeboosted at all
-			var receipt map[string]interface{}
-			err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", tx.Hash())
-			if err != nil {
-				return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
-			}
-
-			// Get timeboosted field from receipt, default to false if not present
-			if timeboosted, ok := receipt["timeboosted"].(bool); ok && timeboosted {
-				if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
-					fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", tx.Hash().Hex())
-				}
-				tx.SetTimeboosted(timeboosted)
-			}
-
-			// get the effective gas used from the receipt for this type of tx
-			if arbitrumTx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
-				if gasUsed, ok := receipt["gasUsed"].(uint64); ok {
-					arbitrumTx.EffectiveGasUsed = gasUsed
-				}
+		if err := wg.Wait(); err != nil { // Ensure the receipt fetch is complete before proceeding
+			return nil, err
+		}
+		if timeboosted {
+			tx.SetTimeboosted(true)
+		}
+		if effectiveGasUsed.Sign() > 0 {
+			if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+				srtx.EffectiveGasUsed = effectiveGasUsed.Uint64()
 			}
 		}
 
