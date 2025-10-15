@@ -27,7 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // go test -trimpath -v -fuzz=Fuzz_ProcessUpdate -fuzztime=300s ./erigon/execution/commitment
@@ -127,7 +127,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 				updateSeed.Read(aux[:sz])
 
 				copy(updates[k].Storage[:], aux[:sz])
-				updates[k].StorageLen = sz
+				updates[k].StorageLen = int8(sz)
 			}
 
 			plainKeys[k] = make([]byte, kl)

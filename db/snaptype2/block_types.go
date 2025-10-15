@@ -21,13 +21,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -80,10 +81,10 @@ var Indexes = struct {
 	TxnHash,
 	TxnHash2BlockNum snaptype.Index
 }{
-	HeaderHash:       snaptype.Index{Name: "headers"},
-	BodyHash:         snaptype.Index{Name: "bodies"},
-	TxnHash:          snaptype.Index{Name: "transactions"},
-	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Offset: 1},
+	HeaderHash:       snaptype.Index{Name: statecfg.HeadersIdx, Version: statecfg.Schema.HeadersBlock.Version.AccessorIdx},
+	BodyHash:         snaptype.Index{Name: statecfg.BodiesIdx, Version: statecfg.Schema.BodiesBlock.Version.AccessorIdx},
+	TxnHash:          snaptype.Index{Name: statecfg.TransactionsIdx, Version: statecfg.Schema.TransactionsBlock.Version.AccessorIdx},
+	TxnHash2BlockNum: snaptype.Index{Name: statecfg.TransactionsToBlockIdx, Version: statecfg.Schema.TxnHash2BlockNumBlock.Version.AccessorIdx, Offset: 1},
 }
 
 var (
@@ -100,8 +101,8 @@ var (
 	)
 	Headers = snaptype.RegisterType(
 		Enums.Headers,
-		"headers",
-		version.V1_1_standart,
+		statecfg.Headers,
+		statecfg.Schema.HeadersBlock.Version.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
@@ -119,7 +120,7 @@ var (
 					BaseDataID:         info.From,
 					LessFalsePositives: true,
 				}
-				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, Indexes.HeaderHash.Version, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -141,8 +142,8 @@ var (
 
 	Bodies = snaptype.RegisterType(
 		Enums.Bodies,
-		"bodies",
-		version.V1_1_standart,
+		statecfg.Bodies,
+		statecfg.Schema.BodiesBlock.Version.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.BodyHash},
 		snaptype.IndexBuilderFunc(
@@ -157,7 +158,7 @@ var (
 					Salt:       &salt,
 					BaseDataID: info.From,
 				}
-				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, Indexes.BodyHash.Version, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -175,8 +176,8 @@ var (
 
 	Transactions = snaptype.RegisterType(
 		Enums.Transactions,
-		"transactions",
-		version.V1_1_standart,
+		statecfg.Transactions,
+		statecfg.Schema.TransactionsBlock.Version.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
 		snaptype.IndexBuilderFunc(
@@ -223,7 +224,7 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(Indexes.TxnHash.Version.Current, sn.From, sn.To)),
 					BaseDataID: baseTxnID.U64(),
 				}, logger)
 				if err != nil {
@@ -237,7 +238,9 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
+					IndexFile: filepath.Join(sn.Dir(),
+						sn.Type.IdxFileName(Indexes.TxnHash2BlockNum.Version.Current,
+							sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,
 				}, logger)
 				if err != nil {

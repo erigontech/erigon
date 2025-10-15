@@ -21,7 +21,7 @@ import (
 
 	"github.com/google/btree"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type SpanId uint64

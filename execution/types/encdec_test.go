@@ -28,7 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -679,8 +679,8 @@ func BenchmarkLegacyTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(LegacyTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -690,8 +690,8 @@ func BenchmarkAccessListTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(AccessListTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -701,8 +701,8 @@ func BenchmarkDynamicFeeTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(DynamicFeeTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -712,8 +712,8 @@ func BenchmarkBlobTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(BlobTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -723,8 +723,8 @@ func BenchmarkSetCodeTxRLP(b *testing.B) {
 	tr := NewTRand()
 	txn := tr.RandTransaction(SetCodeTxType)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
@@ -734,8 +734,8 @@ func BenchmarkWithdrawalRLP(b *testing.B) {
 	tr := NewTRand()
 	w := tr.RandWithdrawal()
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		w.EncodeRLP(&buf)
 	}
