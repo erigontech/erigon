@@ -37,8 +37,8 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/turbo/debug"
 )
 
 type Sqeeze string
