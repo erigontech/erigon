@@ -679,9 +679,9 @@ func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[strin
 				// Get timeboosted field from receipt, default to false if not present
 				// Value could be missing (not present), false, or true. If not present but tx type supports it - means value not set yet on arb side
 				if tb, ok := receipt["timeboosted"].(bool); ok && tb {
-					if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
-						fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
-					}
+					// if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
+					// 	fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
+					// }
 					timeboosted = tb
 				}
 				if typeTx == "0x69" {
