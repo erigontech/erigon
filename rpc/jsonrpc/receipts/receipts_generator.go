@@ -386,7 +386,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
-			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "getReceipts", nil)
+			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipts", nil)
 			if err != nil {
 				return nil, err
 			}
