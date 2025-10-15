@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/urfave/cli/v2"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 func stepRebase(cliCtx *cli.Context) error {

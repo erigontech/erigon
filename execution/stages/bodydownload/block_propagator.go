@@ -14,30 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package wrap
+package bodydownload
 
 import (
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state"
+	"context"
+	"math/big"
+
+	"github.com/erigontech/erigon/execution/types"
 )
 
-func NewTxContainer(tx kv.RwTx, doms *state.SharedDomains) TxContainer {
-	txContainer := TxContainer{
-		Doms: doms,
-	}
-	txContainer.SetTx(tx)
-	return txContainer
-}
-
-func (c *TxContainer) SetTx(tx kv.RwTx) {
-	c.Tx = tx
-	if ttx, ok := tx.(kv.TemporalTx); ok {
-		c.Ttx = ttx
-	}
-}
-
-type TxContainer struct {
-	Tx   kv.RwTx
-	Ttx  kv.TemporalTx
-	Doms *state.SharedDomains
-}
+type BlockPropagator func(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int)

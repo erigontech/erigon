@@ -1525,7 +1525,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 				return err
 			}
 		}
-		if err := stateObject.updateStotage(stateWriter); err != nil {
+		if err := stateObject.updateStorage(stateWriter); err != nil {
 			return err
 		}
 		if dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr)) {

@@ -43,8 +43,7 @@ func BenchmarkWebsocketEmptyCall(b *testing.B) {
 	}
 	defer client.Close()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if err := client.Call(nil, "test_ping"); err != nil {
 			panic(err)
 		}
@@ -68,9 +67,8 @@ func BenchmarkWebsocket16kb(b *testing.B) {
 	defer client.Close()
 
 	payload16kb := strings.Repeat("x", 4096*4)
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		err := client.Call(nil, "test_echo", payload16kb, 5, nil)
 		if err != nil {
 			panic(err)
