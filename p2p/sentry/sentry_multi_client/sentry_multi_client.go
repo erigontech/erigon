@@ -62,6 +62,36 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
+const blockRangeEpochBlocks = 32
+
+type blockRangeTracker struct {
+	last        eth.BlockRangeUpdatePacket
+	initialized bool
+}
+
+func (t *blockRangeTracker) decide(next eth.BlockRangeUpdatePacket) bool {
+	if !t.initialized {
+		return true
+	}
+
+	prev := t.last
+
+	if next.Latest < prev.Latest {
+		return true // unwind has occurred
+	}
+
+	if next.Latest-prev.Latest >= blockRangeEpochBlocks {
+		return true
+	}
+
+	return false
+}
+
+func (t *blockRangeTracker) record(next eth.BlockRangeUpdatePacket) {
+	t.last = next
+	t.initialized = true
+}
+
 // StartStreamLoops starts message processing loops for all sentries.
 // The processing happens in several streams:
 // RecvMessage - processing incoming headers/bodies
@@ -152,35 +182,58 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 		return
 	}
 
+	if packet, err := cs.buildBlockRangePacket(ctx); err == nil {
+		if send := cs.shouldAnnounceBlockRange(packet); send {
+			cs.broadcastBlockRange(ctx, packet)
+		}
+	} else {
+		cs.logger.Error("blockRangeUpdate", "err", err)
+	}
+
 	broadcastEvery := time.NewTicker(frequency)
 	defer broadcastEvery.Stop()
 
 	for {
 		select {
 		case <-broadcastEvery.C:
-			cs.doAnnounceBlockRange(ctx)
+			packet, err := cs.buildBlockRangePacket(ctx)
+			if err != nil {
+				cs.logger.Error("blockRangeUpdate", "err", err)
+				continue
+			}
+
+			send := cs.shouldAnnounceBlockRange(packet)
+			if !send {
+				cs.logger.Trace("block range unchanged; skipping broadcast", "earliest", packet.Earliest, "latest", packet.Latest)
+				continue
+			}
+
+			cs.broadcastBlockRange(ctx, packet)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
-	sentries := cs.Sentries()
+func (cs *MultiClient) shouldAnnounceBlockRange(update eth.BlockRangeUpdatePacket) bool {
+	return cs.blockRange.decide(update)
+}
+
+func (cs *MultiClient) buildBlockRangePacket(ctx context.Context) (eth.BlockRangeUpdatePacket, error) {
 	status, err := cs.statusDataProvider.GetStatusData(ctx)
 	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
-		return
+		return eth.BlockRangeUpdatePacket{}, err
 	}
 
-	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
-	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
-
-	request := eth.BlockRangeUpdatePacket{
+	return eth.BlockRangeUpdatePacket{
 		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
 		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
-	}
+	}, nil
+}
+
+func (cs *MultiClient) broadcastBlockRange(ctx context.Context, request eth.BlockRangeUpdatePacket) {
+	cs.logger.Debug("sending status data", "start", request.Earliest, "end", request.Latest, "hash", hex.EncodeToString(request.LatestHash[:]))
 
 	data, err := rlp.EncodeToBytes(&request)
 	if err != nil {
@@ -188,7 +241,7 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 		return
 	}
 
-	for _, s := range sentries {
+	for _, s := range cs.Sentries() {
 		handshake, err := s.HandShake(ctx, &emptypb.Empty{})
 		if err != nil {
 			cs.logger.Error("blockRangeUpdate", "err", err)
@@ -203,10 +256,11 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 			})
 			if err != nil {
 				cs.logger.Error("blockRangeUpdate", "err", err)
-				continue // continue sending message to other sentries
 			}
 		}
 	}
+
+	cs.blockRange.record(request)
 }
 
 // waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
@@ -220,11 +274,11 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 //   - nil when both blockReader is ready and a header is available
 //   - error if blockReader fails to become ready or context is cancelled
 func (cs *MultiClient) waitForPrerequisites(ctx context.Context, pollFrequency time.Duration, isHeaderAvailable func() bool) error {
-	cs.logger.Info("Waiting for blockreader to be ready")
+	cs.logger.Debug("Waiting for blockreader to be ready")
 	if err := <-cs.blockReader.Ready(ctx); err != nil {
 		return err
 	}
-	cs.logger.Info("Blockreader ready")
+	cs.logger.Debug("Blockreader ready")
 
 	if isHeaderAvailable() {
 		cs.logger.Info("Header already available.")
@@ -282,6 +336,7 @@ type MultiClient struct {
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
 	maxBlockBroadcastPeers            func(*types.Header) uint
+	blockRange                        blockRangeTracker
 
 	// disableBlockDownload is meant to be used temporarily for astrid until work to
 	// decouple sentry multi client from header and body downloading logic is done

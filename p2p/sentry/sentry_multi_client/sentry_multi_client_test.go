@@ -174,7 +174,15 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 		logger:             log.New(),
 	}
 
-	cs.doAnnounceBlockRange(ctx)
+	packet, err := cs.buildBlockRangePacket(ctx)
+	if err != nil {
+		t.Fatalf("failed to build block range packet: %v", err)
+	}
+	send := cs.shouldAnnounceBlockRange(packet)
+	if !send {
+		t.Fatal("expected block range to be announced")
+	}
+	cs.broadcastBlockRange(ctx, packet)
 
 	if sentMessage == nil {
 		t.Fatal("No message was sent")
@@ -196,6 +204,150 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 	}
 	if response.LatestHash != testBestHash {
 		t.Errorf("Expected latest hash %s, got %s", testBestHash.Hex(), response.LatestHash.Hex())
+	}
+}
+
+func TestBlockRangeTrackerAccept(t *testing.T) {
+	var tracker blockRangeTracker
+
+	first := eth.BlockRangeUpdatePacket{
+		Earliest:   0,
+		Latest:     100,
+		LatestHash: common.HexToHash("0x1"),
+	}
+	if send := tracker.decide(first); !send {
+		t.Fatal("expected initial announcement without forward gating")
+	}
+	tracker.record(first)
+
+	if send := tracker.decide(first); send {
+		t.Fatal("expected identical announcement to be skipped")
+	}
+
+	advanceBelowThreshold := first
+	advanceBelowThreshold.Latest += blockRangeEpochBlocks - 1
+	if send := tracker.decide(advanceBelowThreshold); send {
+		t.Fatal("expected insufficient latest advance to be skipped")
+	}
+
+	advanceThreshold := first
+	advanceThreshold.Latest += blockRangeEpochBlocks
+	if send := tracker.decide(advanceThreshold); !send {
+		t.Fatal("expected latest advance >= 32 to be sent")
+	}
+	tracker.record(advanceThreshold)
+
+	regression := advanceThreshold
+	regression.Latest -= 10
+	if send := tracker.decide(regression); !send {
+		t.Fatal("expected regression to trigger immediate announcement")
+	}
+	tracker.record(regression)
+}
+
+func TestMultiClient_DoAnnounceBlockRangeSkipsUntilThreshold(t *testing.T) {
+	ctx := context.Background()
+
+	status := &proto_sentry.StatusData{
+		MinimumBlockHeight: 100,
+		MaxBlockHeight:     200,
+		BestHash:           gointerfaces.ConvertHashToH256(common.HexToHash("0xaa")),
+	}
+
+	var (
+		sentCount   int
+		lastMessage *proto_sentry.OutboundMessageData
+	)
+
+	mockSentry := &mockSentryClient{
+		sendMessageToAllFunc: func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			sentCount++
+			lastMessage = req
+			return &proto_sentry.SentPeers{}, nil
+		},
+		handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+			return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH69}, nil
+		},
+	}
+
+	statusProvider := &mockStatusDataProvider{
+		getStatusDataFunc: func(ctx context.Context) (*proto_sentry.StatusData, error) {
+			return status, nil
+		},
+	}
+
+	readyReader := &mockFullBlockReader{
+		readyFunc: func(ctx context.Context) <-chan error {
+			ch := make(chan error, 1)
+			ch <- nil
+			return ch
+		},
+	}
+
+	cs := &MultiClient{
+		sentries:           []proto_sentry.SentryClient{mockSentry},
+		statusDataProvider: statusProvider,
+		blockReader:        readyReader,
+		logger:             log.New(),
+	}
+
+	attempt := func() bool {
+		packet, err := cs.buildBlockRangePacket(ctx)
+		if err != nil {
+			t.Fatalf("failed to build block range packet: %v", err)
+		}
+		send := cs.shouldAnnounceBlockRange(packet)
+		if !send {
+			return false
+		}
+		cs.broadcastBlockRange(ctx, packet)
+		return true
+	}
+
+	if !attempt() {
+		t.Fatal("expected first announcement to be sent")
+	}
+	if sentCount != 1 {
+		t.Fatalf("expected first announcement to be sent, got %d", sentCount)
+	}
+
+	if attempt() {
+		t.Fatalf("expected unchanged range to be skipped, got %d", sentCount)
+	}
+
+	status.MaxBlockHeight = 200 + blockRangeEpochBlocks - 1
+	if attempt() {
+		t.Fatalf("expected latest advance below threshold to be skipped, got %d", sentCount)
+	}
+
+	status.MaxBlockHeight = 200 + blockRangeEpochBlocks
+	status.BestHash = gointerfaces.ConvertHashToH256(common.HexToHash("0xbb"))
+	if !attempt() {
+		t.Fatalf("expected announcement after reaching threshold, got %d", sentCount)
+	}
+	if sentCount != 2 {
+		t.Fatalf("expected announcement after reaching threshold, got %d", sentCount)
+	}
+
+	if lastMessage == nil {
+		t.Fatal("expected block range message to be captured")
+	}
+
+	var payload eth.BlockRangeUpdatePacket
+	if err := rlp.DecodeBytes(lastMessage.Data, &payload); err != nil {
+		t.Fatalf("failed to decode payload: %v", err)
+	}
+	if payload.Latest != status.MaxBlockHeight {
+		t.Fatalf("expected latest %d, got %d", status.MaxBlockHeight, payload.Latest)
+	}
+
+	status.MaxBlockHeight = status.MaxBlockHeight - blockRangeEpochBlocks/2
+	status.BestHash = gointerfaces.ConvertHashToH256(common.HexToHash("0xcc"))
+	if !attempt() {
+		t.Fatalf("expected regression to trigger announcement, got %d", sentCount)
+	}
+	if sentCount != 3 {
+		t.Fatalf("expected regression to trigger announcement, got %d", sentCount)
 	}
 }
 
