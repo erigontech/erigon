@@ -2183,21 +2183,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := blockReader.TxnumReader(ctx)
-	var lastTxNum uint64
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = txNumsReader.Max(tx, execProgress)
+	logger.Info("Build state history snapshots")
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return err
 		}
-		return nil
+		return agg.SafeBuildFiles(tx, blockReader.TxnumReader(ctx), execProgress)
 	}); err != nil {
-		return err
-	}
-
-	logger.Info("Build state history snapshots")
-	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
