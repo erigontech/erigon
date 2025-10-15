@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
-	"github.com/erigontech/erigon/turbo/privateapi"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )

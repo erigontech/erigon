@@ -40,8 +40,8 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
