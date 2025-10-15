@@ -183,15 +183,14 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 		return
 	}
 
-	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
 	request := eth.BlockRangeUpdatePacket{
 		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
-		LatestHash: bestHash,
+		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
 	}
 
 	if err := validateBlockRange(request); err != nil {
-		cs.logger.Warn("blockRangeUpdate: invalid blockRangeUpdate packet", "err", err)
+		cs.logger.Warn("blockRangeUpdate: invalid block range", "err", err)
 		return
 	}
 
