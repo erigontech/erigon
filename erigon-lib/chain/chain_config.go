@@ -132,7 +132,7 @@ type Config struct {
 
 	// used for sovereign chains, will turn off IBS interaction for info tree / GER / etc.
 	// this option should only be used in conjunction with normalcy.
-	SovereignModeBlock *big.Int `json:"sovereignMode,omitempty"`
+	SovereignModeBlock *big.Int `json:"sovereignModeBlock,omitempty"`
 }
 
 type BlobConfig struct {
