@@ -26,21 +26,29 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
+)
+
+type iodir int
+
+const (
+	get iodir = iota
+	put
 )
 
 type dataWithPrevStep struct {
 	data     []byte
 	prevStep kv.Step
+	dir      iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	stepSize uint64
 
-	estSize int
+	getCacheSize int
 
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string]dataWithPrevStep
@@ -51,11 +59,13 @@ type TemporalMemBatch struct {
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
+	metrics                   *DomainMetrics
 }
 
-func newTemporalMemBatch(tx kv.TemporalTx) *TemporalMemBatch {
+func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
+		metrics: metrics,
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -95,21 +105,50 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: kv.Step(txNum / sd.stepSize)}
+	putSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
-			sd.estSize += len(val) - len(old.data)
+			putSize += len(val) - len(old.data)
 		} else {
-			sd.estSize += len(key) + len(val)
+			putSize += len(key) + len(val)
 		}
+
+		sd.metrics.Lock()
+		sd.metrics.CachePutCount++
+		sd.metrics.CachePutSize += putSize
+		if dm, ok := sd.metrics.Domains[domain]; ok {
+			dm.CachePutCount++
+			dm.CachePutSize += putSize
+		} else {
+			sd.metrics.Domains[domain] = &DomainIOMetrics{
+				CachePutCount: 1,
+				CachePutSize:  putSize,
+			}
+		}
+		sd.metrics.Unlock()
 		return
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		sd.estSize += len(val) - len(old.data)
+		putSize += len(val) - len(old.data)
 	} else {
-		sd.estSize += len(key) + len(val)
+		putSize += len(key) + len(val)
 	}
 	sd.domains[domain][key] = valWithPrevStep
+
+	if dm, ok := sd.metrics.Domains[domain]; ok {
+		dm.CachePutCount++
+		dm.CachePutSize += putSize
+	} else {
+		sd.metrics.Domains[domain] = &DomainIOMetrics{
+			CachePutCount: 1,
+			CachePutSize:  putSize,
+		}
+	}
+	sd.metrics.Lock()
+	sd.metrics.CachePutCount++
+	sd.metrics.CachePutSize += putSize
+	sd.metrics.Unlock()
 }
 
 func (sd *TemporalMemBatch) GetLatest(table kv.Domain, key []byte) (v []byte, prevStep kv.Step, ok bool) {
@@ -134,7 +173,7 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.estSize) * 4
+	return uint64(sd.metrics.CachePutSize) * 4
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
@@ -145,7 +184,14 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, dataWithPrevStep](128)
-	sd.estSize = 0
+	sd.metrics.Lock()
+	defer sd.metrics.Unlock()
+	sd.metrics.CachePutSize = 0
+	sd.metrics.CachePutCount = 0
+	for _, dm := range sd.metrics.Domains {
+		dm.CachePutCount = 0
+		dm.CachePutSize = 0
+	}
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {

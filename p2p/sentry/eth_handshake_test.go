@@ -23,17 +23,17 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 func TestCheckPeerStatusCompatibility(t *testing.T) {
-	var version uint = direct.ETH67
+	var version uint = direct.ETH68
 	networkID := chainspec.Mainnet.Config.ChainID.Uint64()
 	heightForks, timeForks := forkid.GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	goodReply := eth.StatusPacket{
@@ -69,14 +69,14 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = direct.ETH67 - 1
+		reply.ProtocolVersion = direct.ETH68 - 1
 		err := compatStatusPacket(reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = direct.ETH67 + 1
+		reply.ProtocolVersion = direct.ETH68 + 1
 		err := compatStatusPacket(reply, &status, version, version)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is more")

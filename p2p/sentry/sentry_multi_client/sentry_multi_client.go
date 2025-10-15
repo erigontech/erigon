@@ -29,22 +29,20 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -53,13 +51,26 @@ import (
 	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
-	"github.com/erigontech/erigon/turbo/services"
 )
+
+func validateBlockRange(packet eth.BlockRangeUpdatePacket) error {
+	if packet.Earliest > packet.Latest {
+		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", packet.Earliest, packet.Latest)
+	}
+	if packet.LatestHash == (common.Hash{}) {
+		return fmt.Errorf("invalid block range: latest block hash is zero")
+	}
+	return nil
+}
 
 // StartStreamLoops starts message processing loops for all sentries.
 // The processing happens in several streams:
@@ -86,8 +97,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []sentryproto.MessageId{
-		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
-		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH68][eth.GetBlockBodiesMsg],
+		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
 		eth.ToProto[direct.ETH69][eth.GetReceiptsMsg],
 		wit.ToProto[direct.WIT0][wit.GetWitnessMsg],
 	}
@@ -104,7 +115,7 @@ func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []sentryproto.MessageId{
-		eth.ToProto[direct.ETH67][eth.GetBlockHeadersMsg],
+		eth.ToProto[direct.ETH68][eth.GetBlockHeadersMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -119,10 +130,10 @@ func (cs *MultiClient) RecvMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []sentryproto.MessageId{
-		eth.ToProto[direct.ETH67][eth.BlockHeadersMsg],
-		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
-		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
-		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
+		eth.ToProto[direct.ETH68][eth.BlockHeadersMsg],
+		eth.ToProto[direct.ETH68][eth.BlockBodiesMsg],
+		eth.ToProto[direct.ETH68][eth.NewBlockHashesMsg],
+		eth.ToProto[direct.ETH68][eth.NewBlockMsg],
 		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
 		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 		eth.ToProto[direct.ETH69][eth.BlockRangeUpdateMsg],
@@ -172,14 +183,18 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 		return
 	}
 
-	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
-	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
-
 	request := eth.BlockRangeUpdatePacket{
 		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
 		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
 	}
+
+	if err := validateBlockRange(request); err != nil {
+		cs.logger.Warn("blockRangeUpdate: invalid block range", "err", err)
+		return
+	}
+
+	cs.logger.Debug("sending status data", "start", request.Earliest, "end", request.Latest, "hash", hex.EncodeToString(request.LatestHash[:]))
 
 	data, err := rlp.EncodeToBytes(&request)
 	if err != nil {
@@ -188,13 +203,22 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 	}
 
 	for _, s := range sentries {
-		_, err := s.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
-			Id:   sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
-			Data: data,
-		})
+		handshake, err := s.HandShake(ctx, &emptypb.Empty{})
 		if err != nil {
 			cs.logger.Error("blockRangeUpdate", "err", err)
 			continue // continue sending message to other sentries
+		}
+
+		version := direct.ProtocolToUintMap[handshake.Protocol]
+		if version >= direct.ETH69 {
+			_, err := s.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
+				Id:   sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
+				Data: data,
+			})
+			if err != nil {
+				cs.logger.Error("blockRangeUpdate", "err", err)
+				continue // continue sending message to other sentries
+			}
 		}
 	}
 }
@@ -1036,6 +1060,9 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 	var query eth.BlockRangeUpdatePacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
+	}
+	if err := validateBlockRange(query); err != nil {
+		return err
 	}
 
 	go func() {

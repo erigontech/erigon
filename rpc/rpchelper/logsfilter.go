@@ -19,11 +19,11 @@ package rpchelper
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 type LogsFilterAggregator struct {
@@ -102,6 +102,15 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 	}
 	a.subtractLogFilters(filter)
 	return true
+}
+
+// hasLogsFilter checks if a log filter identified by filterId is present in the LogsFilterAggregator.
+func (a *LogsFilterAggregator) hasLogsFilter(filterId LogsSubID) bool {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+
+	_, ok := a.logsFilters.Get(filterId)
+	return ok
 }
 
 // createFilterRequest creates a LogsFilterRequest from the current state of the LogsFilterAggregator.

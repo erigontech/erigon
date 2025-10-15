@@ -21,11 +21,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state"
@@ -141,7 +144,6 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 		return nil, err
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
-
 	tx.aggtx = db.stateFiles.BeginFilesRo()
 	return tx, nil
 }
@@ -172,13 +174,12 @@ func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) err
 	return tx.Commit()
 }
 
-func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
-
 	tx.aggtx = db.stateFiles.BeginFilesRo()
 	return tx, nil
 }
@@ -204,6 +205,28 @@ func (db *DB) Close() {
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
+}
+
+func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
+	tb.Helper()
+	db := memdb.NewTestDB(tb, label)
+	dirs := datadir.New(tb.TempDir())
+	stepSize := uint64(1000)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(context.Background(), db)
+	tb.Cleanup(agg.Close)
+	tdb, _ := New(db, agg)
+	return tdb
+}
+
+func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
+	tb.Helper()
+	db := NewTestDB(tb, dbcfg.ChainDB)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return db, tx
 }
 
 type tx struct {
@@ -233,6 +256,10 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+	return tx.aggtx.StepsInFiles(entitySet...)
+}
+
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
@@ -627,14 +654,14 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
-func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
+func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
+	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
+	return tx.historyStartFrom(name, tx.Tx)
 }
 func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.historyStartFrom(name)
+	return tx.historyStartFrom(name, tx.RwTx)
 }
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.Tx)

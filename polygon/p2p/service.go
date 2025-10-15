@@ -23,17 +23,17 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/event"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
-func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf libsentry.StatusDataFactory) *Service {
+func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf libsentry.StatusDataFactory, tmpDir string) *Service {
 	peerPenalizer := p2p.NewPeerPenalizer(sc)
 	messageListener := p2p.NewMessageListener(logger, sc, sdf, peerPenalizer)
 	peerTracker := p2p.NewPeerTracker(logger, messageListener)
@@ -43,6 +43,7 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 	fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
 	publisher := NewPublisher(logger, messageSender, peerTracker)
+	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpDir)
 	return &Service{
 		logger:          logger,
 		fetcher:         fetcher,
@@ -50,6 +51,7 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 		peerPenalizer:   peerPenalizer,
 		peerTracker:     peerTracker,
 		publisher:       publisher,
+		bbd:             bbd,
 		maxPeers:        maxPeers,
 	}
 }
@@ -61,6 +63,7 @@ type Service struct {
 	peerPenalizer   *p2p.PeerPenalizer
 	peerTracker     *p2p.PeerTracker
 	publisher       *Publisher
+	bbd             *p2p.BackwardBlockDownloader
 	maxPeers        int
 }
 
@@ -109,8 +112,8 @@ func (s *Service) FetchBodies(ctx context.Context, headers []*types.Header, peer
 	return s.fetcher.FetchBodies(ctx, headers, peerId, opts...)
 }
 
-func (s *Service) FetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, amount uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Block], error) {
-	return s.fetcher.FetchBlocksBackwardsByHash(ctx, hash, amount, peerId, opts...)
+func (s *Service) FetchBlocksBackwards(ctx context.Context, hash common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.BbdResultFeed, error) {
+	return s.bbd.DownloadBlocksBackwards(ctx, hash, hr, opts...)
 }
 
 func (s *Service) PublishNewBlock(block *types.Block, td *big.Int) {

@@ -34,28 +34,27 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/genesiswrite"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testforks"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -209,15 +208,14 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
-	txc := wrap.NewTxContainer(tx, nil)
-	domains, err := dbstate.NewSharedDomains(txc.Ttx, log.New())
+	domains, err := dbstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
 
-	r := rpchelper.NewLatestStateReader(txc.Ttx)
+	r := rpchelper.NewLatestStateReader(tx)
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb := state.New(r)
 
@@ -300,7 +298,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 
 	var root common.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), true, blockNum, txNum, "")
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
 		return statedb, root, res.GasUsed, fmt.Errorf("ComputeCommitment: %w", err)
 	}
@@ -346,7 +344,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.Genesis
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), domains.TxNum(), "flush-commitment")
+	_, err = domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), domains.TxNum(), "flush-commitment", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -486,6 +484,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 		data,
 		accessList,
 		false, /* checkNonce */
+		true,  /* checkGas */
 		false, /* isFree */
 		uint256.MustFromBig(blobFeeCap),
 	)

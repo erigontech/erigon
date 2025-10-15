@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [ sepolia, holesky, amoy, chiado ]  # Chain name as specified on the erigon command line
+        chain: [ sepolia, hoodi, amoy, chiado ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -100,6 +100,13 @@ jobs:
         path: |
           ${{ github.workspace }}/result-${{ env.CHAIN }}.json
           ${{ github.workspace }}/erigon_data/logs/
+
+    - name: Upload metric plots
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: metric-plots-${{ env.CHAIN }}
+        path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Clean up Erigon data directory
       if: always()

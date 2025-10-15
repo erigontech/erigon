@@ -30,11 +30,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -546,7 +546,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, txNum))
 
 		// Compute and store the commitment
-		_, err = sd.ComputeCommitment(ctx, true, blockNum, txNum, "flush-commitment")
+		_, err = sd.ComputeCommitment(ctx, tx, true, blockNum, txNum, "flush-commitment", nil)
 		require.NoError(err)
 
 		require.NoError(sd.Flush(ctx, tx))

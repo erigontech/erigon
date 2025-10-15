@@ -32,12 +32,11 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -48,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -620,6 +620,10 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		files:    d._visible.files,
 		salt:     d.salt.Load(),
 	}
+}
+
+func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
+	return kv.Step(dt.files.EndTxNum() / dt.stepSize)
 }
 
 // Collation is the set of compressors created after aggregation
@@ -1384,11 +1388,17 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(k)
-	if useCache && dt.getFromFileCache == nil {
-		dt.getFromFileCache = dt.visible.newGetFromFileCache()
+
+	getFromFileCache := dt.getFromFileCache
+
+	if useCache && getFromFileCache == nil {
+		if dt.getFromFileCache == nil {
+			dt.getFromFileCache = dt.visible.newGetFromFileCache()
+		}
+		getFromFileCache = dt.getFromFileCache
 	}
-	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		if cv, ok := dt.getFromFileCache.Get(hi); ok {
+	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
+		if cv, ok := getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1448,9 +1458,10 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 }
 
 // Returns the first txNum from available history
-func (dt *DomainRoTx) HistoryStartFrom() uint64 {
-	if len(dt.ht.files) == 0 {
-		return 0
+func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
+	if len(dt.ht.files) == 0 { // if no history files, check in MDBX
+		firstTxNumInMdbx := dt.ht.h.minTxNumInDB(tx)
+		return firstTxNumInMdbx
 	}
 	return dt.ht.files[0].startTxNum
 }
@@ -1577,7 +1588,7 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	return dt.btReaders[i]
 }
 
-var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
+var errSdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
 
 func (dt *DomainRoTx) closeValsCursor() {
 	if dt.valsC != nil {
@@ -1588,17 +1599,13 @@ func (dt *DomainRoTx) closeValsCursor() {
 	}
 }
 
-type canCheckClosed interface {
-	IsClosed() bool
-}
-
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil { // run in assert mode only
 		if asserts {
 			if tx.ViewID() != dt.valCViewID {
-				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.FilenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
+				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", errSdTxImmutabilityInvariant, dt.d.FilenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 			}
-			if mc, ok := dt.valsC.(canCheckClosed); !ok && mc.IsClosed() {
+			if mc, ok := dt.valsC.(interface{ IsClosed() bool }); ok && mc.IsClosed() {
 				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.FilenameBase))
 			}
 			// if dt.d.largeValues {
@@ -1651,7 +1658,15 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
 	} else {
-		_, stepWithVal, err := valsC.SeekExact(key)
+		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					fmt.Println(fmt.Sprintf("%p: seek failed for: %d", dt, roTx.ViewID()), "reason", rec, "stack", dbg.Stack())
+					err = fmt.Errorf("paniced ")
+				}
+			}()
+			return valsC.SeekExact(key)
+		}()
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 		}
@@ -1660,7 +1675,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		}
 
 		v = stepWithVal[8:]
-
 		foundInvStep = stepWithVal[:8]
 	}
 
@@ -1670,12 +1684,16 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		return v, foundStep, true, nil
 	}
 
-	return nil, 0, false, nil
+	return nil, 0, false, err
 }
 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
+	return dt.getLatest(key, roTx, nil, time.Time{})
+}
+
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, metrics *DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
@@ -1697,10 +1715,17 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found {
+		if metrics != nil {
+			metrics.updateDbReads(dt.name, start)
+		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
+	if metrics != nil {
+		metrics.updateFileReads(dt.name, start)
+	}
+
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
 	}

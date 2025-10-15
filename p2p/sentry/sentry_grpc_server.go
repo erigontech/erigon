@@ -41,18 +41,18 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -263,6 +263,16 @@ func (pi *PeerInfo) MinBlock() uint64 {
 		return pi.minBlock
 	}
 	return pi.height
+}
+
+// SetBlockRange updates minBlock and (monotonically) increases height under a single lock
+func (pi *PeerInfo) SetBlockRange(newMinBlock, newHeight uint64) {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	pi.minBlock = newMinBlock
+	if pi.height < newHeight {
+		pi.height = newHeight
+	}
 }
 
 // SetMinimumBlock updates PeerInfo.minBlock from BlockRangeUpdate message
@@ -775,19 +785,15 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
 			}
 
-			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
-			if err != nil {
-				return err
-			}
-
+			var minBlock, latestBlock uint64
 			if protocol >= direct.ETH69 {
 				statusPacket69, err := handShake[eth.StatusPacket69](ctx, status, rw, protocol, protocol, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 				if err != nil {
 					return err
 				}
 
-				peerInfo.SetMinimumBlock(statusPacket69.MinimumBlock)
-				peerInfo.SetIncreasedHeight(statusPacket69.LatestBlock)
+				minBlock = statusPacket69.MinimumBlock
+				latestBlock = statusPacket69.LatestBlock
 			} else {
 				statusPacket, err := handShake[eth.StatusPacket](ctx, status, rw, protocol, protocol, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 				if err != nil {
@@ -795,6 +801,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				}
 
 				peerBestHash := statusPacket.Head
+
 				getBlockHeadersErr := ss.getBlockHeaders(ctx, peerBestHash, peerID)
 				if getBlockHeadersErr != nil {
 					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
@@ -805,6 +812,16 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
 			peerInfo.SetEthProtocol(protocol)
 
+			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			if err != nil {
+				return err
+			}
+
+			if protocol >= direct.ETH69 {
+				peerInfo.SetBlockRange(minBlock, latestBlock)
+			}
+
+			peerInfo.protocol = protocol
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer peerInfo.Close()
@@ -1128,8 +1145,7 @@ func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *sentryproto.Se
 func (ss *GrpcServer) SetPeerBlockRange(_ context.Context, req *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		peerInfo.SetMinimumBlock(req.MinBlockHeight)
-		peerInfo.SetIncreasedHeight(req.LatestBlockHeight)
+		peerInfo.SetBlockRange(req.MinBlockHeight, req.LatestBlockHeight)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -1327,14 +1343,19 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 
 func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	reply := &sentryproto.HandShakeReply{}
-	switch ss.Protocols[0].Version {
-	case direct.ETH67:
-		reply.Protocol = sentryproto.Protocol_ETH67
-	case direct.ETH68:
-		reply.Protocol = sentryproto.Protocol_ETH68
-	case direct.ETH69:
-		reply.Protocol = sentryproto.Protocol_ETH69
+	reply.Protocol = direct.UintToProtocolMap[ss.Protocols[0].Version]
+
+	for _, protocol := range ss.Protocols[1:] { // noop if no extra protocols
+		v, ok := direct.UintToSideProtocolMap[protocol.Version]
+		if !ok {
+			continue
+		}
+
+		if _, ok = direct.SupportedSideProtocols[v]; ok {
+			reply.SideProtocols = append(reply.SideProtocols, v)
+		}
 	}
+
 	return reply, nil
 }
 

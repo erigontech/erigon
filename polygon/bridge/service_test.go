@@ -27,10 +27,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
@@ -199,7 +199,7 @@ func TestService(t *testing.T) {
 	require.NoError(t, err)
 
 	// check block 0
-	res, err = b.Events(ctx, libcommon.Hash{}, 0)
+	res, err = b.Events(ctx, common.Hash{}, 0)
 	require.Empty(t, res)
 	require.NoError(t, err)
 

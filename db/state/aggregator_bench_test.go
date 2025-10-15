@@ -30,11 +30,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -70,10 +70,10 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	defer domains.Close()
 
 	b.ReportAllocs()
-	b.ResetTimer()
+
 	var blockNum uint64
 	var prev []byte
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
@@ -82,7 +82,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			_, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}
 	}
@@ -127,7 +127,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	require.NoError(b, err)
 	getter := seg.NewReader(kv.MakeGetter(), comp)
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
@@ -239,7 +239,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		p := rnd.IntN(len(keys))
 
 		offset, _ := idxr.Lookup(keys[p])

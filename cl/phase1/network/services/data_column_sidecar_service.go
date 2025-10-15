@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -17,6 +15,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var (
@@ -90,7 +90,6 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err != nil {
 		return fmt.Errorf("failed to get block root: %v", err)
 	}
-	s.seenSidecar.Add(seenKey, struct{}{})
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
 		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
@@ -104,10 +103,14 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 			return fmt.Errorf("failed to get my custody columns: %v", err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
-			// not my custody column
-			log.Debug("not my custody column")
 			return ErrIgnore
 		}
+	}
+
+	blobParameters := s.cfg.GetBlobParameters(blockHeader.Slot / s.cfg.SlotsPerEpoch)
+	if msg.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
+		log.Warn("invalid column sidecar length", "blockRoot", blockRoot, "columnIndex", msg.Index, "columnLen", msg.Column.Len())
+		return errors.New("invalid column sidecar length")
 	}
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
@@ -172,6 +175,8 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
+	s.seenSidecar.Add(seenKey, struct{}{})
+
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
 	}

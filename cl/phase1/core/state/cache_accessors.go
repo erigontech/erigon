@@ -25,12 +25,12 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -222,12 +222,9 @@ func (b *CachingBeaconState) SyncRewards() (proposerReward, participantReward ui
 
 // CommitteeCount returns current number of committee for epoch.
 func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
-	committeCount := uint64(
+	committeCount := min(b.BeaconConfig().MaxCommitteesPerSlot, uint64(
 		len(b.GetActiveValidatorsIndices(epoch)),
-	) / b.BeaconConfig().SlotsPerEpoch / b.BeaconConfig().TargetCommitteeSize
-	if b.BeaconConfig().MaxCommitteesPerSlot < committeCount {
-		committeCount = b.BeaconConfig().MaxCommitteesPerSlot
-	}
+	)/b.BeaconConfig().SlotsPerEpoch/b.BeaconConfig().TargetCommitteeSize)
 	if committeCount < 1 {
 		committeCount = 1
 	}
