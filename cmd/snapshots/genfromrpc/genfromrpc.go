@@ -663,40 +663,40 @@ func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[strin
 		//
 		var timeboosted bool
 		var effectiveGasUsed *big.Int
-		if isArbitrum && typeTx == "0x69" || slices.Contains(timeboostedTxTypes, typeTx) && receiptClient != nil {
-			// wg.Go(func() error {
-			var receipt map[string]interface{}
-			if rawTx["hash"] == "" {
-				return nil, errors.New("missing tx hash for receipt fetch")
-				// return errors.New("missing tx hash for receipt fetch")
-			}
-			err = receiptClient.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
-			if err != nil {
-				// return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
-				return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
-			}
+		// if isArbitrum && typeTx == "0x69" || slices.Contains(timeboostedTxTypes, typeTx) && receiptClient != nil {
+		// 	// wg.Go(func() error {
+		// 	var receipt map[string]interface{}
+		// 	if rawTx["hash"] == "" {
+		// 		return nil, errors.New("missing tx hash for receipt fetch")
+		// 		// return errors.New("missing tx hash for receipt fetch")
+		// 	}
+		// 	err = receiptClient.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
+		// 	if err != nil {
+		// 		// return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
+		// 		return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
+		// 	}
 
-			// Get timeboosted field from receipt, default to false if not present
-			// Value could be missing (not present), false, or true. If not present but tx type supports it - means value not set yet on arb side
-			if tb, ok := receipt["timeboosted"].(bool); ok && tb {
-				// if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
-				// 	fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
-				// }
-				timeboosted = tb
-			}
-			if typeTx == "0x69" {
-				// get the effective gas used from the receipt for retryable
-				gasStr, ok := receipt["gasUsed"].(string)
-				if !ok {
-					// return errors.New("missing gasUsed")
-					return nil, errors.New("missing gasUsed")
-				}
-				effectiveGasUsed = convertHexToBigInt(gasStr)
-			}
+		// 	// Get timeboosted field from receipt, default to false if not present
+		// 	// Value could be missing (not present), false, or true. If not present but tx type supports it - means value not set yet on arb side
+		// 	if tb, ok := receipt["timeboosted"].(bool); ok && tb {
+		// 		// if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
+		// 		// 	fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
+		// 		// }
+		// 		timeboosted = tb
+		// 	}
+		// 	if typeTx == "0x69" {
+		// 		// get the effective gas used from the receipt for retryable
+		// 		gasStr, ok := receipt["gasUsed"].(string)
+		// 		if !ok {
+		// 			// return errors.New("missing gasUsed")
+		// 			return nil, errors.New("missing gasUsed")
+		// 		}
+		// 		effectiveGasUsed = convertHexToBigInt(gasStr)
+		// 	}
 
-			// 		return nil
-			// 	})
-		}
+		// 	// 		return nil
+		// 	// 	})
+		// }
 
 		switch typeTx {
 		case "0x0": // Legacy
