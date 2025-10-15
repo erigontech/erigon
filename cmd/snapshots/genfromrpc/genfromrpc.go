@@ -742,7 +742,7 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 		if timeboosted {
 			tx.SetTimeboosted(true)
 		}
-		if effectiveGasUsed.Sign() > 0 {
+		if effectiveGasUsed != nil {
 			if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
 				srtx.EffectiveGasUsed = effectiveGasUsed.Uint64()
 			}
