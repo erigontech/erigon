@@ -656,7 +656,7 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 	receipts := make([]receiptData, len(rawTxs))
 
 	var receiptWg errgroup.Group
-	if isArbitrum {
+	if false == true {
 		for i, rawTx := range rawTxs {
 			typeTx, ok := rawTx["type"].(string)
 			if !ok {
