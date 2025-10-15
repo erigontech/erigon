@@ -22,14 +22,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
-	node2 "github.com/erigontech/erigon/turbo/node"
 )
 
 // generate the messages
@@ -91,7 +91,7 @@ var rootCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
-		nodeConfig := node2.NewNodeConfig(nil)
+		nodeConfig := node.NewNodeConfig(nil)
 		p2pConfig, err := utils.NewP2PConfig(
 			nodiscover,
 			dirs,
