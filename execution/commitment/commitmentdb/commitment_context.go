@@ -142,6 +142,8 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 
 // Evaluates commitment for gathered updates.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+	sdc.trace = true
+	fmt.Printf ("ComputeCommitment: limit %d\n", sdc.limitReadAsOfTxNum)
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -493,19 +495,17 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	if (d == kv.AccountsDomain && len(plainKey) != 0) { 
     	fmt.Printf ("ReadDomain: Limit %d Domain %d key %s\n", sdc.limitReadAsOfTxNum, d, hexutil.Encode(plainKey))
     }
-	if d == kv.CommitmentDomain && sdc.limitReadAsOfTxNum > 0 {
-         var foundInHistory bool
+	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.withHistory {
-            enc, foundInHistory, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 			if err != nil {
 				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
 			}
-			if !foundInHistory {
-				return enc, 0, nil
+			if sdc.trace {
+ 				fmt.Printf("[SDC] readDomain: %v HISTORY limitReadAsOfTxNum=%d %x => %x\n", d, sdc.limitReadAsOfTxNum, plainKey, enc)
 			}
-		}
-
-		if !foundInHistory { // !sdc.withHistory is implied by the earlier return
+			return enc, 0, nil
+		} else {
 			var ok bool
 			// reading from domain files this way will dereference domain key correctly,
 			// rotx.GetAsOf itself does not dereference keys in commitment domain values
@@ -513,14 +513,20 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 			if !ok {
 				enc = nil
 			}
-		}
-		if err != nil {
-			return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			if err != nil {
+				return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			}
+			if sdc.trace {
+ 				fmt.Printf("[SDC] readDomain: %v FILES limitReadAsOfTxNum=%d %x => %x\n", d, sdc.limitReadAsOfTxNum, plainKey, enc)
+			}
 		}
 	}
 
 	if enc == nil {
 		enc, step, err = sdc.getter.GetLatest(d, plainKey)
+		if sdc.trace {
+		    fmt.Printf("[SDC] readDomain: %v LATEST %x => %x\n", d, plainKey, enc)
+		}
 	}
 
 	if err != nil {
