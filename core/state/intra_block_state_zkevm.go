@@ -58,7 +58,7 @@ func (sdb *IntraBlockState) GetTxCount() (uint64, error) {
 }
 
 func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, blockNum uint64, blockInfoRoot *libcommon.Hash) {
-	if chainConfig.IsNormalcy(blockNum) || chainConfig.IsZkevmStateChangeDisabled(blockNum) {
+	if chainConfig.IsNormalcy(blockNum) || chainConfig.IsSovereignModeEnabled(blockNum) {
 		return
 	}
 
@@ -69,7 +69,7 @@ func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, block
 }
 
 func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, stateRoot *libcommon.Hash) {
-	if chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+	if chainConfig.IsSovereignModeEnabled(blockNumber) {
 		// in debug we return early here, no out of EVM state changes
 		return
 	}
@@ -104,7 +104,8 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(
 	gerUpdates *[]dstypes.GerUpdate,
 	reUsedL1InfoTreeIndex bool,
 ) {
-	if chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+	if chainConfig.IsSovereignModeEnabled(blockNumber) {
+		// in debug we return early here, no out of EVM state changes
 		return
 	}
 
@@ -196,7 +197,7 @@ func (sdb *IntraBlockState) GetBlockStateRoot(blockNum *uint256.Int) *uint256.In
 }
 
 func (sdb *IntraBlockState) ScalableSetSmtRootHash(chainConfig *chain.Config, blockNumber uint64, roHermezDb ReadOnlyHermezDb) error {
-	if chainConfig.IsNormalcy(blockNumber) || chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+	if chainConfig.IsNormalcy(blockNumber) || chainConfig.IsSovereignModeEnabled(blockNumber) {
 		return nil
 	}
 
@@ -238,7 +239,7 @@ func (sdb *IntraBlockState) ReadGerManagerL1BlockHash(ger libcommon.Hash) libcom
 }
 
 func (sdb *IntraBlockState) WriteGerManagerL1BlockHash(chainConfig *chain.Config, blockNumber uint64, ger, l1BlockHash libcommon.Hash) {
-	if chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
+	if chainConfig.IsSovereignModeEnabled(blockNumber) {
 		return
 	}
 
