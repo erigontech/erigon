@@ -140,9 +140,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 
 		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
 			accBlobCount := b.senderIDBlobCount[senderID]
-			txnBlobCount := len(mt.TxnSlot.BlobBundles)
-			if txnBlobCount > 1 {
-				b.senderIDBlobCount[senderID] = accBlobCount - uint64(txnBlobCount)
+			txnBlobCount := uint64(len(mt.TxnSlot.BlobBundles))
+			if accBlobCount > txnBlobCount {
+				b.senderIDBlobCount[senderID] = accBlobCount - txnBlobCount
 			} else {
 				delete(b.senderIDBlobCount, senderID)
 			}
