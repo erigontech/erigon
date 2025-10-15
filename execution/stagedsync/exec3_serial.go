@@ -392,7 +392,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
                         fmt.Printf("executeBlock blockNum=%d txNum=%d stateRoot=%s\n", txTask.BlockNumber(), txTask.TxNum, hexutil.Encode(rh))
 */
 
-
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
