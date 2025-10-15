@@ -671,7 +671,7 @@ func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[strin
 				if rawTx["hash"] == "" {
 					return errors.New("missing tx hash for receipt fetch")
 				}
-				err = receiptClient.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
+				err = client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
 				if err != nil {
 					return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
 				}
