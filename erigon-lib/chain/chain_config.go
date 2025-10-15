@@ -130,10 +130,9 @@ type Config struct {
 	EffectiveGasPriceForContractInvocation uint8  `json:"effectiveGasPriceForContractInvocation,omitempty"`
 	EffectiveGasPriceForContractDeployment uint8  `json:"effectiveGasPriceForContractDeployment,omitempty"`
 
-	// block height for disabling cdk state changes that happen outside of the EVM
-	// helps with compatibility with other clients that do not handle these kinds of
-	// interaction
-	DisableZkevmStateChangesBlock *big.Int `json:"disableZkevmStateChangesBlock,omitempty"`
+	// used for sovereign chains, will turn off IBS interaction for info tree / GER / etc.
+	// this option should only be used in conjunction with normalcy.
+	SovereignModeBlock *big.Int `json:"sovereignMode,omitempty"`
 }
 
 type BlobConfig struct {
@@ -465,8 +464,8 @@ func (c *Config) IsForkID13Durian(num uint64) bool {
 	return isForked(c.ForkId13Durian, num)
 }
 
-func (c *Config) IsZkevmStateChangeDisabled(num uint64) bool {
-	return isForked(c.DisableZkevmStateChangesBlock, num)
+func (c *Config) IsSovereignModeEnabled(num uint64) bool {
+	return isForked(c.SovereignModeBlock, num)
 }
 
 func (c *Config) SecondsPerSlot() uint64 {

@@ -39,6 +39,7 @@ func SpawnL1InfoTreeStage(
 	logger log.Logger,
 ) (funcErr error) {
 	logPrefix := s.LogPrefix()
+
 	log.Info(fmt.Sprintf("[%s] Starting L1 Info Tree stage", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 Info Tree stage", logPrefix))
 
@@ -57,7 +58,9 @@ func SpawnL1InfoTreeStage(
 		return err
 	}
 
-	if cfg.chainConfig.IsZkevmStateChangeDisabled(executionAt) {
+	// if we are running in sovereign mode, then we don't need to track the L1 info tree at all so we can just safely
+	// skip the stage
+	if cfg.chainConfig.IsSovereignModeEnabled(executionAt) {
 		log.Info(fmt.Sprintf("[%s] Skipping stage - state changes disabled", logPrefix))
 
 		// we also want to ensure here that the syncer is stopped as we have no need for it running now

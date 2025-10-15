@@ -161,7 +161,7 @@ func sequencingBatchStep(
 
 	// injected batch
 	if executionAt == 0 {
-		if cfg.chainConfig.IsZkevmStateChangeDisabled(executionAt) {
+		if cfg.chainConfig.IsSovereignModeEnabled(executionAt) {
 			// sealed empty block batch
 			if err = processEmptyInitialBatch(batchContext, batchState); err != nil {
 				return err
@@ -378,7 +378,7 @@ func sequencingBatchStep(
 		}
 
 		// timer: evm + smt
-		t := utils.StartTimer("stage_sequence_execute", "evm", "smt")
+		t := utils.StartTimer("stage_sequence_execute", "evm", "state-root")
 
 		infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err := prepareL1AndInfoTreeRelatedStuff(logPrefix, sdb, batchState, header.Time, cfg.zk.SequencerResequenceReuseL1InfoIndex, cfg.zk.SequencerResequenceInfoTreeOffset)
 		if err != nil {
@@ -472,19 +472,18 @@ func sequencingBatchStep(
 
 			select {
 			case <-infoTreeTicker.C:
-				if cfg.chainConfig.IsZkevmStateChangeDisabled(blockNumber) {
-					break
+				if !cfg.chainConfig.IsSovereignModeEnabled(blockNumber) {
+					processedLogs, err := cfg.infoTreeUpdater.CheckForInfoTreeUpdates(logPrefix, sdb.tx)
+					if err != nil {
+						return err
+					}
+					var latestIndex uint64
+					latest := cfg.infoTreeUpdater.GetLatestUpdate()
+					if latest != nil {
+						latestIndex = latest.Index
+					}
+					log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", processedLogs, "latestIndex", latestIndex)
 				}
-				processedLogs, err := cfg.infoTreeUpdater.CheckForInfoTreeUpdates(logPrefix, sdb.tx)
-				if err != nil {
-					return err
-				}
-				var latestIndex uint64
-				latest := cfg.infoTreeUpdater.GetLatestUpdate()
-				if latest != nil {
-					latestIndex = latest.Index
-				}
-				log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", processedLogs, "latestIndex", latestIndex)
 			default:
 			}
 
