@@ -95,7 +95,18 @@ type BlockJson struct {
 	Transactions []map[string]interface{} `json:"transactions"`
 }
 
-// --- Helper functions ---
+// ReceiptJson holds the minimal receipt data needed for timeboosted transactions
+type ReceiptJson struct {
+	TransactionHash common.Hash `json:"transactionHash"`
+	Timeboosted     bool        `json:"timeboosted"`
+	GasUsed         hexutil.Big `json:"gasUsed"`
+}
+
+// receiptData holds parsed receipt information for a transaction
+type receiptData struct {
+	timeboosted      bool
+	effectiveGasUsed *big.Int
+}
 
 // convertHexToBigInt converts a hex string (with a "0x" prefix) to a *big.Int.
 func convertHexToBigInt(hexStr string) *big.Int {
@@ -637,119 +648,129 @@ var timeboostedTxTypes = map[string]bool{
 	"0x3":  true,
 	"0x4":  true,
 	"0x68": true,
+	"0x69": true, // no timbeoosted but for simplicity
 }
 
-// unMarshalTransactions decodes a slice of raw transactions into types.Transactions.
-func unMarshalTransactions(client, receiptClient *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
-	var txs types.Transactions
+func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
+	txs := make(types.Transactions, len(rawTxs))
+	receipts := make([]receiptData, len(rawTxs))
 
-	for _, rawTx := range rawTxs {
-		commonTx, err := parseCommonTx(rawTx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse common fields: %w", err)
-		}
+	var receiptWg errgroup.Group
+	if isArbitrum {
+		for i, rawTx := range rawTxs {
+			typeTx, ok := rawTx["type"].(string)
+			if !ok {
+				continue
+			}
 
-		var tx types.Transaction
-		// Determine the transaction type based on the "type" field.
-		typeTx, ok := rawTx["type"].(string)
-		if !ok {
-			return nil, errors.New("missing tx type")
-		}
-
-		var wg errgroup.Group
-
-		// For Arbitrum, certain transaction types may have a "timeboosted" field in their receipt.
-		// Retryable tx type on other side got to check gasUsed amount in receipt to get correct value (tx.gas is its gas limit actually, not spent gas)
-		//
-		var timeboosted bool
-		var effectiveGasUsed *big.Int
-		if isArbitrum && typeTx == "0x69" || timeboostedTxTypes[typeTx] {
-			wg.Go(func() error {
-				var receipt map[string]interface{}
-				if rawTx["hash"] == "" {
-					// return nil, errors.New("missing tx hash for receipt fetch")
-					return errors.New("missing tx hash for receipt fetch")
-				}
-				err = receiptClient.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", rawTx["hash"])
-				if err != nil {
-					return fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
-					// return nil, fmt.Errorf("failed to get receipt for tx %s: %w", tx.Hash(), err)
-				}
-
-				// Get timeboosted field from receipt, default to false if not present
-				// Value could be missing (not present), false, or true. If not present but tx type supports it - means value not set yet on arb side
-				if tb, ok := receipt["timeboosted"].(bool); ok && tb {
-					// if os.Getenv("DEBUG_TIMEBOOSTED") != "" {
-					// 	fmt.Printf("Setting timeboosted flag for receipt hash: %s\n", receipt["transactionHash"])
-					// }
-					timeboosted = tb
-				}
-				if typeTx == "0x69" {
-					// get the effective gas used from the receipt for retryable
-					gasStr, ok := receipt["gasUsed"].(string)
-					if !ok {
-						return errors.New("missing gasUsed")
-						// return nil, errors.New("missing gasUsed")
+			if timeboostedTxTypes[typeTx] {
+				idx := i
+				txData := rawTx
+				txType := typeTx
+				receiptWg.Go(func() error {
+					var receipt ReceiptJson
+					if txData["hash"] == "" {
+						return errors.New("missing tx hash for receipt fetch")
 					}
-					effectiveGasUsed = convertHexToBigInt(gasStr)
-				}
 
-				return nil
-			})
-		}
+					err := client.CallContext(context.Background(), &receipt, "eth_getTransactionReceipt", txData["hash"])
+					if err != nil {
+						return fmt.Errorf("failed to get receipt for tx %s: %w", txData["hash"], err)
+					}
 
-		switch typeTx {
-		case "0x0": // Legacy
-			tx = makeLegacyTx(commonTx, rawTx)
-		case "0x1": // Access List
-			tx = makeAccessListTx(commonTx, rawTx)
-		case "0x2": // EIP-1559
-			tx = makeEip1559Tx(commonTx, rawTx)
-		case "0x3": // EIP-4844
-			tx = makeEip4844Tx(commonTx, rawTx)
-		case "0x4": // EIP-7702
-			tx = makeEip7702Tx(commonTx, rawTx)
-		case "0x64": // ArbitrumDepositTxType
-			tx = makeArbitrumDepositTx(commonTx, rawTx)
-		case "0x65": // ArbitrumUnsignedTxType
-			tx = makeArbitrumUnsignedTx(commonTx, rawTx)
-		case "0x66": // ArbitrumContractTxType
-			tx = makeArbitrumContractTx(commonTx, rawTx)
-		case "0x68": // ArbitrumRetryTxType
-			tx = makeArbitrumRetryTx(commonTx, rawTx)
-		case "0x69": // ArbitrumSubmitRetryableTxType
-			tx = makeRetryableTxFunc(commonTx, rawTx)
-		case "0x6a": // ArbitrumInternalTxType
-			var chainID *uint256.Int
-			if chainIDOut := getUint256FromField(rawTx, "chainId"); chainIDOut != nil {
-				chainID = chainIDOut
-			} else {
-				return nil, errors.New("missing chainId in ArbitrumInternalTxType")
-			}
-			tx = &types.ArbitrumInternalTx{
-				Data:    commonTx.Data,
-				ChainId: chainID,
-			}
-		case "0x78": // ArbitrumLegacyTxType
-			tx = makeArbitrumLegacyTxFunc(commonTx, rawTx)
-		default:
-			return nil, fmt.Errorf("unknown tx type: %s", typeTx)
-		}
+					if receipt.Timeboosted {
+						receipts[idx].timeboosted = true
+					}
 
-		if err := wg.Wait(); err != nil { // Ensure the receipt fetch is complete before proceeding
-			return nil, err
-		}
-		if timeboosted {
-			tx.SetTimeboosted(true)
-		}
-		if effectiveGasUsed != nil {
-			if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
-				srtx.EffectiveGasUsed = effectiveGasUsed.Uint64()
+					if txType == "0x69" {
+						receipts[idx].effectiveGasUsed = receipt.GasUsed.ToInt()
+					}
+
+					return nil
+				})
 			}
 		}
-
-		txs = append(txs, tx)
 	}
+
+	var unmarshalWg errgroup.Group
+	for i, rawTx := range rawTxs {
+		idx := i
+		txData := rawTx
+		unmarshalWg.Go(func() error {
+			commonTx, err := parseCommonTx(txData)
+			if err != nil {
+				return fmt.Errorf("failed to parse common fields at index %d: %w", idx, err)
+			}
+
+			typeTx, ok := txData["type"].(string)
+			if !ok {
+				return fmt.Errorf("missing tx type at index %d", idx)
+			}
+
+			var tx types.Transaction
+			switch typeTx {
+			case "0x0": // Legacy
+				tx = makeLegacyTx(commonTx, txData)
+			case "0x1": // Access List
+				tx = makeAccessListTx(commonTx, txData)
+			case "0x2": // EIP-1559
+				tx = makeEip1559Tx(commonTx, txData)
+			case "0x3": // EIP-4844
+				tx = makeEip4844Tx(commonTx, txData)
+			case "0x4": // EIP-7702
+				tx = makeEip7702Tx(commonTx, txData)
+			case "0x64": // ArbitrumDepositTxType
+				tx = makeArbitrumDepositTx(commonTx, txData)
+			case "0x65": // ArbitrumUnsignedTxType
+				tx = makeArbitrumUnsignedTx(commonTx, txData)
+			case "0x66": // ArbitrumContractTxType
+				tx = makeArbitrumContractTx(commonTx, txData)
+			case "0x68": // ArbitrumRetryTxType
+				tx = makeArbitrumRetryTx(commonTx, txData)
+			case "0x69": // ArbitrumSubmitRetryableTxType
+				tx = makeRetryableTxFunc(commonTx, txData)
+			case "0x6a": // ArbitrumInternalTxType
+				var chainID *uint256.Int
+				if chainIDOut := getUint256FromField(txData, "chainId"); chainIDOut != nil {
+					chainID = chainIDOut
+				} else {
+					return fmt.Errorf("missing chainId in ArbitrumInternalTxType at index %d", idx)
+				}
+				tx = &types.ArbitrumInternalTx{
+					Data:    commonTx.Data,
+					ChainId: chainID,
+				}
+			case "0x78": // ArbitrumLegacyTxType
+				tx = makeArbitrumLegacyTxFunc(commonTx, txData)
+			default:
+				return fmt.Errorf("unknown tx type: %s at index %d", typeTx, idx)
+			}
+
+			txs[idx] = tx
+			return nil
+		})
+	}
+
+	if err := receiptWg.Wait(); err != nil {
+		return nil, err
+	}
+	if err := unmarshalWg.Wait(); err != nil {
+		return nil, err
+	}
+
+	// combine results
+	for i := range txs {
+		if receipts[i].timeboosted {
+			txs[i].SetTimeboosted(true)
+		}
+
+		if receipts[i].effectiveGasUsed != nil {
+			if srtx, ok := txs[i].(*types.ArbitrumSubmitRetryableTx); ok {
+				srtx.EffectiveGasUsed = receipts[i].effectiveGasUsed.Uint64()
+			}
+		}
+	}
+
 	return txs, nil
 }
 
@@ -761,7 +782,7 @@ func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, v
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(client, receiptClient, block.Transactions, verify, isArbitrum)
+	txs, err := unMarshalTransactions(receiptClient, block.Transactions, verify, isArbitrum)
 	if err != nil {
 		return nil, err
 	}
