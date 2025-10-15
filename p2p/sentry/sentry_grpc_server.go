@@ -810,12 +810,11 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
-			peerInfo.SetEthProtocol(protocol)
-
 			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
 			if err != nil {
 				return err
 			}
+			peerInfo.SetEthProtocol(protocol)
 
 			if protocol >= direct.ETH69 {
 				peerInfo.SetBlockRange(minBlock, latestBlock)
