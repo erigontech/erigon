@@ -257,5 +257,5 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
 
-	&utils.ErigonDBFrozenStepsThresholdFlag,
+	&utils.ErigonDBStepsInFrozenFileFlag,
 }

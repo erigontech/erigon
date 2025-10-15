@@ -119,7 +119,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	cfg := statecfg.Schema.AccountsDomain.Hist.IiCfg
 
 	dirs := datadir.New(os.TempDir())
-	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultFrozenStepsThreshold, dirs, log.New())
+	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
 	ii.Accessors = 0
 	ii.salt.Store(&salt)
 	if err != nil {
@@ -624,7 +624,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 		cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
-		d, err := NewDomain(cfg, 1, config3.DefaultFrozenStepsThreshold, dirs, log.New())
+		d, err := NewDomain(cfg, 1, config3.DefaultStepsInFrozenFile, dirs, log.New())
 		if err != nil {
 			panic(err)
 		}

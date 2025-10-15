@@ -275,7 +275,7 @@ type Config struct {
 	AllowAA bool
 
 	// ErigonDB geometry settings
-	ErigonDBFrozenStepsThreshold int
+	ErigonDBStepsInFrozenFile int
 }
 
 type Sync struct {

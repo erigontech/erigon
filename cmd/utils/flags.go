@@ -1153,10 +1153,10 @@ var (
 	}
 
 	// ErigonDB geometry settings
-	ErigonDBFrozenStepsThresholdFlag = cli.Uint64Flag{
-		Name:  "erigondb.override.frozenstepsthreshold",
+	ErigonDBStepsInFrozenFileFlag = cli.Uint64Flag{
+		Name:  "erigondb.override.stepsinfrozenfile",
 		Usage: "Override the number of steps in frozen snapshot files; may lead to a corrupted database if used incorrectly",
-		Value: config3.DefaultFrozenStepsThreshold,
+		Value: config3.DefaultStepsInFrozenFile,
 	}
 )
 
@@ -2025,7 +2025,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
 
-	cfg.ErigonDBFrozenStepsThreshold = ctx.Int(ErigonDBFrozenStepsThresholdFlag.Name)
+	cfg.ErigonDBStepsInFrozenFile = ctx.Int(ErigonDBStepsInFrozenFileFlag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)

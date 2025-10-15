@@ -1585,13 +1585,13 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	if snConfig.ErigonDBFrozenStepsThreshold == config3.DefaultFrozenStepsThreshold {
-		logger.Info("Using frozen steps threshold", "steps", snConfig.ErigonDBFrozenStepsThreshold)
+	if snConfig.ErigonDBStepsInFrozenFile == config3.DefaultStepsInFrozenFile {
+		logger.Info("Using frozen steps threshold", "steps", snConfig.ErigonDBStepsInFrozenFile)
 	} else {
-		logger.Warn("OVERRIDING FROZEN STEPS THRESHOLD; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", snConfig.ErigonDBFrozenStepsThreshold, "default", config3.DefaultFrozenStepsThreshold)
+		logger.Warn("OVERRIDING FROZEN STEPS THRESHOLD; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", snConfig.ErigonDBStepsInFrozenFile, "default", config3.DefaultStepsInFrozenFile)
 	}
 
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).FrozenStepsThreshold(uint64(snConfig.ErigonDBFrozenStepsThreshold)).Open(ctx, db)
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).StepsInFrozenFile(uint64(snConfig.ErigonDBStepsInFrozenFile)).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

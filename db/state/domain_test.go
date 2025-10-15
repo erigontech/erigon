@@ -87,7 +87,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 
 	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	//cfg.hist.historyValuesOnCompressedPage = 16
-	d, err := NewDomain(cfg, aggStep, config3.DefaultFrozenStepsThreshold, dirs, logger)
+	d, err := NewDomain(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	d.salt.Store(&salt)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -505,7 +505,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxSpan := d.stepSize * config3.DefaultFrozenStepsThreshold
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 
 	for {
 		if stop := func() bool {
@@ -557,7 +557,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 		dc.Close()
 	}
 
-	maxSpan := d.stepSize * config3.DefaultFrozenStepsThreshold
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 	for {
 		dc := d.BeginFilesRo()
 		r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan)
@@ -773,7 +773,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
-	maxFrozenFiles := (txCount / dom.stepSize) / config3.DefaultFrozenStepsThreshold
+	maxFrozenFiles := (txCount / dom.stepSize) / config3.DefaultStepsInFrozenFile
 
 	ctx := context.Background()
 	roTx, err := db.BeginRo(ctx)
@@ -1063,7 +1063,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.Hist.IiCfg.Version = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
 
-	d, err := NewDomain(cfg, aggStep, config3.DefaultFrozenStepsThreshold, dirs, log.New())
+	d, err := NewDomain(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -1319,7 +1319,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 	var k [8]byte
 	var v [8]byte
-	maxFrozenFiles := (txCount / d.stepSize) / config3.DefaultFrozenStepsThreshold
+	maxFrozenFiles := (txCount / d.stepSize) / config3.DefaultStepsInFrozenFile
 	prev := map[string]string{}
 
 	// key 0: only in frozen file 0
