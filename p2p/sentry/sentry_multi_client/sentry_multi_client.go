@@ -174,12 +174,21 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 	}
 
 	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
+	if status.MinimumBlockHeight > status.MaxBlockHeight {
+		cs.logger.Warn("blockRangeUpdate: invalid block range: earliest > latest", "earliest", status.MinimumBlockHeight, "latest", status.MaxBlockHeight)
+		return
+	}
+	if bestHash == (common.Hash{}) {
+		cs.logger.Warn("blockRangeUpdate: invalid block range: best hash is zero")
+		return
+	}
+
 	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
 
 	request := eth.BlockRangeUpdatePacket{
 		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
-		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
+		LatestHash: bestHash,
 	}
 
 	data, err := rlp.EncodeToBytes(&request)
@@ -1046,6 +1055,12 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 	var query eth.BlockRangeUpdatePacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
+	}
+	if query.Earliest > query.Latest {
+		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", query.Earliest, query.Latest)
+	}
+	if query.LatestHash == (common.Hash{}) {
+		return fmt.Errorf("invalid block range: latest block hash is zero")
 	}
 
 	go func() {

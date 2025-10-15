@@ -472,7 +472,7 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
 	}
 
 	if len(firstKey) < 8 {
-		return math.MaxUint64, nil // no body data found
+		return math.MaxUint64, errors.New("block body key is too short")
 	}
 
 	result := binary.BigEndian.Uint64(firstKey[:8])
