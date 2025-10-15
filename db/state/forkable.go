@@ -174,17 +174,6 @@ func (a *Forkable[MarkedTxI]) valsTblKey(ts Num, hash []byte) []byte {
 	return k
 }
 
-func (a *Forkable[MarkedTxI]) valsTblKey2(ts []byte, hash []byte) []byte {
-	// key for valsTbl
-	// relevant only for marked forkable
-	// assuming hash is common.Hash which is 32 bytes
-	const HashBytes = 32
-	k := make([]byte, 8+HashBytes)
-	copy(k, ts)
-	copy(k[8:], hash)
-	return k
-}
-
 func (a *Forkable[T]) BeginTemporalTx() T {
 	return a.beginTxGen(true)
 }
