@@ -62,6 +62,16 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
+func validateBlockRange(packet eth.BlockRangeUpdatePacket) error {
+	if packet.Earliest > packet.Latest {
+		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", packet.Earliest, packet.Latest)
+	}
+	if packet.LatestHash == (common.Hash{}) {
+		return fmt.Errorf("invalid block range: latest block hash is zero")
+	}
+	return nil
+}
+
 // StartStreamLoops starts message processing loops for all sentries.
 // The processing happens in several streams:
 // RecvMessage - processing incoming headers/bodies
@@ -174,22 +184,18 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
 	}
 
 	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
-	if status.MinimumBlockHeight > status.MaxBlockHeight {
-		cs.logger.Warn("blockRangeUpdate: invalid block range: earliest > latest", "earliest", status.MinimumBlockHeight, "latest", status.MaxBlockHeight)
-		return
-	}
-	if bestHash == (common.Hash{}) {
-		cs.logger.Warn("blockRangeUpdate: invalid block range: best hash is zero")
-		return
-	}
-
-	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
-
 	request := eth.BlockRangeUpdatePacket{
 		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
 		LatestHash: bestHash,
 	}
+
+	if err := validateBlockRange(request); err != nil {
+		cs.logger.Warn("blockRangeUpdate: invalid blockRangeUpdate packet", "err", err)
+		return
+	}
+
+	cs.logger.Debug("sending status data", "start", request.Earliest, "end", request.Latest, "hash", hex.EncodeToString(request.LatestHash[:]))
 
 	data, err := rlp.EncodeToBytes(&request)
 	if err != nil {
@@ -1056,11 +1062,8 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
 	}
-	if query.Earliest > query.Latest {
-		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", query.Earliest, query.Latest)
-	}
-	if query.LatestHash == (common.Hash{}) {
-		return fmt.Errorf("invalid block range: latest block hash is zero")
+	if err := validateBlockRange(query); err != nil {
+		return err
 	}
 
 	go func() {
