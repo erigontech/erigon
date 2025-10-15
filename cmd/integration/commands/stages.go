@@ -952,25 +952,15 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	if chainTipMode {
-		if noCommit {
-			tx, err := db.BeginTemporalRw(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-			for bn := execProgress; bn < block; bn++ {
-				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
-					return err
-				}
-			}
-		} else {
+		//if chainTip = true, forced noCommit = false
+		for bn := execProgress; bn < block; bn++ {
 			if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-				for bn := execProgress; bn < block; bn++ {
-					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger); err != nil {
-						return err
-					}
+				err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, tx, bn, ctx, cfg, logger)
+				var errExhausted *stagedsync.ErrLoopExhausted
+				if errors.As(err, &errExhausted) {
+					return nil
 				}
-				return nil
+				return err
 			}); err != nil {
 				return err
 			}
