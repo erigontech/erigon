@@ -24,6 +24,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	enode "github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
-	enode "github.com/erigontech/erigon/turbo/node"
 	shuttercmd "github.com/erigontech/erigon/txnprovider/shutter/cmd"
 )
 

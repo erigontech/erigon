@@ -26,6 +26,7 @@ import (
 	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon/cmd/erigon/node"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/turbo/node"
 )
 
 func main() {

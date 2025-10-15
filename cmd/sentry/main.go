@@ -22,6 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
@@ -29,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/turbo/node"
 )
 
 // generate the messages

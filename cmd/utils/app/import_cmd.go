@@ -30,6 +30,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
