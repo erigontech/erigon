@@ -119,16 +119,14 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 }
 
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg,
+	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
 	doms *dbstate.SharedDomains, rwTx kv.TemporalRwTx,
 	parallel bool, //nolint
 	maxBlockNum uint64,
-	logger log.Logger,
-	hooks *tracing.Hooks,
-	initialCycle bool,
-	isMining bool,
-) (execErr error) {
+	logger log.Logger) (execErr error) {
 	inMemExec := doms != nil
+	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
+	hooks := cfg.vmConfig.Tracer
 
 	useExternalTx := rwTx != nil
 	var applyTx kv.TemporalRwTx
@@ -151,7 +149,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if !inMemExec && !isMining {
+	if !inMemExec && !cfg.blockProduction {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	} else {
@@ -209,7 +207,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
+	shouldReportToTxPool := cfg.notifications != nil && !cfg.blockProduction && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
@@ -268,7 +266,7 @@ func ExecV3(ctx context.Context,
 				rs:                    rs,
 				doms:                  doms,
 				agg:                   agg,
-				isMining:              isMining,
+				isMining:              cfg.blockProduction,
 				inMemExec:             inMemExec,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
@@ -278,7 +276,7 @@ func ExecV3(ctx context.Context,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
 			},
-			workerCount: workerCount,
+			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 
 		defer func() {
@@ -301,7 +299,7 @@ func ExecV3(ctx context.Context,
 				doms:                  doms,
 				agg:                   agg,
 				u:                     u,
-				isMining:              isMining,
+				isMining:              cfg.blockProduction,
 				inMemExec:             inMemExec,
 				applyTx:               applyTx,
 				logger:                logger,
@@ -392,7 +390,7 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(doms.TxNum())
 
-	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && lastHeader != nil {
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !cfg.blockProduction && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where

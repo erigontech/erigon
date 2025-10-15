@@ -132,40 +132,11 @@ func StageExecuteBlocksCfg(
 
 // ================ Erigon3 ================
 
-func ExecBlockV3(s *StageState, u Unwinder, doms *state.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
-	workersCount := cfg.syncCfg.ExecWorkerCount
-
-	prevStageProgress, err := stageProgress(rwTx, cfg.db, stages.Senders)
-	if err != nil {
-		return err
-	}
-
-	var to = prevStageProgress
-	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
-	}
-	if to < s.BlockNumber {
-		return nil
-	}
-
-	if err := ExecV3(ctx, s, u, workersCount, cfg, doms, rwTx, dbg.Exec3Parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
-		return err
-	}
-	return nil
-}
-
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 
-	if doms == nil {
-		doms, err = state.NewSharedDomains(rwTx, logger)
-		if err != nil {
-			return err
-		}
-		defer doms.Close()
-	}
 	txNumsReader := br.TxnumReader(ctx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
@@ -292,19 +263,11 @@ func unwindExec3State(ctx context.Context,
 		return err
 	}
 
-	//_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment")
-	//if err != nil {
-	//	return err
-	//}
-	if err := sd.Flush(ctx, tx); err != nil {
-		return err
-	}
-
+	// TODO this may need to be moved
 	if err := tx.Unwind(ctx, txUnwindTo, changeset); err != nil {
 		return err
 	}
 
-	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
 	return nil
@@ -338,7 +301,27 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *state.SharedDomain
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
-	if err = ExecBlockV3(s, u, doms, rwTx, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger, false); err != nil {
+
+	if doms == nil || rwTx == nil {
+		// to support parallel execution unwind must be called with the same
+		// shared domains and transaction which are used by the execution stage
+		return fmt.Errorf("can't execute: need external domains & tx")
+	}
+
+	prevStageProgress, err := stageProgress(rwTx, cfg.db, stages.Senders)
+	if err != nil {
+		return err
+	}
+
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = min(prevStageProgress, toBlock)
+	}
+	if to < s.BlockNumber {
+		return nil
+	}
+
+	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel, to, logger); err != nil {
 		return err
 	}
 	return nil
@@ -349,18 +332,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomai
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}
-	useExternalTx := rwTx != nil
-	if !useExternalTx {
-		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
-		if !ok {
-			return errors.New("cfg.db is not a temporal db")
-		}
-		tx, err := temporalDb.BeginTemporalRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		rwTx = tx
+
+	if doms == nil || rwTx == nil {
+		// to support parallel execution unwind must be called with the same
+		// shared domains and transaction which are used by the execution stage
+		return fmt.Errorf("can't unwind: need external domains & tx")
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
@@ -373,24 +349,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomai
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 
-	if err = unwindExecutionStage(u, s, doms, rwTx, ctx, cfg, logger); err != nil {
-		return err
-	}
-
-	if err = u.Done(rwTx); err != nil {
-		return err
-	}
-	//dumpPlainStateDebug(tx, nil)
-
-	if !useExternalTx {
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func unwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
@@ -416,7 +374,15 @@ func unwindExecutionStage(u *UnwindState, s *StageState, doms *state.SharedDomai
 		accumulator.StartChange(header, txs, true)
 	}
 
-	return unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger)
+	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
+		return err
+	}
+
+	if err = u.Done(rwTx); err != nil {
+		return err
+	}
+	//dumpPlainStateDebug(tx, nil)
+	return nil
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) (err error) {
