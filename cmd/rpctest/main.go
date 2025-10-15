@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 func main() {

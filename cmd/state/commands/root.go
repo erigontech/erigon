@@ -31,7 +31,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/node/logging"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )

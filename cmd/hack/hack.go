@@ -56,7 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/turbo/services"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains

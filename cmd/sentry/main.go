@@ -26,9 +26,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/node"
 )
 

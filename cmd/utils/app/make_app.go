@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/node"
 	cli2 "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/logging"
 	enode "github.com/erigontech/erigon/turbo/node"
 	shuttercmd "github.com/erigontech/erigon/txnprovider/shutter/cmd"
 )

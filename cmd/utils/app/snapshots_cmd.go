@@ -73,9 +73,9 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethconfig/features"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
