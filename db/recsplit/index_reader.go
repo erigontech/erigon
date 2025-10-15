@@ -40,7 +40,7 @@ func NewIndexReader(index *Index) *IndexReader {
 }
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
-	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
+	// this inlinable alloc-free logicVersion, it's faster than pre-allocated `hasher` object
 	// because `hasher` object is interface and need call many methods on it
 	return murmur3.Sum128WithSeed(key, r.salt)
 }
