@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -182,7 +183,9 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	agg.BuildFilesInBackground(doms.TxNum())
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		agg.BuildFilesInBackground(doms.TxNum())
+	}
 
 	var (
 		inputTxNum               uint64
@@ -388,7 +391,9 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	agg.BuildFilesInBackground(doms.TxNum())
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		agg.BuildFilesInBackground(doms.TxNum())
+	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !cfg.blockProduction && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
@@ -726,7 +731,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 		return nil, t2, err
 	}
 
-	if !useExternalTx {
+	if !useExternalTx && execStage.SyncMode() == stages.ModeApplyingBlocks {
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
