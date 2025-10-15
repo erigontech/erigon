@@ -196,7 +196,19 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 	for {
 		select {
 		case <-broadcastEvery.C:
-			cs.doAnnounceBlockRange(ctx, true)
+			packet, err := cs.buildBlockRangePacket(ctx)
+			if err != nil {
+				cs.logger.Error("blockRangeUpdate", "err", err)
+				continue
+			}
+
+			send, _ := cs.shouldAnnounceBlockRange(packet)
+			if !send {
+				cs.logger.Trace("block range unchanged; skipping broadcast", "earliest", packet.Earliest, "latest", packet.Latest)
+				continue
+			}
+
+			cs.broadcastBlockRange(ctx, packet)
 		case <-ctx.Done():
 			return
 		}
@@ -219,15 +231,34 @@ func (cs *MultiClient) announceBlockRangeFromChannel(ctx context.Context, freque
 	progressCh := cs.blockProgressCh
 	cs.blockProgressMu.Unlock()
 
+	cleanup := func() {
+		cs.blockProgressMu.Lock()
+		cs.blockProgressCh = nil
+		cs.blockProgressUnsubscribe = nil
+		cs.blocksSinceLastAnnounce = 0
+		cs.blockProgressMu.Unlock()
+	}
+
 	if unsubscribe != nil {
-		defer unsubscribe()
+		defer func() {
+			unsubscribe()
+			cleanup()
+		}()
+	} else {
+		defer cleanup()
 	}
 
 	if progressCh == nil {
 		return
 	}
 
-	cs.doAnnounceBlockRange(ctx, true)
+	if packet, err := cs.buildBlockRangePacket(ctx); err == nil {
+		if send, _ := cs.shouldAnnounceBlockRange(packet); send {
+			cs.broadcastBlockRange(ctx, packet)
+		}
+	} else {
+		cs.logger.Error("blockRangeUpdate", "err", err)
+	}
 
 	for {
 		select {
@@ -241,46 +272,62 @@ func (cs *MultiClient) announceBlockRangeFromChannel(ctx context.Context, freque
 				continue
 			}
 
+			packet, err := cs.buildBlockRangePacket(ctx)
+			if err != nil {
+				cs.logger.Error("blockRangeUpdate", "err", err)
+				continue
+			}
+
+			send, dueToUnwind := cs.shouldAnnounceBlockRange(packet)
+
 			cs.blockProgressMu.Lock()
 			cs.blocksSinceLastAnnounce += uint64(len(headers))
-			ready := cs.blocksSinceLastAnnounce >= blockRangeEpochBlocks
+			ready := false
+			if dueToUnwind {
+				ready = true
+				cs.blocksSinceLastAnnounce = 0
+			} else if send && cs.blocksSinceLastAnnounce >= blockRangeEpochBlocks {
+				ready = true
+				cs.blocksSinceLastAnnounce = 0
+			}
 			cs.blockProgressMu.Unlock()
 
-			if cs.doAnnounceBlockRange(ctx, ready) {
-				cs.blockProgressMu.Lock()
-				cs.blocksSinceLastAnnounce = 0
-				cs.blockProgressMu.Unlock()
+			if !send {
+				cs.logger.Trace("block range unchanged; skipping broadcast", "earliest", packet.Earliest, "latest", packet.Latest)
+				continue
 			}
+
+			if !ready {
+				continue
+			}
+
+			cs.broadcastBlockRange(ctx, packet)
 		}
 	}
 }
 
-func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context, readyForForward bool) bool {
-	sentries := cs.Sentries()
+func (cs *MultiClient) shouldAnnounceBlockRange(update eth.BlockRangeUpdatePacket) (send bool, dueToUnwind bool) {
+	cs.blockRangeMu.Lock()
+	defer cs.blockRangeMu.Unlock()
+	send, dueToUnwind = cs.blockRange.decide(update)
+	return send, dueToUnwind
+}
+
+func (cs *MultiClient) buildBlockRangePacket(ctx context.Context) (eth.BlockRangeUpdatePacket, error) {
 	status, err := cs.statusDataProvider.GetStatusData(ctx)
 	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
-		return false
+		return eth.BlockRangeUpdatePacket{}, err
 	}
 
-	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
-	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
-
-	request := eth.BlockRangeUpdatePacket{
+	return eth.BlockRangeUpdatePacket{
 		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
 		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
-	}
+	}, nil
+}
 
-	send, dueToUnwind := cs.shouldAnnounceBlockRange(request)
-	if !send {
-		cs.logger.Trace("block range unchanged; skipping broadcast", "earliest", request.Earliest, "latest", request.Latest)
-		return false
-	}
-
-	if !dueToUnwind && !readyForForward {
-		return false
-	}
+func (cs *MultiClient) broadcastBlockRange(ctx context.Context, request eth.BlockRangeUpdatePacket) bool {
+	cs.logger.Debug("sending status data", "start", request.Earliest, "end", request.Latest, "hash", hex.EncodeToString(request.LatestHash[:]))
 
 	data, err := rlp.EncodeToBytes(&request)
 	if err != nil {
@@ -288,11 +335,11 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context, readyForForward
 		return false
 	}
 
-	for _, s := range sentries {
+	for _, s := range cs.Sentries() {
 		handshake, err := s.HandShake(ctx, &emptypb.Empty{})
 		if err != nil {
 			cs.logger.Error("blockRangeUpdate", "err", err)
-			continue // continue sending message to other sentries
+			continue
 		}
 
 		version := direct.ProtocolToUintMap[handshake.Protocol]
@@ -303,7 +350,6 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context, readyForForward
 			})
 			if err != nil {
 				cs.logger.Error("blockRangeUpdate", "err", err)
-				continue // continue sending message to other sentries
 			}
 		}
 	}
@@ -313,13 +359,6 @@ func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context, readyForForward
 	cs.blockRangeMu.Unlock()
 
 	return true
-}
-
-func (cs *MultiClient) shouldAnnounceBlockRange(update eth.BlockRangeUpdatePacket) (send bool, dueToUnwind bool) {
-	cs.blockRangeMu.Lock()
-	defer cs.blockRangeMu.Unlock()
-	send, dueToUnwind = cs.blockRange.decide(update)
-	return send, dueToUnwind
 }
 
 // waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
@@ -495,9 +534,18 @@ func (cs *MultiClient) Sentries() []sentryproto.SentryClient { return cs.sentrie
 
 func (cs *MultiClient) SetBlockProgressChannel(ch <-chan [][]byte, unsubscribe func()) {
 	cs.blockProgressMu.Lock()
-	defer cs.blockProgressMu.Unlock()
+	prevUnsubscribe := cs.blockProgressUnsubscribe
+	cs.blockProgressMu.Unlock()
+
+	if prevUnsubscribe != nil {
+		prevUnsubscribe()
+	}
+
+	cs.blockProgressMu.Lock()
 	cs.blockProgressCh = ch
 	cs.blockProgressUnsubscribe = unsubscribe
+	cs.blocksSinceLastAnnounce = 0
+	cs.blockProgressMu.Unlock()
 }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {

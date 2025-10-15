@@ -178,7 +178,17 @@ func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
 		logger:             log.New(),
 	}
 
-	cs.doAnnounceBlockRange(ctx, true)
+	packet, err := cs.buildBlockRangePacket(ctx)
+	if err != nil {
+		t.Fatalf("failed to build block range packet: %v", err)
+	}
+	send, _ := cs.shouldAnnounceBlockRange(packet)
+	if !send {
+		t.Fatal("expected block range to be announced")
+	}
+	if !cs.broadcastBlockRange(ctx, packet) {
+		t.Fatal("expected broadcast to succeed")
+	}
 
 	if sentMessage == nil {
 		t.Fatal("No message was sent")
@@ -287,25 +297,40 @@ func TestMultiClient_DoAnnounceBlockRangeSkipsUntilThreshold(t *testing.T) {
 		logger:             log.New(),
 	}
 
-	cs.doAnnounceBlockRange(ctx, true)
+	attempt := func() bool {
+		packet, err := cs.buildBlockRangePacket(ctx)
+		if err != nil {
+			t.Fatalf("failed to build block range packet: %v", err)
+		}
+		send, _ := cs.shouldAnnounceBlockRange(packet)
+		if !send {
+			return false
+		}
+		cs.broadcastBlockRange(ctx, packet)
+		return true
+	}
+
+	if !attempt() {
+		t.Fatal("expected first announcement to be sent")
+	}
 	if sentCount != 1 {
 		t.Fatalf("expected first announcement to be sent, got %d", sentCount)
 	}
 
-	cs.doAnnounceBlockRange(ctx, true)
-	if sentCount != 1 {
+	if attempt() {
 		t.Fatalf("expected unchanged range to be skipped, got %d", sentCount)
 	}
 
 	status.MaxBlockHeight = 200 + blockRangeEpochBlocks - 1
-	cs.doAnnounceBlockRange(ctx, true)
-	if sentCount != 1 {
+	if attempt() {
 		t.Fatalf("expected latest advance below threshold to be skipped, got %d", sentCount)
 	}
 
 	status.MaxBlockHeight = 200 + blockRangeEpochBlocks
 	status.BestHash = gointerfaces.ConvertHashToH256(common.HexToHash("0xbb"))
-	cs.doAnnounceBlockRange(ctx, true)
+	if !attempt() {
+		t.Fatalf("expected announcement after reaching threshold, got %d", sentCount)
+	}
 	if sentCount != 2 {
 		t.Fatalf("expected announcement after reaching threshold, got %d", sentCount)
 	}
@@ -324,7 +349,9 @@ func TestMultiClient_DoAnnounceBlockRangeSkipsUntilThreshold(t *testing.T) {
 
 	status.MaxBlockHeight = status.MaxBlockHeight - blockRangeEpochBlocks/2
 	status.BestHash = gointerfaces.ConvertHashToH256(common.HexToHash("0xcc"))
-	cs.doAnnounceBlockRange(ctx, false)
+	if !attempt() {
+		t.Fatalf("expected regression to trigger announcement, got %d", sentCount)
+	}
 	if sentCount != 3 {
 		t.Fatalf("expected regression to trigger announcement, got %d", sentCount)
 	}
