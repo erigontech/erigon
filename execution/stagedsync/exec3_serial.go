@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -193,7 +194,9 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 		}
 
 		t2 = time.Since(tt)
-		se.agg.BuildFilesInBackground(se.outputTxNum.Load())
+		if se.execStage.SyncMode() == stages.ModeApplyingBlocks {
+			se.agg.BuildFilesInBackground(se.outputTxNum.Load())
+		}
 
 		se.applyTx, err = se.cfg.db.BeginRw(context.Background()) //nolint
 		if err != nil {
