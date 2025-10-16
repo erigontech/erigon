@@ -13,6 +13,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -422,6 +426,7 @@ func TestMultiClient_BlockRangeChannelLoop(t *testing.T) {
 		ChainConfig:        &chain.Config{},
 		logger:             log.New(),
 	}
+	cs.db = newTestDBWithHeader(t)
 
 	cs.SetBlockProgressChannel(progressCh, unsub)
 
@@ -463,6 +468,92 @@ func TestMultiClient_BlockRangeChannelLoop(t *testing.T) {
 	}
 }
 
+func TestBlockProgressChannelCleanupDoesNotDropNewChannel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	statusCalled := make(chan struct{})
+	var statusOnce sync.Once
+
+	mockStatus := &mockStatusDataProvider{
+		getStatusDataFunc: func(ctx context.Context) (*proto_sentry.StatusData, error) {
+			statusOnce.Do(func() { close(statusCalled) })
+			return &proto_sentry.StatusData{
+				MinimumBlockHeight: 1,
+				MaxBlockHeight:     1,
+				BestHash:           gointerfaces.ConvertHashToH256(common.HexToHash("0x1")),
+			}, nil
+		},
+	}
+
+	readyReader := &mockFullBlockReader{
+		readyFunc: func(ctx context.Context) <-chan error {
+			ch := make(chan error, 1)
+			ch <- nil
+			return ch
+		},
+	}
+
+	progressCh1 := make(chan [][]byte)
+	unsub1Called := make(chan struct{}, 2)
+	var unsub1Once sync.Once
+	unsub1 := func() {
+		unsub1Once.Do(func() { close(progressCh1) })
+		unsub1Called <- struct{}{}
+	}
+
+	cs := &MultiClient{
+		statusDataProvider: mockStatus,
+		blockReader:        readyReader,
+		ChainConfig:        &chain.Config{},
+		logger:             log.New(),
+	}
+	cs.db = newTestDBWithHeader(t)
+
+	cs.SetBlockProgressChannel(progressCh1, unsub1)
+
+	done := make(chan struct{})
+	go func() {
+		cs.announceBlockRangeFromChannel(ctx, func() bool { return true })
+		close(done)
+	}()
+
+	select {
+	case <-statusCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial status fetch")
+	}
+
+	progressCh2 := make(chan [][]byte)
+	unsub2 := func() { close(progressCh2) }
+
+	cs.SetBlockProgressChannel(progressCh2, unsub2)
+
+	select {
+	case <-unsub1Called:
+	case <-time.After(time.Second):
+		t.Fatal("expected previous unsubscribe to run")
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("announceBlockRangeFromChannel did not exit")
+	}
+
+	if got := cs.getBlockProgressChannel(); got != progressCh2 {
+		t.Fatal("expected new channel to remain registered after cleanup")
+	}
+
+	select {
+	case <-unsub1Called:
+		t.Fatal("unsubscribe called more than once")
+	default:
+	}
+}
+
 func currentSentCount(mu *sync.Mutex, count *int) int {
 	mu.Lock()
 	defer mu.Unlock()
@@ -483,6 +574,46 @@ func waitFor(cond func() bool, timeout time.Duration) bool {
 		case <-ticker.C:
 		}
 	}
+}
+
+func newTestDBWithHeader(t *testing.T) kv.TemporalRwDB {
+	t.Helper()
+
+	tdb := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	header := &types.Header{
+		ParentHash:  common.Hash{},
+		UncleHash:   common.Hash{},
+		Root:        common.Hash{},
+		TxHash:      common.Hash{},
+		ReceiptHash: common.Hash{},
+		Difficulty:  big.NewInt(1),
+		Number:      big.NewInt(1),
+		GasLimit:    30_000_000,
+		GasUsed:     0,
+		Time:        uint64(time.Now().Unix()),
+		Extra:       []byte{},
+	}
+
+	err := tdb.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, header); err != nil {
+			return err
+		}
+		if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+			return err
+		}
+		if err := rawdb.WriteBody(tx, header.Hash(), header.Number.Uint64(), &types.Body{}); err != nil {
+			return err
+		}
+		rawdb.WriteHeadHeaderHash(tx, header.Hash())
+		rawdb.WriteHeadBlockHash(tx, header.Hash())
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("initialise temp db: %v", err)
+	}
+
+	return tdb
 }
 
 // Mock implementations
@@ -536,7 +667,13 @@ func TestMultiClient_AnnounceBlockRangeLoop_SkipInvalidRanges(t *testing.T) {
 				logger: log.New(),
 			}
 
-			cs.doAnnounceBlockRange(ctx)
+			packet, err := cs.buildBlockRangePacket(ctx)
+			if err != nil {
+				t.Fatalf("buildBlockRangePacket: %v", err)
+			}
+			if cs.blockRange.decide(packet) {
+				cs.broadcastBlockRange(ctx, packet)
+			}
 		})
 	}
 }

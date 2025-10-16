@@ -194,26 +194,24 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 	cs.announceBlockRangeFromChannel(ctx, headerInDB)
 }
 
-// doAnnounceBlockRange builds the current block range and broadcasts it.
-// This helper preserves compatibility with legacy callers and is primarily used in tests.
-func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
-	packet, err := cs.buildBlockRangePacket(ctx)
-	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
-		return
-	}
-
-	if !cs.blockRange.decide(packet) {
-		return
-	}
-
-	cs.broadcastBlockRange(ctx, packet)
-}
-
 func (cs *MultiClient) getBlockProgressChannel() <-chan [][]byte {
 	cs.blockProgressMu.Lock()
 	defer cs.blockProgressMu.Unlock()
 	return cs.blockProgressCh
+}
+
+func (cs *MultiClient) clearBlockProgressChannel(expected <-chan [][]byte) (unsubscribe func()) {
+	cs.blockProgressMu.Lock()
+	defer cs.blockProgressMu.Unlock()
+
+	if cs.blockProgressCh != expected {
+		return nil
+	}
+
+	unsubscribe = cs.blockProgressUnsubscribe
+	cs.blockProgressCh = nil
+	cs.blockProgressUnsubscribe = nil
+	return unsubscribe
 }
 
 func (cs *MultiClient) announceBlockRangeFromChannel(ctx context.Context, headerInDB func() bool) {
@@ -223,23 +221,18 @@ func (cs *MultiClient) announceBlockRangeFromChannel(ctx context.Context, header
 
 	cs.blockProgressMu.Lock()
 	progressCh := cs.blockProgressCh
-	unsubscribe := cs.blockProgressUnsubscribe
 	cs.blockProgressMu.Unlock()
 
 	if progressCh == nil {
 		return
 	}
 
-	cleanup := func() {
-		if unsubscribe != nil {
-			unsubscribe()
+	// Drop the subscription when we exit the loop, but only if we still own it.
+	defer func() {
+		if unsub := cs.clearBlockProgressChannel(progressCh); unsub != nil {
+			unsub()
 		}
-		cs.blockProgressMu.Lock()
-		cs.blockProgressCh = nil
-		cs.blockProgressUnsubscribe = nil
-		cs.blockProgressMu.Unlock()
-	}
-	defer cleanup()
+	}()
 
 	if packet, err := cs.buildBlockRangePacket(ctx); err == nil {
 		if send := cs.blockRange.decide(packet); send {
@@ -495,18 +488,24 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []sentryproto.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) SetBlockProgressChannel(ch <-chan [][]byte, unsubscribe func()) {
-	cs.blockProgressMu.Lock()
-	prevUnsubscribe := cs.blockProgressUnsubscribe
-	cs.blockProgressMu.Unlock()
-
-	if prevUnsubscribe != nil {
+	if prevUnsubscribe := cs.swapBlockProgressChannel(ch, unsubscribe); prevUnsubscribe != nil {
 		prevUnsubscribe()
 	}
+}
 
+func (cs *MultiClient) swapBlockProgressChannel(ch <-chan [][]byte, unsubscribe func()) (prevUnsubscribe func()) {
 	cs.blockProgressMu.Lock()
+	defer cs.blockProgressMu.Unlock()
+
+	if cs.blockProgressCh == ch {
+		cs.blockProgressUnsubscribe = unsubscribe
+		return nil
+	}
+
+	prevUnsubscribe = cs.blockProgressUnsubscribe
 	cs.blockProgressCh = ch
 	cs.blockProgressUnsubscribe = unsubscribe
-	cs.blockProgressMu.Unlock()
+	return prevUnsubscribe
 }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
