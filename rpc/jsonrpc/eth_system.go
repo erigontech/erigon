@@ -19,10 +19,8 @@ package jsonrpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"math/big"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -276,24 +274,30 @@ type EthConfigResp struct {
 // Config returns the HardFork config for current and upcoming forks:
 // assuming linear fork progression and ethereum-like schedule
 func (api *APIImpl) Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error) {
-	var timeUnix uint64
-	if timeArg != nil {
-		timeUnix = timeArg.Uint64()
-	} else {
-		timeUnix = uint64(time.Now().Unix())
-	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
+	var timeUnix uint64
+	if timeArg != nil {
+		// optional utility arg to aid with testing
+		timeUnix = timeArg.Uint64()
+	} else {
+		h, err := api.headerByRPCNumber(ctx, rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return nil, err
+		}
+		if h == nil {
+			return nil, errors.New("latest header not found")
+		}
+		timeUnix = h.Time
+	}
+
 	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
 	if err != nil {
 		return nil, err
-	}
-	if !chainConfig.IsCancun(timeUnix) {
-		return &EthConfigResp{}, fmt.Errorf("not supported: %w: time=%v", ErrForkTimeBeforeCancun, timeUnix)
 	}
 
 	response := EthConfigResp{}
