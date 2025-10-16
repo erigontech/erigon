@@ -124,7 +124,7 @@ func SpawnMiningExecStage(s *StageState, sd *dbstate.SharedDomains, tx kv.Tempor
 	if err != nil {
 		return err
 	}
-	defer sd.Close()
+	defer simSd.Close()
 
 	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}
 
