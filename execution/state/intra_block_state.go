@@ -303,15 +303,6 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
-// reset everything but keep stateObjects
-func (sdb *IntraBlockState) SoftReset() {
-	stateObjects := sdb.stateObjects
-	sdb.Reset()
-	sdb.stateObjects = stateObjects
-	sdb.ClearDirtyStorage()
-	sdb.ClearDirtyCode()
-}
-
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log.TxIndex = uint(sdb.txIndex)
@@ -1598,18 +1589,6 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
-}
-
-func (sdb *IntraBlockState) ClearDirtyStorage() {
-	for _, so := range sdb.stateObjects {
-		so.dirtyStorage = make(Storage)
-	}
-}
-
-func (sdb *IntraBlockState) ClearDirtyCode() {
-	for _, so := range sdb.stateObjects {
-		so.dirtyCode = false
-	}
 }
 
 func (sdb *IntraBlockState) SoftFinalise() {
