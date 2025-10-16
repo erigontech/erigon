@@ -98,7 +98,7 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
-func NewDomain(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -113,7 +113,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs, logge
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.Hist, stepSize, dirs, logger); err != nil {
+	if d.History, err = NewHistory(cfg.Hist, stepSize, stepsInFrozenFile, dirs, logger); err != nil {
 		return nil, err
 	}
 
@@ -299,7 +299,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	l := filterDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
+	l := filterDirtyFiles(fileNames, d.stepSize, d.stepsInFrozenFile, d.FilenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
 		dirtyFile.frozen = false
 
@@ -540,12 +540,13 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
-	files    visibleFiles
-	visible  *domainVisible
-	name     kv.Domain
-	stepSize uint64
-	ht       *HistoryRoTx
-	salt     *uint32
+	files             visibleFiles
+	visible           *domainVisible
+	name              kv.Domain
+	stepSize          uint64
+	stepsInFrozenFile uint64
+	ht                *HistoryRoTx
+	salt              *uint32
 
 	d *Domain
 
@@ -612,13 +613,14 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 
 	return &DomainRoTx{
-		name:     d.Name,
-		stepSize: d.stepSize,
-		d:        d,
-		ht:       d.History.BeginFilesRo(),
-		visible:  d._visible,
-		files:    d._visible.files,
-		salt:     d.salt.Load(),
+		name:              d.Name,
+		stepSize:          d.stepSize,
+		stepsInFrozenFile: d.stepsInFrozenFile,
+		d:                 d,
+		ht:                d.History.BeginFilesRo(),
+		visible:           d._visible,
+		files:             d._visible.files,
+		salt:              d.salt.Load(),
 	}
 }
 
@@ -1293,7 +1295,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize)
+	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.stepsInFrozenFile)
 	fi.frozen = false
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx

@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 var stateBuckets = []string{

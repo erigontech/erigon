@@ -194,8 +194,8 @@ func BenchmarkCall(b *testing.B) {
 	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		for j := 0; j < 400; j++ {
 			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
 			_, _, _ = Execute(code, creceived, cfg, tmpdir)

@@ -201,6 +201,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		proofsPerBlob := 1
 		_, dataLen, err = rlp.ParseString(payload, p)
 		if err == nil && dataLen == 1 {
+			if payload[p] != 0x01 { // Validate wrapper_version == 1 for EIP-7594
+				return 0, fmt.Errorf("%w: invalid wrapper version: expected 1, got %d", ErrParseTxn, payload[p])
+			}
 			p = p + 1
 			proofsPerBlob = int(params.CellsPerExtBlob)
 		}

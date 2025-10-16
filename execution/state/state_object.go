@@ -90,19 +90,19 @@ type stateObject struct {
 	createdContract bool // true if this object represents a newly created contract
 }
 
-func (s *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	stateObject := &stateObject{db: db, address: s.address}
-	stateObject.data.Copy(&s.data)
-	stateObject.original.Copy(&s.original)
-	stateObject.code = s.code
-	stateObject.dirtyStorage = s.dirtyStorage.Copy()
-	stateObject.originStorage = s.originStorage.Copy()
-	stateObject.blockOriginStorage = s.blockOriginStorage.Copy()
-	stateObject.selfdestructed = s.selfdestructed
-	stateObject.dirtyCode = s.dirtyCode
-	stateObject.deleted = s.deleted
-	stateObject.newlyCreated = s.newlyCreated
-	stateObject.createdContract = s.createdContract
+func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
+	stateObject := &stateObject{db: db, address: so.address}
+	stateObject.data.Copy(&so.data)
+	stateObject.original.Copy(&so.original)
+	stateObject.code = so.code
+	stateObject.dirtyStorage = so.dirtyStorage.Copy()
+	stateObject.originStorage = so.originStorage.Copy()
+	stateObject.blockOriginStorage = so.blockOriginStorage.Copy()
+	stateObject.selfdestructed = so.selfdestructed
+	stateObject.dirtyCode = so.dirtyCode
+	stateObject.deleted = so.deleted
+	stateObject.newlyCreated = so.newlyCreated
+	stateObject.createdContract = so.createdContract
 	return stateObject
 }
 
@@ -141,7 +141,7 @@ func (so *stateObject) markSelfdestructed() {
 
 // GetState returns a value from account storage.
 func (so *stateObject) GetState(key common.Hash, out *uint256.Int) bool {
-	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[key]
 		return false
@@ -152,13 +152,13 @@ func (so *stateObject) GetState(key common.Hash, out *uint256.Int) bool {
 		return false
 	}
 	// Otherwise return the entry's original value
-	so.GetCommittedState(key, out)
+	_ = so.GetCommittedState(key, out)
 	return true
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) error {
-	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[key]
 		return nil
@@ -252,27 +252,51 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 
 // SetStorage replaces the entire state storage with the given one.
 //
-// After this function is called, all original state will be ignored and state
+// After this function is called, all the original state will be ignored and state
 // lookup only happens in the fake state storage.
 //
-// Note this function should only be used for debugging purpose.
+// Note this function should only be used for call/block simulation and debugging purpose.
 func (so *stateObject) SetStorage(storage Storage) {
 	// Allocate fake storage if it's nil.
 	if so.fakeStorage == nil {
 		so.fakeStorage = make(Storage)
 	}
-	maps.Copy(so.fakeStorage, storage)
-	// Don't bother journal since this function should only be used for
-	// debugging and the `fake` storage won't be committed to database.
+	// Set the fake storage through SetState to ensure journalling is done correctly.
+	for key, value := range storage {
+		so.SetState(key, value, false)
+	}
 }
 
 func (so *stateObject) setState(key common.Hash, value uint256.Int) {
 	so.dirtyStorage[key] = value
 }
 
-// updateStotage writes cached storage modifications into the object's storage trie.
-func (so *stateObject) updateStotage(stateWriter StateWriter) error {
-	for key, value := range so.dirtyStorage {
+// updateStorage writes cached storage modifications into the object's storage trie.
+func (so *stateObject) updateStorage(stateWriter StateWriter) error {
+	// When using full state override, only the fake storage matters (see also SetStorage)
+	if so.fakeStorage != nil {
+		// First, delete the account to wipe out the original storage
+		err := stateWriter.DeleteAccount(so.address, &so.original)
+		if err != nil {
+			return err
+		}
+		// Then, we need to apply the fake storage changes to compute the state root correctly
+		err = so.applyStorageChanges(stateWriter, so.fakeStorage)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	// Normal behaviour, apply the dirty storage changes
+	err := so.applyStorageChanges(stateWriter, so.dirtyStorage)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStorage Storage) error {
+	for key, value := range updatedStorage {
 		blockOriginValue := so.blockOriginStorage[key]
 		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address)) {
 			fmt.Printf("%d (%d.%d) Update Storage (%T): %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version,
@@ -285,6 +309,7 @@ func (so *stateObject) updateStotage(stateWriter StateWriter) error {
 	}
 	return nil
 }
+
 func (so *stateObject) printTrie() {
 	for key, value := range so.dirtyStorage {
 		fmt.Printf("UpdateStorage: %x,%x,%s\n", so.address, key, value.Hex())
