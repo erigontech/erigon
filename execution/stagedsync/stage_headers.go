@@ -189,7 +189,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
 	}
 
-	const concurrentBlocks = 10
+	const concurrentBlocks = 1
 
 	prev := curBlock
 	timer := time.NewTicker(40 * time.Second)
