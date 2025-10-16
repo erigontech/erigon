@@ -1412,9 +1412,8 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			traceResult.StateDiff = sdMap
 			sd = &StateDiff{sdMap: sdMap}
 		}
-		// ibs.Reset()
-		ibs.ClearDirtyStorage()
-		ibs.ClearDirtyCode()
+
+		ibs.SoftReset()
 		var finalizeTxStateWriter state.StateWriter
 		if sd != nil {
 			finalizeTxStateWriter = sd

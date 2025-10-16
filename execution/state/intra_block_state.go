@@ -303,6 +303,15 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
+// reset everything but keep stateObjects
+func (sdb *IntraBlockState) SoftReset() {
+	stateObjects := sdb.stateObjects
+	sdb.Reset()
+	sdb.stateObjects = stateObjects
+	sdb.ClearDirtyStorage()
+	sdb.ClearDirtyCode()
+}
+
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log.TxIndex = uint(sdb.txIndex)
