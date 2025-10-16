@@ -4,7 +4,21 @@ on:
   #push: # Run on push to release branches
   #  branches:
   #    - 'release/*'
-  workflow_dispatch: # Run manually
+  workflow_dispatch:
+    # Run manually with parameters for load generation
+    inputs:
+      execution_name:
+        description: "Execution name (only for reporting purposes)"
+        required: false
+        default: "eth_getBlockByNumber"
+      load_pattern:
+        description: "Stress test load pattern file name from rpc-tests repo"
+        required: false
+        default: "stress_test_eth_getBlockByNumber_13M.tar"
+      load_sequence:
+        description: "Stress test load sequence (qps:duration_secs) e.g. 100:300,500:300,750:300 "
+        required: false
+        default: "100:300,500:300,750:300,1:300,1000:300,1:300"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -99,7 +113,7 @@ jobs:
           Erigon3 \
           $CHAIN \
           archive_node \
-          load@eth_getBlockByNumber@stress_test_eth_getBlockByNumber_13M.tar@100:300,500:300,750:300,1:300,1000:300,1:300@${{runner.workspace}}/rpc-tests
+          load@${{ inputs.execution_name }}@${{ inputs.load_pattern }}@${{ inputs.load_sequence }}@${{runner.workspace}}/rpc-tests
   
         # Capture monitoring script exit status
         test_exit_status=$?
