@@ -47,7 +47,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic

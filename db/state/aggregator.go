@@ -630,7 +630,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		return err
 	}
 	if !ok {
-		a.logger.Debug("[agg] not ready for collation", "step", step, "lastBlockInStep", lastBlockInStep, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInDB", lastBlockInDB, "lastTxInDB", lastTxInDB)
+		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
 		return errStepNotReady
 	}
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
@@ -749,6 +749,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+	if a.reorgBlockDepth == 0 {
+		return 0, 0, 0, true, nil
+	}
 	err = a.db.View(ctx, func(tx kv.Tx) error {
 		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(tx, lastTxNumOfStep(step, a.stepSize))
 		if err != nil {
