@@ -185,12 +185,8 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	txnNumReader := cfg.blockReader.TxnumReader(ctx)
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		err := agg.SafeBuildFilesInBackground(applyTx, txnNumReader, doms.BlockNum())
-		if err != nil {
-			return err
-		}
+		agg.BuildFilesInBackground(doms.TxNum())
 	}
 
 	var (
@@ -398,10 +394,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		err := agg.SafeBuildFilesInBackground(applyTx, txnNumReader, doms.BlockNum())
-		if err != nil {
-			return err
-		}
+		agg.BuildFilesInBackground(doms.TxNum())
 	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && lastHeader != nil {
@@ -741,10 +734,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 	}
 
 	if !useExternalTx && execStage.SyncMode() == stages.ModeApplyingBlocks {
-		err := te.agg.SafeBuildFilesInBackground(tx, te.cfg.blockReader.TxnumReader(ctx), te.doms.BlockNum())
-		if err != nil {
-			return nil, t2, err
-		}
+		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
 	if !te.inMemExec {

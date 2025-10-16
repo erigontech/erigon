@@ -61,8 +61,6 @@ type Aggregator struct {
 	iis      []*InvertedIndex
 	dirs     datadir.Dirs
 	stepSize uint64
-	// blockReorgDepth is used to protect collation from freezing data that is not past the reorg range.
-	blockReorgDepth uint64
 
 	dirtyFilesLock           sync.Mutex
 	visibleFilesLock         sync.RWMutex
@@ -106,14 +104,14 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize uint64, db k
 		onFilesDelete:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		stepSize:               stepSize,
-		blockReorgDepth:        dbg.MaxReorgDepth,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
-		produce:                true,
+
+		produce: true,
 	}, nil
 }
 
@@ -735,17 +733,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	return nil
 }
 
-// SafeBuildFiles calls BuildFiles but with a txn num that is outside the block reorg range.
-func (a *Aggregator) SafeBuildFiles(tx kv.Tx, txnNumsReader txnNumsReader, latestBlockNum uint64) error {
-	safeTxnNum, err := a.SafeTxnNumForCollation(tx, txnNumsReader, latestBlockNum)
-	if err != nil {
-		return err
-	}
-	return a.BuildFiles(safeTxnNum)
-}
-
-// BuildFiles builds files in the background and blocks until that completes.
-// Consider using SafeBuildFiles to avoid building files for data that is not outside the reorg block depth.
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
 	finished := a.BuildFilesInBackground(toTxNum)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
@@ -1563,28 +1550,6 @@ func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 // SetProduceMod allows setting produce to false in order to stop making state files (default value is true)
 func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
-}
-
-type txnNumsReader interface {
-	Max(tx kv.Tx, blockNum uint64) (maxTxnNum uint64, err error)
-}
-
-// SafeTxnNumForCollation finds a txn num that is outside the block reorg range based on the passed latestBlockNum.
-func (a *Aggregator) SafeTxnNumForCollation(tx kv.Tx, txnNumsReader txnNumsReader, latestBlockNum uint64) (uint64, error) {
-	if latestBlockNum <= a.blockReorgDepth {
-		return 0, nil
-	}
-	return txnNumsReader.Max(tx, latestBlockNum-a.blockReorgDepth)
-}
-
-// SafeBuildFilesInBackground calls BuildFilesInBackground but with a txn num that is outside the block reorg range.
-func (a *Aggregator) SafeBuildFilesInBackground(tx kv.Tx, txnNumsReader txnNumsReader, latestBlockNum uint64) error {
-	safeTxnNum, err := a.SafeTxnNumForCollation(tx, txnNumsReader, latestBlockNum)
-	if err != nil {
-		return err
-	}
-	a.BuildFilesInBackground(safeTxnNum)
-	return nil
 }
 
 // Returns channel which is closed when aggregation is done
