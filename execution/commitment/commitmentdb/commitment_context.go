@@ -9,7 +9,8 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
-	"time"
+ 	"time"
+        "runtime/debug"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -255,6 +256,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 				return 0, 0, false, err
 			}
 			if lastBn < blockNum {
+                                debug.PrintStack()
 				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
 			}
 		}
