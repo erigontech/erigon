@@ -159,9 +159,7 @@ func (tab *Table) self() *enode.Node {
 func (tab *Table) seedRand() {
 	var b [8]byte
 	if _, err := crand.Read(b[:]); err != nil {
-		// Fallback to a non-crypto source to avoid deterministic seed (zero)
-		// if crypto/rand fails for any reason.
-		binary.BigEndian.PutUint64(b[:], uint64(time.Now().UnixNano()))
+		panic("crypto/rand failed in seedRand: " + err.Error())
 	}
 
 	tab.mutex.Lock()
