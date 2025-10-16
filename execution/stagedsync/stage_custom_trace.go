@@ -218,7 +218,8 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}); err != nil {
 		return err
 	}
-	var lastTxNum uint64
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	var fromStep, toStep kv.Step
 	{
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
@@ -247,23 +248,15 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 			}
 		}
 
-		lastTxNum = doms.TxNum()
+		fromStep, toStep, err = SafeStepRangeForCollation(tx, cfg.BlockReader.TxnumReader(ctx), doms, agg.EndTxNumMinimax())
+		if err != nil {
+			return err
+		}
+
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 
-	}
-
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	var fromStep, toStep kv.Step
-	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		fromStep = firstStepNotInFiles(tx, produce)
-		if lastTxNum/agg.StepSize() > 0 {
-			toStep = kv.Step(lastTxNum / agg.StepSize())
-		}
-		return nil
-	}); err != nil {
-		return err
 	}
 	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
 		return err

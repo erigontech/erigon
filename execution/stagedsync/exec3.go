@@ -185,14 +185,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	txnNumReader := cfg.blockReader.TxnumReader(ctx)
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		err := agg.SafeBuildFilesInBackground(applyTx, txnNumReader, doms.BlockNum())
-		if err != nil {
-			return err
-		}
-	}
-
 	var (
 		inputTxNum               uint64
 		offsetFromBlockBeginning uint64
@@ -214,6 +206,15 @@ func ExecV3(ctx context.Context,
 
 	if maxTxNum == 0 {
 		return nil
+	}
+
+	txNumReader := cfg.blockReader.TxnumReader(ctx)
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		safeTxNum, err := SafeTxNumForCollation(applyTx, txNumReader, doms, agg.EndTxNumMinimax())
+		if err != nil {
+			return err
+		}
+		agg.BuildFilesInBackground(safeTxNum)
 	}
 
 	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
@@ -409,10 +410,11 @@ func ExecV3(ctx context.Context,
 		} else {
 			tx = applyTx
 		}
-		err := agg.SafeBuildFilesInBackground(tx, txnNumReader, doms.BlockNum())
+		safeTxNum, err := SafeTxNumForCollation(tx, txNumReader, doms, agg.EndTxNumMinimax())
 		if err != nil {
 			return err
 		}
+		agg.BuildFilesInBackground(safeTxNum)
 	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && lastHeader != nil {
@@ -424,6 +426,37 @@ func ExecV3(ctx context.Context,
 	}
 
 	return execErr
+}
+
+// SafeTxNumForCollation respects the block reorg window and returns the last tx num that can be collated.
+func SafeTxNumForCollation(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, doms *dbstate.SharedDomains, lastTxNumInFiles uint64) (uint64, error) {
+	_, to, err := SafeStepRangeForCollation(tx, txNumsReader, doms, lastTxNumInFiles)
+	if err != nil {
+		return 0, err
+	}
+	return to.ToLastTxNum(doms.StepSize()), nil
+}
+
+// SafeStepRangeForCollation respects the block reorg window and returns the range of steps that can be collated.
+func SafeStepRangeForCollation(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, doms *dbstate.SharedDomains, lastTxNumInFiles uint64) (kv.Step, kv.Step, error) {
+	from := kv.Step(lastTxNumInFiles / doms.StepSize())
+	to := kv.Step(doms.TxNum() / doms.StepSize())
+	for step := from; step < to; step++ {
+		lastTxNumOfStep := step.ToLastTxNum(doms.StepSize())
+		blockNum, ok, err := txNumsReader.FindBlockNum(tx, lastTxNumOfStep)
+		if err != nil {
+			return 0, 0, err
+		}
+		if !ok {
+			return 0, 0, fmt.Errorf("can't find block num for last tx num %d of step %d", lastTxNumOfStep, step)
+		}
+		if doms.BlockNum() < blockNum+dbg.MaxReorgDepth {
+			// last tx num of step is in the reorg window - we can't collate it yet
+			to = step
+			break
+		}
+	}
+	return from, to, nil
 }
 
 func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
@@ -752,10 +785,11 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 	}
 
 	if !useExternalTx && execStage.SyncMode() == stages.ModeApplyingBlocks {
-		err := te.agg.SafeBuildFilesInBackground(tx, te.cfg.blockReader.TxnumReader(ctx), te.doms.BlockNum())
+		safeTxNum, err := SafeTxNumForCollation(tx, te.cfg.blockReader.TxnumReader(ctx), te.doms, te.agg.EndTxNumMinimax())
 		if err != nil {
 			return nil, t2, err
 		}
+		te.agg.BuildFilesInBackground(safeTxNum)
 	}
 
 	if !te.inMemExec {

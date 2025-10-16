@@ -381,6 +381,8 @@ type Step uint64
 
 func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
+func (s Step) ToLastTxNum(steSize uint64) uint64 { return (s + 1).ToTxNum(steSize) - 1 }
+
 type (
 	Domain      uint16
 	InvertedIdx uint16
