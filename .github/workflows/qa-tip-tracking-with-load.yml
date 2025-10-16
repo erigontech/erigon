@@ -79,6 +79,12 @@ jobs:
           exit 1
         fi
 
+    - name: Restore Erigon Testbed Data Directory & Erigon binary
+      id: save_chaindata_step
+      run: |
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+        cp $ERIGON_REFERENCE_DATA_DIR/../erigon $ERIGON_TESTBED_DATA_DIR/../
+
     - name: Run Erigon, wait sync and check ability to maintain sync with load
       id: test_step
       run: |
