@@ -66,7 +66,7 @@ func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accoun
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
 func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	addrBytes := address.Bytes()
-	if s, ok := cr.cache.GetStorage(addrBytes, 0, key.Bytes()); ok {
+	if s, ok := cr.cache.GetStorage(addrBytes, 1, key.Bytes()); ok {
 		var v uint256.Int
 		(&v).SetBytes(s)
 		return v, true, nil
@@ -76,9 +76,9 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Ha
 		return uint256.Int{}, false, err
 	}
 	if !ok {
-		cr.cache.SetStorageAbsent(addrBytes, 0, key.Bytes())
+		cr.cache.SetStorageAbsent(addrBytes, 1, key.Bytes())
 	} else {
-		cr.cache.SetStorageRead(addrBytes, 0, key.Bytes(), v.Bytes())
+		cr.cache.SetStorageRead(addrBytes, 1, key.Bytes(), v.Bytes())
 	}
 	return v, ok, nil
 }
@@ -97,7 +97,7 @@ func (cr *CachedReader) HasStorage(address common.Address) (bool, error) {
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
 func (cr *CachedReader) ReadAccountCode(address common.Address) ([]byte, error) {
-	if c, ok := cr.cache.GetCode(address.Bytes(), 0); ok {
+	if c, ok := cr.cache.GetCode(address.Bytes(), 1); ok {
 		return c, nil
 	}
 	c, err := cr.r.ReadAccountCode(address)
@@ -105,7 +105,7 @@ func (cr *CachedReader) ReadAccountCode(address common.Address) ([]byte, error) 
 		return nil, err
 	}
 	if cr.cache != nil && len(c) <= 1024 {
-		cr.cache.SetCodeRead(address.Bytes(), 0, c)
+		cr.cache.SetCodeRead(address.Bytes(), 1, c)
 	}
 	return c, nil
 }
