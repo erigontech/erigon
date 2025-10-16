@@ -78,6 +78,8 @@ var (
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
 	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceGas             = EnvBool("TRACE_GAS", false)
+	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
