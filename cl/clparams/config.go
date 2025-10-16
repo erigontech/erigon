@@ -1197,6 +1197,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
 	cfg.MaxRequestBlobSidecarsElectra = 256
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 6
 	cfg.InitializeForkSchedule()
 	return cfg
 }
