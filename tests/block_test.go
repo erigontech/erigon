@@ -20,13 +20,9 @@
 package tests
 
 import (
-	"io"
-	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
-	//"github.com/erigontech/erigon-lib/log/v3"
-	//"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -76,11 +72,9 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	}
 
 	//defer log.Root().SetHandler(log.Root().GetHandler())
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(io.Writer(os.Stderr), log.TerminalFormat())))
-
-	log.SetRootHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(io.Writer(os.Stderr), log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StdoutHandler))
+	//log.SetRootHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(io.Writer(os.Stdout), log.TerminalFormat())))
 	//testlog.Logger(t, log.LvlTrace).SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StreamHandler(io.Writer(os.Stderr), log.TerminalFormat())))
 	bt := new(testMatcher)
 
@@ -97,7 +91,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 		//	t.Skip()
 		//}
 
-		t.Parallel()
+		//t.Parallel()
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)
