@@ -9,7 +9,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/db/services"
 )
 
 // CheckReceiptsNoDups performs integrity checks on receipts to ensure no duplicates exist.

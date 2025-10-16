@@ -13,6 +13,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -20,7 +21,6 @@ import (
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type receiptRLP69 struct {
@@ -486,6 +486,61 @@ func waitFor(cond func() bool, timeout time.Duration) bool {
 }
 
 // Mock implementations
+func TestMultiClient_AnnounceBlockRangeLoop_SkipInvalidRanges(t *testing.T) {
+	ctx := context.Background()
+	nonZeroHash := common.HexToHash("0x1")
+
+	testcases := []struct {
+		name   string
+		status *proto_sentry.StatusData
+	}{
+		{
+			name: "earliestGreaterThanLatest",
+			status: &proto_sentry.StatusData{
+				MinimumBlockHeight: 10,
+				MaxBlockHeight:     5,
+				BestHash:           gointerfaces.ConvertHashToH256(nonZeroHash),
+			},
+		},
+		{
+			name: "zeroBestHash",
+			status: &proto_sentry.StatusData{
+				MinimumBlockHeight: 5,
+				MaxBlockHeight:     10,
+				BestHash:           gointerfaces.ConvertHashToH256(common.Hash{}),
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mockSentry := &mockSentryClient{
+				handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+					t.Fatalf("handshake should not be called for invalid status %q", tc.name)
+					return nil, nil
+				},
+				sendMessageToAllFunc: func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+					t.Fatalf("sendMessageToAll should not be called for invalid status %q", tc.name)
+					return nil, nil
+				},
+			}
+
+			cs := &MultiClient{
+				sentries: []proto_sentry.SentryClient{mockSentry},
+				statusDataProvider: &mockStatusDataProvider{
+					getStatusDataFunc: func(context.Context) (*proto_sentry.StatusData, error) {
+						return tc.status, nil
+					},
+				},
+				logger: log.New(),
+			}
+
+			cs.doAnnounceBlockRange(ctx)
+		})
+	}
+}
+
 type mockSentryClient struct {
 	proto_sentry.SentryClient
 	sendMessageByIdFunc  func(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)

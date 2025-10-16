@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
@@ -71,6 +72,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -112,6 +114,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/nodecfg"
+	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -128,8 +131,6 @@ import (
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/txnprovider"
@@ -1586,7 +1587,14 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if _, err := snaptype.LoadSalt(dirs.Snap, createNewSaltFileIfNeeded, logger); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).Open(ctx, db)
+
+	if snConfig.ErigonDBStepsInFrozenFile == config3.DefaultStepsInFrozenFile {
+		logger.Info("Using number of steps in frozen files", "steps", snConfig.ErigonDBStepsInFrozenFile)
+	} else {
+		logger.Warn("OVERRIDING NUMBER OF STEPS IN FROZEN FILES; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", snConfig.ErigonDBStepsInFrozenFile, "default", config3.DefaultStepsInFrozenFile)
+	}
+
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).StepsInFrozenFile(uint64(snConfig.ErigonDBStepsInFrozenFile)).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

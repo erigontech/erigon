@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -59,7 +60,6 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 const blockRangeEpochBlocks = 32
@@ -90,6 +90,16 @@ func (t *blockRangeTracker) decide(next eth.BlockRangeUpdatePacket) bool {
 func (t *blockRangeTracker) record(next eth.BlockRangeUpdatePacket) {
 	t.last = next
 	t.initialized = true
+}
+
+func validateBlockRange(packet eth.BlockRangeUpdatePacket) error {
+	if packet.Earliest > packet.Latest {
+		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", packet.Earliest, packet.Latest)
+	}
+	if packet.LatestHash == (common.Hash{}) {
+		return fmt.Errorf("invalid block range: latest block hash is zero")
+	}
+	return nil
 }
 
 // StartStreamLoops starts message processing loops for all sentries.
@@ -184,6 +194,22 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 	cs.announceBlockRangeFromChannel(ctx, headerInDB)
 }
 
+// doAnnounceBlockRange builds the current block range and broadcasts it.
+// This helper preserves compatibility with legacy callers and is primarily used in tests.
+func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
+	packet, err := cs.buildBlockRangePacket(ctx)
+	if err != nil {
+		cs.logger.Error("blockRangeUpdate", "err", err)
+		return
+	}
+
+	if !cs.blockRange.decide(packet) {
+		return
+	}
+
+	cs.broadcastBlockRange(ctx, packet)
+}
+
 func (cs *MultiClient) getBlockProgressChannel() <-chan [][]byte {
 	cs.blockProgressMu.Lock()
 	defer cs.blockProgressMu.Unlock()
@@ -257,14 +283,21 @@ func (cs *MultiClient) buildBlockRangePacket(ctx context.Context) (eth.BlockRang
 		return eth.BlockRangeUpdatePacket{}, err
 	}
 
-	return eth.BlockRangeUpdatePacket{
+	packet := eth.BlockRangeUpdatePacket{
 		Earliest:   status.MinimumBlockHeight,
 		Latest:     status.MaxBlockHeight,
 		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
-	}, nil
+	}
+
+	return packet, nil
 }
 
 func (cs *MultiClient) broadcastBlockRange(ctx context.Context, request eth.BlockRangeUpdatePacket) {
+	if err := validateBlockRange(request); err != nil {
+		cs.logger.Warn("blockRangeUpdate: invalid block range", "err", err)
+		return
+	}
+
 	cs.logger.Debug("sending status data", "start", request.Earliest, "end", request.Latest, "hash", hex.EncodeToString(request.LatestHash[:]))
 
 	data, err := rlp.EncodeToBytes(&request)
@@ -1150,6 +1183,9 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 	var query eth.BlockRangeUpdatePacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
+	}
+	if err := validateBlockRange(query); err != nil {
+		return err
 	}
 
 	go func() {

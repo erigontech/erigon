@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br services.FullBlockReader, failFast bool) error {

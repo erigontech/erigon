@@ -222,7 +222,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		return nil
 	}
 
-	txs := (aggStep) * config3.StepsInFrozenFile
+	txs := (aggStep) * config3.DefaultStepsInFrozenFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
 	rnd := newRnd(0)
