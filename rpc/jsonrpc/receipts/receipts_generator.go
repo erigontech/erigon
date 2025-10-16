@@ -155,6 +155,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	calculatePostState := txsForPostState != nil
+	fmt.Println ("calculatePostState: ", calculatePostState)
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB, receipt *types.Receipt
@@ -218,7 +219,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 
 	if txn.Type() == types.AccountAbstractionTxType {
-		genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
+		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 		if err != nil {
 			return nil, err
 		}
@@ -246,6 +247,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
+		fmt.Println ("CreateSharedDomain")
 		sharedDomains, err := dbstate.NewSharedDomains(tx, log.Root())
 		if err != nil {
 			return nil, err
@@ -264,6 +266,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
+
+			fmt.Println ("before SeekCommitment")
+
 			// commitment are indexed by txNum of the first tx (system-tx) of the block
 			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
 			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
