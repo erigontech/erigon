@@ -1593,7 +1593,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 
 func (sdb *IntraBlockState) ClearDirtyStorage() {
 	for _, so := range sdb.stateObjects {
-		so.dirtyStorage = nil
+		so.dirtyStorage = make(Storage)
 	}
 }
 
