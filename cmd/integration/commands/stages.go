@@ -837,6 +837,9 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if chainTipMode && noCommit {
+		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
+	}
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
