@@ -28,7 +28,7 @@ but it could be read with the current (or older) version of Erigon, we upgrade o
 
 If with the update we change logic of reading(!) file, we should bump a major version for new files (v1.0->v2.0).
 
-So that means that we could read this file with a previous version of Erigon.
+So that means that we could NOT read this file with a previous version of Erigon.
 
 All the versions of snapshots could be found in statecfg.Schema struct, versions.yaml and version_schema_gen.go files.
 To learn how to use them, please visit Bumper README
