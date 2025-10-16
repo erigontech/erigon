@@ -34,10 +34,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/debug"
 )
 
 var cmdResetState = &cobra.Command{
@@ -69,7 +69,7 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = reset2.ResetState(db, ctx); err != nil {
+		if err = rawdbreset.ResetState(db, ctx); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}

@@ -21,7 +21,7 @@ import (
 	"maps"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 // bench9 tests eth_getProof

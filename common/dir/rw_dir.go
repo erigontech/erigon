@@ -161,7 +161,6 @@ func DeleteFiles(dirs ...string) error {
 			return err
 		}
 		for _, fPath := range files {
-			fPath := fPath
 			g.Go(func() error { return RemoveFile(fPath) })
 		}
 	}

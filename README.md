@@ -575,6 +575,12 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
+### Why doesn't my full node have earlier blocks data?
+
+- `prune.mode=full` no longer downloads pre-merge blocks (see [partial history expiry](https://blog.ethereum.org/2025/07/08/partial-history-exp)).
+   Now it only stores post-merge blocks data (i.e. blocks and transactions)
+- To include pre-merge blocks data, use `--prune.mode=blocks` (all blocks data + only recent state data) or `--prune.mode=archive` (all data)
+
 ### RaspberryPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4

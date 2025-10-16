@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // Config are the configuration options for the Interpreter

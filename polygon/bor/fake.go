@@ -18,10 +18,10 @@ package bor
 
 import (
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 

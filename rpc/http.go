@@ -288,6 +288,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		codec.WriteJSON(ctx, errorMsg)
 	}
+
+	if !s.disableStreaming {
+		stream.Flush()
+	}
 }
 
 // validateRequest returns a non-zero response code and error message if the

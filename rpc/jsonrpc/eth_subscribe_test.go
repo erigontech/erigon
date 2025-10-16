@@ -26,17 +26,16 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/privateapi"
 )
 
 func TestEthSubscribe(t *testing.T) {
@@ -81,7 +80,7 @@ func TestEthSubscribe(t *testing.T) {
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 

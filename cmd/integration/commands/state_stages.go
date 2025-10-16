@@ -30,25 +30,24 @@ import (
 
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/debugprint"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/core/debugprint"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
+	erigoncli "github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/shards"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
@@ -163,14 +162,13 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 	_, engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig, logger1)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
-	ttx, err := db.BeginTemporalRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
-	defer ttx.Rollback()
-	var tx kv.RwTx = ttx
+	defer tx.Rollback()
 
-	sd, err := state.NewSharedDomains(ttx, logger1)
+	sd, err := state.NewSharedDomains(tx, logger1)
 	if err != nil {
 		return err
 	}
@@ -193,8 +191,8 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
-		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, txc, execToBlock, ctx, execCfg, logger); err != nil {
+		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, doms *state.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error {
+			if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, doms, rwTx, execToBlock, ctx, execCfg, logger); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil
@@ -252,7 +250,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		tx, err = db.BeginRw(context.Background())
+		tx, err = db.BeginTemporalRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -281,7 +279,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if _, err := stateStages.Run(db, wrap.NewTxContainer(tx, sd), false /* firstCycle */, false); err != nil {
+		if _, err := stateStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
 			return err
 		}
 
@@ -290,7 +288,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		tx, err = db.BeginRw(ctx)
+		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -310,8 +308,8 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.Address{}) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
-			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				err = stagedsync.SpawnMiningCreateBlockStage(s, txc,
+			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, sd *state.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				err = stagedsync.SpawnMiningCreateBlockStage(s, sd, tx,
 					stagedsync.StageMiningCreateBlockCfg(db, miner, chainConfig, engine, nil, dirs.Tmp, br),
 					quit, logger)
 				if err != nil {
@@ -333,11 +331,11 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 			//})
 
 			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
-			if _, err := miningStages.Run(db, wrap.NewTxContainer(tx, sd), false /* firstCycle */, false); err != nil {
+			if _, err := miningStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
 				return err
 			}
 			tx.Rollback()
-			tx, err = db.BeginRw(context.Background())
+			tx, err = db.BeginTemporalRw(context.Background())
 			if err != nil {
 				return err
 			}
@@ -359,7 +357,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		tx, err = db.BeginRw(context.Background())
+		tx, err = db.BeginTemporalRw(context.Background())
 		if err != nil {
 			return err
 		}
@@ -393,14 +391,14 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	_, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil, logger)
 
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	must(tx.Commit())
-	tx, err = db.BeginRw(ctx)
+	tx, err = db.BeginTemporalRw(ctx)
 	must(err)
 	defer tx.Rollback()
 	sync.DisableAllStages()
@@ -421,8 +419,8 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil)
 
 	// set block limit of execute stage
-	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-		if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, txc, to, ctx, cfg, logger); err != nil {
+	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, sd *state.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+		if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, sd, tx, to, ctx, cfg, logger); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 		}
 		return nil
@@ -437,12 +435,12 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
-		if _, err = sync.Run(db, wrap.NewTxContainer(tx, nil), initialCycle, false); err != nil {
+		if _, err = sync.Run(db, nil, tx, initialCycle, false); err != nil {
 			return err
 		}
 		logger.Info("[Integration] ", "loop time", time.Since(t))
 		tx.Rollback()
-		tx, err = db.BeginRw(ctx)
+		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}

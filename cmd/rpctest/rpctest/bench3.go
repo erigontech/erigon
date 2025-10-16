@@ -23,7 +23,7 @@ import (
 	"maps"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 func Bench3(erigon_url, geth_url string) error {

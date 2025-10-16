@@ -20,8 +20,8 @@
 package runtime
 
 import (
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )

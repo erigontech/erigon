@@ -26,9 +26,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stages"
 	"github.com/erigontech/erigon/execution/stages/mock"
@@ -75,7 +74,7 @@ func TestHeaderStep(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -114,7 +113,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-		if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, log.New(), m.BlockReader, nil); err != nil {
+		if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, log.New(), m.BlockReader, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -183,7 +182,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -235,7 +234,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -278,7 +277,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -314,7 +313,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -411,7 +410,7 @@ func TestAnchorReplace(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -517,7 +516,7 @@ func TestAnchorReplace2(t *testing.T) {
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, nil, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 }
