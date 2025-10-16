@@ -391,25 +391,14 @@ func ExecV3(ctx context.Context,
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
 	}
 
-	if !useExternalTx {
+	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		var tx kv.Tx
-		if !useExternalTx {
-			// need to do this because at this point the applyTx is committed when useExternalTx=false
-			tx, err = cfg.db.BeginRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-		} else {
-			tx = applyTx
-		}
-		err := agg.SafeBuildFilesInBackground(tx, txnNumReader, doms.BlockNum())
+		err := agg.SafeBuildFilesInBackground(applyTx, txnNumReader, doms.BlockNum())
 		if err != nil {
 			return err
 		}
