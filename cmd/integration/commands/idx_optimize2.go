@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 var idxOptimize2 = &cobra.Command{

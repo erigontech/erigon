@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 var (
