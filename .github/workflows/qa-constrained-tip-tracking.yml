@@ -19,10 +19,10 @@ jobs:
           #  backend: Gnosis
           #  cgroup_name: constrained_res_64G
           #  prune_mode: archive_node
-    runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}", tip-tracking-ext ]
     timeout-minutes: 780 # 13 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.0/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.3/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
@@ -88,28 +88,7 @@ jobs:
         rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
         cp $ERIGON_REFERENCE_DATA_DIR/../erigon $ERIGON_TESTBED_DATA_DIR/../
 
-    # Upgrade + tip-tracking test
-
-    - name: Print datadir contents before upgrade (for debugging)
-      working-directory: ${{ github.workspace }}
-      run: |
-        find $ERIGON_TESTBED_DATA_DIR
-
-    # The following task runs the datadir upgrade procedure explicitly.
-    # It is unnecessary and is executed automatically by erigon when it detects the old format.
-    - name: Run the datadir upgrade procedure
-      if: ${{ inputs.explicit_upgrade }}
-      working-directory: ${{ github.workspace }}
-      run: |
-        ./build/bin/erigon snapshots update-to-new-ver-format --datadir $ERIGON_TESTBED_DATA_DIR
-
-    - name: Print datadir contents after upgrade (for debugging)
-      if: ${{ inputs.explicit_upgrade }}
-      working-directory: ${{ github.workspace }}
-      run: |
-        find $ERIGON_TESTBED_DATA_DIR
-
-    - name: Run Erigon, wait sync and check ability to maintain sync
+    - name: Run Erigon under constraints, wait sync and check ability to maintain sync
       id: test_step
       run: |
         set +e # Disable exit on error
@@ -210,6 +189,6 @@ jobs:
       run: |
         if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]] || \
            [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
-          echo "::error::Error detected during tests"
+          echo "::error::Error detected during tests, please see the summary section for details"
           exit 1
         fi 
