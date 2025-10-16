@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -455,7 +454,6 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
 	}
 
-	var err error
 	dbMinBlock, err := r.findFirstCompleteBlock(tx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find first complete block in database: %w", err)
@@ -464,18 +462,19 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 	return dbMinBlock, nil
 }
 
-// findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
+// findFirstCompleteBlock finds the first block (after genesis) where block body is available.
+// When no block bodies exist beyond genesis, it returns 0.
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
-	firstKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
 	}
 
-	if len(firstKey) < 8 {
-		return math.MaxUint64, nil // no body data found
+	if len(secondKey) < 8 { // incomplete key, no block found
+		return 0, nil
 	}
 
-	result := binary.BigEndian.Uint64(firstKey[:8])
+	result := binary.BigEndian.Uint64(secondKey[:8])
 	return result, nil
 }
 func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
