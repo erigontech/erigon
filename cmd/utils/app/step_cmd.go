@@ -146,7 +146,7 @@ func stepRebase(cliCtx *cli.Context) error {
 	if decr {
 		newFrozenSteps = config3.DefaultStepsInFrozenFile * factor
 	}
-	fmt.Printf("When starting erigon against this datadir, use the: --%s %d --%s %d flags.", utils.ErigonDBStepSizeFlag.Name, newStepSize, utils.ErigonDBStepsInFrozenFileFlag.Name, newFrozenSteps)
+	fmt.Printf("When starting erigon against this datadir, use the: --%s %d --%s %d flags.\n", utils.ErigonDBStepSizeFlag.Name, newStepSize, utils.ErigonDBStepsInFrozenFileFlag.Name, newFrozenSteps)
 
 	return nil
 }
