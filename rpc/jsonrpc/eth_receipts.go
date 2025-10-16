@@ -333,6 +333,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil)
 		if err != nil {
+			log.Warn("[rpc]GetReceipt", "err", err)
+
 			return nil, err
 		}
 		if r == nil {

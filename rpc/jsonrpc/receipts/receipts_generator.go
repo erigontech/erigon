@@ -272,7 +272,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
    		    log.Info("[dbg] ReceiptGenerator.GetReceipt: ",
-				"SeekCommitment", minTxNum)
+				"SeekCommitment1", minTxNum)
 
 			// commitment are indexed by txNum of the first tx (system-tx) of the block
 			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
@@ -443,6 +443,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, err
 		}
+		log.Info("[dbg] ReceiptGenerator.GetReceipts: ",
+				"SeekCommitment2", minTxNum)
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
 		sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
 		if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
