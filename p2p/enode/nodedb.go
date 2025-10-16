@@ -61,14 +61,13 @@ const (
 	// Use localItemKey to create those keys.
 	dbLocalSeq = "seq"
 )
-
 const (
 	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
 	dbVersion        = 10
 
-	dbSyncBytesThreshold = 10 * datasize.MB // see `BenchmarkSyncPeriodDefault`
-	dbSyncPeriod         = 2 * time.Second  // see `BenchmarkSyncPeriodDefault`
+	dbSyncBytesThreshold = 5 * datasize.MB // see BenchmarkSyncPeriodDefault
+	dbSyncPeriod         = 2 * time.Second
 )
 
 var (

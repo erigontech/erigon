@@ -1192,8 +1192,8 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 
 	tx, err := _db.BeginRw(ctx)
 	require.NoError(b, err)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for i := 0; b.Loop(); i++ {
 		err = tx.ResetSequence(table, uint64(i))
 		if err != nil {
 			b.Fatal(err)
