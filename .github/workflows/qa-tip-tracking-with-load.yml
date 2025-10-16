@@ -107,7 +107,9 @@ jobs:
           kill $ERIGON_PID
           wait $ERIGON_PID
         fi
-
+        
+        # This is a load test that looks for the breaking point, so it makes no sense (for now) to consider 
+        # the correct outcome of the test (=ability to track the tip). So the next lines are commented out
         # Check test runner script exit status
         #if [ $test_exit_status -eq 0 ]; then
         #  echo "Upgrade & tip-tracking test completed successfully"
@@ -117,10 +119,16 @@ jobs:
         #  echo "Upgrade & tip-tracking test encountered an error"
         #  echo "::error::Upgrade & tip-tracking test encountered an error"
         #  echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-        #fi
-        echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-        echo "::notice::This is a load test that looks for the breaking point, so it makes no sense (for now) to consider the correct outcome of the test (=ability to track the tip)"
-        echo "::notice::To see the result of the test, please check the 'sync-with-load-combined' plot in the plots artifact"
+        #fi 
+        
+        PLOT_FILE="metrics-${{ env.CHAIN }}-plots_sync_with_load_combined_gauge.png"
+        if [ -f "${{ github.workspace }}/$PLOT_FILE" ]; then
+          echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          echo "::notice::To see the result of the test, please check the '$PLOT_FILE' plot in the plots artifact"
+        else
+          echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          echo "::error::Missing expected plot file: $PLOT_FILE"
+        fi
 
     - name: Upload Downloader Torrent Client Status
       if: always()
@@ -187,6 +195,6 @@ jobs:
       if: ${{ always() }}
       run: |
         if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
-          echo "::error::Error detected during tests"
+          echo "::error::Error detected during tests, please see the summary section for details"
           exit 1
         fi 
