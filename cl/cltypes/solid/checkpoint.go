@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/common/clonable"
 )
 
+var _ ssz2.SizedObjectSSZ = (*Checkpoint)(nil)
+
 const CheckpointSizeSSZ = 40
 
 type Checkpoint struct {
