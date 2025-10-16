@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/compiler"
-	cli2 "github.com/erigontech/erigon/turbo/cli"
+	cli2 "github.com/erigontech/erigon/node/cli"
 )
 
 var (

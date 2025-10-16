@@ -35,11 +35,11 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/node"
+	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gdbme"
 	"github.com/erigontech/erigon/node/nodecfg"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.

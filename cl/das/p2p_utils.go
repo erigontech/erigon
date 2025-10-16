@@ -1,12 +1,14 @@
 package das
 
 import (
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
 )
 
 const (
@@ -54,38 +56,38 @@ func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
 		cellIndices[i] = sidecar.Index
 	}
 
-	ckzgCommitments := make([]ckzg.Bytes48, sidecar.KzgCommitments.Len())
+	ckzgCommitments := make([]goethkzg.KZGCommitment, sidecar.KzgCommitments.Len())
 	for i := range ckzgCommitments {
 		copy(ckzgCommitments[i][:], sidecar.KzgCommitments.Get(i)[:])
 	}
 
-	ckzgCells := make([]ckzg.Cell, sidecar.Column.Len())
+	ckzgCells := make([]*goethkzg.Cell, sidecar.Column.Len())
 	for i := range ckzgCells {
 		cell := sidecar.Column.Get(i)
-		copy(ckzgCells[i][:], cell[:])
+		ckzgCells[i] = (*goethkzg.Cell)(cell)
 	}
 
-	ckzgProofs := make([]ckzg.Bytes48, sidecar.KzgProofs.Len())
+	ckzgProofs := make([]goethkzg.KZGProof, sidecar.KzgProofs.Len())
 	for i := range ckzgProofs {
 		copy(ckzgProofs[i][:], sidecar.KzgProofs.Get(i)[:])
 	}
 
-	ok, err := ckzg.VerifyCellKZGProofBatch(ckzgCommitments, cellIndices, ckzgCells, ckzgProofs)
+	err := kzg.Ctx().VerifyCellKZGProofBatch(ckzgCommitments, cellIndices, ckzgCells, ckzgProofs)
 	if err != nil {
 		log.Warn("failed to verify cell kzg proofs", "error", err)
 		return false
 	}
-	return ok
+	return true
 }
 
 func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
-	cells, err := ckzg.ComputeCells((*ckzg.Blob)(blobs))
+	cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blobs), 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, err
 	}
 	ret := make([]cltypes.Cell, len(cells))
 	for i, cell := range &cells {
-		ret[i] = cltypes.Cell(cell)
+		ret[i] = cltypes.Cell(*cell)
 	}
 	return ret, nil
 }

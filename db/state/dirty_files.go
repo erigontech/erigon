@@ -58,8 +58,8 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// Frozen: file of size StepsInFrozenFile. Completely immutable.
-	// Cold: file of size < StepsInFrozenFile. Immutable, but can be closed/removed after merge to bigger file.
+	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
+	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
 	frozen   bool         // immutable, don't need atomic
 	refcount atomic.Int32 // only for `frozen=false`
@@ -79,15 +79,11 @@ type FilesItem struct {
 
 //var _ FilesItem = (*filesItem)(nil)
 
-func newFilesItem(startTxNum, endTxNum, stepSize uint64) *FilesItem {
-	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
-}
-
 func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
-	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
+	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
 
-func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
+func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep >= stepsInFrozenFile
@@ -226,7 +222,7 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 }
 
-func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
+func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
 	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
@@ -260,7 +256,7 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 		//   1-2.kv: [8, 16)
 		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
 
-		var newFile = newFilesItem(startTxNum, endTxNum, stepSize)
+		var newFile = newFilesItem(startTxNum, endTxNum, stepSize, stepsInFrozenFile)
 		res = append(res, newFile)
 	}
 	return res
@@ -498,7 +494,6 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 	invalidFileItemsLock := sync.Mutex{}
 	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			item := item
 			fromStep, toStep := kv.Step(item.startTxNum/ii.stepSize), kv.Step(item.endTxNum/ii.stepSize)
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
