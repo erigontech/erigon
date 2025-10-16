@@ -60,16 +60,18 @@ func NewSharedDomainsCommitmentContext(sd sd, tx kv.TemporalTx, mode commitment.
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		trace:         false,
-		//trace:         true,
+		//tracePutBranch:         true,
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	trieCtx := &TrieContext{
-		roTtx:  tx,
-		getter: sd.AsGetter(tx),
-		putter: sd.AsPutDel(tx),
-
+		roTtx:    tx,
+		getter:   sd.AsGetter(tx),
+		putter:   sd.AsPutDel(tx),
 		stepSize: sd.StepSize(),
+		//tracePutBranch:   true,
+		//traceStorageRead: true,
+		traceReadDomain: true,
 	}
 	ctx.mainTtx = trieCtx
 	ctx.patriciaTrie.ResetContext(trieCtx)
@@ -264,7 +266,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	//	sdc.sharedDomains.SetTxNum(0)
 	//	return 0, 0, false, err
 	//}
-	//if sdc.trace {
+	//if sdc.tracePutBranch {
 	//	fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
 	//}
 	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
@@ -417,7 +419,9 @@ type TrieContext struct {
 	limitReadAsOfTxNum uint64
 	stepSize           uint64
 	withHistory        bool // if true, do not use history reader and limit to domain files only
-	trace              bool
+	tracePutBranch     bool
+	traceStorageRead   bool
+	traceReadDomain    bool
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
@@ -428,8 +432,8 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
 		return nil
 	}
-	if sdc.trace {
-		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
+	if sdc.tracePutBranch {
+		fmt.Printf("[TrieContext] PutBranch: %x: %x\n", prefix, data)
 	}
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
@@ -473,6 +477,9 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 
 	if err != nil {
 		return nil, 0, fmt.Errorf("readDomain %q: %w", d, err)
+	}
+	if sdc.traceReadDomain {
+		fmt.Printf("[TrieContext] readDomain(d=%s,plainKey=%x)=(step=%d,enc=%x)\n", d, plainKey, step, enc)
 	}
 	return enc, step, nil
 }
@@ -522,7 +529,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 }
 
 func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
-	enc, _, err := sdc.readDomain(kv.StorageDomain, plainKey)
+	enc, step, err := sdc.readDomain(kv.StorageDomain, plainKey)
 	if err != nil {
 		return nil, err
 	}
@@ -534,6 +541,10 @@ func (sdc *TrieContext) Storage(plainKey []byte) (u *commitment.Update, err erro
 	if u.StorageLen > 0 {
 		u.Flags = commitment.StorageUpdate
 		copy(u.Storage[:u.StorageLen], enc)
+	}
+
+	if sdc.traceStorageRead {
+		fmt.Printf("[TrieContext] Storage read @ step=%d: %x: %x\n", step, plainKey, enc)
 	}
 
 	return u, nil

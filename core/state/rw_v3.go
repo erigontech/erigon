@@ -422,7 +422,7 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 		tx:          tx,
 		accumulator: accumulator,
 		txNum:       txNum,
-		//trace: true,
+		//trace:       true,
 	}
 }
 
@@ -501,6 +501,9 @@ func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64,
 	composite := append(address[:], key.Bytes()...)
 	v := value.Bytes()
 	if w.trace {
+		//if address == params.BeaconRootsAddress {
+		//	fmt.Printf("YOOOO\n")
+		//}
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
 	if len(v) == 0 {

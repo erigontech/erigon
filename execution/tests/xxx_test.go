@@ -214,8 +214,8 @@ func TestYYYHeader(t *testing.T) {
 func TestZZZFcu(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
-	jwtConfig := &httpcfg.HttpCfg{JWTSecretPath: "/Users/taratorio/prysm-erigon-2.fusaka-devnet-3-recent-pure-wrong-trie-root-at-canonical-tip-v2/data/jwt.hex"}
-	//jwtConfig := &httpcfg.HttpCfg{JWTSecretPath: "/Users/taratorio/erigon-data/lh-erigon-fusaka-devnet-3-experimental/jwt.hex"}
+	//jwtConfig := &httpcfg.HttpCfg{JWTSecretPath: "/Users/taratorio/prysm-erigon-2.fusaka-devnet-3-recent-pure-wrong-trie-root-at-canonical-tip-v2/data/jwt.hex"}
+	jwtConfig := &httpcfg.HttpCfg{JWTSecretPath: "/Users/taratorio/erigon-data/lh-erigon-fusaka-devnet-3-experimental/jwt.hex"}
 	jwtSecret, err := cli.ObtainJWTSecret(jwtConfig, logger)
 	require.NoError(t, err)
 	engineApiClient, err := engineapi.DialJsonRpcClient("http://localhost:8551", jwtSecret, logger)
@@ -275,6 +275,43 @@ func TestStateDumper(t *testing.T) {
 	dump := dumper.Dump(true /* excludeCode */, false /* excludeStorage */)
 	dumpFileName := "/Users/taratorio/prysm-erigon-2.fusaka-devnet-3-recent-pure-wrong-trie-root-at-canonical-tip-v2/erigon/correct-state-dump.json"
 	err = os.WriteFile(dumpFileName, dump, 0644)
+	require.NoError(t, err)
+}
+
+func TestTxnNums(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	dirs := datadir.New("/Users/taratorio/prysm-erigon-2.fusaka-devnet-3-recent-pure-wrong-trie-root-at-canonical-tip-v2/data/erigon")
+	//dirs := datadir.New("/Users/taratorio/erigon-data/lh-erigon-fusaka-devnet-3-experimental/erigon-datadir")
+	nodeConfig := nodecfg.Config{
+		Dirs:         dirs,
+		MdbxPageSize: ethconfig.DefaultChainDBPageSize,
+		MdbxWriteMap: true,
+	}
+	blockFreezingConfig := ethconfig.BlocksFreezing{
+		ProduceE2:    true,
+		ProduceE3:    true,
+		NoDownloader: true,
+	}
+	sn := freezeblocks.NewRoSnapshots(blockFreezingConfig, dirs.Snap, logger)
+	br := freezeblocks.NewBlockReader(sn, nil)
+	mdbxDb, err := node.OpenDatabase(ctx, &nodeConfig, dbcfg.ChainDB, "", false, logger)
+	require.NoError(t, err)
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(false).Open(ctx, mdbxDb)
+	require.NoError(t, err)
+	db, err := temporal.New(mdbxDb, agg)
+	require.NoError(t, err)
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	txnNumReader := br.TxnumReader(ctx)
+	blockNum, txnNum, err := txnNumReader.Last(tx)
+	for blockNum >= 272900 {
+		require.NoError(t, err)
+		fmt.Printf("blockNum: %d, txnNum: %d, step: %d\n", blockNum, txnNum, txnNum/agg.StepSize())
+		blockNum--
+		txnNum, err = txnNumReader.Max(tx, blockNum)
+	}
 	require.NoError(t, err)
 }
 
