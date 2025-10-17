@@ -111,6 +111,6 @@ func (m *EpochData) getSchema() []interface{} {
 		&m.FinalizedCheckpoint,
 		&m.HistoricalSummariesLength,
 		&m.HistoricalRootsLength,
-		&m.ProposerLookahead,
+		m.ProposerLookahead,
 	}
 }

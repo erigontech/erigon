@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -720,6 +722,44 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	err = agg.MergeLoop(context.Background())
 	require.NoError(t, err)
+}
+
+func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
+	ctx := t.Context()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(db.Close)
+	agg := state.NewTest(dirs).ReorgBlockDepth(5).StepSize(2).Logger(logger).MustOpen(ctx, db)
+	t.Cleanup(agg.Close)
+	err := agg.OpenFolder()
+	require.NoError(t, err)
+	tdb, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	t.Cleanup(tdb.Close)
+	tx, err := tdb.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	doms, err := state.NewSharedDomains(tx, logger)
+	require.NoError(t, err)
+	txnNums := uint64(18)
+	txnsPerBlock := uint64(1)
+	blocks := txnNums / txnsPerBlock
+	for i := range blocks {
+		blockNum := i + 1
+		err = rawdbv3.TxNums.Append(tx, blockNum, blockNum*txnsPerBlock)
+		require.NoError(t, err)
+	}
+	generateSharedDomainsUpdates(t, doms, tx, txnNums, newRnd(0), length.Addr, 10, txnsPerBlock)
+	err = doms.Flush(ctx, tx)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+	err = agg.BuildFiles(txnNums)
+	require.NoError(t, err)
+	// blocks up to 13 (incl) are outside the reorg depth, which adds to 13 txns, which is 6 steps
+	require.Equal(t, uint64(12), agg.EndTxNumMinimax())
+	require.Equal(t, kv.Step(6), kv.Step(agg.EndTxNumMinimax()/agg.StepSize()))
 }
 
 func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {
