@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -24,6 +25,7 @@ type AggOpts struct { //nolint:gocritic
 	logger   log.Logger
 	stepSize uint64
 
+	reorgBlockDepth uint64
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
 	disableFsync    bool // for tests speed
@@ -35,6 +37,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 		schema:          statecfg.Schema,
 		dirs:            dirs,
 		stepSize:        config3.DefaultStepSize,
+		reorgBlockDepth: dbg.MaxReorgDepth,
 		genSaltIfNeed:   false,
 		sanityOldNaming: false,
 		disableFsync:    false,
@@ -42,7 +45,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -58,7 +61,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, opts.reorgBlockDepth, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +101,11 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 
 // Setters
 
-func (opts AggOpts) StepSize(s uint64) AggOpts    { opts.stepSize = s; return opts }        //nolint:gocritic
+func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
+	opts.reorgBlockDepth = d
+	return opts
+}
 func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
 func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
