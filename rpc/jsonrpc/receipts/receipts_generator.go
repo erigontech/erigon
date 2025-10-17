@@ -273,7 +273,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
 			// commitment are indexed by txNum of the first tx (system-tx) of the block
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 				return nil, err
 			}
@@ -335,7 +335,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 
 			// calculate state root after tx identified by txNum (txNim+1)
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -442,7 +442,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			return nil, err
 		}
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
-		sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(minTxNum, false)
+		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 		if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 			return nil, err
 		}
@@ -481,7 +481,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			// calculate state root after tx identified by txNum (txNim+1)
-			sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum+1, false)
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 			stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipts", nil)
 			if err != nil {
 				return nil, err
