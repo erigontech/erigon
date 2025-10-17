@@ -119,6 +119,8 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			h := handler{}
 			h.runMethod(context.Background(), &msg, cb, args, stream)
 
+			stream.Flush()
+
 			output := buf.String()
 			assert.Equal(t, testParams.expected, output, "expected output should match")
 		})

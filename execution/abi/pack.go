@@ -25,8 +25,8 @@ import (
 	"math/big"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // packBytesSlice packs the given bytes as [L, V] as the canonical representation

@@ -34,8 +34,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/ecies"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/ecies"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/pipes"
 )
@@ -374,7 +374,7 @@ func TestHandshakeForwardCompatibility(t *testing.T) {
 func BenchmarkHandshakeRead(b *testing.B) {
 	var input = unhex(eip8HandshakeAuthTests[0].input)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var (
 			h   handshakeState
 			r   = bytes.NewReader(input)
@@ -431,7 +431,7 @@ func BenchmarkThroughput(b *testing.B) {
 	// Read N messages.
 	b.SetBytes(int64(len(msgdata)))
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _, _, err := conn2.Read()
 		if err != nil {
 			b.Fatal("read error:", err)
