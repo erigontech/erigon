@@ -25,6 +25,8 @@ import (
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
+var _ ssz2.SizedObjectSSZ = (*Checkpoint)(nil)
+
 const CheckpointSizeSSZ = 40
 
 type Checkpoint struct {
