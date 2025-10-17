@@ -245,6 +245,7 @@ func (tx *tx) AggTx() any                                            { panic("no
 func (tx *tx) Debug() kv.TemporalDebugTx                             { return kv.TemporalDebugTx(tx) }
 func (tx *tx) FreezeInfo() kv.FreezeInfo                             { panic("not implemented") }
 func (tx *tx) AllForkableIds() (ids []kv.ForkableId)                 { panic("not implemented") }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step           { panic("not implemented") }
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
 func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }
