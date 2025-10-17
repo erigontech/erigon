@@ -2,7 +2,6 @@ package sais
 
 /*
 #include "sais.h"
-#include "utils.h"
 */
 import "C"
 import (

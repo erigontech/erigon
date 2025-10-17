@@ -21,12 +21,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -58,6 +59,76 @@ func (l *KvList) Swap(i, j int) {
 	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
+type DomainMetrics struct {
+	sync.RWMutex
+	DomainIOMetrics
+	Domains map[kv.Domain]*DomainIOMetrics
+}
+
+func (dm *DomainMetrics) updateCacheReads(domain kv.Domain, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.CacheReadCount++
+	readDuration := time.Since(start)
+	dm.CacheReadDuration += readDuration
+	if d, ok := dm.Domains[domain]; ok {
+		d.CacheReadCount++
+		d.CacheReadDuration += readDuration
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			CacheReadCount:    1,
+			CacheReadDuration: readDuration,
+		}
+	}
+}
+
+func (dm *DomainMetrics) updateDbReads(domain kv.Domain, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.DbReadCount++
+	readDuration := time.Since(start)
+	dm.DbReadDuration += readDuration
+	if d, ok := dm.Domains[domain]; ok {
+		d.DbReadCount++
+		d.DbReadDuration += readDuration
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			DbReadCount:    1,
+			DbReadDuration: readDuration,
+		}
+	}
+}
+
+func (dm *DomainMetrics) updateFileReads(domain kv.Domain, start time.Time) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.FileReadCount++
+	readDuration := time.Since(start)
+	dm.FileReadDuration += readDuration
+	if d, ok := dm.Domains[domain]; ok {
+		d.FileReadCount++
+		d.FileReadDuration += readDuration
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{
+			FileReadCount:    1,
+			FileReadDuration: readDuration,
+		}
+	}
+}
+
+type DomainIOMetrics struct {
+	CacheReadCount    int64
+	CacheReadDuration time.Duration
+	CacheGetCount     int64
+	CachePutCount     int64
+	CacheGetSize      int
+	CachePutSize      int
+	DbReadCount       int64
+	DbReadDuration    time.Duration
+	FileReadCount     int64
+	FileReadDuration  time.Duration
+}
+
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -65,11 +136,12 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	txNum    uint64
-	blockNum atomic.Uint64
-	trace    bool //nolint
-
-	mem *TemporalMemBatch
+	txNum             uint64
+	blockNum          atomic.Uint64
+	trace             bool //nolint
+	commitmentCapture bool
+	mem               *TemporalMemBatch
+	metrics           DomainMetrics
 }
 
 type HasAgg interface {
@@ -80,16 +152,17 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		mem: newTemporalMemBatch(tx),
+		metrics:  DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}},
+		stepSize: tx.Debug().StepSize(),
 	}
-	sd.stepSize = tx.Debug().StepSize()
+	sd.mem = newTemporalMemBatch(tx, &sd.metrics)
 
 	tv := commitment.VariantHexPatriciaTrie
 	if statecfg.ExperimentalConcurrentCommitment {
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -135,6 +208,10 @@ func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []b
 	return gt.sd.HasPrefix(name, prefix, gt.tx)
 }
 
+func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+	return gt.tx.StepsInFiles(entitySet...)
+}
+
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd, tx}
 }
@@ -149,6 +226,14 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
+}
+
+func (sd *SharedDomains) Trace() bool {
+	return sd.trace
+}
+
+func (sd *SharedDomains) CommitmentCapture() bool {
+	return sd.commitmentCapture
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
@@ -174,7 +259,6 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	sd.sdCtx.SetTxNum(txNum)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
@@ -185,8 +269,10 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) SetTrace(b bool) {
+func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
+	sd.commitmentCapture = capture
+	return sd.sdCtx.GetCapture(true)
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
@@ -232,14 +318,78 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
+	start := time.Now()
 	if v, prevStep, ok := sd.mem.GetLatest(domain, k); ok {
+		sd.metrics.updateCacheReads(domain, start)
 		return v, prevStep, nil
 	}
-	v, step, err = tx.GetLatest(domain, k)
+	if aggTx, ok := tx.AggTx().(*AggregatorRoTx); ok {
+		v, step, _, err = aggTx.getLatest(domain, k, tx, &sd.metrics, start)
+	} else {
+		v, step, err = tx.GetLatest(domain, k)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
+
 	return v, step, nil
+}
+
+func (sd *SharedDomains) Metrics() *DomainMetrics {
+	return &sd.metrics
+}
+
+func (sd *SharedDomains) LogMetrics() []any {
+	var metrics []any
+
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
+
+	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
+		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
+			"puts", common.PrettyCounter(sd.metrics.CachePutCount), "size", common.PrettyCounter(sd.metrics.CachePutSize),
+			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
+			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
+	}
+
+	if readCount := sd.metrics.DbReadCount; readCount > 0 {
+		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
+	}
+
+	if readCount := sd.metrics.FileReadCount; readCount > 0 {
+		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.FileReadDuration/time.Duration(readCount), 0))
+	}
+
+	return metrics
+}
+
+func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
+	var logMetrics = map[kv.Domain][]any{}
+
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
+
+	for domain, dm := range sd.metrics.Domains {
+		var metrics []any
+
+		if readCount := dm.CacheReadCount; readCount > 0 {
+			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(dm.CacheReadDuration/time.Duration(readCount), 0))
+		}
+
+		if readCount := dm.DbReadCount; readCount > 0 {
+			metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(dm.DbReadDuration/time.Duration(readCount), 0))
+		}
+
+		if readCount := dm.FileReadCount; readCount > 0 {
+			metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(dm.DbReadDuration/time.Duration(readCount), 0))
+		}
+
+		if len(metrics) > 0 {
+			logMetrics[domain] = metrics
+		}
+	}
+
+	return logMetrics
 }
 
 // DomainPut

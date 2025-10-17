@@ -19,9 +19,9 @@ package bor
 import (
 	"github.com/holiman/uint256"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 var transferLogSig = common.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
@@ -40,7 +40,7 @@ func addTransferLog(
 	input1,
 	input2,
 	output1,
-	output2 *uint256.Int,
+	output2 uint256.Int,
 ) {
 	// ignore if amount is 0
 	if amount.IsZero() {

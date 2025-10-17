@@ -21,8 +21,8 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var (

@@ -30,14 +30,14 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // MaxTxTTL - kv interface provide high-consistancy guaranties: Serializable Isolations Level https://en.wikipedia.org/wiki/Isolation_(database_systems)
@@ -68,7 +68,7 @@ var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv                 kv.RoDB
+	kv                 kv.TemporalRoDB
 	stateChangeStreams *StateChangePubSub
 	blockSnapshots     Snapshots
 	borSnapshots       Snapshots
@@ -86,7 +86,7 @@ type KvServer struct {
 }
 
 type threadSafeTx struct {
-	kv.Tx
+	kv.TemporalTx
 	sync.Mutex
 }
 
@@ -95,7 +95,7 @@ type Snapshots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
+func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
 	return &KvServer{
 		trace:              false,
 		rangeStep:          1024,
@@ -135,12 +135,12 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
-	tx, errBegin := s.kv.BeginRo(ctx) //nolint:gocritic
+	tx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return 0, errBegin
 	}
 	id = s.txIdGen.Add(1)
-	s.txs[id] = &threadSafeTx{Tx: tx}
+	s.txs[id] = &threadSafeTx{TemporalTx: tx}
 	return id, nil
 }
 
@@ -157,11 +157,11 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 		defer tx.Unlock()
 		tx.Rollback()
 	}
-	newTx, errBegin := s.kv.BeginRo(ctx) //nolint:gocritic
+	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return fmt.Errorf("kvserver: %w", err)
 	}
-	s.txs[id] = &threadSafeTx{Tx: newTx}
+	s.txs[id] = &threadSafeTx{TemporalTx: newTx}
 	return nil
 }
 
@@ -188,7 +188,7 @@ func (s *KvServer) rollback(id uint64) {
 //	long-living server-side streams must read limited-portion of data inside `with`, send this portion to
 //	client, portion of data it to client, then read next portion in another `with` call.
 //	It will allow cooperative access to `tx` object
-func (s *KvServer) with(id uint64, f func(kv.Tx) error) error {
+func (s *KvServer) with(id uint64, f func(kv.TemporalTx) error) error {
 	s.txsMapLock.RLock()
 	tx, ok := s.txs[id]
 	s.txsMapLock.RUnlock()
@@ -209,7 +209,7 @@ func (s *KvServer) with(id uint64, f func(kv.Tx) error) error {
 			s.logger.Info(fmt.Sprintf("[kv_server] with %d unlock %s\n", id, dbg.Stack()[:2]))
 		}
 	}()
-	return f(tx.Tx)
+	return f(tx.TemporalTx)
 }
 
 func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
@@ -220,7 +220,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 	defer s.rollback(id)
 
 	var viewID uint64
-	if err := s.with(id, func(tx kv.Tx) error {
+	if err := s.with(id, func(tx kv.TemporalTx) error {
 		viewID = tx.ViewID()
 		return nil
 	}); err != nil {
@@ -267,7 +267,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 			if err := s.renew(stream.Context(), id); err != nil {
 				return err
 			}
-			if err := s.with(id, func(tx kv.Tx) error {
+			if err := s.with(id, func(tx kv.TemporalTx) error {
 				for _, c := range cursors { // restore all cursors position
 					var err error
 					c.c, err = tx.Cursor(c.bucket) //nolint:gocritic
@@ -310,7 +310,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 		case remoteproto.Op_OPEN:
 			CursorID++
 			var err error
-			if err := s.with(id, func(tx kv.Tx) error {
+			if err := s.with(id, func(tx kv.TemporalTx) error {
 				c, err = tx.Cursor(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
@@ -330,7 +330,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 		case remoteproto.Op_OPEN_DUP_SORT:
 			CursorID++
 			var err error
-			if err := s.with(id, func(tx kv.Tx) error {
+			if err := s.with(id, func(tx kv.TemporalTx) error {
 				c, err = tx.CursorDupSort(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
@@ -467,12 +467,8 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest)
 
 func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, err error) {
 	reply = &remoteproto.SequenceReply{}
-	if err := s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("server DB doesn't implement kv.Temporal interface")
-		}
-		reply.Value, err = ttx.ReadSequence(req.Table)
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		reply.Value, err = tx.ReadSequence(req.Table)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -538,18 +534,14 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 		return nil, err
 	}
 	reply = &remoteproto.GetLatestReply{}
-	if err := s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("server DB doesn't implement kv.Temporal interface")
-		}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		if req.Latest {
-			reply.V, _, err = ttx.GetLatest(domainName, req.K)
+			reply.V, _, err = tx.GetLatest(domainName, req.K)
 			if err != nil {
 				return err
 			}
 		} else {
-			reply.V, reply.Ok, err = ttx.GetAsOf(domainName, req.K, req.Ts)
+			reply.V, reply.Ok, err = tx.GetAsOf(domainName, req.K, req.Ts)
 			if err != nil {
 				return err
 			}
@@ -568,13 +560,8 @@ func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (
 	}
 
 	reply := &remoteproto.HasPrefixReply{}
-	err = s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("server DB doesn't implement kv.Temporal interface")
-		}
-
-		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = ttx.HasPrefix(domain, req.Prefix)
+	err = s.with(req.TxId, func(tx kv.TemporalTx) error {
+		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = tx.HasPrefix(domain, req.Prefix)
 		return err
 	})
 	if err != nil {
@@ -586,16 +573,12 @@ func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (
 
 func (s *KvServer) HistorySeek(_ context.Context, req *remoteproto.HistorySeekReq) (reply *remoteproto.HistorySeekReply, err error) {
 	reply = &remoteproto.HistorySeekReply{}
-	if err := s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("server DB doesn't implement kv.Temporal interface")
-		}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		domain, err := kv.String2Domain(req.Table)
 		if err != nil {
 			return err
 		}
-		reply.V, reply.Ok, err = ttx.HistorySeek(domain, req.K, req.Ts)
+		reply.V, reply.Ok, err = tx.HistorySeek(domain, req.K, req.Ts)
 		if err != nil {
 			return err
 		}
@@ -622,16 +605,12 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 		req.PageSize = PageSizeLimit
 	}
 
-	if err := s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("server DB doesn't implement kv.Temporal interface")
-		}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		ii, err := kv.String2InvertedIdx(req.Table)
 		if err != nil {
 			return err
 		}
-		it, err := ttx.IndexRange(ii, req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
+		it, err := tx.IndexRange(ii, req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
@@ -662,16 +641,12 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRangeReq) (*remoteproto.Pairs, error) {
 	reply := &remoteproto.Pairs{}
 	fromTs, limit := int(req.FromTs), int(req.Limit)
-	if err := s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
-		}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		domain, err := kv.String2Domain(req.Table)
 		if err != nil {
 			return err
 		}
-		it, err := ttx.HistoryRange(domain, fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
+		it, err := tx.HistoryRange(domain, fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
@@ -711,12 +686,8 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 		req.PageSize = PageSizeLimit
 	}
 
-	if err := s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("server DB doesn't implement kv.Temporal interface")
-		}
-		it, err := ttx.RangeAsOf(domainName, fromKey, toKey, req.Ts, order.By(req.OrderAscend), limit)
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		it, err := tx.RangeAsOf(domainName, fromKey, toKey, req.Ts, order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
@@ -762,7 +733,7 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 
 	reply := &remoteproto.Pairs{}
 	var err error
-	if err = s.with(req.TxId, func(tx kv.Tx) error {
+	if err = s.with(req.TxId, func(tx kv.TemporalTx) error {
 		var it stream.KV
 		it, err = tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
 		if err != nil {
@@ -796,12 +767,8 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 
 func (s *KvServer) HistoryStartFrom(_ context.Context, req *remoteproto.HistoryStartFromReq) (reply *remoteproto.HistoryStartFromReply, err error) {
 	reply = &remoteproto.HistoryStartFromReply{}
-	if err := s.with(req.TxId, func(tx kv.Tx) error {
-		ttx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("server DB doesn't implement kv.Temporal interface")
-		}
-		reply.StartFrom = ttx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		reply.StartFrom = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
 		return nil
 	}); err != nil {
 		return nil, err
