@@ -102,7 +102,7 @@ type Worker struct {
 	notifier    *sync.Cond
 	runnable    atomic.Bool
 	logger      log.Logger
-	chainDb     kv.RoDB
+	chainDb     kv.TemporalRoDB
 	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
@@ -127,7 +127,7 @@ type Worker struct {
 	metrics *WorkerMetrics
 }
 
-func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
+func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -207,7 +207,6 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	}
 }
 
-func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
 func (rw *Worker) ResetTx(chainTx kv.TemporalTx) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -325,7 +324,7 @@ func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
 	if resettable, ok := reader.(interface{ SetTx(kv.Tx) }); ok {
-		resettable.SetTx(rw.Tx())
+		resettable.SetTx(rw.chainTx)
 	}
 	rw.ibs = state.New(rw.stateReader)
 
@@ -340,17 +339,9 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 }
 
 func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
-	if txTask.IsHistoric() && !rw.historyMode {
-		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
-		// from the beginning until committed txNum and only then disable history mode.
-		// Needed to correctly evaluate spent gas and other things.
-		rw.SetReader(state.NewHistoryReaderV3())
-	} else if !txTask.IsHistoric() && rw.historyMode {
-		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
-	}
 
 	if rw.background && rw.chainTx == nil {
-		chainTx, err := rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx) //nolint
+		chainTx, err := rw.chainDb.BeginTemporalRo(rw.ctx) //nolint
 
 		if err != nil {
 			return &exec.TxResult{
@@ -360,6 +351,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		}
 
 		rw.resetTx(chainTx)
+	}
+
+	if txTask.IsHistoric() && !rw.historyMode {
+		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
+		// from the beginning until committed txNum and only then disable history mode.
+		// Needed to correctly evaluate spent gas and other things.
+		rw.SetReader(state.NewHistoryReaderV3())
+	} else if !txTask.IsHistoric() && rw.historyMode {
+		rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains().AsGetter(rw.chainTx))))
 	}
 
 	txIndex := txTask.Version().TxIndex
@@ -393,7 +393,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 	return result
 }
 
-func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.RoDB,
+func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine consensus.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)

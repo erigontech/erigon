@@ -590,6 +590,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 		lastFrozenStep := tx.StepsInFiles(kv.CommitmentDomain)
 
+		var lastFrozenTxNum uint64
+		if lastFrozenStep > 0 {
+			lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(te.doms.StepSize())) - 1
+		}
+
 		for blockNum := startBlockNum; blockNum <= maxBlockNum; blockNum++ {
 			select {
 			case readAhead <- blockNum:
@@ -645,7 +650,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
 					// use history reader instead of state reader to catch up to the tx where we left off
-					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+					HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
 					Trace:            dbg.TraceTx(blockNum, txIndex),
@@ -675,8 +680,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
 			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-				if blockLimit > 0 && startBlockNum-blockNum+1 >= blockLimit {
-					return &ErrLoopExhausted{From: blockNum, To: blockNum, Reason: "block limit reached"}
+				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit {
+					return nil
 				}
 			}
 		}

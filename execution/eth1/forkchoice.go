@@ -260,6 +260,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
 	}
+
+	sd, err := state.NewSharedDomains(tx, e.logger)
+	if err != nil {
+		return
+	}
+	defer sd.Close()
+
 	if fcuHeader.Number.Uint64() > 0 {
 		if canonicalHash == blockHash {
 			// if block hash is part of the canonical chain treat it as no-op.
@@ -346,7 +353,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, nil, tx); err != nil {
+		if err := e.executionPipeline.RunUnwind(e.db, sd, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -397,6 +404,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 	}
 	if isDomainAheadOfBlocks(tx, e.logger) {
+		if err := sd.Flush(ctx, tx); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		sd.ClearRam(true)
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -455,12 +467,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	}
 
-	sd, err := state.NewSharedDomains(tx, e.logger)
-	if err != nil {
-		return
-	}
-	defer sd.Close()
-
 	for {
 		hasMore, err := e.executionPipeline.Run(e.db, sd, tx, initialCycle, firstCycle)
 		if err != nil {
@@ -490,6 +496,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendError("updateForkChoice:flush sd after hasMore", err)
 			return
 		}
+		sd.ClearRam(true)
 		if err = tx.Commit(); err != nil {
 			sendError("updateForkChoice: tx commit after hasMore", err)
 			return
@@ -560,6 +567,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if err != nil {
 			e.logger.Warn("Failed to get txnum", "err", err)
 		}
+		if err := sd.Flush(ctx, tx); err != nil {
+			sendError("updateForkChoice:flush sd after hasMore", err)
+			return
+		}
+		sd.ClearRam(true)
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return

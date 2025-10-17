@@ -584,7 +584,7 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 	return nil
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -647,7 +647,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, errors.New("engine is not consensus.Engine")
 	}
 
-	roTx2, err := db.BeginRo(ctx)
+	roTx2, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

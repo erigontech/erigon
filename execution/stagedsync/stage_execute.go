@@ -65,7 +65,7 @@ type headerDownloader interface {
 }
 
 type ExecuteBlockCfg struct {
-	db            kv.RwDB
+	db            kv.TemporalRwDB
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
 	chainConfig   *chain.Config
@@ -89,7 +89,7 @@ type ExecuteBlockCfg struct {
 }
 
 func StageExecuteBlocksCfg(
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	chainConfig *chain.Config,
