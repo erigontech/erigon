@@ -12,7 +12,7 @@ func InitSchemasGen() {
 	Schema.AccountsDomain.Hist.Version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.AccountsDomain.Hist.IiCfg.Version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.AccountsDomain.Hist.IiCfg.Version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.BodiesBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.BodiesBlock.Version.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.BodiesBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 1}}
 	Schema.CodeDomain.Version.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.Version.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
@@ -27,7 +27,7 @@ func InitSchemasGen() {
 	Schema.CommitmentDomain.Hist.Version.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CommitmentDomain.Hist.IiCfg.Version.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.CommitmentDomain.Hist.IiCfg.Version.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.HeadersBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.HeadersBlock.Version.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.HeadersBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.LogAddrIdx.Version.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.LogAddrIdx.Version.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
@@ -57,7 +57,7 @@ func InitSchemasGen() {
 	Schema.TracesFromIdx.Version.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.TracesToIdx.Version.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.TracesToIdx.Version.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.TransactionsBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.TransactionsBlock.Version.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.TransactionsBlock.Version.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.TxnHash2BlockNumBlock.Version.AccessorIdx = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.TxnHash2BlockNumBlock.Version.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 }
