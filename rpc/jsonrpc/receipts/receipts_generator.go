@@ -180,10 +180,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
-		if receipt.BlockHash == blockHash { // elegant way to handle reorgs
+		if receipt.BlockHash == blockHash &&  // elegant way to handle reorgs
+		   calculatePostState == (len(receipt.PostState) != 0)  { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
 			return receipt, nil
 		}
-		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash
+
+		g.receiptCache.Remove(txnHash) // remove old receipt with same hash, but different blockHash OR different postState
 	}
 
 	// Now the snapshot have not the `postState` field. Therefore, for pre-Byzantium blocks,
