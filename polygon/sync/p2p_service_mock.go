@@ -14,9 +14,9 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon/common"
+	p2p "github.com/erigontech/erigon/execution/p2p"
 	types "github.com/erigontech/erigon/execution/types"
-	p2p "github.com/erigontech/erigon/polygon/p2p"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -44,46 +44,46 @@ func (m *Mockp2pService) EXPECT() *Mockp2pServiceMockRecorder {
 	return m.recorder
 }
 
-// FetchBlocksBackwardsByHash mocks base method.
-func (m *Mockp2pService) FetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, amount uint64, peerId *p2p.PeerId, opts ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Block], error) {
+// FetchBlocksBackwards mocks base method.
+func (m *Mockp2pService) FetchBlocksBackwards(ctx context.Context, h common.Hash, hr p2p.BbdHeaderReader, opts ...p2p.BbdOption) (p2p.BbdResultFeed, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{ctx, hash, amount, peerId}
+	varargs := []any{ctx, h, hr}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "FetchBlocksBackwardsByHash", varargs...)
-	ret0, _ := ret[0].(p2p.FetcherResponse[[]*types.Block])
+	ret := m.ctrl.Call(m, "FetchBlocksBackwards", varargs...)
+	ret0, _ := ret[0].(p2p.BbdResultFeed)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FetchBlocksBackwardsByHash indicates an expected call of FetchBlocksBackwardsByHash.
-func (mr *Mockp2pServiceMockRecorder) FetchBlocksBackwardsByHash(ctx, hash, amount, peerId any, opts ...any) *Mockp2pServiceFetchBlocksBackwardsByHashCall {
+// FetchBlocksBackwards indicates an expected call of FetchBlocksBackwards.
+func (mr *Mockp2pServiceMockRecorder) FetchBlocksBackwards(ctx, h, hr any, opts ...any) *Mockp2pServiceFetchBlocksBackwardsCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, hash, amount, peerId}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlocksBackwardsByHash", reflect.TypeOf((*Mockp2pService)(nil).FetchBlocksBackwardsByHash), varargs...)
-	return &Mockp2pServiceFetchBlocksBackwardsByHashCall{Call: call}
+	varargs := append([]any{ctx, h, hr}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBlocksBackwards", reflect.TypeOf((*Mockp2pService)(nil).FetchBlocksBackwards), varargs...)
+	return &Mockp2pServiceFetchBlocksBackwardsCall{Call: call}
 }
 
-// Mockp2pServiceFetchBlocksBackwardsByHashCall wrap *gomock.Call
-type Mockp2pServiceFetchBlocksBackwardsByHashCall struct {
+// Mockp2pServiceFetchBlocksBackwardsCall wrap *gomock.Call
+type Mockp2pServiceFetchBlocksBackwardsCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *Mockp2pServiceFetchBlocksBackwardsByHashCall) Return(arg0 p2p.FetcherResponse[[]*types.Block], arg1 error) *Mockp2pServiceFetchBlocksBackwardsByHashCall {
+func (c *Mockp2pServiceFetchBlocksBackwardsCall) Return(arg0 p2p.BbdResultFeed, arg1 error) *Mockp2pServiceFetchBlocksBackwardsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *Mockp2pServiceFetchBlocksBackwardsByHashCall) Do(f func(context.Context, common.Hash, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Block], error)) *Mockp2pServiceFetchBlocksBackwardsByHashCall {
+func (c *Mockp2pServiceFetchBlocksBackwardsCall) Do(f func(context.Context, common.Hash, p2p.BbdHeaderReader, ...p2p.BbdOption) (p2p.BbdResultFeed, error)) *Mockp2pServiceFetchBlocksBackwardsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *Mockp2pServiceFetchBlocksBackwardsByHashCall) DoAndReturn(f func(context.Context, common.Hash, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Block], error)) *Mockp2pServiceFetchBlocksBackwardsByHashCall {
+func (c *Mockp2pServiceFetchBlocksBackwardsCall) DoAndReturn(f func(context.Context, common.Hash, p2p.BbdHeaderReader, ...p2p.BbdOption) (p2p.BbdResultFeed, error)) *Mockp2pServiceFetchBlocksBackwardsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

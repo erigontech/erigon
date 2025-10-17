@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"unsafe"
 
@@ -29,15 +30,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // generate the messages and services
@@ -50,6 +51,7 @@ type remoteOpts struct {
 }
 
 var _ kv.TemporalTx = (*tx)(nil)
+var _ kv.TemporalRoDB = (*DB)(nil)
 
 type DB struct {
 	remoteKV     remoteproto.KVClient
@@ -107,9 +109,8 @@ func (opts remoteOpts) Open() (*DB, error) {
 		roTxsLimiter: semaphore.NewWeighted(targetSemCount), // 1 less than max to allow unlocking
 	}
 	customBuckets := opts.bucketsCfg
-	for name, cfg := range customBuckets { // copy map to avoid changing global variable
-		db.buckets[name] = cfg
-	}
+	// copy map to avoid changing global variable
+	maps.Copy(db.buckets, customBuckets)
 
 	return db, nil
 }

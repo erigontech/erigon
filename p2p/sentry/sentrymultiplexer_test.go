@@ -11,17 +11,16 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/erigontech/secp256k1"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/secp256k1"
-
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
@@ -47,7 +46,7 @@ func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentry
 		ListenerAddr: fmt.Sprintf("127.0.0.%d", i),
 	}, nil).AnyTimes()
 
-	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH67}, nil).AnyTimes()
+	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil).AnyTimes()
 
 	client.EXPECT().Peers(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
@@ -116,8 +115,8 @@ func TestStatus(t *testing.T) {
 				statusCount++
 				return &emptypb.Empty{}, nil
 			})
-		client.EXPECT().PeerMinBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, sd *sentryproto.PeerMinBlockRequest, co ...grpc.CallOption) (*emptypb.Empty, error) {
+		client.EXPECT().SetPeerMinimumBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, sd *sentryproto.SetPeerMinimumBlockRequest, co ...grpc.CallOption) (*emptypb.Empty, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
@@ -148,7 +147,7 @@ func TestStatus(t *testing.T) {
 
 	statusCount = 0
 
-	empty, err = mux.PeerMinBlock(context.Background(), &sentryproto.PeerMinBlockRequest{})
+	empty, err = mux.SetPeerMinimumBlock(context.Background(), &sentryproto.SetPeerMinimumBlockRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, empty)
 	require.Equal(t, 10, statusCount)

@@ -24,23 +24,23 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
 const startPruneFrom = 1024
@@ -244,7 +244,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	var limitedBigJump bool
 	limitedBigJumpPadding := uint64(2)
-	if e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore {
+	if e.syncCfg.LoopBlockLimit > 0 && fcuHeader.Number.Uint64() > finishProgressBefore {
 		// note fcuHeader.Number.Uint64() may be < finishProgressBefore - protect from underflow by checking it is >
 		limitedBigJump = (fcuHeader.Number.Uint64()-finishProgressBefore)+limitedBigJumpPadding > uint64(e.syncCfg.LoopBlockLimit)
 	}
@@ -346,7 +346,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, wrap.NewTxContainer(tx, nil)); err != nil {
+		if err := e.executionPipeline.RunUnwind(e.db, nil, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -448,10 +448,18 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	initialCycle := limitedBigJump
 	firstCycle := false
 	for {
-		hasMore, err := e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle)
+		hasMore, err := e.executionPipeline.Run(e.db, nil, tx, initialCycle, firstCycle)
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+			if errors.Is(err, consensus.ErrInvalidBlock) {
+				sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
+					Status:          executionproto.ExecutionStatus_BadBlock,
+					ValidationError: err.Error(),
+					LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(tx)),
+				}, stateFlushingInParallel)
+				return
+			}
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
@@ -465,6 +473,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			return
 		}
+
 		err = tx.Commit()
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)

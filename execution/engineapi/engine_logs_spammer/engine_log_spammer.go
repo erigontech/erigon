@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -31,21 +31,19 @@ func (e *EngineLogsSpammer) Start(ctx context.Context) {
 	if !e.chainConfig.TerminalTotalDifficultyPassed {
 		return
 	}
-	go func() {
-		intervalSpam := time.NewTicker(logSpamInterval)
-		defer intervalSpam.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-intervalSpam.C:
-				ts := time.Since(e.lastRequestTime.Load().(time.Time)).Round(1 * time.Second)
-				if ts > logSpamInterval {
-					e.logger.Warn("flag --externalcl was provided, but no CL requests to engine-api in " + ts.String())
-				}
+	intervalSpam := time.NewTicker(logSpamInterval)
+	defer intervalSpam.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-intervalSpam.C:
+			ts := time.Since(e.lastRequestTime.Load().(time.Time)).Round(1 * time.Second)
+			if ts > logSpamInterval {
+				e.logger.Warn("flag --externalcl was provided, but no CL requests to engine-api in " + ts.String())
 			}
 		}
-	}()
+	}
 }
 
 func (e *EngineLogsSpammer) RecordRequest() {

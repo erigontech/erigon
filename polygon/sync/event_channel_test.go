@@ -18,10 +18,12 @@ package sync
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/synctest"
 )
 
 func TestEventChannel(t *testing.T) {
@@ -59,24 +61,27 @@ func TestEventChannel(t *testing.T) {
 	})
 
 	t.Run("ConsumeEvents", func(t *testing.T) {
-		ctx := t.Context()
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			ch := NewEventChannel[string](2)
+			eg := errgroup.Group{}
+			eg.Go(func() error {
+				return ch.Run(ctx)
+			})
+			t.Cleanup(func() {
+				err := eg.Wait()
+				require.ErrorIs(t, err, context.Canceled)
+			})
 
-		ch := NewEventChannel[string](2)
+			ch.PushEvent("event1")
+			ch.PushEvent("event2")
+			ch.PushEvent("event3")
 
-		go func() {
-			err := ch.Run(ctx)
-			if !errors.Is(err, context.Canceled) {
-				panic("expected another error")
-			}
-		}()
-
-		ch.PushEvent("event1")
-		ch.PushEvent("event2")
-		ch.PushEvent("event3")
-
-		events := ch.Events()
-		require.Equal(t, "event2", <-events)
-		require.Equal(t, "event3", <-events)
-		require.Empty(t, events)
+			events := ch.Events()
+			require.Equal(t, "event2", <-events)
+			require.Equal(t, "event3", <-events)
+			require.Empty(t, events)
+		})
 	})
 }

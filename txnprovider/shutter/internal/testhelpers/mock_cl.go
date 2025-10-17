@@ -19,130 +19,68 @@ package testhelpers
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math/big"
-	"time"
 
-	"github.com/cenkalti/backoff/v4"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/common/log/v3"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
+	executiontests "github.com/erigontech/erigon/execution/tests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
 type MockCl struct {
-	slotCalculator        shutter.SlotCalculator
-	engineApiClient       *engineapi.JsonRpcClient
-	suggestedFeeRecipient common.Address
-	prevBlockHash         common.Hash
-	prevRandao            *big.Int
-	prevBeaconBlockRoot   *big.Int
+	logger         log.Logger
+	base           *executiontests.MockCl
+	slotCalculator shutter.SlotCalculator
+	initialised    bool
 }
 
-func NewMockCl(sc shutter.SlotCalculator, elClient *engineapi.JsonRpcClient, feeRecipient common.Address, elGenesis *types.Block) *MockCl {
-	return &MockCl{
-		slotCalculator:        sc,
-		engineApiClient:       elClient,
-		suggestedFeeRecipient: feeRecipient,
-		prevBlockHash:         elGenesis.Hash(),
-		prevRandao:            big.NewInt(0),
-		prevBeaconBlockRoot:   big.NewInt(10_000),
+func NewMockCl(logger log.Logger, base *executiontests.MockCl, sc shutter.SlotCalculator) *MockCl {
+	return &MockCl{logger: logger, base: base, slotCalculator: sc}
+}
+
+func (cl *MockCl) Initialise(ctx context.Context) error {
+	if cl.initialised {
+		return nil
 	}
+	cl.logger.Debug("[shutter-mock-cl] initialising with an empty block")
+	// we do this to ensure that the timestamp of the payload does not overlap with the previously built block
+	// by the base mock cl which does not align the timestamps to the slot boundaries
+	slot := cl.slotCalculator.CalcCurrentSlot() + 2
+	payloadRes, err := cl.base.BuildCanonicalBlock(
+		ctx,
+		executiontests.WithTimestamp(cl.slotCalculator.CalcSlotStartTimestamp(slot)),
+		executiontests.WithWaitUntilTimestamp(),
+	)
+	if err != nil {
+		return err
+	}
+	if len(payloadRes.ExecutionPayload.Transactions) > 0 {
+		return errors.New("shutter mock cl is not initialised with an empty block, call initialise before submitting txns")
+	}
+	cl.initialised = true
+	return nil
 }
 
 func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (*enginetypes.ExecutionPayload, error) {
+	if !cl.initialised {
+		return nil, errors.New("shutter mock cl is not initialised with an empty block")
+	}
 	options := cl.applyBlockBuildingOptions(opts...)
 	timestamp := cl.slotCalculator.CalcSlotStartTimestamp(options.slot)
-	forkChoiceState := enginetypes.ForkChoiceState{
-		FinalizedBlockHash: cl.prevBlockHash,
-		SafeBlockHash:      cl.prevBlockHash,
-		HeadHash:           cl.prevBlockHash,
-	}
-
-	parentBeaconBlockRoot := common.BigToHash(cl.prevBeaconBlockRoot)
-	payloadAttributes := enginetypes.PayloadAttributes{
-		Timestamp:             hexutil.Uint64(timestamp),
-		PrevRandao:            common.BigToHash(cl.prevRandao),
-		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
-		Withdrawals:           make([]*types.Withdrawal, 0),
-		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
-	}
-
-	// start block building process
-	fcuRes, err := retryEngineSyncing(ctx, func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
-		if err != nil {
-			return nil, "", err
-		}
-		return r, r.PayloadStatus.Status, err
-	})
+	cl.logger.Debug("[shutter-mock-cl] building block", "slot", options.slot, "timestamp", timestamp)
+	payloadRes, err := cl.base.BuildCanonicalBlock(
+		ctx,
+		executiontests.WithTimestamp(timestamp),
+		executiontests.WithWaitUntilTimestamp(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
-	}
-
-	// give block builder time to build a block
-	err = common.Sleep(ctx, time.Duration(cl.slotCalculator.SecondsPerSlot())*time.Second)
-	if err != nil {
-		return nil, err
-	}
-
-	// get the newly built block
-	payloadRes, err := cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
-	if err != nil {
-		return nil, err
-	}
-
-	// insert the newly built block
-	payloadStatus, err := retryEngineSyncing(ctx, func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.NewPayloadV4(ctx, payloadRes.ExecutionPayload, []common.Hash{}, &parentBeaconBlockRoot, []hexutil.Bytes{})
-		if err != nil {
-			return nil, "", err
-		}
-		return r, r.Status, err
-	})
-	if err != nil {
-		return nil, err
-	}
-	if payloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status of new payload is not valid: %s", payloadStatus.Status)
-	}
-
-	// set the newly built block as canonical
-	newHash := payloadRes.ExecutionPayload.BlockHash
-	forkChoiceState = enginetypes.ForkChoiceState{
-		FinalizedBlockHash: newHash,
-		SafeBlockHash:      newHash,
-		HeadHash:           newHash,
-	}
-	fcuRes, err = retryEngineSyncing(ctx, func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
-		if err != nil {
-			return nil, "", err
-		}
-		return r, r.PayloadStatus.Status, err
-	})
-	if err != nil {
-		return nil, err
-	}
-	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status of fcu is not valid: %s", fcuRes.PayloadStatus.Status)
-	}
-
-	cl.prevBlockHash = newHash
-	cl.prevRandao.Add(cl.prevRandao, big.NewInt(1))
-	cl.prevBeaconBlockRoot.Add(cl.prevBeaconBlockRoot, big.NewInt(1))
 	return payloadRes.ExecutionPayload, nil
 }
 
 func (cl *MockCl) applyBlockBuildingOptions(opts ...BlockBuildingOption) blockBuildingOptions {
 	defaultOptions := blockBuildingOptions{
-		slot: cl.slotCalculator.CalcCurrentSlot(),
+		slot: cl.slotCalculator.CalcCurrentSlot() + 1,
 	}
 	for _, opt := range opts {
 		opt(&defaultOptions)
@@ -160,26 +98,4 @@ func WithBlockBuildingSlot(slot uint64) BlockBuildingOption {
 
 type blockBuildingOptions struct {
 	slot uint64
-}
-
-func retryEngineSyncing[T any](ctx context.Context, f func() (*T, enginetypes.EngineStatus, error)) (*T, error) {
-	operation := func() (*T, error) {
-		res, status, err := f()
-		if err != nil {
-			return nil, backoff.Permanent(err) // do not retry
-		}
-		if status == enginetypes.SyncingStatus {
-			return nil, errors.New("engine is syncing") // retry
-		}
-		return res, nil
-	}
-
-	// don't retry for too long
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-
-	var backOff backoff.BackOff
-	backOff = backoff.NewConstantBackOff(50 * time.Millisecond)
-	backOff = backoff.WithContext(backOff, ctx)
-	return backoff.RetryWithData(operation, backOff)
 }

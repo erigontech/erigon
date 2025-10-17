@@ -12,7 +12,7 @@ import (
 	"golang.org/x/text/language"
 	"gopkg.in/yaml.v3"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -95,13 +95,21 @@ func goStruct(dom string) string {
 		return "TracesFromIdx"
 	case "tracesto":
 		return "TracesToIdx"
+	case "transactiontoblock":
+		return "TxnHash2BlockNumBlock"
+	case Headers:
+		return "HeadersBlock"
+	case Bodies:
+		return "BodiesBlock"
+	case Transactions:
+		return "TransactionsBlock"
 	default:
 		return cases.Title(language.Und).String(dom) + "Domain"
 	}
 }
 
 func pathPrefix(sec, dom string) string {
-	if sec == "domain" {
+	if sec == "domain" || sec == "block" {
 		return ".Version"
 	}
 	if sec == "hist" {
@@ -143,7 +151,15 @@ func fieldName(sec, key string) string {
 		case "efi":
 			return "AccessorEFI"
 		}
+	case "block":
+		switch key {
+		case "idx":
+			return "AccessorIdx"
+		case "seg":
+			return "DataSeg"
+		}
 	}
+
 	return "UNKNOWN"
 }
 

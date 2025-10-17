@@ -29,14 +29,14 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var stateTestCommand = cli.Command{
@@ -103,7 +103,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
 	if err != nil {
 		return err
 	}
-	var stateTests map[string]tests.StateTest
+	var stateTests map[string]testutil.StateTest
 	if err = json.Unmarshal(src, &stateTests); err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
 }
 
 func aggregateResultsFromStateTests(
-	stateTests map[string]tests.StateTest, cfg vm.Config,
+	stateTests map[string]testutil.StateTest, cfg vm.Config,
 	jsonOut bool, bench bool) ([]StatetestResult, error) {
 	dirs := datadir.New(filepath.Join(os.TempDir(), "erigon-statetest"))
 

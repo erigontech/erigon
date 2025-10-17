@@ -7,7 +7,7 @@ import (
 	"path"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapcfg"

@@ -21,11 +21,11 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 type Store interface {
@@ -38,10 +38,10 @@ type Store interface {
 }
 
 func NewMdbxStore(logger log.Logger, dataDir string, accede bool, roTxLimit int64) *MdbxStore {
-	return newMdbxStore(polygoncommon.NewDatabase(dataDir, dbcfg.HeimdallDB, databaseTablesCfg, logger, accede, roTxLimit))
+	return newMdbxStore(polygondb.NewDatabase(dataDir, dbcfg.HeimdallDB, databaseTablesCfg, logger, accede, roTxLimit))
 }
 
-func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
+func newMdbxStore(db *polygondb.Database) *MdbxStore {
 	spanIndex := NewSpanRangeIndex(db, kv.BorSpansIndex)
 	producerSelectionIndex := NewSpanRangeIndex(db, kv.BorProducerSelectionsIndex)
 
@@ -61,11 +61,11 @@ func newMdbxStore(db *polygoncommon.Database) *MdbxStore {
 }
 
 func NewDbStore(db kv.RoDB) *MdbxStore {
-	return newMdbxStore(polygoncommon.AsDatabase(db))
+	return newMdbxStore(polygondb.AsDatabase(db))
 }
 
 type MdbxStore struct {
-	db                          *polygoncommon.Database
+	db                          *polygondb.Database
 	checkpoints                 EntityStore[*Checkpoint]
 	milestones                  EntityStore[*Milestone]
 	spans                       EntityStore[*Span]

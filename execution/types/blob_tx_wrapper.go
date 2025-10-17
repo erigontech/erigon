@@ -27,8 +27,8 @@ import (
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon/common"
+	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"

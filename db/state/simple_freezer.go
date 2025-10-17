@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 )
 

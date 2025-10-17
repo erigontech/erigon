@@ -31,18 +31,14 @@ import (
 	"github.com/holiman/uint256"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
@@ -50,10 +46,14 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/event"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -618,6 +618,10 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	} else {
 		hi = b.pendingBlock.GasLimit()
 	}
+	if hi > params.MaxTxnGasLimit && b.m.ChainConfig.IsOsaka(b.pendingBlock.Time()) {
+		// Cap the maximum gas allowance according to EIP-7825 if Osaka
+		hi = params.MaxTxnGasLimit
+	}
 	// Recap the highest gas allowance with account's balance.
 	if call.GasPrice != nil && !call.GasPrice.IsZero() {
 		balance, err := b.pendingState.GetBalance(call.From) // from can't be nil
@@ -723,7 +727,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if err != nil {
 		return nil, err
 	}
-	from.SetBalance(*uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
+	from.SetBalance(*uint256.NewInt(0).SetAllOne(), true, tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 
@@ -843,6 +847,7 @@ func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPr
 func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }
 func (m callMsg) TipCap() *uint256.Int                  { return m.CallMsg.TipCap }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
+func (m callMsg) CheckGas() bool                        { return true }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
