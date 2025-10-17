@@ -529,7 +529,7 @@ var (
 	}
 	P2pProtocolVersionFlag = cli.UintSliceFlag{
 		Name:  "p2p.protocol",
-		Usage: "FileVersion of eth p2p protocol",
+		Usage: "Version of eth p2p protocol",
 		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
 	P2pProtocolAllowedPorts = cli.UintSliceFlag{
