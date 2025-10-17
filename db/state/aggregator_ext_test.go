@@ -742,6 +742,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	t.Cleanup(tx.Rollback)
 	doms, err := state.NewSharedDomains(tx, logger)
 	require.NoError(t, err)
+	t.Cleanup(doms.Close)
 	txnNums := uint64(18)
 	txnsPerBlock := uint64(1)
 	blocks := txnNums / txnsPerBlock
