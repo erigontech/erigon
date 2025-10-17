@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/stretchr/testify/require"
 )
 
 type bundle struct {
@@ -48,11 +49,13 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 	confirmExist(t, b.domain.DataFile(version.V1_0, 90, 100))
 
 	// delete 9-10
-	DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	require.NoError(t, err)
 	confirmDoesntExist(t, b.domain.DataFile(version.V1_0, 90, 100))
 
 	// should delete 8-9
-	DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err = DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	require.NoError(t, err)
 	confirmDoesntExist(t, b.domain.DataFile(version.V1_0, 80, 90))
 }
 

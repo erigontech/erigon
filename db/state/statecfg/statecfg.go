@@ -106,6 +106,19 @@ func (ii InvIdxCfg) GetVersions() VersionTypes {
 	}
 }
 
+type ForkableCfg struct {
+	Name string
+
+	canonicalTbl           string // for marked structures
+	ValsTbl                string
+	updateCanonical        bool
+	pruneFrom              kv.Num
+	Accessors              Accessors
+	Compression            seg.FileCompression
+	ValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
+	Enabled                bool
+}
+
 type DomainVersionTypes struct {
 	DataKV       version.Versions
 	AccessorBT   version.Versions
