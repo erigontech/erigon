@@ -65,8 +65,11 @@ import (
 const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
-	handshakeTimeout  = 5 * time.Second
-	maxPermitsPerPeer = 4 // How many outstanding requests per peer we may have
+	handshakeTimeout = 5 * time.Second
+	// ethProtocolTimeout is the maximum allowed time for the ETH protocol to be ready
+	// before dropping the connection. This prevents goroutine leaks and DOS attacks.
+	ethProtocolTimeout = 30 * time.Second
+	maxPermitsPerPeer  = 4 // How many outstanding requests per peer we may have
 )
 
 // PeerInfo collects various extra bits of information about the peer,
@@ -80,6 +83,8 @@ type PeerInfo struct {
 	rw                    p2p.MsgReadWriter
 	protocol, witProtocol uint
 	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
+	ethReady              chan struct{}
+	ethReadyOnce          sync.Once
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -147,6 +152,7 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	p := &PeerInfo{
 		peer:           peer,
 		rw:             rw,
+		ethReady:       make(chan struct{}),
 		knownWitnesses: wit.NewKnownCache(wit.MaxKnownWitnesses),
 		removed:        make(chan struct{}),
 		tasks:          make(chan func(), 32),
@@ -194,6 +200,47 @@ func (pi *PeerInfo) Height() uint64 {
 	pi.lock.RLock()
 	defer pi.lock.RUnlock()
 	return pi.height
+}
+
+// SetEthProtocol sets protocol version and marks the ETH protocol as ready
+func (pi *PeerInfo) SetEthProtocol(version uint) {
+	if version == 0 {
+		return
+	}
+
+	pi.lock.Lock()
+	pi.protocol = version
+	pi.lock.Unlock()
+
+	pi.ethReadyOnce.Do(func() { close(pi.ethReady) })
+}
+
+// WaitForEth blocks until the ETH handshake completes or returns a disconnect reason
+func (pi *PeerInfo) WaitForEth(ctx context.Context) *p2p.PeerError {
+	if !pi.peer.RunningProtocol(eth.ProtocolName) {
+		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscProtocolError, nil, "wit protocol requires eth capability")
+	}
+
+	pi.lock.RLock()
+	ready := pi.protocol != 0
+	readyCh := pi.ethReady
+	pi.lock.RUnlock()
+
+	if ready {
+		return nil
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, ethProtocolTimeout)
+	defer cancel()
+
+	select {
+	case <-readyCh:
+		return nil
+	case <-pi.removed:
+		return pi.RemoveReason()
+	case <-timeoutCtx.Done():
+		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, timeoutCtx.Err(), "wit protocol waiting for eth handshake cancelled")
+	}
 }
 
 // SetIncreasedHeight updates PeerInfo.height only if newHeight is higher (threadsafe)
@@ -562,6 +609,10 @@ func runWitPeer(
 	getWitnessRequest func(hash common.Hash, peerID [64]byte) bool,
 	logger log.Logger,
 ) *p2p.PeerError {
+	if err := peerInfo.WaitForEth(ctx); err != nil {
+		return err
+	}
+
 	protocol := uint(wit.WIT1)
 	pubkey := peerInfo.peer.Pubkey()
 	logger.Debug("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
@@ -759,11 +810,11 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
-
 			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
 			if err != nil {
 				return err
 			}
+			peerInfo.SetEthProtocol(protocol)
 
 			if protocol >= direct.ETH69 {
 				peerInfo.SetBlockRange(minBlock, latestBlock)
