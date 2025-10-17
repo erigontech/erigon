@@ -21,8 +21,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
 )
+
+var _ ssz2.SizedObjectSSZ = (*JustificationBits)(nil)
 
 const JustificationBitsLength = 4
 
