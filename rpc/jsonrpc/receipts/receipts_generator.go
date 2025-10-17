@@ -180,8 +180,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
-		if receipt.BlockHash == blockHash &&  // elegant way to handle reorgs
-		   calculatePostState == (len(receipt.PostState) != 0)  { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
+		if receipt.BlockHash == blockHash && // elegant way to handle reorgs
+			calculatePostState == (len(receipt.PostState) != 0) { // verify if the expected postState matches the actual postState on cache. Otherwise re-calculate it
 			return receipt, nil
 		}
 
