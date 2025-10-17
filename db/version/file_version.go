@@ -13,10 +13,10 @@ import (
 
 /*
 Version this type represents snapshot's file versions. Also, we have inner file versions,
-for example, in recsplit.Index this is fielded `rsVersion`. They have several differences between them, so I'll
+for example, in recsplit.Index this is fielded `dataStructureVersion`. They have several differences between them, so I'll
 try to explain them:
 
-1. Internal Version (i.e. rsVersion) is now used only for logic(!) inside Erigon. For example, rs with version 23 uses only one method of
+1. Internal Version (i.e. dataStructureVersion) is now used only for logic(!) inside Erigon. For example, rs with version 23 uses only one method of
 compression, but version 24 means that now rs using two other methods. So, you can define this logic in code and use it
 whichever way you want. Also, this innerVersion usually stores in a 1st byte of a file.
 
@@ -37,7 +37,7 @@ To sum up:
 
 A file version represents the way of reading a file, how it has changed.
 
-rsVersion and all other (dataSerializationVersion etc) represent the behavior of the file: for example, which is
+dataStructureVersion and all other (dataSerializationVersion etc) represent the behavior of the file: for example, which is
 compressing algorithm it will use.
 */
 type Version struct {
