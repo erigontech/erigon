@@ -29,16 +29,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // API describes the set of methods offered over the RPC interface
 type API struct {
-	Namespace string      // namespace under which the rpc methods of Service are exposed
-	Version   string      // api version for DApp's
-	Service   interface{} // receiver instance which holds the methods
-	Public    bool        // indication if the methods must be considered safe for public use
+	Namespace string // namespace under which the rpc methods of Service are exposed
+	Version   string // api version for DApp's
+	Service   any    // receiver instance which holds the methods
+	Public    bool   // indication if the methods must be considered safe for public use
 }
 
 // Error wraps RPC errors, which contain an error code in addition to the message.
@@ -49,8 +49,8 @@ type Error interface {
 
 // A DataError contains some data in addition to the error message.
 type DataError interface {
-	Error() string          // returns the message
-	ErrorData() interface{} // returns the error data
+	Error() string  // returns the message
+	ErrorData() any // returns the error data
 }
 
 // ServerCodec implements reading, parsing and writing RPC messages for the server side of
@@ -67,9 +67,9 @@ type ServerCodec interface {
 // jsonWriter can write JSON messages to its underlying connection.
 // Implementations must be safe for concurrent use.
 type jsonWriter interface {
-	WriteJSON(context.Context, interface{}) error
+	WriteJSON(context.Context, any) error
 	// Closed returns a channel which is closed when the connection is closed.
-	closed() <-chan interface{}
+	closed() <-chan any
 	// RemoteAddr returns the peer address of the connection.
 	remoteAddr() string
 }
@@ -196,7 +196,7 @@ func (bn BlockNumber) string(base int) string {
 	return strconv.FormatUint(bn.Uint64(), base)
 }
 
-func AsBlockNumber(no interface{}) BlockNumber {
+func AsBlockNumber(no any) BlockNumber {
 	switch no := no.(type) {
 	case *big.Int:
 		return BlockNumber(no.Int64())
@@ -371,7 +371,7 @@ func (br BlockReference) String() string {
 	return ""
 }
 
-func AsBlockReference(ref interface{}) BlockReference {
+func AsBlockReference(ref any) BlockReference {
 	switch ref := ref.(type) {
 	case *big.Int:
 		return IntBlockReference(ref)

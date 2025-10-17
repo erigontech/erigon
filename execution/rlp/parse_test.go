@@ -23,7 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 var parseU64Tests = []struct {

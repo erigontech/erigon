@@ -24,6 +24,7 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"io/fs"
 	"iter"
+	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -56,10 +57,10 @@ import (
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/anacrolix/torrent/webseed"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
@@ -175,9 +176,7 @@ var cloudflareHeaders = http.Header{
 
 func insertCloudflareHeaders(req *http.Request) {
 	// Note this is clobbering the headers.
-	for key, value := range cloudflareHeaders {
-		req.Header[key] = value
-	}
+	maps.Copy(req.Header, cloudflareHeaders)
 }
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)
@@ -662,7 +661,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			noMetadata = append(noMetadata, t.Name())
 			continue
 		}
-		stats.FilesTotal += len(t.Files())
 
 		torrentName := t.Name()
 		torrentComplete := t.Complete().Bool()

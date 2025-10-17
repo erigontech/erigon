@@ -22,7 +22,7 @@ import (
 	"math/rand"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // Compares response of Erigon with OpenEthereum

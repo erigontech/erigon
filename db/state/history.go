@@ -30,9 +30,9 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -71,7 +71,7 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-func NewHistory(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
+func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
@@ -84,7 +84,7 @@ func NewHistory(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Dirs, logger
 	}
 
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.IiCfg, stepSize, dirs, logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.IiCfg, stepSize, stepsInFrozenFile, dirs, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.IiCfg.FilenameBase, err)
 	}
@@ -156,7 +156,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	if h.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.FilenameBase, "v", h.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.stepsInFrozenFile, h.FilenameBase, "v", h.logger) {
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}
@@ -843,7 +843,7 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 		existence: sf.efExistence,
 	}, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, h.stepSize)
+	fi := newFilesItem(txNumFrom, txNumTo, h.stepSize, h.stepsInFrozenFile)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.dirtyFiles.Set(fi)
@@ -885,10 +885,11 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters  []*seg.Reader
-	readers  []*recsplit.IndexReader
-	stepSize uint64
+	files             visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
+	getters           []*seg.Reader
+	readers           []*recsplit.IndexReader
+	stepSize          uint64
+	stepsInFrozenFile uint64
 
 	trace bool
 
@@ -908,11 +909,12 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 	}
 
 	return &HistoryRoTx{
-		h:        h,
-		iit:      h.InvertedIndex.BeginFilesRo(),
-		files:    files,
-		stepSize: h.stepSize,
-		trace:    false,
+		h:                 h,
+		iit:               h.InvertedIndex.BeginFilesRo(),
+		files:             files,
+		stepSize:          h.stepSize,
+		stepsInFrozenFile: h.stepsInFrozenFile,
+		trace:             false,
 	}
 }
 
