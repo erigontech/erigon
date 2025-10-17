@@ -72,7 +72,6 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
-				key := key
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
 				if err := state.SetState(addr, key, *intValue); err != nil {
 					return err
