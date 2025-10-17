@@ -1,9 +1,0 @@
-[book]
-authors = ["Erigon"]
-language = "en"
-multilingual = false
-src = "src"
-title = "Help Section"
-
-# [output.linkcheck]
-# Enable this section only with the appropriate plugin installed
