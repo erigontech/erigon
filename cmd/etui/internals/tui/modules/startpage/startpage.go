@@ -1,6 +1,7 @@
 package startpage
 
 import (
+	"fmt"
 	"github.com/rivo/tview"
 )
 
@@ -17,7 +18,7 @@ $$$$$$$$/ $$/       $$/  $$$$$$$ | $$$$$$/  $$/   $$/        $$$$$$/
                         $$    $$/                                     
                          $$$$$$/                                      `
 
-func Body(clock *tview.TextView) (*tview.Flex, *BodyView) {
+func Body(clock *tview.TextView, datadir string) (*tview.Flex, *BodyView) {
 	netInf := tview.NewTextView().SetDynamicColors(true).SetText("network info...")
 	view := &BodyView{
 		Logo:        tview.NewTextView().SetText(E3Logo).SetDynamicColors(true),
@@ -26,7 +27,8 @@ func Body(clock *tview.TextView) (*tview.Flex, *BodyView) {
 		Execution:   tview.NewTextView().SetDynamicColors(true).SetText("exec/stop"),
 		Status:      tview.NewTextView().SetDynamicColors(true).SetText("status..."),
 		Clock:       clock,
-		Datadir:     tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignRight).SetText("select datadir"),
+		Datadir: tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignRight).
+			SetText(fmt.Sprintf("datadir: %s", datadir)),
 	}
 
 	topPanel := tview.NewFlex().

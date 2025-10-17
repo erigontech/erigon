@@ -13,14 +13,16 @@ import (
 )
 
 type TUI struct {
-	app *tview.Application
-	dp  *nodeinfo.DownloaderPinger
+	app     *tview.Application
+	dp      *nodeinfo.DownloaderPinger
+	datadir string
 }
 
-func NewTUI() *TUI {
+func NewTUI(datadir string) *TUI {
 	return &TUI{
-		app: tview.NewApplication(),
-		dp:  nodeinfo.NewDownloaderPinger("http://localhost:6060"),
+		datadir: datadir,
+		app:     tview.NewApplication(),
+		dp:      nodeinfo.NewDownloaderPinger("http://localhost:6060"),
 	}
 }
 
@@ -28,7 +30,7 @@ func (t *TUI) Run(infoCh <-chan *commands.StagesInfo, errCh chan error) error {
 	pages := tview.NewPages()
 	nodeInfoBody, view := nodeinfo.Body()
 	footer := modules.Footer()
-	startPageBody, startView := startpage.Body(view.Clock)
+	startPageBody, startView := startpage.Body(view.Clock, t.datadir)
 	_ = startView
 	startPage := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(modules.Header(), 1, 1, false).

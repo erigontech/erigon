@@ -38,7 +38,7 @@ var infoCmd = &cobra.Command{
 				}
 			}
 		}()
-		tuiApp := tui.NewTUI()
+		tuiApp := tui.NewTUI(datadirCli)
 		err := tuiApp.Run(infoCh, errCh)
 		if err != nil {
 			return err
