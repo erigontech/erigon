@@ -13,10 +13,10 @@ import (
 
 /*
 Version this type represents snapshot's file versions. Also, we have inner file versions,
-for example, in recsplit.Index this is fielded `logicVersion`. They have several differences between them, so I'll
+for example, in recsplit.Index this is fielded `rsVersion`. They have several differences between them, so I'll
 try to explain them:
 
-1. logicVersion is now used only for logic(!) inside Erigon. For example, rs with version 23 uses only one method of
+1. rsVersion is now used only for logic(!) inside Erigon. For example, rs with version 23 uses only one method of
 compression, but version 24 means that now rs using two other methods. So, you can define this logic in code and use it
 whichever way you want. Also, this innerVersion usually stores in a 1st byte of a file.
 
@@ -37,7 +37,7 @@ To sum up:
 
 A file version represents the way of reading a file, how it has changed.
 
-LogicVersion represents the behavior of the file: for example, which is compressing algorithm it will use.
+rsVersion represents the behavior of the file: for example, which is compressing algorithm it will use.
 */
 type Version struct {
 	Major uint64
@@ -249,7 +249,7 @@ func (v *Version) UnmarshalYAML(node *yaml.Node) error {
 
 func VersionTooLowPanic(filename string, version Versions) {
 	panic(fmt.Sprintf(
-		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
 		filename,
 		version.MinSupported,
 		version.Current,

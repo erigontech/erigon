@@ -84,7 +84,7 @@ type Index struct {
 	mmapHandle1 []byte // mmap handle for unix (this is used to close mmap)
 	golombRice  []uint32
 
-	logicVersion       uint8
+	rsVersion          uint8
 	startSeed          []uint64
 	ef                 eliasfano16.DoubleEliasFano
 	bucketSize         int
@@ -144,7 +144,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	}
 
 	// dontt know how to madv part of file in golang yet
-	//if idx.logicVersion == 1 && idx.lessFalsePositives {
+	//if idx.rsVersion == 1 && idx.lessFalsePositives {
 	//	if len(idx.existenceV1) > 0 {
 	//		if err := mmap.MadviseWillNeed(idx.existence); err != nil {
 	//			panic(err)
@@ -180,8 +180,8 @@ func (idx *Index) init() (err error) {
 
 	defer idx.MadvSequential().DisableReadAhead()
 
-	// 1 byte: logicVersion, 7 bytes: app-specific minimal dataID (of current shard)
-	idx.logicVersion = idx.data[0]
+	// 1 byte: rsVersion, 7 bytes: app-specific minimal dataID (of current shard)
+	idx.rsVersion = idx.data[0]
 	baseDataBytes := bytes.Clone(idx.data[:8])
 	baseDataBytes[0] = 0
 	idx.baseDataID = binary.BigEndian.Uint64(baseDataBytes)
@@ -232,7 +232,7 @@ func (idx *Index) init() (err error) {
 		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
 		offset += size
 	}
-	if idx.logicVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
+	if idx.rsVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
@@ -242,7 +242,7 @@ func (idx *Index) init() (err error) {
 		offset += int(arrSz)
 	}
 
-	if idx.logicVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.rsVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		var sz int
 		idx.existenceV1, sz, err = fusefilter.NewReaderOnBytes(idx.data[offset:], idx.fileName)
 		if err != nil {
@@ -282,7 +282,7 @@ func (idx *Index) init() (err error) {
 }
 
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
-	if idx.logicVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+	if idx.rsVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		return idx.existenceV1.ForceInMem()
 	}
 	return 0
@@ -366,7 +366,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 1 {
 		return 0, true
 	}
-	if idx.logicVersion == 1 && idx.lessFalsePositives {
+	if idx.rsVersion == 1 && idx.lessFalsePositives {
 		if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
 			return 0, false
 		}
@@ -430,7 +430,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-	if idx.logicVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
+	if idx.rsVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
 		if len(idx.existenceV0) == 0 {
 			msg := fmt.Sprintf("existence filter is empty, file %s, len data %d first byte %b, "+
 				"lessFalsePositives %v enums %v", idx.fileName, len(idx.data), idx.data[0], idx.lessFalsePositives, idx.enums)

@@ -120,10 +120,10 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		panic("assert: empty `stepSize`")
 	}
 
-	if ii.Version.DataEF.IsZero() {
+	if ii.FileVersion.DataEF.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", ii.Name))
 	}
-	if ii.Version.AccessorEFI.IsZero() {
+	if ii.FileVersion.AccessorEFI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", ii.Name))
 	}
 
@@ -134,13 +134,13 @@ func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep kv.Step) string 
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.Version.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.FileVersion.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efNewFilePath(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.Version.DataEF.String(), ii.FilenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.FileVersion.DataEF.String(), ii.FilenameBase, fromStep, toStep))
 }
 
 func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string {
@@ -1157,7 +1157,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
-	if !ii.Version.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
 		versionOfRs = 1
 	}
 	cfg := recsplit.RecSplitArgs{

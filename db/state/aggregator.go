@@ -922,7 +922,7 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 	return files
 }
 func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
-	return at.d[domain].d.Version.DataKV.Current
+	return at.d[domain].d.FileVersion.DataKV.Current
 }
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {

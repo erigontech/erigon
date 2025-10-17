@@ -68,7 +68,7 @@ func remix(z uint64) uint64 {
 type RecSplit struct {
 	// v=0 falsePositeves=true - as array of hashedKeys[0]. Requires `enum=true`. Problem: requires key number - which recsplit has but expensive to encode (~5bytes/key)
 	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
-	logicVersion uint8
+	rsVersion uint8
 
 	//v0 fields
 	existenceFV0 *os.File
@@ -169,8 +169,8 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	rs := &RecSplit{
-		logicVersion: args.Version,
-		bucketSize:   args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
+		rsVersion:  args.Version,
+		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
 		tmpDir: args.TmpDir, filePath: args.IndexFile,
 		enums:              args.Enums,
 		baseDataID:         args.BaseDataID,
@@ -205,7 +205,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	var err error
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
-		if rs.logicVersion == 0 {
+		if rs.rsVersion == 0 {
 			rs.existenceFV0, err = os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
 			if err != nil {
 				return nil, err
@@ -214,7 +214,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		}
 
 	}
-	if args.KeyCount > 0 && rs.lessFalsePositives && rs.logicVersion >= 1 {
+	if args.KeyCount > 0 && rs.lessFalsePositives && rs.rsVersion >= 1 {
 		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
 		if err != nil {
 			return nil, err
@@ -244,7 +244,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 }
 
 func (rs *RecSplit) FileName() string    { return rs.fileName }
-func (rs *RecSplit) MajorVersion() uint8 { return rs.logicVersion }
+func (rs *RecSplit) MajorVersion() uint8 { return rs.rsVersion }
 func (rs *RecSplit) Salt() uint32        { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
@@ -415,7 +415,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			return err
 		}
 		if rs.lessFalsePositives {
-			if rs.logicVersion == 0 {
+			if rs.rsVersion == 0 {
 				//1 byte from each hashed key
 				if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
 					return err
@@ -428,7 +428,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
-	if rs.lessFalsePositives && rs.logicVersion >= 1 {
+	if rs.lessFalsePositives && rs.rsVersion >= 1 {
 		if err := rs.existenceFV1.AddHash(hi); err != nil {
 			return err
 		}
@@ -642,9 +642,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
-	// 1 byte: logicVersion, 7 bytes: app-specific minimal dataID (of current shard)
+	// 1 byte: rsVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
-	rs.numBuf[0] = rs.logicVersion
+	rs.numBuf[0] = rs.rsVersion
 	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
@@ -784,7 +784,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 }
 
 func (rs *RecSplit) flushExistenceFilter() error {
-	if rs.logicVersion == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
+	if rs.rsVersion == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
 		defer rs.existenceFV0.Close()
 
 		//Write len of array
@@ -805,7 +805,7 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		}
 	}
 
-	if rs.logicVersion >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
+	if rs.rsVersion >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
 		_, err := rs.existenceFV1.BuildTo(rs.indexW)
 		if err != nil {
 			return err
