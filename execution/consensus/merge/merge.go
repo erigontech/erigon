@@ -197,7 +197,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
-			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+			return nil, fmt.Errorf("could not parse requests logs: %v", err)
 		}
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
@@ -219,7 +219,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
-				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
+				return nil, fmt.Errorf("invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
 			}
 		}
 	}
