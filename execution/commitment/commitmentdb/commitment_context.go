@@ -106,14 +106,14 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, ste
 	return enc, 0, nil
 }
 
-// FrozenHistoryStateReader reads *limited* (i.e. without recent files) historical state at specified txNum or latest state.
-type FrozenHistoryStateReader struct {
+// LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) historical state at specified txNum, otherwise from *latest*.
+type LimitedHistoryStateReader struct {
 	HistoryStateReader
 	getter kv.TemporalGetter
 }
 
-func NewFrozenHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *FrozenHistoryStateReader {
-	return &FrozenHistoryStateReader{
+func NewLimitedHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
+	return &LimitedHistoryStateReader{
 		HistoryStateReader: HistoryStateReader{
 			roTx:               roTx,
 			limitReadAsOfTxNum: limitReadAsOfTxNum,
@@ -122,11 +122,11 @@ func NewFrozenHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, l
 	}
 }
 
-func (r *FrozenHistoryStateReader) HasFullHistory() bool {
+func (r *LimitedHistoryStateReader) HasFullHistory() bool {
 	return false
 }
 
-func (r *FrozenHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
+func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	var ok bool
 	// reading from domain files this way will dereference domain key correctly,
 	// GetAsOf itself does not dereference keys in commitment domain values
@@ -135,12 +135,12 @@ func (r *FrozenHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byt
 		enc = nil
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("FrozenHistoryStateReader(GetLatestFromFiles) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
+		return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatestFromFiles) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
 	}
 	if enc == nil {
 		enc, step, err = r.getter.GetLatest(d, plainKey)
 		if err != nil {
-			return nil, 0, fmt.Errorf("FrozenHistoryStateReader(GetLatest) %q: %w", d, err)
+			return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatest) %q: %w", d, err)
 		}
 	}
 	return enc, step, nil
@@ -165,9 +165,9 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
-// SetFrozenHistoryStateReader sets the state reader to read *frozen* (i.e. *without-recent-files*) historical state at specified txNum.
-func (sdc *SharedDomainsCommitmentContext) SetFrozenHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewFrozenHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
+// SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
+func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
+	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
