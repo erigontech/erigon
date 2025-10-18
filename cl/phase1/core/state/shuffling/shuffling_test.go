@@ -20,14 +20,13 @@ import (
 	_ "embed"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
+	"github.com/erigontech/erigon-lib/common/eth2shuffle"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/cl/utils/eth2shuffle"
+	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkLambdaShuffledIndex(b *testing.B) {
@@ -37,8 +36,8 @@ func BenchmarkLambdaShuffledIndex(b *testing.B) {
 		return hashed[:]
 	}
 	seed := [32]byte{2, 35, 6}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		eth2shuffle.PermuteIndex(eth2ShuffleHash, uint8(clparams.MainnetBeaconConfig.ShuffleRoundCount), 10, 1000, seed)
 	}
 }
@@ -50,8 +49,8 @@ func BenchmarkErigonShuffledIndex(b *testing.B) {
 
 	seed := [32]byte{2, 35, 6}
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, keccakOptimized)
 	}
 }
