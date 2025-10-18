@@ -75,14 +75,12 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step
 
 type HistoryStateReader struct {
 	roTx               kv.TemporalTx
-	getter             kv.TemporalGetter
 	limitReadAsOfTxNum uint64
 }
 
-func NewHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *HistoryStateReader {
+func NewHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) *HistoryStateReader {
 	return &HistoryStateReader{
 		roTx:               roTx,
-		getter:             getter,
 		limitReadAsOfTxNum: limitReadAsOfTxNum,
 	}
 }
@@ -161,7 +159,7 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
+	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
 // SetFrozenHistoryStateReader sets the state reader to read *frozen* (i.e. *without-recent-files*) historical state at specified txNum.
