@@ -117,16 +117,16 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 		return nil, err
 	}
 
-	if d.Version.DataKV.IsZero() {
+	if d.FileVersion.DataKV.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
-	if d.Accessors.Has(statecfg.AccessorBTree) && d.Version.AccessorBT.IsZero() {
+	if d.Accessors.Has(statecfg.AccessorBTree) && d.FileVersion.AccessorBT.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
-	if d.Accessors.Has(statecfg.AccessorHashMap) && d.Version.AccessorKVI.IsZero() {
+	if d.Accessors.Has(statecfg.AccessorHashMap) && d.FileVersion.AccessorKVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
-	if d.Accessors.Has(statecfg.AccessorExistence) && d.Version.AccessorKVEI.IsZero() {
+	if d.Accessors.Has(statecfg.AccessorExistence) && d.FileVersion.AccessorKVEI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
 	}
 
@@ -137,16 +137,16 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 }
 
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.Version.DataKV.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.FileVersion.DataKV.String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.Version.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.FileVersion.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kvExistenceIdxNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.Version.AccessorKVEI.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.FileVersion.AccessorKVEI.String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.Version.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
 func (d *Domain) kvFilePathMask(fromStep, toStep kv.Step) string {
@@ -1118,7 +1118,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
-	if !d.Version.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
 		versionOfRs = 1
 	}
 	cfg := recsplit.RecSplitArgs{
@@ -1999,7 +1999,7 @@ func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
 func versionTooLowPanic(filename string, version version.Versions) {
 	panic(fmt.Sprintf(
-		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
 		filename,
 		version.MinSupported,
 		version.Current,
