@@ -138,6 +138,9 @@ func (r *FrozenHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byt
 	}
 	if enc == nil {
 		enc, step, err = r.getter.GetLatest(d, plainKey)
+		if err != nil {
+			return nil, 0, fmt.Errorf("FrozenHistoryStateReader(GetLatest) %q: %w", d, err)
+		}
 	}
 	return enc, step, nil
 }
