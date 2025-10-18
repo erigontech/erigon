@@ -52,8 +52,6 @@ func TestEngineApiPerformance(t *testing.T) {
 	engineApiTestDir := filepath.Join(".", "engineapi-performance-tests")
 	tm := new(testMatcher)
 	tm.walk(t, engineApiTestDir, func(t *testing.T, name string, test *EngineApiTest) {
-		t.Parallel()
-
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		if err := tm.checkFailure(t, test.Run(ctx, t)); err != nil {
