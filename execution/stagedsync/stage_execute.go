@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -471,7 +472,8 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 	}
 
-	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
+	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
