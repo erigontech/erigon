@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -40,9 +41,8 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/turbo/privateapi"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 var _ services.FullBlockReader = &RemoteBackend{}

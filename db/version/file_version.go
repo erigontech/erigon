@@ -11,6 +11,35 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+/*
+Version this type represents snapshot's file versions. Also, we have inner file versions,
+for example, in recsplit.Index this is fielded `dataStructureVersion`. They have several differences between them, so I'll
+try to explain them:
+
+1. Internal Version (i.e. dataStructureVersion) is now used only for logic(!) inside Erigon. For example, rs with version 23 uses only one method of
+compression, but version 24 means that now rs using two other methods. So, you can define this logic in code and use it
+whichever way you want. Also, this innerVersion usually stores in a 1st byte of a file.
+
+2. The Usual File Version (bellow) is used to mark changed snapshots. We store it in the name of the file like this:
+v1.0-041400-041500-transactions-to-block.idx where "v1.0" represents the current version of a file.
+
+This version contains 2 parts: major and minor. So, when we do an update to the file that only changes the content of it,
+but it could be read with the current (or older) version of Erigon, we upgrade only a minor version (v1.0->v1.1).
+
+If with the update we change logic of reading(!) file, we should bump a major version for new files (v1.0->v2.0).
+
+So that means that we could NOT read this file with a previous version of Erigon.
+
+All the versions of snapshots could be found in statecfg.Schema struct, versions.yaml and version_schema_gen.go files.
+To learn how to use them, please visit Bumper README
+
+To sum up:
+
+A file version represents the way of reading a file, how it has changed.
+
+dataStructureVersion and all other (dataSerializationVersion etc) represent the behavior of the file: for example, which is
+compressing algorithm it will use.
+*/
 type Version struct {
 	Major uint64
 	Minor uint64
@@ -221,7 +250,7 @@ func (v *Version) UnmarshalYAML(node *yaml.Node) error {
 
 func VersionTooLowPanic(filename string, version Versions) {
 	panic(fmt.Sprintf(
-		"Version is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
+		"FileVersion is too low, try to run snapshot reset: `erigon --datadir $DATADIR --chain $CHAIN snapshots reset`. file=%s, min_supported=%s, current=%s",
 		filename,
 		version.MinSupported,
 		version.Current,

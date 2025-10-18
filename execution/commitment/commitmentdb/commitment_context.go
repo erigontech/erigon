@@ -21,9 +21,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 var (
@@ -479,9 +479,11 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.withHistory {
 			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
-		}
-
-		if enc == nil {
+			if err != nil {
+				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			}
+			return enc, 0, nil
+		} else {
 			var ok bool
 			// reading from domain files this way will dereference domain key correctly,
 			// rotx.GetAsOf itself does not dereference keys in commitment domain values
@@ -489,9 +491,9 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 			if !ok {
 				enc = nil
 			}
-		}
-		if err != nil {
-			return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			if err != nil {
+				return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			}
 		}
 	}
 

@@ -574,8 +574,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 	memStart := *new(uint256.Int)
 	value := *new(uint256.Int).SetUint64(0x1337)
 
-	bench.ResetTimer()
-	for i := 0; i < bench.N; i++ {
+	for bench.Loop() {
 		stack.push(value)
 		stack.push(memStart)
 		opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
@@ -633,8 +632,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	pc := uint64(0)
 	start := uint256.Int{}
 
-	bench.ResetTimer()
-	for i := 0; i < bench.N; i++ {
+	for bench.Loop() {
 		stack.push(*uint256.NewInt(32))
 		stack.push(start)
 		opKeccak256(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})

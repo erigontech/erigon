@@ -37,8 +37,8 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/turbo/debug"
 )
 
 type Sqeeze string
@@ -90,7 +90,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	_, _, _, _, agg, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	_, _, _, _, agg, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	_, _, _, br, _, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}

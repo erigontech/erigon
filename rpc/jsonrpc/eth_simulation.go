@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -630,7 +630,7 @@ func (s *simulator) simulateCall(
 				callResult.Error = rpc.NewJsonError(rpc.ErrCodeReverted, revertError.Error(), revertError.ErrorData().(string))
 			} else {
 				// Otherwise, we just capture the error message.
-				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), "")
+				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), nil)
 			}
 		} else {
 			// If the call was successful, we capture the return data, the gas used and logs.

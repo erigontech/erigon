@@ -40,10 +40,10 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -826,6 +826,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				}
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
+				storageRootHashIsSet = true
 			} else if cell.hashLen > 0 {
 				storageRootHash = cell.hash
 				storageRootHashIsSet = true

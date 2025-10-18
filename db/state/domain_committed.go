@@ -228,7 +228,7 @@ func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesIt
 	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
 		return dirty, nil
 	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.Version.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
 }
 
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {

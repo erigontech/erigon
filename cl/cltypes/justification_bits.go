@@ -19,10 +19,13 @@ package cltypes
 import (
 	"encoding/json"
 
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 )
+
+var _ ssz2.SizedObjectSSZ = (*JustificationBits)(nil)
 
 const JustificationBitsLength = 4
 

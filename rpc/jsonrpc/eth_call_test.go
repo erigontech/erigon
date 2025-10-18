@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -36,11 +37,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/trie"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -90,7 +92,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	pruneTo := uint64(3)
 	ethCallBlockNumber := rpc.BlockNumber(2)
 
-	m, bankAddress, contractAddress := chainWithDeployedContract(t)
+	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 
@@ -110,9 +112,9 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
-	var maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
-
-	m, bankAddr, contractAddr := chainWithDeployedContract(t)
+	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
+	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
+	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
 	key := func(b byte) hexutil.Bytes {
@@ -120,6 +122,7 @@ func TestGetProof(t *testing.T) {
 		result[31] = b
 		return result.Bytes()
 	}
+	_ = bankAddr
 
 	tests := []struct {
 		name        string
@@ -132,53 +135,65 @@ func TestGetProof(t *testing.T) {
 		{
 			name:     "currentBlockNoState",
 			addr:     contractAddr,
-			blockNum: 3,
+			blockNum: 4,
 		},
 		{
 			name:     "currentBlockEOA",
 			addr:     bankAddr,
-			blockNum: 3,
+			blockNum: 4,
 		},
 		{
 			name:     "currentBlockNoAccount",
 			addr:     common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
-			blockNum: 3,
+			blockNum: 4,
 		},
 		{
 			name:        "currentBlockWithState",
 			addr:        contractAddr,
-			blockNum:    3,
+			blockNum:    4,
 			storageKeys: []hexutil.Bytes{key(0), key(4), key(8), key(10)},
+			stateVal:    2,
+		},
+		{
+			name:        "currentBlockWithStateAndShortKeys",
+			addr:        contractAddr,
+			blockNum:    4,
+			storageKeys: []hexutil.Bytes{{0x0}, {0x4}, {0x8}, {0x0a}},
 			stateVal:    2,
 		},
 		{
 			name:        "currentBlockWithMissingState",
 			addr:        contractAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    3,
+			blockNum:    4,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockEOAMissingState",
 			addr:        bankAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    3,
+			blockNum:    4,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockNoAccountMissingState",
 			addr:        common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    3,
+			blockNum:    4,
 			stateVal:    0,
 		},
-		// {
-		// 	name:        "olderBlockWithState",
-		// 	addr:        contractAddr,
-		// 	blockNum:    2,
-		// 	storageKeys: []common.Hash{key(1), key(5), key(9), key(13)},
-		// 	stateVal:    1,
-		// },
+		{
+			name:        "olderBlockWithState",
+			addr:        contractAddr,
+			blockNum:    2,
+			storageKeys: []hexutil.Bytes{key(1), key(5), key(9), key(13)},
+			stateVal:    1,
+		},
+		{
+			name:     "notCreatedYetAccount",
+			addr:     receiverAddress, // receiver address only starts existing at block 4
+			blockNum: 2,
+		},
 		// {
 		// 	name:        "tooOldBlock",
 		// 	addr:        contractAddr,
@@ -217,10 +232,10 @@ func TestGetProof(t *testing.T) {
 			for _, storageKey := range tt.storageKeys {
 				found := false
 				for _, storageProof := range proof.StorageProof {
-					var proofKeyHash, storageKeyHash common.Hash
-					proofKeyHash.SetBytes(hexutil.FromHex(storageProof.Key))
-					storageKeyHash.SetBytes(uint256.NewInt(0).SetBytes(storageKey).Bytes())
-					if proofKeyHash != storageKeyHash {
+					var proofKeyHashBytes, storageKeyBytes []byte
+					proofKeyHashBytes = hexutil.FromHex(storageProof.Key)
+					storageKeyBytes = storageKey
+					if !bytes.Equal(proofKeyHashBytes, storageKeyBytes) {
 						continue
 					}
 					found = true
@@ -504,14 +519,16 @@ func contractInvocationData(val byte) []byte {
 	return hexutil.MustDecode(fmt.Sprintf("0x%x00000000000000000000000000000000000000000000000000000000000000%02x", contractFuncSelector, val))
 }
 
-func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address) {
+func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
 	var (
-		signer      = types.LatestSignerForChainID(nil)
-		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
-		bankFunds   = big.NewInt(1e9)
-		contract    = hexutil.MustDecode(contractHexString)
-		gspec       = &types.Genesis{
+		signer          = types.LatestSignerForChainID(nil)
+		bankKey, _      = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		bankAddress     = crypto.PubkeyToAddress(bankKey.PublicKey)
+		receiverKey, _  = crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
+		receiverAddress = crypto.PubkeyToAddress(receiverKey.PublicKey)
+		bankFunds       = big.NewInt(1e9)
+		contract        = hexutil.MustDecode(contractHexString)
+		gspec           = &types.Genesis{
 			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 			//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
@@ -522,7 +539,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 
 	var contractAddr common.Address
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -536,6 +553,11 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 			block.AddTx(txn)
 		case 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(2)), *signer, bankKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		case 3:
+			transferAmount := big.NewInt(1e2)
+			txn, err := types.SignTx(types.NewTransaction(nonce, receiverAddress, uint256.MustFromBig(transferAmount), 21000, new(uint256.Int), nil), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
 		}
@@ -569,7 +591,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 
-	return m, bankAddress, contractAddr
+	return m, bankAddress, contractAddr, receiverAddress
 }
 
 func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
