@@ -13,6 +13,40 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
+func TestStepRange(t *testing.T) {
+	t.Run("simple range", func(t *testing.T) {
+		f := &FilesItem{
+			startTxNum: 1,
+			endTxNum:   10,
+		}
+
+		startStep, endStep := f.StepRange(4)
+		require.Equal(t, kv.Step(0), startStep)
+		require.Equal(t, kv.Step(2), endStep)
+	})
+
+	t.Run("inner boundaries", func(t *testing.T) {
+		f := &FilesItem{
+			startTxNum: 4,
+			endTxNum:   7,
+		}
+
+		startStep, endStep := f.StepRange(4)
+		require.Equal(t, kv.Step(1), startStep)
+		require.Equal(t, kv.Step(1), endStep)
+	})
+
+	t.Run("outer boundaries", func(t *testing.T) {
+		f := &FilesItem{
+			startTxNum: 3,
+			endTxNum:   8,
+		}
+		startStep, endStep := f.StepRange(4)
+		require.Equal(t, kv.Step(0), startStep)
+		require.Equal(t, kv.Step(2), endStep)
+	})
+}
+
 func TestFileItemWithMissedAccessor(t *testing.T) {
 	tmp := t.TempDir()
 

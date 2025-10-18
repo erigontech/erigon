@@ -117,6 +117,12 @@ func (i *FilesItem) Range() (startTxNum, endTxNum uint64) {
 	return i.startTxNum, i.endTxNum
 }
 
+// Returns the [startTxNum, endTxNum) range converted to steps of a given size; FilesItem doesn't know about
+// step sizes (for now), hence the caller needs to provide it.
+func (i *FilesItem) StepRange(stepSize uint64) (startStep, endStep kv.Step) {
+	return kv.Step(i.startTxNum / stepSize), kv.Step(i.endTxNum / stepSize)
+}
+
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *FilesItem) isProperSubsetOf(j *FilesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
