@@ -73,6 +73,7 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step
 	return enc, step, nil
 }
 
+// HistoryStateReader reads *full* historical state at specified txNum.
 type HistoryStateReader struct {
 	roTx               kv.TemporalTx
 	limitReadAsOfTxNum uint64
@@ -101,17 +102,19 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, ste
 	return enc, 0, nil
 }
 
+// FrozenHistoryStateReader reads *limited* (i.e. without recent files) historical state at specified txNum or latest state.
 type FrozenHistoryStateReader struct {
-	roTx               kv.TemporalTx
-	getter             kv.TemporalGetter
-	limitReadAsOfTxNum uint64
+	HistoryStateReader
+	getter kv.TemporalGetter
 }
 
 func NewFrozenHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *FrozenHistoryStateReader {
 	return &FrozenHistoryStateReader{
-		roTx:               roTx,
-		getter:             getter,
-		limitReadAsOfTxNum: limitReadAsOfTxNum,
+		HistoryStateReader: HistoryStateReader{
+			roTx:               roTx,
+			limitReadAsOfTxNum: limitReadAsOfTxNum,
+		},
+		getter: getter,
 	}
 }
 
