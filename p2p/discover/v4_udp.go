@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"sync"
 	"time"
@@ -207,9 +208,7 @@ func (t *UDPv4) Errors() map[string]uint {
 	errors := map[string]uint{}
 
 	t.mutex.Lock()
-	for key, value := range t.errors {
-		errors[key] = value
-	}
+	maps.Copy(errors, t.errors)
 	t.mutex.Unlock()
 
 	return errors
