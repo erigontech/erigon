@@ -252,7 +252,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			pruneDuration = time.Since(timeStart)
 
-			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx)
+			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx, se.agg.StepSize())
 
 			var commitDuration time.Duration
 			rwTx, commitDuration, err = se.commit(ctx, execStage, rwTx, nil, useExternalTx)
