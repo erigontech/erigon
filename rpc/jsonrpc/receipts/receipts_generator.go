@@ -430,15 +430,20 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
-	sharedDomains, err := dbstate.NewSharedDomains(tx, log.Root())
-	if err != nil {
-		return nil, err
-	}
-	defer sharedDomains.Close()
+	var sharedDomains * dbstate.SharedDomains
+	defer func() {
+		if sharedDomains != nil {
+			sharedDomains.Close()
+		}
+	}()
 
 	var stateWriter state.StateWriter
 	var minTxNum uint64
 	if calculatePostState {
+		sharedDomains, err = dbstate.NewSharedDomains(tx, log.Root())
+		if err != nil {
+			return nil, err
+		}
 		minTxNum, err = g.txNumReader.Min(tx, blockNum)
 		if err != nil {
 			return nil, err
