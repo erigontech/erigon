@@ -45,7 +45,7 @@ type sd interface {
 
 type StateReader interface {
 	HasFullHistory() bool
-	LatestCommitment() bool
+	CheckDataAvailable(d kv.Domain, step kv.Step) error
 	Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error)
 }
 
@@ -61,8 +61,12 @@ func (r *LatestStateReader) HasFullHistory() bool {
 	return false
 }
 
-func (r *LatestStateReader) LatestCommitment() bool {
-	return true
+func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	// we're processing the latest state - in which case it needs to be writable
+	if frozenSteps := r.getter.StepsInFiles(d); step < frozenSteps {
+		return fmt.Errorf("%q state out of date: step %d, expected step %d", d, step, frozenSteps)
+	}
+	return nil
 }
 
 func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
@@ -90,8 +94,8 @@ func (r *HistoryStateReader) HasFullHistory() bool {
 	return true
 }
 
-func (r *HistoryStateReader) LatestCommitment() bool {
-	return false
+func (r *HistoryStateReader) CheckDataAvailable(kv.Domain, kv.Step) error {
+	return nil
 }
 
 func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
@@ -119,10 +123,6 @@ func NewFrozenHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, l
 }
 
 func (r *FrozenHistoryStateReader) HasFullHistory() bool {
-	return false
-}
-
-func (r *FrozenHistoryStateReader) LatestCommitment() bool {
 	return false
 }
 
@@ -321,11 +321,8 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if trieContext.stateReader.LatestCommitment() {
-		// assume we're processing the latest state - in which case it needs to be writable
-		if frozenSteps := trieContext.getter.StepsInFiles(kv.CommitmentDomain); step < frozenSteps {
-			return 0, 0, nil, fmt.Errorf("commitment state out of date: commitment step: %d, expected step: %d", step, frozenSteps)
-		}
+	if err = trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
+		return 0, 0, nil, err
 	}
 
 	if len(state) < 16 {
