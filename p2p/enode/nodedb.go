@@ -61,7 +61,6 @@ const (
 	// Use localItemKey to create those keys.
 	dbLocalSeq = "seq"
 )
-
 const (
 	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
@@ -127,7 +126,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		Path(path).
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
-		GrowthStep(16 * datasize.MB).
+		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
 		SyncBytes(dbSyncBytesThreshold).
 		SyncPeriod(dbSyncPeriod).
