@@ -63,8 +63,6 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 		ClientCAs:    caCertPool,
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		MinVersion:   tls.VersionTLS12,
-		//nolint:gosec
-		InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
 	}), nil
 }
 
