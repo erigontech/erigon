@@ -21,9 +21,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 var (

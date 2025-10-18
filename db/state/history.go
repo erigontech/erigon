@@ -89,10 +89,10 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.IiCfg.FilenameBase, err)
 	}
 
-	if h.Version.DataV.IsZero() {
+	if h.FileVersion.DataV.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.Name))
 	}
-	if h.Version.AccessorVI.IsZero() {
+	if h.FileVersion.AccessorVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", h.Name))
 	}
 	h.InvertedIndex.Name = h.HistoryIdx
@@ -101,13 +101,13 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 }
 
 func (h *History) vFileName(fromStep, toStep kv.Step) string {
-	return fmt.Sprintf("%s-%s.%d-%d.v", h.Version.DataV.String(), h.FilenameBase, fromStep, toStep)
+	return fmt.Sprintf("%s-%s.%d-%d.v", h.FileVersion.DataV.String(), h.FilenameBase, fromStep, toStep)
 }
 func (h *History) vNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.Version.AccessorVI.String(), h.FilenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.FileVersion.AccessorVI.String(), h.FilenameBase, fromStep, toStep))
 }
 
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {

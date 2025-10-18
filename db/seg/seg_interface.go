@@ -46,6 +46,7 @@ type ReaderI interface {
 	Skip() (uint64, int)
 	FileName() string
 	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
+	GetMetadata() []byte
 	MadvNormal() MadvDisabler
 	DisableReadAhead()
 }

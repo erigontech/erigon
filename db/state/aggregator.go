@@ -201,8 +201,9 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 }
 
 func (a *Aggregator) StepSize() uint64          { return a.stepSize }
-func (a *Aggregator) StepsInFrozenFile() uint64 { return a.stepsInFrozenFile }
 func (a *Aggregator) Dirs() datadir.Dirs        { return a.dirs }
+func (a *Aggregator) StepsInFrozenFile() uint64 { return a.stepsInFrozenFile }
+func (a *Aggregator) Logger() log.Logger        { return a.logger }
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
 	a.d[domain].ReplaceKeysInValues = v
@@ -922,7 +923,7 @@ func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles)
 	return files
 }
 func (at *AggregatorRoTx) CurrentDomainVersion(domain kv.Domain) version.Version {
-	return at.d[domain].d.Version.DataKV.Current
+	return at.d[domain].d.FileVersion.DataKV.Current
 }
 func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
