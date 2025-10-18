@@ -67,6 +67,7 @@ func TestInterpreterReadonly(t *testing.T) {
 		dummyContract := NewContract(
 			common.Address{},
 			common.Address{},
+			common.Address{},
 			uint256.Int{},
 			0,
 			c,
@@ -324,6 +325,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 				dummyContract := NewContract(
 					common.Address{},
 					common.Address{},
+					common.Address{},
 					uint256.Int{},
 					0,
 					c,
@@ -414,6 +416,7 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
 	c := NewJumpDestCache(16)
 	nextContract := NewContract(
+		common.Address{},
 		common.Address{},
 		common.Address{},
 		uint256.Int{},

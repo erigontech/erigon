@@ -398,6 +398,11 @@ func opCaller(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	return nil, nil
 }
 
+func stCaller(_ uint64, scope *ScopeContext) string {
+	caller := scope.Contract.Caller()
+	return fmt.Sprintf("%s (%d)", CALLER, new(uint256.Int).SetBytes(caller[:]))
+}
+
 func opCallValue(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	scope.Stack.push(scope.Contract.value)
 	return nil, nil

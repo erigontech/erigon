@@ -491,6 +491,7 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: GasQuickStep,
 			numPop:      0,
 			numPush:     1,
+			string:      stCaller,
 		},
 		CALLVALUE: {
 			execute:     opCallValue,

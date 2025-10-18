@@ -45,10 +45,10 @@ func (ar AccountRef) Address() common.Address { return (common.Address)(ar) }
 // Contract represents an ethereum contract in the state database. It contains
 // the contract code, calling arguments. Contract implements ContractRef
 type Contract struct {
-	// CallerAddress is the result of the caller which initialised this
+	// callerAddress is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
-	CallerAddress common.Address
+	callerAddress common.Address
 	caller        common.Address
 	self          common.Address
 	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
@@ -90,10 +90,12 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller common.Address, addr common.Address, value uint256.Int, gas uint64, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller common.Address, callerAddress common.Address, addr common.Address, value uint256.Int, gas uint64, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
-		CallerAddress: caller, caller: caller, self: addr,
-		value: value,
+		caller:        caller,
+		callerAddress: callerAddress,
+		self:          addr,
+		value:         value,
 		// Gas should be a pointer so it can safely be reduced through the run
 		// This pointer will be off the state transition
 		Gas:       gas,
@@ -151,16 +153,6 @@ func (c *Contract) isCode(udest uint64) bool {
 	return c.analysis.codeSegment(udest)
 }
 
-// AsDelegate sets the contract to be a delegate call and returns the current
-// contract (for chaining calls)
-func (c *Contract) AsDelegate() *Contract {
-	// For delegate calls, we need to use the caller's caller address
-	// and inherit the value from the parent call
-	// Since we removed ContractRef, the caller address should be set by the caller
-	// of this method before calling AsDelegate()
-	return c
-}
-
 // GetOp returns the n'th element in the contract's byte array
 func (c *Contract) GetOp(n uint64) OpCode {
 	if n < uint64(len(c.Code)) {
@@ -175,7 +167,7 @@ func (c *Contract) GetOp(n uint64) OpCode {
 // Caller will recursively call caller when the contract is a delegate
 // call, including that of caller's caller.
 func (c *Contract) Caller() common.Address {
-	return c.CallerAddress
+	return c.callerAddress
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success

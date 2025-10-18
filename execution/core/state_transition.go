@@ -179,6 +179,10 @@ func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResul
 	return NewStateTransition(evm, msg, gp).ApplyFrame()
 }
 
+func (st *StateTransition) SetTrace(trace bool) {
+	st.evm.IntraBlockState().SetTrace(trace)
+}
+
 // to returns the recipient of the message.
 func (st *StateTransition) to() common.Address {
 	if st.msg == nil || st.msg.To() == nil /* contract creation */ {
