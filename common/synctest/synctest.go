@@ -25,6 +25,6 @@ import (
 // NOTE: we can remove this pkg once go1.26 is out, and we've dropped support for go1.24
 //
 
-var Wait = synctest.Wait
+var Wait = synctest.Wait // nolint:govet
 
 type testFunc func(t *testing.T, f func(*testing.T))
