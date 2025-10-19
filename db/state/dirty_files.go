@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -701,12 +700,12 @@ func (files visibleFiles) StartTxNum() uint64 {
 	return files[0].startTxNum
 }
 
-func (files visibleFiles) LatestMergedRange() MergeRange {
+func (files visibleFiles) LatestMergedRange(stepSize uint64) MergeRange {
 	if len(files) == 0 {
 		return MergeRange{}
 	}
 	for i := len(files) - 1; i >= 0; i-- {
-		shardSize := (files[i].endTxNum - files[i].startTxNum) / config3.DefaultStepSize
+		shardSize := (files[i].endTxNum - files[i].startTxNum) / stepSize
 		if shardSize > 2 {
 			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
 		}

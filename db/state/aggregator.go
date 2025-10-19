@@ -839,8 +839,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	mxRunningMerges.Inc()
 	defer mxRunningMerges.Dec()
 
-	maxSpan := a.stepsInFrozenFile * a.StepSize()
-	r := aggTx.findMergeRange(toTxNum, maxSpan)
+	r := aggTx.findMergeRange(toTxNum, a.StepSize(), a.StepsInFrozenFile())
 	if !r.any() {
 		a.cleanAfterMerge(nil)
 		return false, nil
@@ -1333,13 +1332,14 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	a.visibleFilesMinimaxTxNum.Store(aggTx.TxNumsInFiles(kv.StateDomains...))
 }
 
-func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
+func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
+	maxSpan := stepSize * stepsInFrozenFile
 	r := &Ranges{invertedIndex: make([]*MergeRange, len(at.a.iis))}
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if commitmentUseReferencedBranches {
-		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange()
-		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange()
-		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange()
+		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
+		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
+		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange(stepSize)
 
 		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
 			// ensure that we do not make further merge progress until ranges are not equal
