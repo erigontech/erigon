@@ -231,7 +231,7 @@ func ExecV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, agg.StepSize())
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 	blockNum = doms.BlockNum()
 
 	if maxBlockNum < blockNum {
@@ -337,7 +337,7 @@ func ExecV3(ctx context.Context,
 					se.lastCommittedTxNum = se.domains().TxNum()
 
 					commitStart := time.Now()
-					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, agg.StepSize())
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 					applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
