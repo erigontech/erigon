@@ -41,8 +41,7 @@ var (
 	integrityFast, integritySlow bool
 	file                         string
 	HeimdallURL                  string
-	txtrace                      bool // Whether to trace the execution (should only be used together with `block`)
-	unwindTypes                  []string
+	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
 
@@ -186,10 +185,6 @@ func withStartTx(cmd *cobra.Command) {
 
 func withOutputCsvFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
-}
-
-func withUnwindTypes(cmd *cobra.Command) {
-	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
 }
 
 func withChaosMonkey(cmd *cobra.Command) {
