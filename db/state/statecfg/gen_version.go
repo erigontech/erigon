@@ -70,7 +70,7 @@ func writeGoFile(path string, src []byte) error {
 /* ---------- Helpers ---------- */
 
 func versLit(v Version) string {
-	return fmt.Sprintf("version.Version{%d, %d}", v.Major, v.Minor)
+	return fmt.Sprintf("version.FileVersion{%d, %d}", v.Major, v.Minor)
 }
 
 func goStruct(dom string) string {
@@ -110,17 +110,17 @@ func goStruct(dom string) string {
 
 func pathPrefix(sec, dom string) string {
 	if sec == "domain" || sec == "block" {
-		return ".Version"
+		return ".FileVersion"
 	}
 	if sec == "hist" {
-		return ".Hist.Version"
+		return ".Hist.FileVersion"
 	}
 	// ii
 	switch dom {
 	case "logaddrs", "logtopics", "tracesfrom", "tracesto":
-		return ".Version"
+		return ".FileVersion"
 	default:
-		return ".Hist.IiCfg.Version"
+		return ".Hist.IiCfg.FileVersion"
 	}
 }
 

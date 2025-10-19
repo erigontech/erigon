@@ -106,4 +106,6 @@ type HttpCfg struct {
 	OtsMaxPageSize uint64
 
 	RPCSlowLogThreshold time.Duration
+
+	ErigonDBStepsInFrozenFile uint64
 }

@@ -445,11 +445,13 @@ type TemporalDebugTx interface {
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	Dirs() datadir.Dirs
+	AllForkableIds() []ForkableId
 }
 
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
+	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
@@ -508,6 +510,7 @@ type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
+	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 

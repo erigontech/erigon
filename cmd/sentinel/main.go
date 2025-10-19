@@ -31,10 +31,10 @@ import (
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/cmd/utils"
+	sentinelapp "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/mem"
-	sentinelapp "github.com/erigontech/erigon/turbo/app"
 )
 
 func main() {

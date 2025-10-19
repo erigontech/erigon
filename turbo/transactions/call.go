@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/core"
@@ -38,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type BlockOverrides struct {
@@ -99,9 +100,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 		blockCtx.GasLimit = uint64(*o.GasLimit)
 	}
 	if o.BlockHash != nil {
-		for blockNum, hash := range *o.BlockHash {
-			overrideBlockHash[blockNum] = hash
-		}
+		maps.Copy(overrideBlockHash, *o.BlockHash)
 	}
 }
 
