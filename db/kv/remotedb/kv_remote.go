@@ -241,13 +241,13 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                                            { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx                             { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo                             { panic("not implemented") }
-func (tx *tx) AllForkableIds() (ids []kv.ForkableId)                 { panic("not implemented") }
-func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step           { panic("not implemented") }
-func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
-func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }
+func (tx *tx) AggTx() any                                      { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx                       { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo                       { panic("not implemented") }
+func (tx *tx) AllForkableIds() (ids []kv.ForkableId)           { panic("not implemented") }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step     { panic("not implemented") }
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
+func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }
@@ -688,22 +688,22 @@ func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
 }
 
 func (tx *tx) StepSize() uint64 {
-       reply, err := tx.db.remoteKV.StepSize(tx.ctx, &remoteproto.StepSizeReq{TxId: tx.id})
-       if err != nil {
-               return 0
-       }
-       return reply.Step
+	reply, err := tx.db.remoteKV.StepSize(tx.ctx, &remoteproto.StepSizeReq{TxId: tx.id})
+	if err != nil {
+		return 0
+	}
+	return reply.Step
 }
 
 func (tx *tx) CurrentDomainVersion(name kv.Domain) version.Version {
-       reply, err := tx.db.remoteKV.CurrentDomainVersion(tx.ctx, &remoteproto.CurrentDomainVersionReq{TxId: tx.id, Domain: uint32(name)})
-       if err != nil {         
-               return version.Version{} 
-       }
-       var v version.Version
-       v.Major = reply.Major
-       v.Minor = reply.Minor
-       return v
+	reply, err := tx.db.remoteKV.CurrentDomainVersion(tx.ctx, &remoteproto.CurrentDomainVersionReq{TxId: tx.id, Domain: uint32(name)})
+	if err != nil {
+		return version.Version{}
+	}
+	var v version.Version
+	v.Major = reply.Major
+	v.Minor = reply.Minor
+	return v
 }
 
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
