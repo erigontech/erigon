@@ -44,7 +44,7 @@ type sd interface {
 }
 
 type StateReader interface {
-	HasFullHistory() bool
+	WithHistory() bool
 	CheckDataAvailable(d kv.Domain, step kv.Step) error
 	Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error)
 }
@@ -57,7 +57,7 @@ func NewLatestStateReader(getter kv.TemporalGetter) *LatestStateReader {
 	return &LatestStateReader{getter: getter}
 }
 
-func (r *LatestStateReader) HasFullHistory() bool {
+func (r *LatestStateReader) WithHistory() bool {
 	return false
 }
 
@@ -78,6 +78,7 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step
 }
 
 // HistoryStateReader reads *full* historical state at specified txNum.
+// `limitReadAsOfTxNum` here is used as timestamp for usual GetAsOf.
 type HistoryStateReader struct {
 	roTx               kv.TemporalTx
 	limitReadAsOfTxNum uint64
@@ -90,7 +91,7 @@ func NewHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) *Histo
 	}
 }
 
-func (r *HistoryStateReader) HasFullHistory() bool {
+func (r *HistoryStateReader) WithHistory() bool {
 	return true
 }
 
@@ -106,7 +107,8 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, ste
 	return enc, 0, nil
 }
 
-// LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) historical state at specified txNum, otherwise from *latest*.
+// LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
+// `limitReadAsOfTxNum` here is used for unusual operation: "hide recent .kv files and read the latest state from files".
 type LimitedHistoryStateReader struct {
 	HistoryStateReader
 	getter kv.TemporalGetter
@@ -122,10 +124,13 @@ func NewLimitedHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, 
 	}
 }
 
-func (r *LimitedHistoryStateReader) HasFullHistory() bool {
+func (r *LimitedHistoryStateReader) WithHistory() bool {
 	return false
 }
 
+// Reason why we have `kv.TemporalDebugTx.GetLatestFromFiles' call here: `state.RebuildCommitmentFiles` can build commitment.kv from account.kv.
+// Example: we have account.0-16.kv and account.16-18.kv, let's generate commitment.0-16.kv => it means we need to make account.16-18.kv invisible
+// and then read "latest state" like there is no account.16-18.kv
 func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	var ok bool
 	// reading from domain files this way will dereference domain key correctly,
@@ -562,7 +567,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
-	if sdc.stateReader.HasFullHistory() { // do not store branches if explicitly operate on history
+	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}
 	if sdc.trace {
