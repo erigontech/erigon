@@ -248,7 +248,8 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *Fil
 	if item == nil || item.bindex == nil {
 		fileStepsss := "" + dt.d.Name.String() + ": "
 		for _, item := range dt.d.dirtyFiles.Items() {
-			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.stepSize, item.endTxNum/dt.d.stepSize)
+			fromStep, toStep := item.StepRange(dt.d.stepSize)
+			fileStepsss += fmt.Sprintf("%d-%d;", fromStep, toStep)
 		}
 		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.stepSize, "stepTo", txTo/dt.d.stepSize,

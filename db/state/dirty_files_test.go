@@ -14,15 +14,18 @@ import (
 )
 
 func TestStepRange(t *testing.T) {
+	stepSize := uint64(4)
+
 	t.Run("simple range", func(t *testing.T) {
 		f := &FilesItem{
 			startTxNum: 1,
 			endTxNum:   10,
 		}
 
-		startStep, endStep := f.StepRange(4)
+		startStep, endStep := f.StepRange(stepSize)
 		require.Equal(t, kv.Step(0), startStep)
 		require.Equal(t, kv.Step(2), endStep)
+		require.Equal(t, uint64(2), f.StepCount(4))
 	})
 
 	t.Run("inner boundaries", func(t *testing.T) {
@@ -31,9 +34,10 @@ func TestStepRange(t *testing.T) {
 			endTxNum:   7,
 		}
 
-		startStep, endStep := f.StepRange(4)
+		startStep, endStep := f.StepRange(stepSize)
 		require.Equal(t, kv.Step(1), startStep)
 		require.Equal(t, kv.Step(1), endStep)
+		require.Equal(t, uint64(0), f.StepCount(stepSize))
 	})
 
 	t.Run("outer boundaries", func(t *testing.T) {
@@ -41,9 +45,10 @@ func TestStepRange(t *testing.T) {
 			startTxNum: 3,
 			endTxNum:   8,
 		}
-		startStep, endStep := f.StepRange(4)
+		startStep, endStep := f.StepRange(stepSize)
 		require.Equal(t, kv.Step(0), startStep)
 		require.Equal(t, kv.Step(2), endStep)
+		require.Equal(t, uint64(2), f.StepCount(stepSize))
 	})
 }
 
@@ -78,12 +83,12 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	}
 
 	// create accesssor files for f1, f2
-	for _, fname := range accessorFor(kv.Step(f1.startTxNum/aggStep), kv.Step(f1.endTxNum/aggStep)) {
+	for _, fname := range accessorFor(f1.StepRange(aggStep)) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer dir.RemoveFile(fname)
 	}
 
-	for _, fname := range accessorFor(kv.Step(f2.startTxNum/aggStep), kv.Step(f2.endTxNum/aggStep)) {
+	for _, fname := range accessorFor(f2.StepRange(aggStep)) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer dir.RemoveFile(fname)
 	}
