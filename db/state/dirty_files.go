@@ -117,6 +117,35 @@ func (i *FilesItem) Range() (startTxNum, endTxNum uint64) {
 	return i.startTxNum, i.endTxNum
 }
 
+// warn: check the StepRange method docs for the details on how the step range is calculated.
+func (i *FilesItem) StartStep(stepSize uint64) kv.Step {
+	return kv.Step(i.startTxNum / stepSize)
+}
+
+// warn: check the StepRange method docs for the details on how the step range is calculated.
+func (i *FilesItem) EndStep(stepSize uint64) kv.Step {
+	return kv.Step(i.endTxNum / stepSize)
+}
+
+// Returns the [startTxNum, endTxNum) range converted to steps of a given size; FilesItem doesn't know about
+// step sizes (for now), hence the caller needs to provide it.
+//
+// IMPORTANT: the covered range in terms of steps is NOT intuitive as one should expect, due to historical reasons
+// and how this struct is built by callers, because the startTxNum/endTxNum are aligned to the beginning of the step.
+//
+// That means, the startStep is counted even if the startTxNum is not aligned to the step boundary, but that is not true
+// for the endTxNum. If the endTxNum is inside a certain step txNum range, the corresponding step is not considered in the returned range.
+func (i *FilesItem) StepRange(stepSize uint64) (startStep, endStep kv.Step) {
+	return i.StartStep(stepSize), i.EndStep(stepSize)
+}
+
+// Calculate how many steps are covered by [startTxNum, endTxNum) range. The number of steps follows the criteria
+// of the StepRange method, see its docs for the details.
+func (i *FilesItem) StepCount(stepSize uint64) uint64 {
+	fromStep, toStep := i.StepRange(stepSize)
+	return uint64(toStep - fromStep)
+}
+
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *FilesItem) isProperSubsetOf(j *FilesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
@@ -296,7 +325,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 	invalidFileItemsLock := sync.Mutex{}
 	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := kv.Step(item.startTxNum/d.stepSize), kv.Step(item.endTxNum/d.stepSize)
+			fromStep, toStep := item.StepRange(d.stepSize)
 			if item.decompressor == nil {
 				fPathMask := d.kvFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -411,7 +440,7 @@ func (h *History) openDirtyFiles() error {
 	invalidFileItems := make([]*FilesItem, 0)
 	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := kv.Step(item.startTxNum/h.stepSize), kv.Step(item.endTxNum/h.stepSize)
+			fromStep, toStep := item.StepRange(h.stepSize)
 			if item.decompressor == nil {
 				fPathMask := h.vFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
@@ -499,7 +528,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 	invalidFileItemsLock := sync.Mutex{}
 	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := kv.Step(item.startTxNum/ii.stepSize), kv.Step(item.endTxNum/ii.stepSize)
+			fromStep, toStep := item.StepRange(ii.stepSize)
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
@@ -735,8 +764,7 @@ func (files visibleFiles) VisibleFiles() []VisibleFile {
 // here "accessors" are generated dynamically by `accessorsFor`
 func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep kv.Step) []string) (l []*FilesItem) {
 	for _, item := range dirtyFiles {
-		fromStep, toStep := kv.Step(item.startTxNum/aggregationStep), kv.Step(item.endTxNum/aggregationStep)
-		for _, fName := range accessorsFor(fromStep, toStep) {
+		for _, fName := range accessorsFor(item.StepRange(aggregationStep)) {
 			exists, err := dir.FileExist(fName)
 			if err != nil {
 				panic(err)
