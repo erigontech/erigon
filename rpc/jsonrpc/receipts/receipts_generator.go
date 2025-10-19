@@ -430,7 +430,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
-	var sharedDomains * dbstate.SharedDomains
+	var sharedDomains *dbstate.SharedDomains
 	defer func() {
 		if sharedDomains != nil {
 			sharedDomains.Close()
