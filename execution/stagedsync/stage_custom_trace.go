@@ -449,7 +449,7 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 	return txNum
 }
 
-func firstStepNotInFiles(tx kv.Tx, produce Produce) kv.Step {
+func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
 	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	ac := dbstate.AggTx(tx)
 	fromStep := kv.Step(math.MaxUint64)

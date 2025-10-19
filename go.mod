@@ -7,7 +7,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250731094644-2f399d9fb4a1
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.9
+	github.com/erigontech/mdbx-go v0.39.11
 	github.com/erigontech/secp256k1 v1.2.0
 	github.com/erigontech/silkworm-go v0.24.0
 )
