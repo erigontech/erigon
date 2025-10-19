@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -51,6 +52,8 @@ var (
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
+
+	integStepSize uint64 // name prefixed to avoid conflict with another existing stepSize flag
 )
 
 func must(err error) {
@@ -129,6 +132,8 @@ func withDataDir2(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+
+	cmd.Flags().Uint64Var(&integStepSize, "stepsize", config3.DefaultStepSize, "override snapshot step size")
 }
 
 func withDataDir(cmd *cobra.Command) {
@@ -142,6 +147,8 @@ func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+
+	cmd.Flags().Uint64Var(&integStepSize, "stepsize", config3.DefaultStepSize, "override snapshot step size")
 }
 
 func withConcurrentCommitment(cmd *cobra.Command) {
