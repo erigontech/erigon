@@ -116,7 +116,7 @@ jobs:
           Erigon3 \
           $CHAIN \
           archive_node \
-          load@$EXECUTION_NAME@$LOAD_PATTERN@$LOAD_SEQUENCE@${{runner.workspace}}/rpc-tests
+          load@${{ env.EXECUTION_NAME }}@${{ env.LOAD_PATTERN }}@${{ env.LOAD_SEQUENCE }}@${{ runner.workspace }}/rpc-tests
   
         # Capture monitoring script exit status
         test_exit_status=$?
