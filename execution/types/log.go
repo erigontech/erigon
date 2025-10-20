@@ -191,7 +191,6 @@ func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap
 	return o
 }
 
-
 type logMarshaling struct {
 	Data        hexutil.Bytes
 	BlockNumber hexutil.Uint64
