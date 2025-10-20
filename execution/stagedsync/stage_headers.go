@@ -148,17 +148,14 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return err
 	}
 
-	var urlReciept string
-	if cfg.chainConfig.ChainName == "arb-sepolia" {
-		urlReciept = "https://sepolia-rollup.arbitrum.io/rpc"
-	} else if cfg.chainConfig.ChainName == "arb1" {
-		urlReciept = "https://arb1.arbitrum.io/rpc"
-	}
-
-	receiptClient, err := rpc.Dial(urlReciept, log.Root())
-	if err != nil {
-		log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
-		return err
+	urlReciept := dbg.EnvString("ERIGON_ARB_RECEIPT_URL", "")
+	var receiptClient *rpc.Client
+	if urlReciept != "" {
+		receiptClient, err = rpc.Dial(urlReciept, log.Root())
+		if err != nil {
+			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
+			return err
+		}
 	}
 
 	var curBlock uint64

@@ -13,6 +13,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -648,24 +649,31 @@ var timeboostedTxTypes = map[string]bool{
 	"0x3":  true,
 	"0x4":  true,
 	"0x68": true,
-	"0x69": true, // no timbeoosted but for simplicity
+
+	"0x69": true, // no timbeoosted but for simplicity of checking
 }
 
 func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
 	receipts := make([]receiptData, len(rawTxs))
 
-	var receiptWg errgroup.Group
-	if false == true {
-		for i, rawTx := range rawTxs {
-			typeTx, ok := rawTx["type"].(string)
-			if !ok {
-				continue
+	receiptsEnabled := client != nil
+	var receiptWg, unmarshalWg errgroup.Group
+
+	for i, rawTx := range rawTxs {
+		idx := i
+		txData := rawTx
+		unmarshalWg.Go(func() error {
+			commonTx, err := parseCommonTx(txData)
+			if err != nil {
+				return fmt.Errorf("failed to parse common fields at index %d: %w", idx, err)
 			}
 
-			if timeboostedTxTypes[typeTx] {
-				idx := i
-				txData := rawTx
+			typeTx, ok := txData["type"].(string)
+			if !ok {
+				return fmt.Errorf("missing tx type at index %d", idx)
+			}
+			if receiptsEnabled && timeboostedTxTypes[typeTx] {
 				txType := typeTx
 				receiptWg.Go(func() error {
 					var receipt ReceiptJson
@@ -688,23 +696,6 @@ func unMarshalTransactions(client *rpc.Client, rawTxs []map[string]interface{}, 
 
 					return nil
 				})
-			}
-		}
-	}
-
-	var unmarshalWg errgroup.Group
-	for i, rawTx := range rawTxs {
-		idx := i
-		txData := rawTx
-		unmarshalWg.Go(func() error {
-			commonTx, err := parseCommonTx(txData)
-			if err != nil {
-				return fmt.Errorf("failed to parse common fields at index %d: %w", idx, err)
-			}
-
-			typeTx, ok := txData["type"].(string)
-			if !ok {
-				return fmt.Errorf("missing tx type at index %d", idx)
 			}
 
 			var tx types.Transaction
@@ -844,10 +835,9 @@ func genFromRPc(cliCtx *cli.Context) error {
 	verification := cliCtx.Bool(Verify.Name)
 	isArbitrum := cliCtx.Bool(Arbitrum.Name)
 
+	urlReciept := dbg.EnvString("ERIGON_ARB_RECEIPT_URL", "")
 	var receiptClient *rpc.Client
-	if isArbitrum {
-		urlReciept := "https://sepolia-rollup.arbitrum.io/rpc"
-		// urlReciept:='https://arb1.arbitrum.io/rpc',
+	if isArbitrum && urlReciept != "" {
 		receiptClient, err = rpc.Dial(urlReciept, log.Root())
 		if err != nil {
 			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
