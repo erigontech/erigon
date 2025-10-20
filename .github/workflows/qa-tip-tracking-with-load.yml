@@ -35,8 +35,6 @@ jobs:
       TRACKING_TIME_SECONDS: 1800 # 0.5 hours
       TOTAL_TIME_SECONDS: 7200 # 2 hours
       CHAIN: mainnet
-      GITHUB_WORKSPACE: ${{ github.workspace }}
-      RUNNER_WORKSPACE: ${{ runner.workspace }}
 
     steps:
     - name: Check out Erigon repository
@@ -44,9 +42,9 @@ jobs:
 
     - name: Checkout RPC Tests Repository & Install Requirements
       run: |
-        rm -rf "$RUNNER_WORKSPACE/rpc-tests"
-        git -c advice.detachedHead=false clone --depth 1 --branch v1.78.0 https://github.com/erigontech/rpc-tests "$RUNNER_WORKSPACE/rpc-tests"
-        cd "$RUNNER_WORKSPACE/rpc-tests"
+        rm -rf ${{runner.workspace}}/rpc-tests
+        git -c advice.detachedHead=false clone --depth 1 --branch v1.78.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+        cd ${{runner.workspace}}/rpc-tests
 
     - name: Clean Erigon Build Directory
       run: |
@@ -113,7 +111,7 @@ jobs:
         
         # Launch the testbed Erigon instance & test its ability to maintain sync with a load for TRACKING_TIME_SECONDS
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          "$GITHUB_WORKSPACE/build/bin" \
+          "${{ github.workspace }}/build/bin" \
           "$ERIGON_TESTBED_DATA_DIR" \
           "$TRACKING_TIME_SECONDS" \
           "$TOTAL_TIME_SECONDS" \
@@ -149,7 +147,7 @@ jobs:
         #fi 
         
         PLOT_FILE="metrics-${{ env.CHAIN }}-plots_sync_with_load_combined_gauge.png"
-        if [ -f "$GITHUB_WORKSPACE/$PLOT_FILE" ]; then
+        if [ -f "${{ github.workspace }}/$PLOT_FILE" ]; then
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           echo "::notice::To see the result of the test, please check the '$PLOT_FILE' plot in the plots artifact"
         else
@@ -168,8 +166,6 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-        SAFE_BRANCH: ${{ github.ref_name }}
-        SAFE_RUNNER_NAME: ${{ runner.name }}
       run: |
         db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
         if [ -z "$db_version" ]; then
@@ -179,13 +175,13 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch "$SAFE_BRANCH" \
+          --branch ${{ github.ref_name }} \
           --test_name tip-tracking-with-load \
-          --chain "$CHAIN" \
-          --runner "$SAFE_RUNNER_NAME" \
-          --db_version "$db_version" \
-          --outcome "$TEST_RESULT" \
-          --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
+          --chain $CHAIN \
+          --runner ${{ runner.name }} \
+          --db_version $db_version \
+          --outcome $TEST_RESULT \
+          --result_file ${{ github.workspace }}/result-$CHAIN.json
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'
@@ -222,10 +218,8 @@ jobs:
 
     - name: Action for Not Success
       if: ${{ always() }}
-      env:
-        TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
       run: |
-        if [[ "$TEST_RESULT" != "success" ]]; then
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
           echo "::error::Error detected during tests, please see the summary section for details"
           exit 1
         fi 
