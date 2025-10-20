@@ -69,7 +69,6 @@ func TestInterpreterReadonly(t *testing.T) {
 			common.Address{},
 			common.Address{},
 			uint256.Int{},
-			0,
 			c,
 		)
 
@@ -327,7 +326,6 @@ func TestReadonlyBasicCases(t *testing.T) {
 					common.Address{},
 					common.Address{},
 					uint256.Int{},
-					0,
 					c,
 				)
 
@@ -412,19 +410,18 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 	return &testSequential{env, currentIdx, readonlies, isEVMCalled}
 }
 
-func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
+func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, error) {
 	*st.currentIdx++
 	c := NewJumpDestCache(16)
-	nextContract := NewContract(
+	nextContract := *NewContract(
 		common.Address{},
 		common.Address{},
 		common.Address{},
 		uint256.Int{},
-		0,
 		c,
 	)
 
-	return st.env.interpreter.Run(nextContract, nil, st.readOnlys[*st.currentIdx])
+	return st.env.interpreter.Run(nextContract, 0, nil, st.readOnlys[*st.currentIdx])
 }
 
 func trace(isEVMSlice []bool, readOnlySlice []*readOnlyState) string {

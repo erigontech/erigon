@@ -790,7 +790,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}
 
 		if stateObject.data.Empty() {
-			sdb.versionWritten(addr, BalancePath, common.Hash{}, *common.Num0)
+			sdb.versionWritten(addr, BalancePath, common.Hash{}, uint256.Int{})
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
 				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 			}

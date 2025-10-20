@@ -43,7 +43,7 @@ type testVM struct {
 	depth int
 }
 
-func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err error) {
+func (evm *testVM) Run(_ Contract, _ uint64, _ []byte, readOnly bool) (ret []byte, gas uint64, err error) {
 	currentReadOnly := new(readOnlyState)
 
 	currentReadOnly.outer = readOnly
@@ -65,15 +65,14 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	*evm.currentIdx++
 
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
-		res, err := evm.env.interpreter.Run(NewContract(
+		res, _, err := evm.env.interpreter.Run(*NewContract(
 			common.Address{},
 			common.Address{},
 			common.Address{},
 			uint256.Int{},
-			0,
 			evm.env.config.JumpDestCache,
-		), nil, evm.readOnlySliceTest[*evm.currentIdx])
-		return res, err
+		), 0, nil, evm.readOnlySliceTest[*evm.currentIdx])
+		return res, 0, err
 	}
 
 	return

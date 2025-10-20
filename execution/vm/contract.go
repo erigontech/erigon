@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // AccountRef is a reference to an account address.
@@ -56,10 +55,8 @@ type Contract struct {
 
 	Code     []byte
 	CodeHash common.Hash
-	CodeAddr *common.Address
-	Input    []byte
+	CodeAddr common.Address
 
-	Gas   uint64
 	value uint256.Int
 }
 
@@ -90,16 +87,13 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller common.Address, callerAddress common.Address, addr common.Address, value uint256.Int, gas uint64, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller common.Address, callerAddress common.Address, addr common.Address, value uint256.Int, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
 		caller:        caller,
 		callerAddress: callerAddress,
 		self:          addr,
 		value:         value,
-		// Gas should be a pointer so it can safely be reduced through the run
-		// This pointer will be off the state transition
-		Gas:       gas,
-		jumpdests: jumpDest,
+		jumpdests:     jumpDest,
 	}
 }
 
@@ -170,36 +164,6 @@ func (c *Contract) Caller() common.Address {
 	return c.callerAddress
 }
 
-// UseGas attempts the use gas and subtracts it and returns true on success
-// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
-func (c *Contract) UseGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
-	_ = reason
-
-	if c.Gas < gas {
-		return false
-	}
-
-	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		tracer.OnGasChange(c.Gas, c.Gas-gas, reason)
-	}
-	c.Gas -= gas
-	return true
-}
-
-// RefundGas refunds gas to the contract
-func (c *Contract) RefundGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
-	// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
-	_ = reason
-
-	if gas == 0 {
-		return
-	}
-	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		tracer.OnGasChange(c.Gas, c.Gas+gas, reason)
-	}
-	c.Gas += gas
-}
-
 // Address returns the contracts address
 func (c *Contract) Address() common.Address {
 	return c.self
@@ -210,17 +174,9 @@ func (c *Contract) Value() *uint256.Int {
 	return &c.value
 }
 
-// SetCallCode sets the code of the contract and address of the backing data
-// object
-func (c *Contract) SetCallCode(addr *common.Address, hash common.Hash, code []byte) {
-	c.Code = code
-	c.CodeHash = hash
-	c.CodeAddr = addr
-}
-
 // SetCodeOptionalHash can be used to provide code, but it's optional to provide hash.
 // In case hash is not provided, the jumpdest analysis will not be saved to the parent context
-func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAndHash) {
+func (c *Contract) SetCodeOptionalHash(addr common.Address, codeAndHash *codeAndHash) {
 	c.Code = codeAndHash.code
 	c.CodeHash = codeAndHash.hash
 	c.CodeAddr = addr

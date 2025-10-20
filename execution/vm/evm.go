@@ -248,32 +248,53 @@ func (evm *EVM) call(typ OpCode, caller common.Address, parent *Contract, addr c
 		// The depth-check is already done, and precompiles handled above
 		ret, err = nil, nil // gas is unchanged
 	} else {
-		// At this point, we use a copy of address. If we don't, the go compiler will
-		// leak the 'contract' to the outer scope, and make allocation for 'contract'
-		// even if the actual execution ends on RunPrecompiled above.
-		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		var codeHash common.Hash
-		codeHash, err = evm.intraBlockState.ResolveCodeHash(addrCopy)
+		codeHash, err = evm.intraBlockState.ResolveCodeHash(addr)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		var contract *Contract
+		var contract Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, caller, caller, value, gas, evm.config.JumpDestCache)
+			contract = Contract{
+				caller:        caller,
+				callerAddress: caller,
+				self:          caller,
+				value:         value,
+				jumpdests:     evm.config.JumpDestCache,
+				Code:          code,
+				CodeHash:      codeHash,
+				CodeAddr:      addr,
+			}
 		} else if typ == DELEGATECALL {
-			contract = NewContract(caller, parent.callerAddress, caller, parent.value, gas, evm.config.JumpDestCache)
+			contract = Contract{
+				caller:        caller,
+				callerAddress: parent.callerAddress,
+				self:          caller,
+				value:         parent.value,
+				jumpdests:     evm.config.JumpDestCache,
+				Code:          code,
+				CodeHash:      codeHash,
+				CodeAddr:      addr,
+			}
 		} else {
-			contract = NewContract(caller, caller, addrCopy, value, gas, evm.config.JumpDestCache)
+			contract = Contract{
+				caller:        caller,
+				callerAddress: caller,
+				self:          addr,
+				value:         value,
+				jumpdests:     evm.config.JumpDestCache,
+				Code:          code,
+				CodeHash:      codeHash,
+				CodeAddr:      addr,
+			}
 		}
-		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, err = evm.interpreter.Run(contract, input, readOnly)
-		gas = contract.Gas
+		ret, gas, err = evm.interpreter.Run(contract, gas, input, readOnly)
 	}
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
@@ -433,14 +454,14 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, caller, address, value, gasRemaining, evm.config.JumpDestCache)
-	contract.SetCodeOptionalHash(&address, codeAndHash)
+	contract := *NewContract(caller, caller, address, value, evm.config.JumpDestCache)
+	contract.SetCodeOptionalHash(address, codeAndHash)
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
 
-	ret, err = evm.interpreter.Run(contract, nil, false)
+	ret, gasRemaining, err = evm.interpreter.Run(contract, gasRemaining, nil, false)
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
@@ -461,7 +482,8 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if contract.UseGas(createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
+		var ok bool
+		if gasRemaining, ok = useGas(gasRemaining, createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage); ok {
 			evm.intraBlockState.SetCode(address, ret)
 		} else {
 			// If we run out of gas, we do not store the code: the returned code must be empty.
@@ -478,11 +500,11 @@ func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemai
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
 		if err != ErrExecutionReverted {
-			contract.UseGas(contract.Gas, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
+			gasRemaining, _ = useGas(gasRemaining, gasRemaining, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
 		}
 	}
 
-	return ret, address, contract.Gas, err
+	return ret, address, gasRemaining, err
 }
 
 func (evm *EVM) maxCodeSize() int {
@@ -591,7 +613,3 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas u
 func (evm *EVM) Depth() int {
 	return evm.interpreter.Depth()
 }
-
-func (evm *EVM) IncDepth() { evm.interpreter.IncDepth() }
-
-func (evm *EVM) DecDepth() { evm.interpreter.DecDepth() }

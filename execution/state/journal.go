@@ -34,7 +34,7 @@ type journalEntry interface {
 	revert(*IntraBlockState) error
 
 	// dirtied returns the Ethereum address modified by this journal entry.
-	dirtied() *common.Address
+	dirtied() (common.Address, bool)
 }
 
 // journal contains the list of state modifications applied since the last state
@@ -59,8 +59,8 @@ func (j *journal) Reset() {
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
 	j.entries = append(j.entries, entry)
-	if addr := entry.dirtied(); addr != nil {
-		j.dirties[*addr]++
+	if addr, isditry := entry.dirtied(); isditry {
+		j.dirties[addr]++
 	}
 }
 
@@ -72,9 +72,9 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 		j.entries[i].revert(statedb)
 
 		// Drop any dirty tracking induced by the change
-		if addr := j.entries[i].dirtied(); addr != nil {
-			if j.dirties[*addr]--; j.dirties[*addr] == 0 {
-				delete(j.dirties, *addr)
+		if addr, isdirty := j.entries[i].dirtied(); isdirty {
+			if j.dirties[addr]--; j.dirties[addr] == 0 {
+				delete(j.dirties, addr)
 			}
 		}
 	}
@@ -184,8 +184,8 @@ func (ch createObjectChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch createObjectChange) dirtied() *common.Address {
-	return &ch.account
+func (ch createObjectChange) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) error {
@@ -193,8 +193,8 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch resetObjectChange) dirtied() *common.Address {
-	return nil
+func (ch resetObjectChange) dirtied() (common.Address, bool) {
+	return common.Address{}, false
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
@@ -242,8 +242,8 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch selfdestructChange) dirtied() *common.Address {
-	return &ch.account
+func (ch selfdestructChange) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
 var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
@@ -252,7 +252,7 @@ func (ch touchChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch touchChange) dirtied() *common.Address { return &ch.account }
+func (ch touchChange) dirtied() (common.Address, bool) { return ch.account, true }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(ch.account)
@@ -290,8 +290,8 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch balanceChange) dirtied() *common.Address {
-	return &ch.account
+func (ch balanceChange) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
 func (ch balanceIncrease) revert(s *IntraBlockState) error {
@@ -305,12 +305,12 @@ func (ch balanceIncrease) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch balanceIncrease) dirtied() *common.Address {
-	return &ch.account
+func (ch balanceIncrease) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
-func (ch balanceIncreaseTransfer) dirtied() *common.Address {
-	return nil
+func (ch balanceIncreaseTransfer) dirtied() (common.Address, bool) {
+	return common.Address{}, false
 }
 
 func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
@@ -351,8 +351,8 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch nonceChange) dirtied() *common.Address {
-	return &ch.account
+func (ch nonceChange) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
 func (ch codeChange) revert(s *IntraBlockState) error {
@@ -405,8 +405,8 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch codeChange) dirtied() *common.Address {
-	return &ch.account
+func (ch codeChange) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
 func (ch storageChange) revert(s *IntraBlockState) error {
@@ -448,8 +448,8 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch storageChange) dirtied() *common.Address {
-	return &ch.account
+func (ch storageChange) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
@@ -461,8 +461,8 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch fakeStorageChange) dirtied() *common.Address {
-	return &ch.account
+func (ch fakeStorageChange) dirtied() (common.Address, bool) {
+	return ch.account, true
 }
 
 func (ch transientStorageChange) revert(s *IntraBlockState) error {
@@ -470,8 +470,8 @@ func (ch transientStorageChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch transientStorageChange) dirtied() *common.Address {
-	return nil
+func (ch transientStorageChange) dirtied() (common.Address, bool) {
+	return common.Address{}, false
 }
 
 func (ch refundChange) revert(s *IntraBlockState) error {
@@ -479,8 +479,8 @@ func (ch refundChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch refundChange) dirtied() *common.Address {
-	return nil
+func (ch refundChange) dirtied() (common.Address, bool) {
+	return common.Address{}, false
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) error {
@@ -496,8 +496,8 @@ func (ch addLogChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch addLogChange) dirtied() *common.Address {
-	return nil
+func (ch addLogChange) dirtied() (common.Address, bool) {
+	return common.Address{}, false
 }
 
 func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
@@ -514,8 +514,8 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch accessListAddAccountChange) dirtied() *common.Address {
-	return nil
+func (ch accessListAddAccountChange) dirtied() (common.Address, bool) {
+	return common.Address{}, false
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
@@ -523,6 +523,6 @@ func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch accessListAddSlotChange) dirtied() *common.Address {
-	return nil
+func (ch accessListAddSlotChange) dirtied() (common.Address, bool) {
+	return common.Address{}, false
 }

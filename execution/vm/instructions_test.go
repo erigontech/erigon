@@ -122,7 +122,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		stack.push(x)
 		stack.push(y)
-		opFn(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opFn(&pc, evmInterpreter, &ScopeContext{0, nil, nil, stack, Contract{}})
 		if len(stack.data) != 1 {
 			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(stack.data))
 		}
@@ -242,7 +242,7 @@ func TestAddMod(t *testing.T) {
 		stack.push(z)
 		stack.push(y)
 		stack.push(x)
-		opAddmod(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opAddmod(&pc, evmInterpreter, &ScopeContext{0, nil, nil, stack, Contract{}})
 		actual := stack.pop()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
@@ -320,7 +320,7 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 			a := *new(uint256.Int).SetBytes(arg)
 			stack.push(a)
 		}
-		op(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		op(&pc, evmInterpreter, &ScopeContext{0, nil, nil, stack, Contract{}})
 		stack.pop()
 	}
 }
@@ -548,13 +548,13 @@ func TestOpMstore(t *testing.T) {
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
 	stack.push(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
 	stack.push(*new(uint256.Int))
-	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+	opMstore(&pc, evmInterpreter, &ScopeContext{0, nil, mem, stack, Contract{}})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
 	stack.push(*new(uint256.Int).SetOne())
 	stack.push(*new(uint256.Int))
-	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+	opMstore(&pc, evmInterpreter, &ScopeContext{0, nil, mem, stack, Contract{}})
 	if common.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
 	}
@@ -577,7 +577,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 	for bench.Loop() {
 		stack.push(value)
 		stack.push(memStart)
-		opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+		opMstore(&pc, evmInterpreter, &ScopeContext{0, nil, mem, stack, Contract{}})
 	}
 }
 
@@ -591,8 +591,8 @@ func TestOpTstore(t *testing.T) {
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		caller         = common.Address{}
 		to             = common.Address{1}
-		contract       = NewContract(caller, caller, to, uint256.Int{}, 0, NewJumpDestCache(16))
-		scopeContext   = ScopeContext{mem, stack, contract}
+		contract       = *NewContract(caller, caller, to, uint256.Int{}, NewJumpDestCache(16))
+		scopeContext   = ScopeContext{0, nil, mem, stack, contract}
 		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 
@@ -635,7 +635,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	for bench.Loop() {
 		stack.push(*uint256.NewInt(32))
 		stack.push(start)
-		opKeccak256(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+		opKeccak256(&pc, evmInterpreter, &ScopeContext{0, nil, mem, stack, Contract{}})
 	}
 }
 
@@ -831,7 +831,7 @@ func TestOpMCopy(t *testing.T) {
 		}
 		// and the dynamic cost
 		var haveGas uint64
-		if dynamicCost, err := gasMcopy(env, nil, stack, mem, memorySize); err != nil {
+		if dynamicCost, err := gasMcopy(env, common.Address{}, 0, stack, mem, memorySize); err != nil {
 			t.Error(err)
 		} else {
 			haveGas = GasFastestStep + dynamicCost
@@ -841,7 +841,7 @@ func TestOpMCopy(t *testing.T) {
 			mem.Resize(memorySize)
 		}
 		// Do the copy
-		opMcopy(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+		opMcopy(&pc, evmInterpreter, &ScopeContext{0, nil, mem, stack, Contract{}})
 		want := common.FromHex(strings.ReplaceAll(tc.want, " ", ""))
 		if have := mem.store; !bytes.Equal(want, have) {
 			t.Errorf("case %d: \nwant: %#x\nhave: %#x\n", i, want, have)
