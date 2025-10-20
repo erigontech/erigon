@@ -517,6 +517,47 @@ func TestInvalidWrapperVersionAcceptance(t *testing.T) {
 	}
 }
 
+func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	baseWrapper := types.MakeWrappedBlobTxn(chainID)
+
+	baseBuf := &bytes.Buffer{}
+	require.NoError(t, baseWrapper.MarshalBinaryWrapped(baseBuf))
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.withSender = false
+
+	// Sanity-check baseline payload parses successfully.
+	var validSlot TxnSlot
+	_, err := ctx.ParseTransaction(baseBuf.Bytes(), 0, &validSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.NoError(t, err)
+
+	// Commitments > blobs.
+	moreCommitmentsWrapper := *baseWrapper
+	moreCommitmentsWrapper.Commitments = append(types.BlobKzgs{}, baseWrapper.Commitments...)
+	moreCommitmentsWrapper.Commitments = append(moreCommitmentsWrapper.Commitments, types.KZGCommitment{})
+
+	moreBuf := &bytes.Buffer{}
+	require.NoError(t, moreCommitmentsWrapper.MarshalBinaryWrapped(moreBuf))
+
+	var moreSlot TxnSlot
+	_, err = ctx.ParseTransaction(moreBuf.Bytes(), 0, &moreSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "more commitments than blobs")
+
+	// Commitments < blobs.
+	fewerCommitmentsWrapper := *baseWrapper
+	fewerCommitmentsWrapper.Commitments = append(types.BlobKzgs{}, baseWrapper.Commitments[:1]...)
+
+	fewerBuf := &bytes.Buffer{}
+	require.NoError(t, fewerCommitmentsWrapper.MarshalBinaryWrapped(fewerBuf))
+
+	var fewerSlot TxnSlot
+	_, err = ctx.ParseTransaction(fewerBuf.Bytes(), 0, &fewerSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "fewer commitments than blobs")
+}
+
 func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	txnRlpHex := testdata.ValidSetCodeTxn1
 	// For authorizationList[0] in the above :-

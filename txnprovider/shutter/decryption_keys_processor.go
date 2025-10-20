@@ -273,18 +273,25 @@ func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub
 }
 
 // threadSafeParseTxn is needed because txnParseCtx.ParseTransaction is not thread safe
-func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnSlot, common.Address, error) {
+func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (txnSlot *txpool.TxnSlot, sender common.Address, err error) {
 	dkp.txnParseCtxMu.Lock()
 	defer dkp.txnParseCtxMu.Unlock()
 
-	var txnSlot txpool.TxnSlot
-	var sender common.Address
-	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], false, true, nil)
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic while parsing transaction: %v", r)
+			txnSlot = nil
+			sender = common.Address{}
+		}
+	}()
+
+	var slot txpool.TxnSlot
+	_, err = dkp.txnParseCtx.ParseTransaction(rlp, 0, &slot, sender[:], false, true, nil)
 	if err != nil {
 		return nil, common.Address{}, err
 	}
 
-	return &txnSlot, sender, nil
+	return &slot, sender, nil
 }
 
 func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
