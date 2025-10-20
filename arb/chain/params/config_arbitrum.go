@@ -40,7 +40,7 @@ func ArbitrumOneParams() types.ArbitrumChainParams {
 		GenesisBlockNum:           22207817,
 		GenesisTxNum:              69372193, // non-canonical (E3) txnumber of first txn in given block
 
-		Rollup: chain.ArbRollupConfig{
+		Rollup: types.ArbRollupConfig{
 			Bridge:                 "0x8315177ab297ba92a06054ce80a67ed4dbd7ed3a",
 			Inbox:                  "0x4dbd4fc535ac27206064b68ffcf827b0a60bab3f",
 			SequencerInbox:         "0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6",
