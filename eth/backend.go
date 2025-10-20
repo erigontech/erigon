@@ -76,6 +76,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/snaptype"
+	arbchain "github.com/erigontech/erigon/arb/chain"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -362,6 +364,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		chainConfig = chainspec.ChainConfigByChainName("arb1")
+
+		genesis = rawdb.ReadBlock(tx, arbchain.Arb1GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum)
+		if genesis == nil {
+			log.Info("db genesis block is nil")
+			genesis = arbchain.Arb1GenesisBlock()
+		}
+		return nil
 
 		genesisConfig, err := core.ReadGenesis(tx)
 		if err != nil {

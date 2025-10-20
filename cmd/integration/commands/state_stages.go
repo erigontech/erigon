@@ -139,6 +139,7 @@ func init() {
 	withWorkers(stateStages)
 	//withChaosMonkey(stateStages)
 	withL2RPCaddress(stateStages)
+	withArbInitJson(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)

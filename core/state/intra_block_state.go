@@ -1324,7 +1324,7 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
+func updateAccount(EIP161Enabled, isAura bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
@@ -1402,7 +1402,16 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
+		zombieDies := chainRules.IsSpuriousDragon
+		if chainRules.IsArbitrum {
+			// TODO (awskii): review this condition, possibly not required at all.
+			// Somewhy this change is required only for arb1 chain.
+			// zombieDies = chainRules.ArbOSVersion < chain.ArbosVersion_30
+			if bi, exists := sdb.balanceInc[addr]; exists && bi.isEscrow {
+				zombieDies = false
+			}
+		}
+		if err := updateAccount(zombieDies, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
 
@@ -1470,14 +1479,7 @@ type BalanceIncreaseEntry struct {
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[common.Address]BalanceIncreaseEntry {
 	s := make(map[common.Address]BalanceIncreaseEntry, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
-		if bi.isEscrow {
-			s[addr] = BalanceIncreaseEntry{
-				Amount:   uint256.Int{},
-				IsEscrow: bi.isEscrow,
-			}
-		}
-
-		if !bi.transferred {
+		if !bi.transferred || bi.isEscrow {
 			s[addr] = BalanceIncreaseEntry{
 				Amount:   bi.increase,
 				IsEscrow: bi.isEscrow,
@@ -1510,7 +1512,14 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
+		zombieDies := chainRules.IsSpuriousDragon
+		if chainRules.IsArbitrum {
+			// zombieDies = chainRules.ArbOSVersion < chain.ArbosVersion_30
+			if bi, exists := sdb.balanceInc[addr]; exists && bi.isEscrow {
+				zombieDies = false
+			}
+		}
+		if err := updateAccount(zombieDies, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
 	}

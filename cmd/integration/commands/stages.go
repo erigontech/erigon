@@ -1215,11 +1215,20 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	events := shards.NewEvents()
 
 	genesis := readGenesis(chain)
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, dirs, logger)
-	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
-		panic(genesisErr)
+	var chainConfig *chain2.ChainConfig
+	var genesisBlock *types.Block
+	if chain == "arb1" {
+		chainConfig = chainspec.ChainConfigByChainName("arb1")
+		genesisBlock = arbchain.Arb1GenesisBlock()
+	} else {
+		var genesisErr error
+		chainConfig, genesisBlock, genesisErr = core.CommitGenesisBlock(db, genesis, dirs, logger)
+		if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
+			panic(genesisErr)
+		}
 	}
-	//logger.Info("Initialised chain configuration", "config", chainConfig)
+
+	logger.Info("Initialised chain configuration", "config", chainConfig)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
