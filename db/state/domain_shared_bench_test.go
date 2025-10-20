@@ -25,9 +25,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
@@ -66,7 +66,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		}
 
 		if i%stepSize == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
@@ -76,7 +76,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			}
 		}
 	}
-	_, err = domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+	_, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 
 	b.Run("ComputeCommitment", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}
 	})

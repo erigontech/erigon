@@ -18,10 +18,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -206,7 +206,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		cf.decompressor.MadvNormal()
 
 		err = func() error {
-			steps := cf.endTxNum/stepSize - cf.startTxNum/stepSize
+			steps := cf.StepCount(stepSize)
 			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
@@ -363,7 +363,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	ranges := make([]MergeRange, 0)
 	for fi, f := range sf.d[kv.AccountsDomain] {
-		logger.Info(fmt.Sprintf("[commitment_rebuild] shard to build #%d: steps %d-%d (based on %s)", fi, f.startTxNum/a.StepSize(), f.endTxNum/a.StepSize(), f.decompressor.FileName()))
+		fromStep, toStep := f.StepRange(a.StepSize())
+		logger.Info(fmt.Sprintf("[commitment_rebuild] shard to build #%d: steps %d-%d (based on %s)", fi, fromStep, toStep, f.decompressor.FileName()))
+
 		ranges = append(ranges, MergeRange{
 			from: f.startTxNum,
 			to:   f.endTxNum,
@@ -596,7 +598,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.Tempor
 	}
 
 	collectionSpent := time.Since(sf)
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}

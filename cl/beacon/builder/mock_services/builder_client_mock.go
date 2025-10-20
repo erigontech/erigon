@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
 	builder "github.com/erigontech/erigon/cl/beacon/builder"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	common "github.com/erigontech/erigon/common"
 	engine_types "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	gomock "go.uber.org/mock/gomock"
 )

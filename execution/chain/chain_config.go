@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/execution/chain/params"
 )
 

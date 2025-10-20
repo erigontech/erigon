@@ -27,20 +27,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	math2 "github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	math2 "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/eth/tracers"
-	"github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	ptracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -681,7 +681,7 @@ func (ot *OeTracer) GetResult() (json.RawMessage, error) {
 
 func (ot *OeTracer) Stop(err error) {}
 
-// Implements core/state/StateWriter to provide state diffs
+// Implements execution/state/StateWriter to provide state diffs
 type StateDiff struct {
 	sdMap map[common.Address]*StateDiffAccount
 }
