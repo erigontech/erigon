@@ -365,7 +365,7 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: {},
+			0: nil,
 		}
 		if c.CancunTime != nil {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
@@ -416,7 +416,10 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Max
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.Max
+	}
+	return 0
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
@@ -424,11 +427,17 @@ func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
 }
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Target
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return c.GetBlobConfig(time).Target
+	}
+	return 0
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	return c.GetBlobConfig(time).BaseFeeUpdateFraction
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return c.GetBlobConfig(time).BaseFeeUpdateFraction
+	}
+	return 0
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
