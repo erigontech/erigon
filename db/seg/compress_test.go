@@ -82,10 +82,10 @@ func checksum(file string) uint32 {
 }
 
 func prepareDict(t *testing.T, multiplier int, keys int) *Decompressor {
-	return prepareDictMetadata(t, multiplier, false, nil)
+	return prepareDictMetadata(t, multiplier, false, nil, keys)
 }
 
-func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadata []byte) *Decompressor {
+func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadata []byte, keys int) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -266,7 +266,7 @@ func TestCompressDictCmp(t *testing.T) {
 
 func Test_CompressWithMetadata(t *testing.T) {
 	metadata := []byte("lorem metadata ipsum")
-	d := prepareDictMetadata(t, 1, true, metadata)
+	d := prepareDictMetadata(t, 1, true, metadata, 100)
 	defer d.Close()
 	require.Equal(t, metadata, d.GetMetadata())
 	g := d.MakeGetter()
