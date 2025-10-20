@@ -657,7 +657,7 @@ func (b *Body) MatchesHeader(h *Header) error {
 	} else {
 		hash := b.BlockAccessList.Hash()
 		if hash != *h.BlockAccessListHash {
-			return fmt.Errorf("body has invalid block access list hash: have %x, exp: %x", hash, h.BlockAccessListHash)
+			return fmt.Errorf("body has invalid block access list hash: have %x, exp: %x", hash, *h.BlockAccessListHash)
 		}
 	}
 
