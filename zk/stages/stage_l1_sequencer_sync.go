@@ -206,8 +206,8 @@ Loop:
 		case <-ctx.Done():
 			break Loop
 		case <-idleTicker.C:
-			if time.Since(latestActivity) > noActivityTimeout {
-				log.Warn(fmt.Sprintf("[%s] No activity for %s", logPrefix, noActivityTimeout))
+			if time.Since(latestActivity) > cfg.zkCfg.L1NoActivityTimeout {
+				log.Warn(fmt.Sprintf("[%s] No activity for %s", logPrefix, cfg.zkCfg.L1NoActivityTimeout))
 
 				cfg.syncer.StopQueryBlocks()
 				cfg.syncer.ConsumeQueryBlocks()

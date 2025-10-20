@@ -3,6 +3,7 @@ package l1infotree
 import (
 	"context"
 	"math/big"
+	"os"
 	"testing"
 	"time"
 
@@ -106,6 +107,16 @@ func TestUpdater_WarmUp(t *testing.T) {
 
 	assert.Equal(t, uint64(999), updater.progress)
 	mockSyncer.AssertExpectations(t)
+}
+
+// TestMain overrides test-global values such as minFilterBlockSpan so tests
+// can exercise smaller splits without changing production defaults.
+func TestMain(m *testing.M) {
+	old := syncer.MinFilterBlockSpan
+	syncer.MinFilterBlockSpan = 1
+	code := m.Run()
+	syncer.MinFilterBlockSpan = old
+	os.Exit(code)
 }
 
 func TestL1InfoWorkerPool_NewAndStart(t *testing.T) {

@@ -36,6 +36,7 @@ type Zk struct {
 	L1HighestBlockType                     string
 	L1MaticContractAddress                 common.Address
 	L1FirstBlock                           uint64
+	L1NoActivityTimeout                    time.Duration
 	L1FinalizedBlockRequirement            uint64
 	RpcRateLimits                          int
 	RpcGetBatchWitnessConcurrencyLimit     int
