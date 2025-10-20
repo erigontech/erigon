@@ -55,7 +55,7 @@ func TestMemoryGasCost(t *testing.T) {
 		{0x1fffffffe1, 0, true},
 	}
 	for i, tt := range tests {
-		v, err := vm.MemoryGasCost(&vm.Memory{}, tt.size)
+		v, err := vm.MemoryGasCost(&vm.CallContext{}, tt.size)
 		if (err == vm.ErrGasUintOverflow) != tt.overflow {
 			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, err == vm.ErrGasUintOverflow, tt.overflow)
 		}

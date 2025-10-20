@@ -111,7 +111,7 @@ func init() {
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = New()
+		callContext    = &CallContext{}
 		pc             = uint64(0)
 		evmInterpreter = env.interpreter.(*EVMInterpreter)
 	)
@@ -120,13 +120,13 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		x := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
 		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
-		stack.push(x)
-		stack.push(y)
-		opFn(pc, evmInterpreter, &CallContext{0, nil, Memory{}, *stack, Contract{}})
-		if len(stack.data) != 1 {
-			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(stack.data))
+		callContext.Stack.push(x)
+		callContext.Stack.push(y)
+		opFn(pc, evmInterpreter, callContext)
+		if len(callContext.Stack.data) != 1 {
+			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(callContext.Stack.data))
 		}
-		actual := stack.pop()
+		actual := callContext.Stack.pop()
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
@@ -215,7 +215,7 @@ func TestAddMod(t *testing.T) {
 	t.Parallel()
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = New()
+		callContext    = &CallContext{}
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		pc             = uint64(0)
 	)
@@ -239,11 +239,11 @@ func TestAddMod(t *testing.T) {
 		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.y))
 		z := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.z))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.expected))
-		stack.push(z)
-		stack.push(y)
-		stack.push(x)
-		opAddmod(pc, evmInterpreter, &CallContext{0, nil, Memory{}, *stack, Contract{}})
-		actual := stack.pop()
+		callContext.Stack.push(z)
+		callContext.Stack.push(y)
+		callContext.Stack.push(x)
+		opAddmod(pc, evmInterpreter, callContext)
+		actual := callContext.Stack.pop()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
@@ -798,9 +798,8 @@ func TestOpMCopy(t *testing.T) {
 		)
 		data := common.FromHex(strings.ReplaceAll(tc.pre, " ", ""))
 		// Set pre
-		mem := NewMemory()
-		mem.Resize(uint64(len(data)))
-		mem.Set(0, uint64(len(data)), data)
+		callContext.Memory.Resize(uint64(len(data)))
+		callContext.Memory.Set(0, uint64(len(data)), data)
 		// Push stack args
 		len, _ := uint256.FromHex(tc.len)
 		src, _ := uint256.FromHex(tc.src)
@@ -832,12 +831,12 @@ func TestOpMCopy(t *testing.T) {
 		}
 		// Expand mem
 		if memorySize > 0 {
-			mem.Resize(memorySize)
+			callContext.Memory.Resize(memorySize)
 		}
 		// Do the copy
 		opMcopy(pc, evmInterpreter, callContext)
 		want := common.FromHex(strings.ReplaceAll(tc.want, " ", ""))
-		if have := mem.store; !bytes.Equal(want, have) {
+		if have := callContext.Memory.store; !bytes.Equal(want, have) {
 			t.Errorf("case %d: \nwant: %#x\nhave: %#x\n", i, want, have)
 		}
 		wantGas := tc.wantGas

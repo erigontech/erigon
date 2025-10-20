@@ -986,7 +986,7 @@ func opCreate(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 }
 
 func stCreate(_ uint64, scope *CallContext) string {
-	stack := scope.Stack
+	stack := &scope.Stack
 	var (
 		value  = stack.data[len(stack.data)-1]
 		offset = stack.data[len(stack.data)-2]
@@ -1035,7 +1035,7 @@ func opCreate2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 }
 
 func stCreate2(_ uint64, scope *CallContext) string {
-	stack := scope.Stack
+	stack := &scope.Stack
 	var (
 		endowment    = stack.data[len(stack.data)-1]
 		offset, size = stack.data[len(stack.data)-2], stack.data[len(stack.data)-3]
@@ -1047,7 +1047,7 @@ func stCreate2(_ uint64, scope *CallContext) string {
 }
 
 func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	stack := scope.Stack
+	stack := &scope.Stack
 	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
 	// We can use this as a temporary value
 	temp := stack.pop()
@@ -1085,7 +1085,7 @@ func opCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 }
 
 func stCall(_ uint64, scope *CallContext) string {
-	stack := scope.Stack
+	stack := &scope.Stack
 	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
@@ -1096,7 +1096,7 @@ func stCall(_ uint64, scope *CallContext) string {
 
 func opCallCode(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
-	stack := scope.Stack
+	stack := &scope.Stack
 	// We use it as a temporary value
 	temp := stack.pop()
 	gas := interpreter.evm.CallGasTemp()
@@ -1129,7 +1129,7 @@ func opCallCode(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uin
 }
 
 func stCallCode(_ uint64, scope *CallContext) string {
-	stack := scope.Stack
+	stack := &scope.Stack
 	addr, _, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4], stack.data[len(stack.data)-5]
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
@@ -1139,7 +1139,7 @@ func stCallCode(_ uint64, scope *CallContext) string {
 }
 
 func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	stack := scope.Stack
+	stack := &scope.Stack
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	// We use it as a temporary value
 	temp := stack.pop()
@@ -1169,7 +1169,7 @@ func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 }
 
 func stDelegateCall(_ uint64, scope *CallContext) string {
-	stack := scope.Stack
+	stack := &scope.Stack
 	addr, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4]
 	toAddr := common.Address(addr.Bytes20())
 	// Get the arguments from the memory.
@@ -1180,7 +1180,7 @@ func stDelegateCall(_ uint64, scope *CallContext) string {
 
 func opStaticCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
-	stack := scope.Stack
+	stack := &scope.Stack
 	// We use it as a temporary value
 	temp := stack.pop()
 	gas := interpreter.evm.CallGasTemp()
@@ -1208,7 +1208,7 @@ func opStaticCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (u
 }
 
 func stStaticCall(_ uint64, scope *CallContext) string {
-	stack := scope.Stack
+	stack := &scope.Stack
 	addr, inOffset, inSize := stack.data[len(stack.data)-2], stack.data[len(stack.data)-3], stack.data[len(stack.data)-4]
 	toAddr := common.Address(addr.Bytes20())
 	// Get arguments from the memory.
@@ -1293,7 +1293,7 @@ func makeLog(size int) executionFunc {
 			return pc, nil, ErrWriteProtection
 		}
 		topics := make([]common.Hash, size)
-		stack := scope.Stack
+		stack := &scope.Stack
 		mStart, mSize := stack.pop(), stack.pop()
 		for i := 0; i < size; i++ {
 			addr := stack.pop()
