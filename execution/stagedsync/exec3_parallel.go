@@ -271,7 +271,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 											pe.LogCommitted(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
-												committedGas-prevCommitedGas, rawdbhelpers.IdxStepsCountV3(rwTx), commitProgress)
+												committedGas-prevCommitedGas, rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize()), commitProgress)
 										}
 
 										lastCommitedLog = time.Now()

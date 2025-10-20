@@ -43,21 +43,139 @@ type sd interface {
 	CommitmentCapture() bool
 }
 
-type SharedDomainsCommitmentContext struct {
-	sharedDomains      sd
-	updates            *commitment.Updates
-	patriciaTrie       commitment.Trie
-	justRestored       atomic.Bool // set to true when commitment trie was just restored from snapshot
-	trace              bool
-	limitReadAsOfTxNum uint64
-	withHistory        bool // if true, do not use history reader and limit to domain files only
+type StateReader interface {
+	WithHistory() bool
+	CheckDataAvailable(d kv.Domain, step kv.Step) error
+	Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error)
 }
 
-// Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
-// If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
-func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
-	sdc.limitReadAsOfTxNum = txNum
-	sdc.withHistory = !domainOnly
+type LatestStateReader struct {
+	getter kv.TemporalGetter
+}
+
+func NewLatestStateReader(getter kv.TemporalGetter) *LatestStateReader {
+	return &LatestStateReader{getter: getter}
+}
+
+func (r *LatestStateReader) WithHistory() bool {
+	return false
+}
+
+func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	// we're processing the latest state - in which case it needs to be writable
+	if frozenSteps := r.getter.StepsInFiles(d); step < frozenSteps {
+		return fmt.Errorf("%q state out of date: step %d, expected step %d", d, step, frozenSteps)
+	}
+	return nil
+}
+
+func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	enc, step, err = r.getter.GetLatest(d, plainKey)
+	if err != nil {
+		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
+	}
+	return enc, step, nil
+}
+
+// HistoryStateReader reads *full* historical state at specified txNum.
+// `limitReadAsOfTxNum` here is used as timestamp for usual GetAsOf.
+type HistoryStateReader struct {
+	roTx               kv.TemporalTx
+	limitReadAsOfTxNum uint64
+}
+
+func NewHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) *HistoryStateReader {
+	return &HistoryStateReader{
+		roTx:               roTx,
+		limitReadAsOfTxNum: limitReadAsOfTxNum,
+	}
+}
+
+func (r *HistoryStateReader) WithHistory() bool {
+	return true
+}
+
+func (r *HistoryStateReader) CheckDataAvailable(kv.Domain, kv.Step) error {
+	return nil
+}
+
+func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	enc, _, err = r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
+	if err != nil {
+		return enc, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
+	}
+	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+}
+
+// LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
+// `limitReadAsOfTxNum` here is used for unusual operation: "hide recent .kv files and read the latest state from files".
+type LimitedHistoryStateReader struct {
+	HistoryStateReader
+	getter kv.TemporalGetter
+}
+
+func NewLimitedHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
+	return &LimitedHistoryStateReader{
+		HistoryStateReader: HistoryStateReader{
+			roTx:               roTx,
+			limitReadAsOfTxNum: limitReadAsOfTxNum,
+		},
+		getter: getter,
+	}
+}
+
+func (r *LimitedHistoryStateReader) WithHistory() bool {
+	return false
+}
+
+// Reason why we have `kv.TemporalDebugTx.GetLatestFromFiles' call here: `state.RebuildCommitmentFiles` can build commitment.kv from account.kv.
+// Example: we have account.0-16.kv and account.16-18.kv, let's generate commitment.0-16.kv => it means we need to make account.16-18.kv invisible
+// and then read "latest state" like there is no account.16-18.kv
+func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	var ok bool
+	var endTxNum uint64
+	// reading from domain files this way will dereference domain key correctly,
+	// GetAsOf itself does not dereference keys in commitment domain values
+	enc, ok, _, endTxNum, err = r.roTx.Debug().GetLatestFromFiles(d, plainKey, r.limitReadAsOfTxNum)
+	if err != nil {
+		return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatestFromFiles) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
+	}
+	if !ok {
+		enc = nil
+	} else {
+		step = kv.Step(endTxNum / stepSize)
+	}
+	if enc == nil {
+		enc, step, err = r.getter.GetLatest(d, plainKey)
+		if err != nil {
+			return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatest) %q: %w", d, err)
+		}
+	}
+	return enc, step, nil
+}
+
+type SharedDomainsCommitmentContext struct {
+	sharedDomains sd
+	updates       *commitment.Updates
+	patriciaTrie  commitment.Trie
+	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
+	trace         bool
+	stateReader   StateReader
+}
+
+// SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
+func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
+	sdc.stateReader = stateReader
+}
+
+// SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
+func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
+	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
+}
+
+// SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
+func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
+	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
@@ -70,13 +188,16 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant 
 
 func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx) *TrieContext {
 	mainTtx := &TrieContext{
-		roTtx:              tx,
-		getter:             sdc.sharedDomains.AsGetter(tx),
-		putter:             sdc.sharedDomains.AsPutDel(tx),
-		stepSize:           sdc.sharedDomains.StepSize(),
-		txNum:              sdc.sharedDomains.TxNum(),
-		limitReadAsOfTxNum: sdc.limitReadAsOfTxNum,
-		withHistory:        sdc.withHistory,
+		roTtx:    tx,
+		getter:   sdc.sharedDomains.AsGetter(tx),
+		putter:   sdc.sharedDomains.AsPutDel(tx),
+		stepSize: sdc.sharedDomains.StepSize(),
+		txNum:    sdc.sharedDomains.TxNum(),
+	}
+	if sdc.stateReader != nil {
+		mainTtx.stateReader = sdc.stateReader
+	} else {
+		mainTtx.stateReader = &LatestStateReader{mainTtx.getter}
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -208,11 +329,8 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if trieContext.limitReadAsOfTxNum == 0 {
-		// assume we're processing the latest state - in which case it needs to be writable
-		if frozenSteps := trieContext.getter.StepsInFiles(kv.CommitmentDomain); step < frozenSteps {
-			return 0, 0, nil, fmt.Errorf("commitment state out of date: commitment step: %d, expected step: %d", step, frozenSteps)
-		}
+	if err = trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
+		return 0, 0, nil, err
 	}
 
 	if len(state) < 16 {
@@ -442,10 +560,9 @@ type TrieContext struct {
 	putter kv.TemporalPutDel
 	txNum  uint64
 
-	limitReadAsOfTxNum uint64
-	stepSize           uint64
-	withHistory        bool // if true, do not use history reader and limit to domain files only
-	trace              bool
+	stepSize    uint64
+	trace       bool
+	stateReader StateReader
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
@@ -453,7 +570,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
-	if sdc.limitReadAsOfTxNum > 0 && sdc.withHistory { // do not store branches if explicitly operate on history
+	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}
 	if sdc.trace {
@@ -475,36 +592,7 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
 	//}
-
-	if sdc.limitReadAsOfTxNum > 0 {
-		if sdc.withHistory {
-			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
-			if err != nil {
-				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
-			}
-			return enc, 0, nil
-		} else {
-			var ok bool
-			// reading from domain files this way will dereference domain key correctly,
-			// rotx.GetAsOf itself does not dereference keys in commitment domain values
-			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
-			if !ok {
-				enc = nil
-			}
-			if err != nil {
-				return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
-			}
-		}
-	}
-
-	if enc == nil {
-		enc, step, err = sdc.getter.GetLatest(d, plainKey)
-	}
-
-	if err != nil {
-		return nil, 0, fmt.Errorf("readDomain %q: %w", d, err)
-	}
-	return enc, step, nil
+	return sdc.stateReader.Read(d, plainKey, sdc.stepSize)
 }
 
 func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err error) {
@@ -535,7 +623,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash
 	}
 
-	if assert.Enable {
+	if assert.Enable { // verify code hash from account encoding matches stored code
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err

@@ -200,6 +200,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
+		agg.StepSize(),
 	); err != nil {
 		return err
 	}
@@ -227,6 +228,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
+		agg.StepSize(),
 	); err != nil {
 		return err
 	}

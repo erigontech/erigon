@@ -434,7 +434,7 @@ func (s *simulator) simulateBlock(
 			return nil, nil, state.PrunedError
 		}
 
-		sharedDomains.GetCommitmentContext().SetLimitReadAsOfTxNum(txNum, false)
+		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum)
 		if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 			return nil, nil, err
 		}
