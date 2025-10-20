@@ -35,6 +35,9 @@ jobs:
       TRACKING_TIME_SECONDS: 1800 # 0.5 hours
       TOTAL_TIME_SECONDS: 7200 # 2 hours
       CHAIN: mainnet
+      EXECUTION_NAME: ${{ inputs.execution_name }}
+      LOAD_PATTERN: ${{ inputs.load_pattern }}
+      LOAD_SEQUENCE: ${{ inputs.load_sequence }}
 
     steps:
     - name: Check out Erigon repository
@@ -113,7 +116,7 @@ jobs:
           Erigon3 \
           $CHAIN \
           archive_node \
-          load@${{ inputs.execution_name }}@${{ inputs.load_pattern }}@${{ inputs.load_sequence }}@${{runner.workspace}}/rpc-tests
+          load@$EXECUTION_NAME@$LOAD_PATTERN@$LOAD_SEQUENCE@${{runner.workspace}}/rpc-tests
   
         # Capture monitoring script exit status
         test_exit_status=$?
