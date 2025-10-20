@@ -186,12 +186,28 @@ func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
 		return done
 	}
 
-	if cs.getBlockProgressChannel() == nil {
-		cs.logger.Warn("block progress channel not configured; block range announcements disabled")
-		return
-	}
+	var warned bool
+	for {
+		if ctx.Err() != nil {
+			return
+		}
 
-	cs.announceBlockRangeFromChannel(ctx, headerInDB)
+		if cs.getBlockProgressChannel() == nil {
+			if !warned {
+				cs.logger.Warn("block progress channel not configured; waiting for subscription")
+				warned = true
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
+		}
+
+		warned = false
+		cs.announceBlockRangeFromChannel(ctx, headerInDB)
+	}
 }
 
 func (cs *MultiClient) getBlockProgressChannel() <-chan [][]byte {

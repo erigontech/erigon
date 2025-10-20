@@ -554,6 +554,81 @@ func TestBlockProgressChannelCleanupDoesNotDropNewChannel(t *testing.T) {
 	}
 }
 
+func TestAnnounceBlockRangeLoopWaitsForChannel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testMinimumBlockHeight := uint64(5)
+	testLatestBlockHeight := uint64(10)
+	testBestHash := common.HexToHash("0xabc")
+
+	var (
+		sentMu    sync.Mutex
+		sentCount int
+	)
+
+	mockSentry := &mockSentryClient{
+		sendMessageToAllFunc: func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			sentMu.Lock()
+			sentCount++
+			sentMu.Unlock()
+			return &proto_sentry.SentPeers{}, nil
+		},
+		handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+			return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH69}, nil
+		},
+	}
+
+	mockStatus := &mockStatusDataProvider{
+		getStatusDataFunc: func(ctx context.Context) (*proto_sentry.StatusData, error) {
+			return &proto_sentry.StatusData{
+				MinimumBlockHeight: testMinimumBlockHeight,
+				MaxBlockHeight:     testLatestBlockHeight,
+				BestHash:           gointerfaces.ConvertHashToH256(testBestHash),
+			}, nil
+		},
+	}
+
+	readyReader := &mockFullBlockReader{
+		readyFunc: func(ctx context.Context) <-chan error {
+			ch := make(chan error, 1)
+			ch <- nil
+			return ch
+		},
+	}
+
+	cs := &MultiClient{
+		sentries:           []proto_sentry.SentryClient{mockSentry},
+		statusDataProvider: mockStatus,
+		blockReader:        readyReader,
+		ChainConfig:        &chain.Config{},
+		logger:             log.New(),
+	}
+	cs.db = newTestDBWithHeader(t)
+
+	done := make(chan struct{})
+	go func() {
+		cs.AnnounceBlockRangeLoop(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("announce loop exited before channel was configured")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	progressCh := make(chan [][]byte, 1)
+	cs.SetBlockProgressChannel(progressCh, func() {})
+
+	if !waitFor(func() bool { return currentSentCount(&sentMu, &sentCount) >= 1 }, time.Second) {
+		t.Fatal("expected announcement after channel configuration")
+	}
+
+	cancel()
+	<-done
+}
+
 func currentSentCount(mu *sync.Mutex, count *int) int {
 	mu.Lock()
 	defer mu.Unlock()
