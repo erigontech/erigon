@@ -1,10 +1,12 @@
+---
+description: Remote Procedure Call Daemon
+---
 
 # RPC Daemon
-*Remote Procedure Call*
 
 The RPC daemon is a crucial component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component. For detailed instructions on running it remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
 
-For a comprehensive understanding of the RPC daemon's functionality, configuration, and usage, please refer to <https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md> (also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`) which covers the following key topics:
+For a comprehensive understanding of the RPC daemon's functionality, configuration, and usage, please refer to [https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md) (also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`) which covers the following key topics:
 
 1. **Introduction**: An overview of the RPC daemon, its benefits, and how it integrates with Erigon.
 2. **Getting Started**: Step-by-step guides for running the RPC daemon locally and remotely, including configuration options and command-line flags.

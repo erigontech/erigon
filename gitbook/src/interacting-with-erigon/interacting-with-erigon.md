@@ -2,26 +2,28 @@
 
 The RPC daemon is a fundamental component of Erigon, enabling JSON remote procedure calls and providing access to various APIs. It is designed to operate effectively both as an internal or as an external component.
 
-> For detailed instructions on running it remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
+{% hint style="info" %}
+For detailed instructions on running it remotely, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
+{% endhint %}
 
 The RPC Daemon supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
-- [`eth`](eth.md): Standard Ethereum API.
-- [`erigon`](erigon.md): Erigon-specific extensions.
-- [`web3`](web3.md): Web3 compatibility API.
-- [`net`](net.md): Network information API.
-- [`debug`](debug.md): Debugging and tracing API.
-- [`trace`](trace.md): Transaction tracing API.
-- [`txpool`](txpool.md): Transaction pool API.
-- [`admin`](admin.md): Node administration API
-- [`bor`](bor.md): Polygon Bor-specific API (when running on Polygon)
-- [`ots`](ots.md): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
-- [`internal`](internal.md): Erigon specific API for development and debugging purposes.
-- [`gRPC`](grpc.md): API for lower-level data access.
+* [`eth`](eth.md): Standard Ethereum API.
+* [`erigon`](erigon.md): Erigon-specific extensions.
+* [`web3`](web3.md): Web3 compatibility API.
+* [`net`](net.md): Network information API.
+* [`debug`](debug.md): Debugging and tracing API.
+* [`trace`](trace.md): Transaction tracing API.
+* [`txpool`](txpool.md): Transaction pool API.
+* [`admin`](admin.md): Node administration API
+* [`bor`](bor.md): Polygon Bor-specific API (when running on Polygon)
+* [`ots`](ots.md): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
+* [`internal`](internal.md): Erigon specific API for development and debugging purposes.
+* [`gRPC`](grpc.md): API for lower-level data access.
 
 ## Erigon RPC Transports
 
-Erigon supports [HTTP](#http), [HTTPS](#https), [WebSockets](#websockets), [IPC](#ipc), [gRPC](#grpc) and [GraphQL](#graphql) through its RPC daemon.
+Erigon supports [HTTP](interacting-with-erigon.md#http), [HTTPS](interacting-with-erigon.md#https), [WebSockets](interacting-with-erigon.md#websockets), [IPC](interacting-with-erigon.md#ipc), [gRPC](interacting-with-erigon.md#grpc) and [GraphQL](interacting-with-erigon.md#graphql) through its RPC daemon.
 
 ### HTTP
 
@@ -39,7 +41,7 @@ erigon --http
 rpcdaemon --http.enabled
 ```
 
-The default port is `8545`, and the default listen address is localhost. <cite>node/nodecfg/defaults.go:30-31</cite>
+The default port is `8545`, and the default listen address is localhost. _node/nodecfg/defaults.go:30-31_
 
 You can configure the listen address and port using `--http.addr` and `--http.port` respectively:
 
@@ -89,10 +91,10 @@ Because WebSockets are bidirectional, nodes can push events to clients, which en
 
 The configuration of the WebSocket server follows the same pattern as the HTTP server:
 
-- Enable it using `--ws`
-- Configure the server port by passing `--ws.port` (default `8546`) <cite>node/nodecfg/defaults.go:34</cite>
-- Configure cross-origin requests using `--ws.origins` (though this maps to `--http.corsdomain` in Erigon)
-- WebSocket APIs inherit from the HTTP API configuration
+* Enable it using `--ws`
+* Configure the server port by passing `--ws.port` (default `8546`) _node/nodecfg/defaults.go:34_
+* Configure cross-origin requests using `--ws.origins` (though this maps to `--http.corsdomain` in Erigon)
+* WebSocket APIs inherit from the HTTP API configuration
 
 ```bash
 erigon --http --ws --http.api eth,net,debug,trace
@@ -120,8 +122,7 @@ rpcdaemon --grpc --grpc.addr localhost --grpc.port 9090
 
 #### GraphQL
 
-Erigon uses the standard GraphQL documented by Geth at <https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql>.
-
+Erigon uses the standard GraphQL documented by Geth at [https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql).
 
 ## Interacting with the RPC
 

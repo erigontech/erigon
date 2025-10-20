@@ -6,16 +6,18 @@ TLS authentication can be enabled to ensure communication integrity and access c
 
 At a high level, the process consists of:
 
-1. [Generate the Certificate Authority (CA) key pair](#1-generating-the-key-pair-for-the-certificate-authority-ca)
-2. [Create the Certificate Authority certificate file](#2-creating-the-ca-certificate-file)
-3. [Generate a key pair](#3-generating-a-key-pair)
-4. [Create the certificate file for each public key](#4-creating-the-certificate-file-for-each-public-key)
-5. [Deploy the files to each instance](#5-deploy-the-files-on-each-instance)
-6. [Run Erigon and RPCdaemon with the correct tags](#6-run-erigon-and-rpcdaemon-with-the-correct-tags)
+1. [Generate the Certificate Authority (CA) key pair](tls-authentication.md#1-generating-the-key-pair-for-the-certificate-authority-ca)
+2. [Create the Certificate Authority certificate file](tls-authentication.md#2-creating-the-ca-certificate-file)
+3. [Generate a key pair](tls-authentication.md#3-generating-a-key-pair)
+4. [Create the certificate file for each public key](tls-authentication.md#4-creating-the-certificate-file-for-each-public-key)
+5. [Deploy the files to each instance](tls-authentication.md#5-deploy-the-files-on-each-instance)
+6. [Run Erigon and RPCdaemon with the correct tags](tls-authentication.md#6-run-erigon-and-rpcdaemon-with-the-correct-tags)
 
 The following is a detailed description of how to use the **OpenSSL** suite of tools to secure the connection between a remote Erigon node and a remote or local RPCdaemon. The same procedure applies to any Erigon component you wish to run separately; it is recommended to name the files accordingly.
 
-> ⚠️**Warning**: To maintain a high level of security, it is recommended to create all the keys locally and then copy the 3 required files remotely to the remote node.
+{% hint style="warning" %}
+**Warning**: To maintain a high level of security, it is recommended to create all the keys locally and then copy the 3 required files remotely to the remote node.
+{% endhint %}
 
 ### Prerequisites
 
@@ -29,7 +31,9 @@ Normally, the "client side" (in our case, the RPCdaemon) will check that the ser
 
 Generate the CA key pair using Elliptic Curve (as opposed to RSA). The generated CA key will be in the `CA-key.pem` file.
 
-> ⚠️**Warning**: Access to this file will allow anyone to later add any new instance key pair to the “cluster of trust”, so keep this file safe.
+{% hint style="warning" %}
+**Warning**: Access to this file will allow anyone to later add any new instance key pair to the “cluster of trust”, so keep this file safe.
+{% endhint %}
 
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out CA-key.pem
@@ -37,7 +41,7 @@ openssl ecparam -name prime256v1 -genkey -noout -out CA-key.pem
 
 ## 2. Creating the CA certificate file
 
-Create CA self-signed certificate (this command will ask questions, the answers aren’t important for now, but at least the first one needs to be filled in with some data). The file created by this command will be called ``CA-cert.pem``:
+Create CA self-signed certificate (this command will ask questions, the answers aren’t important for now, but at least the first one needs to be filled in with some data). The file created by this command will be called `CA-cert.pem`:
 
 ```bash
 openssl req -x509 -new -nodes -key CA-key.pem -sha256 -days 3650 -out CA-cert.pem
@@ -81,19 +85,19 @@ openssl x509 -req -in RPC.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial 
 
 These three files must be placed in the /erigon folder on the machine running Erigon:
 
-``CA-cert.pem``
+`CA-cert.pem`
 
-``erigon-key.pem``
+`erigon-key.pem`
 
-``erigon.crt``
+`erigon.crt`
 
 On the RPCdaemon machine, these three files must also be placed in the /erigon folder:
 
-``CA-cert.pem``
+`CA-cert.pem`
 
-``RPC key.pem``
+`RPC key.pem`
 
-``RPC.crtv``
+`RPC.crtv`
 
 ## 6. Run Erigon and RPCdaemon with the correct tags
 

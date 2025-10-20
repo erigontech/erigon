@@ -1,5 +1,8 @@
-# Using Caplin as validator
-*Running Erigon with Caplin as validator*
+---
+description: Running Erigon with Caplin as validator
+---
+
+# Caplin
 
 Caplin is also suitable for staking. However, it is required to pair it with a validator key manager, such as Lighthouse or Teku, since it doesn't have a native key management system.
 
@@ -27,18 +30,18 @@ erigon \
 
 **Flags Explanation**:
 
-- Execution Layer (Erigon):
-    - `--http.api=engine,eth,net,web3`: enables the necessary APIs for external clients and Caplin.
-    - `--ws`: enables WebSocket-based communication (optional).
-- Consensus Layer (Caplin):
-    - `--caplin.discovery.addr` and `--caplin.discovery.port`: configures Caplin's gossip and discovery layer.
-    - `--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse`: enables all possible API endpoints for the validator client.
+* Execution Layer (Erigon):
+  * `--http.api=engine,eth,net,web3`: enables the necessary APIs for external clients and Caplin.
+  * `--ws`: enables WebSocket-based communication (optional).
+* Consensus Layer (Caplin):
+  * `--caplin.discovery.addr` and `--caplin.discovery.port`: configures Caplin's gossip and discovery layer.
+  * `--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse`: enables all possible API endpoints for the validator client.
 
 ## 2. Set Up Lighthouse Validator Client
 
 ### 2.1 Install Lighthouse
 
-Install and run Lighthouse by following the official guide at <https://lighthouse-book.sigmaprime.io/installation.html> or use Docker:
+Install and run Lighthouse by following the official guide at [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html) or use Docker:
 
 ```bash
 docker pull sigp/lighthouse:latest
@@ -63,9 +66,9 @@ lighthouse vc \
 
 **Flags Explanation**:
 
-- `--network mainnet`: Specifies the Ethereum mainnet.
-- `--beacon-nodes`: Points to the Caplin beacon API at `http://127.0.0.1:5555`.
-- `--suggested-fee-recipient`: Specifies your Ethereum address for block rewards.
+* `--network mainnet`: Specifies the Ethereum mainnet.
+* `--beacon-nodes`: Points to the Caplin beacon API at `http://127.0.0.1:5555`.
+* `--suggested-fee-recipient`: Specifies your Ethereum address for block rewards.
 
 ### 2.4. Import Validator Keys
 

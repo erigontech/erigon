@@ -7,13 +7,9 @@ With Erigon 3, the default configuration is changing from an archive node to a *
 ## Key Architectural Benefits
 
 * **Staged Sync:** Erigon uses a unique staged synchronization process that breaks down the blockchain sync into a series of distinct, optimized stages (e.g., downloading headers, executing blocks, building the state). This approach allows Erigon to be faster and more efficient than traditional sync methods because it procesfses data in a way that minimizes database writes and resource usage. This results in significantly faster initial sync times, often in a matter of hours or days, making it far more accessible for users with standard hardware.
-
 * **Modularity:** Erigon's architecture is highly modular, separating components like the core node, RPC daemon, and transaction pool into independent processes. This design enables RPC providers to create scalable, high-performance clusters by running multiple RPC daemons connected to a single node. For developers, this modularity simplifies development, allowing for easier integration of new features and debugging without affecting the entire system.
-
 * **Efficient state Storage:** Erigon's approach to state storage is a core reason for its efficiency. Instead of storing data using the complex Merkle Patricia Trie (MPT) structure like most clients, Erigon uses a flat key-value database. This design simplifies data organization, reducing the need for multiple lookups and random disk access. This architecture not only speeds up read/write operations but also enables powerful data compression, which dramatically shrinks the overall disk footprint of an Erigon node. By making a full archive node feasible on consumer-grade SSDs, Erigon significantly lowers the hardware barrier for solo stakers, developers, and professionals.
-
 * **BitTorrent Solution**: A major advantage of Erigon is its BitTorrent solution, providing immutable historical data with efficient re-sync and node repair capabilities through decentralized snapshots.
-
 * **OtterSync:** OtterSync is a new sync algorithm designed to drastically reduce the time needed to sync a node. It achieves this by shifting most of the initial sync computation from the CPU to network bandwidth. This is done by downloading state data through a secondary protocol, like BitTorrent, instead of re-executing every historical transaction. This enables a fast sync, even for archive nodes.
 
 ## Advantages of using Erigon
@@ -26,12 +22,12 @@ For **large-scale stakers**, Erigon's optimized performance, including fast bloc
 
 #### Performance and Efficiency
 
-- Faster sync and smaller disk footprint compared to other execution clients.
-- Cheaper infrastructure due to a significantly smaller database size.
-- The minimized disk footprint optimizes performance and reduces overall costs.
-- Superior RPC performance, leading to a much-improved user experience.
-- Faster RPC speeds, benefiting wallets and analytics tools.
-- Quicker transaction broadcasting improves the end-user experience, preventing missed opportunities and reducing errors.
+* Faster sync and smaller disk footprint compared to other execution clients.
+* Cheaper infrastructure due to a significantly smaller database size.
+* The minimized disk footprint optimizes performance and reduces overall costs.
+* Superior RPC performance, leading to a much-improved user experience.
+* Faster RPC speeds, benefiting wallets and analytics tools.
+* Quicker transaction broadcasting improves the end-user experience, preventing missed opportunities and reducing errors.
 
 ### Home Users and Solo Stakers
 
@@ -41,4 +37,6 @@ By running their own Erigon node, home users and solo stakers contribute directl
 
 ### Developers
 
-Erigon provides a robust and flexible environment for developers building on Ethereum and L2s. Its modular architecture simplifies development, allowing teams to focus on specific components without being burdened by the entire system. Developers can easily integrate new features or fix bugs within a specific module, enhancing development efficiency. Erigon’s full archive node capabilities by default, coupled with its fast sync, make it an ideal choice for building dApps, analytics platforms, or other applications that require access to comprehensive historical data. The client also offers a gRPC API for lower-level data access and a range of debug and tracing functionalities, empowering developers to create, test, and optimize their applications with greater ease.
+Erigon provides a robust and flexible environment for developers building on Ethereum and L2s. Its modular architecture simplifies development, allowing teams to focus on specific components without being burdened by the entire system. Developers can easily integrate new features or fix bugs within a specific module, enhancing development efficiency.
+
+Erigon's full node capabilities by default, coupled with its fast sync, make it an ideal choice for building dApps, analytics platforms, or other applications that require access to comprehensive historical data. The client also offers a gRPC API for lower-level data access and a range of debug and tracing functionalities, empowering developers to create, test, and optimize their applications with greater ease.

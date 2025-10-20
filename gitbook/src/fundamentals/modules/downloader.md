@@ -1,9 +1,14 @@
+---
+description: Seeding/downloading historical data
+---
+
 # Downloader
-*Seeding/downloading historical data*
 
 The Downloader is a service responsible for seeding and downloading historical data using the BitTorrent protocol. Data is stored in the form of immutable `.seg` files, known as **snapshots**. The Ethereum core instructs the Downloader to download specific files, identified by their unique info hashes, which include both block headers and block bodies. The Downloader then communicates with the BitTorrent network to retrieve the necessary files, as specified by the Ethereum core.
 
-> **Warning**: While all Erigon components are separable and can be run on different machines, the Downloader must run on the same machine as Erigon to be able to share downloaded and seeded files.
+{% hint style="warning" %}
+**Info**: While all Erigon components are separable and can be run on different machines, the Downloader must run on the same machine as Erigon to be able to share downloaded and seeded files.
+{% endhint %}
 
 For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/README.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme.md) with the following key topics:
 
@@ -32,6 +37,7 @@ To display available options for downloader digit:
 ```bash
 ./build/bin/downloader --help
 ```
+
 The `--help` flag listing is reproduced below for your convenience.
 
 ```

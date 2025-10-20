@@ -1,8 +1,12 @@
-# Txpool
+---
+description: Erigon's Transaction Pool
+---
+
+# TxPool
 
 The transaction pool, also known as the mempool, is a dynamic storage area where pending transactions are held before being confirmed and added to the blockchain. Each node on the Ethereum network maintains its own local transaction pool, which is combined with others to form the global pool.
 
-In Erigon, the txpool is a dedicated API namespace that stores pending and queued transactions in local memory. Its primary function is to manage transactions waiting to be processed by miners. 
+In Erigon, the txpool is a dedicated API namespace that stores pending and queued transactions in local memory. Its primary function is to manage transactions waiting to be processed by miners.
 
 The TxPool component is typically run as an internal Erigon component, but it can also be operated as a separate process, providing flexibility in transaction management.
 
@@ -14,14 +18,14 @@ Txpool is run as an internal Erigon component by default.
 
 Running an external txpool can provide a more secure, scalable, and flexible transaction management solution, which can be particularly beneficial in high-performance or high-availability Ethereum node deployments.
 
-1) Before TxPool can be using as a separate process the executable must be built:
+1. Before TxPool can be using as a separate process the executable must be built:
 
 ```bash
 cd erigon
 make txpool
 ```
 
-2) Together with external TxPool also [Sentry](sentry.md) and [RPCDaemon](rpc-daemon.md) must be compiled and run separately.
+2. Together with external TxPool also [Sentry](sentry.md) and [RPCDaemon](rpc-daemon.md) must be compiled and run separately.
 
 ```bash
 make sentry
@@ -31,15 +35,13 @@ make sentry
 make rpcdaemon
 ```
 
-3) Now Erigon and other services can be started as separate processes
-
+3. Now Erigon and other services can be started as separate processes
 
 ```sh
 ./build/bin/erigon --txpool.disable --private.api.addr=localhost:9090 --datadir=<your datadir> --http=false
 ```
 
-If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0` or TxPool will listen on localhost by default. 
-
+If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0` or TxPool will listen on localhost by default.
 
 ```sh
 ./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your datadir>
@@ -55,22 +57,14 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 ## Flags explanation
 
-- `--txpool.disable`: This flag disables the internal transaction pool (txpool) and block producer (default: `false`). When running the txpool as a separate process, this flag is used to prevent the internal txpool from interfering with the external one.
-
-- `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
-
-- `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
-
-- `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the txpool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external txpool.
-
-- `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the sentry API. The sentry API is used for communication between the txpool and the sentry.
-
-- `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the txpool API (default: use value of `--private.api.addr`). The txpool API is used for communication between the txpool and other Erigon components.
-
-- `--pprof`: Enable the pprof HTTP server (default: `false`)
-
-- `--pprof.addr 0.0.0.0`: This flag sets the address for the pprof HTTP server (default: `127.0.0.1`). The pprof server is used for profiling and debugging Erigon. By setting this flag to `0.0.0.0`, the pprof server is made accessible from outside the local machine.
-
+* `--txpool.disable`: This flag disables the internal transaction pool (txpool) and block producer (default: `false`). When running the txpool as a separate process, this flag is used to prevent the internal txpool from interfering with the external one.
+* `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
+* `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
+* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the txpool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external txpool.
+* `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the sentry API. The sentry API is used for communication between the txpool and the sentry.
+* `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the txpool API (default: use value of `--private.api.addr`). The txpool API is used for communication between the txpool and other Erigon components.
+* `--pprof`: Enable the pprof HTTP server (default: `false`)
+* `--pprof.addr 0.0.0.0`: This flag sets the address for the pprof HTTP server (default: `127.0.0.1`). The pprof server is used for profiling and debugging Erigon. By setting this flag to `0.0.0.0`, the pprof server is made accessible from outside the local machine.
 
 ## Command Line Options
 

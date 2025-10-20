@@ -1,3 +1,7 @@
+---
+description: Get started using Erigon
+---
+
 # Basic Usage
 
 Erigon is primarily controlled using the command line, started using the `./build/bin/erigon` command and stopped by pressing `CTRL-C`.
@@ -30,22 +34,19 @@ The default Consensus Layer utilized is [Caplin](caplin.md), the Erigon flagship
 
 ## Basic Configuration​
 
-* Default data directory is `/home/usr/.local/share/erigon`. If you want to store Erigon files in a non-default location, add flag:
+*   Default data directory is `/home/usr/.local/share/erigon`. If you want to store Erigon files in a non-default location, add flag:
 
     ```bash
     --datadir=<your_data_dir>
     ```
+* Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node or `--prune.mode=minimal` for a minimal node. The default node is full node.
+* `--chain=mainnet`, add the flag `--chain=sepolia` for Sepolia testnet or `--chain=holesky` for Holesky testnet.
+* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [wallet](web3-wallet.md).
+* To increase download speed add `--torrent.download.rate=512mb` (default is 16mb).
 
-* Based on the [sync mode](sync-modes.md) you want to run you can add ```--prune.mode=archive``` to run a archive node, ```--prune.mode=full``` for a full node or ```--prune.mode=minimal``` for a minimal node.
-The default node is full node.
-* ```--chain=mainnet```, add the flag `--chain=sepolia` for Sepolia testnet or `--chain=holesky` for Holesky testnet.
-* ```--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool``` to use RPC and e.g. be able to connect your [wallet](web3-wallet.md).
-* To increase download speed add ```--torrent.download.rate=512mb``` (default is 16mb).
-
-To stop the Erigon node you can use the ```CTRL+C``` command.
+To stop the Erigon node you can use the `CTRL+C` command.
 
 Additional flags can be added to [configure](configuring-erigon.md) the node with several options.
-
 
 ## Testnets
 
@@ -62,9 +63,8 @@ To learn about the available commands, open your terminal in your Erigon 3 insta
 ```bash
 make help
 ```
- 
-This command will display a list of convenience commands available in the Makefile, along with their descriptions.
 
+This command will display a list of convenience commands available in the Makefile, along with their descriptions.
 
 ```
  go-version:                        print and verify go version
@@ -109,4 +109,4 @@ For example, from your Erigon 3 installation directory, run:
 make clean
 ```
 
-This will execute the clean target in the Makefile, which cleans the ```go cache```, ```build``` directory, and ```libmdbx``` db directory.
+This will execute the clean target in the Makefile, which cleans the `go cache`, `build` directory, and `libmdbx` db directory.

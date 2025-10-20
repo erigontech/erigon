@@ -1,18 +1,20 @@
+---
+description: P2P network management
+---
+
 # Sentry
-*P2P network management*
 
-Sentry connects Erigon to the Ethereum P2P network, enabling the discovery of other participants across the Internet and secure communication with them. It performs these main functions: 
+Sentry connects Erigon to the Ethereum P2P network, enabling the discovery of other participants across the Internet and secure communication with them. It performs these main functions:
 
-- Peer discovery via the following:
-    - Kademlia DHT
-    - DNS lookup
-    - Configured static peers
-    - Node info saved in the database
-    - Boot nodes pre-configured in the source code
-
-- Peer management:
-    - handshakes
-    - holding p2p connection even if Erigon is restarted
+* Peer discovery via the following:
+  * Kademlia DHT
+  * DNS lookup
+  * Configured static peers
+  * Node info saved in the database
+  * Boot nodes pre-configured in the source code
+* Peer management:
+  * handshakes
+  * holding p2p connection even if Erigon is restarted
 
 The ETH core interacts with the Ethereum p2p network through the Sentry component. Sentry provides a simple interface to the core, with functions to download data, receive notifications about gossip messages, upload data on request from peers, and broadcast gossip messages either to a selected set of peers or to all peers.
 
@@ -37,7 +39,7 @@ Then it can be launched as an independent component with the command:
 
 In this example we will run an instance of Erigon and Sentry on the same machine.
 
-Following is the Sentry client running separately:  
+Following is the Sentry client running separately:
 
 ```bash
 ./build/bin/sentry --datadir=~/.local/share/erigon
@@ -54,6 +56,7 @@ Erigon might be attached to several Sentry instances running across different ma
 ```bash
 --sentry.api.addr value
 ```
+
 Where `value` is comma separated sentry addresses `<host>:<port>,<host>:<port>`.
 
 ## More info

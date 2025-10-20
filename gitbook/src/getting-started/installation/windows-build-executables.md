@@ -2,7 +2,6 @@
 
 Before proceeding, ensure that the [hardware](../hardware-requirements.md) and [software](../software-requirements.md) requirements are met.
 
-
 ## Installing Chocolatey
 
 Install _Chocolatey package manager_ by following these [instructions](https://docs.chocolatey.org/en-us/choco/setup).
@@ -13,33 +12,27 @@ Once your Windows machine has the above installed, open the **Command Prompt** b
 choco -v
 ```
 
-<img src="/images/choco-v.png" alt="" style="display: block; margin: 0 auto;">
-
 Now you need to install the following components: `cmake`, `make`, `mingw` by:
 
 ```bash
 choco install cmake make mingw
 ```
 
-<div class="warning">
-
 **Important note about Anti-Virus:**
 
 During the compiler detection phase of **MinGW**, some temporary executable files are generated to test the compiler capabilities. It's been reported that some anti-virus programs detect these files as possibly infected with the `Win64/Kryptic.CIS` Trojan horse (or a variant of it). Although these are false positives, we have no control over the 100+ vendors of security products for Windows and their respective detection algorithms and we understand that this may make your experience with Windows builds uncomfortable. To work around this, you can either set exclusions for your antivirus software specifically for the`build\bin\mdbx\CMakeFiles` subfolder of the cloned repo, or you can run Erigon using the other two options below.
 
-</div>
-
 Make sure that the Windows System Path variable is set correctly. Use the search bar on your computer to search for “**Edit the system environment variable**”.
 
-<img src="/images/Edit_sys_env.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/Edit_sys_env.png)
 
 Click the “**Environment Variables...**” button.
 
-<img src="/images/Edit_sys_env2.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/Edit_sys_env2.png)
 
 Look down at the "**System variables**" box and double click on "**Path**" to add a new path.
 
-<img src="/images/System_var.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/System_var.png)
 
 Then click on the "**New**" button and paste the following path:
 
@@ -47,8 +40,7 @@ Then click on the "**New**" button and paste the following path:
  C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 ```
 
-<img src="/images/new_sys_var.png" alt="" style="display: block; margin: 0 auto;">
-
+![](../../../../images/new_sys_var.png)
 
 ## Clone the Erigon repository
 
@@ -63,28 +55,29 @@ You might need to change the `ExecutionPolicy` to allow scripts created locally 
 ```powershell
 Set-ExecutionPolicy RemoteSigned
 ```
+
 ## Compiling Erigon
 
 To compile Erigon there are two alternative methods:
 
-1. [Compiling from the wmake.ps1 file in the File Explorer](#1-compiling-from-the-wmakeps1-file-in-the-file-explorer) 
-2. [Using the PowerShell CLI](#2-using-the-powershell-cli)
-    
+1. [Compiling from the wmake.ps1 file in the File Explorer](windows-build-executables.md#1-compiling-from-the-wmakeps1-file-in-the-file-explorer)
+2. [Using the PowerShell CLI](windows-build-executables.md#2-using-the-powershell-cli)
+
 ### 1. Compiling from the wmake.ps1 file in the File Explorer
 
 This is the fastest way which normally works for everyone. Open the File Explorer and go to the Erigon folder, then right click the `wmake` file and choose "**Run with PowerShell**".
 
-<img src="/images/powershell.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/powershell.png)
 
 PowerShell will compile Erigon and all of its modules. All binaries will be placed in the `.\build\bin\` subfolder.
 
-<img src="/images/powershell2.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/powershell2.png)
 
 ### 2. Using the PowerShell CLI
 
 In the search bar on your computer, search for “**Windows PowerShell**” and open it.
 
-<img src="/images/powershell3.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/powershell3.png)
 
 Change the working directory to "**erigon**"
 
@@ -92,7 +85,7 @@ Change the working directory to "**erigon**"
 cd erigon
 ```
 
-<img src="/images/powershell4.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/powershell4.png)
 
 Before modifying security settings, ensure PowerShell script execution is allowed in your Windows account settings using the following command:
 
@@ -114,19 +107,19 @@ For example, to build the Erigon executable write:
 .\wmake.ps1 erigon
 ```
 
-<img src="/images/powershell5.png" alt="" style="display: block; margin: 0 auto;">
+![](../../../../images/powershell5.png)
 
 The executable binary `erigon.exe` should have been created in the `.\build\bin\` subfolder.
 
 You can use the same command to build other binaries such as `RPCDaemon`, `TxPool`, `Sentry` and `Downloader`.
 
-## Running Erigon 
+## Running Erigon
 
 To start Erigon place your command prompt in the `.\build\bin\` subfolder and use:
 
 ```powershell
 start erigon.exe.
-``` 
+```
 
 or from any place use the full address of the executable:
 
