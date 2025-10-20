@@ -162,6 +162,31 @@ func TestDecodeRLPTransactionRejectsTrailingBytesTyped(t *testing.T) {
 	}
 }
 
+func TestDecodeRLPTransactionInsideListAllowsIteration(t *testing.T) {
+	t.Parallel()
+	txBytes, err := rlp.EncodeToBytes(rightvrsTx)
+	if err != nil {
+		t.Fatalf("encode tx: %v", err)
+	}
+	listBytes, err := rlp.EncodeToBytes([]rlp.RawValue{txBytes, txBytes})
+	if err != nil {
+		t.Fatalf("encode tx list: %v", err)
+	}
+	stream := rlp.NewStream(bytes.NewReader(listBytes), uint64(len(listBytes)))
+	if _, err := stream.List(); err != nil {
+		t.Fatalf("list header: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); err != nil {
+		t.Fatalf("first tx decode failed: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); err != nil {
+		t.Fatalf("second tx decode failed: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, rlp.EOL) {
+		t.Fatalf("expected EOL after list, got %v", err)
+	}
+}
+
 func TestTransactionSigHash(t *testing.T) {
 	t.Parallel()
 	if emptyTx.SigningHash(nil) != common.HexToHash("c775b99e7ad12f50d819fcd602390467e28141316969f4b57f0626f74fe3b386") {
