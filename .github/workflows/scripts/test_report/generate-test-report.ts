@@ -74,8 +74,10 @@ function mapConclusionToIcon(conclusion: string | null, status: string | null): 
     switch (conclusion) {
         case 'success': return '✅';
         case 'failure': return '❌';
-        case 'cancelled': return '🗑️️';  // The run was cancelled
-        case 'cancelled_after_start': return '✖️'; // The run was cancelled before it completed.
+        case 'cancelled':
+            return '🗑️️';  // The run was cancelled
+        case 'cancelled_after_start':
+            return '✖️'; // The run was cancelled before it completed.
         case 'skipped': return '⏩';  // The run was skipped.
         case 'timed_out': return '⏰️';
         case 'neutral': return '⚪️';

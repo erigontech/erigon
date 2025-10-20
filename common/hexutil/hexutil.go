@@ -254,6 +254,10 @@ func Encode(b []byte) string {
 	return string(enc)
 }
 
+func EncodeWithoutPrefix(b []byte) string {
+	return string(hex.AppendEncode(nil, b))
+}
+
 func FromHex(s string) []byte {
 	b, _ := FromHexWithValidation(s)
 	return b
