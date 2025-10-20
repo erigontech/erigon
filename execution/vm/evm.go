@@ -167,7 +167,7 @@ func (evm *EVM) call(typ OpCode, caller common.Address, addr common.Address, inp
 	depth := evm.interpreter.Depth()
 
 	version := evm.intraBlockState.Version()
-	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Address())) {
+	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller)) {
 		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, input)
 		defer func() {
 			fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, ret, leftOverGas, err)
@@ -262,11 +262,11 @@ func (evm *EVM) call(typ OpCode, caller common.Address, addr common.Address, inp
 		}
 		var contract *Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, caller, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+			contract = NewContract(caller, caller, value, gas, evm.config.JumpDestCache)
 		} else if typ == DELEGATECALL {
 			// For delegate calls, we need to inherit the caller address and value from the parent call
 			// The caller address should remain the same as the current contract's caller
-			contract = NewContract(caller, caller, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
+			contract = NewContract(caller, caller, value, gas, evm.config.JumpDestCache)
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.JumpDestCache)
 		}
@@ -354,7 +354,7 @@ func (evm *EVM) OverlayCreate(caller common.Address, codeAndHash *codeAndHash, g
 
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller common.Address, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress common.Address, leftOverGas uint64, err error) {
-	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Address())) {
+	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller)) {
 		defer func() {
 			version := evm.intraBlockState.Version()
 			if err != nil {
