@@ -18,7 +18,7 @@ on:
       load_sequence:
         description: "Stress test load sequence (qps:duration_secs) e.g. 100:300,500:300,750:300 "
         required: false
-        default: "100:300,500:300,750:300,1:300,1000:300,1:300"
+        default: "100:300,500:300,750:300,1000:300,1:300,1500:300,1:300"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
