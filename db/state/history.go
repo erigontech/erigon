@@ -588,11 +588,11 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	}
 
 	var (
-		keyBuf  = make([]byte, 0, 256)
-		numBuf  = make([]byte, 8)
-		bitmap  = bitmapdb.NewBitmap64()
-		prevEf  []byte
-		prevKey []byte
+		numBuf    = make([]byte, 8)
+		bitmap    = bitmapdb.NewBitmap64()
+		prevEf    []byte
+		prevKey   []byte
+		dbPrevKey []byte
 
 		initialized bool
 	)
@@ -607,12 +607,14 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
 			prevKey = append(prevKey[:0], k...)
+			dbPrevKey = h.historyKeyDb(txNum, prevKey, dbPrevKey[:0])
 			initialized = true
 		}
 
 		if bytes.Equal(prevKey, k) {
 			bitmap.Add(txNum)
 			prevKey = append(prevKey[:0], k...)
+			dbPrevKey = h.historyKeyDb(txNum, k, dbPrevKey[:0])
 			return nil
 		}
 
@@ -626,9 +628,9 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
 			if !h.HistoryLargeValues {
-				val, err := cd.SeekBothRange(prevKey, numBuf)
+				val, err := cd.SeekBothRange(dbPrevKey, numBuf)
 				if err != nil {
-					return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+					return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.FilenameBase, dbPrevKey, err)
 				}
 				if val != nil && binary.BigEndian.Uint64(val) == vTxNum {
 					val = val[8:]
@@ -642,8 +644,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				}
 				continue
 			}
-			keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
-			key, val, err := c.SeekExact(keyBuf)
+			key, val, err := c.SeekExact(dbPrevKey)
 			if err != nil {
 				return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, key, err)
 			}
@@ -653,7 +654,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
 			if err := historyWriter.Add(histKeyBuf, val); err != nil {
-				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, key, err)
+				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 			}
 		}
 		bitmap.Clear()
@@ -894,10 +895,12 @@ type HistoryRoTx struct {
 
 	trace bool
 
-	valsC    kv.Cursor
-	valsCDup kv.CursorDupSort
+	valsC          kv.Cursor
+	valsCDup       kv.CursorDupSort
+	_firstStepInDb int64
 
 	_bufTs           []byte
+	_dbBufTs         []byte
 	snappyReadBuffer []byte
 }
 
@@ -916,6 +919,7 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 		stepSize:          h.stepSize,
 		stepsInFrozenFile: h.stepsInFrozenFile,
 		trace:             false,
+		_firstStepInDb:    -1,
 	}
 }
 
@@ -1000,6 +1004,11 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 	return ht.prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
 }
 
+// func (ht *HistoryRoTx) historyTblKey(k []byte, txNum uint64, buf []byte) []byte {
+// 	binary.BigEndian.PutUint64(ht._bufTs[:8], txNum)
+// 	return append(append(buf[:0], k...), ht._bufTs[:8]...)
+// }
+
 func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
@@ -1023,6 +1032,41 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			return nil, err
 		}
 		defer valsC.Close()
+	}
+
+	// prune history
+	fromStep := txFrom / ht.stepSize
+	toStep := (txTo - 1) / ht.stepSize
+	binary.BigEndian.PutUint64(seek, ^toStep)
+	stepBytes := seek[:4]
+
+	var deleteFn func() error
+	var cursor kv.RwCursor
+	if ht.h.HistoryLargeValues {
+		cursor = valsC
+	} else {
+		cursor = valsCDup
+	}
+
+	k, _, err := cursor.Seek(stepBytes)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		if k == nil {
+			break
+		}
+		foundStep := ^binary.BigEndian.Uint64(k[:4])
+		if foundStep < fromStep {
+			break
+		}
+		if err = cursor.DeleteCurrent(); err != nil {
+			return nil, err
+		}
+		k, _, err = cursor.Next()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var pruned int
@@ -1157,9 +1201,42 @@ func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 	return buf
 }
 
+func (h *History) historyKeyDb(txNum uint64, key []byte, buf []byte) []byte {
+	largeVal := h.HistoryLargeValues
+	size := 4 + len(key)
+	if largeVal {
+		size += 8
+	}
+	if buf == nil || cap(buf) < size {
+		buf = make([]byte, size)
+	}
+	step := txNum / h.stepSize
+	binary.BigEndian.PutUint32(buf[:4], ^uint32(step))
+	copy(buf[4:4+len(key)], key)
+	if !largeVal {
+		binary.BigEndian.PutUint64(buf[4+len(key):], txNum)
+	}
+	return buf
+}
+
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 	ht._bufTs = historyKey(txNum, key, ht._bufTs)
 	return ht._bufTs
+}
+
+func (ht *HistoryRoTx) encodeTsDb(txNum uint64, key []byte) []byte {
+	ht._dbBufTs = ht.h.historyKeyDb(txNum, key, ht._dbBufTs)
+	return ht._dbBufTs
+}
+
+func (ht *HistoryRoTx) reduceStepTsDb(keybuf []byte) ([]byte, kv.Step) {
+	step := ^binary.BigEndian.Uint32(keybuf[:4])
+	if step == 0 {
+		panic("assert: step==0")
+	}
+	binary.BigEndian.PutUint32(keybuf[:4], step-1)
+	binary.BigEndian.PutUint64(keybuf[4+len(keybuf):], ^uint64(0))
+	return keybuf, kv.Step(step - 1)
 }
 
 // HistorySeek searches history for a value of specified key before txNum
@@ -1201,40 +1278,78 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	return ht.valsCDup, nil
 }
 
+func (ht *HistoryRoTx) firstStepInDb(tx kv.Tx) (kv.Step, error) {
+	if ht._firstStepInDb >= 0 {
+		return kv.Step(ht._firstStepInDb), nil
+	}
+	c, err := ht.valsCursor(tx)
+	if err != nil {
+		return 0, err
+	}
+	k, _, err := c.First()
+	if err != nil {
+		return 0, err
+	}
+	if k == nil {
+		return 0, nil
+	}
+	step := ^binary.BigEndian.Uint32(k[:4])
+	ht._firstStepInDb = int64(step)
+	return kv.Step(step), nil
+}
+
 func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if ht.h.HistoryLargeValues {
 		c, err := ht.valsCursor(tx)
 		if err != nil {
 			return nil, false, err
 		}
-		seek := make([]byte, len(key)+8)
-		copy(seek, key)
-		binary.BigEndian.PutUint64(seek[len(key):], txNum)
-
-		kAndTxNum, val, err := c.Seek(seek)
+		seek := ht.encodeTsDb(txNum, key)
+		fromStep := kv.Step(txNum / ht.stepSize)
+		tillStep, err := ht.firstStepInDb(tx) // desc order
 		if err != nil {
 			return nil, false, err
 		}
-		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
-			return nil, false, nil
+
+		for fromStep >= tillStep {
+			stepAndKAndTxNum, val, err := c.Seek(seek)
+			if err != nil {
+				return nil, false, err
+			}
+			if stepAndKAndTxNum == nil || !bytes.Equal(stepAndKAndTxNum[4:len(stepAndKAndTxNum)+4], key) {
+				seek, fromStep = ht.reduceStepTsDb(stepAndKAndTxNum[:4+len(key)])
+				continue
+			}
+
+			return val, true, nil
 		}
-		// val == []byte{}, means key was created in this txNum and doesn't exist before.
-		return val, true, nil
 	}
 	c, err := ht.valsCursorDup(tx)
 	if err != nil {
 		return nil, false, err
 	}
-	val, err := c.SeekBothRange(key, ht.encodeTs(txNum, nil))
+
+	seek := ht.encodeTsDb(txNum, key)
+	fromStep := kv.Step(txNum / ht.stepSize)
+	tillStep, err := ht.firstStepInDb(tx) // desc order
 	if err != nil {
 		return nil, false, err
 	}
-	if val == nil {
-		return nil, false, nil
+
+	for fromStep >= tillStep {
+		val, err := c.SeekBothRange(seek, ht.encodeTs(txNum, nil))
+		if err != nil {
+			return nil, false, err
+		}
+		if val == nil || !bytes.Equal(seek[4:], key) {
+			seek, fromStep = ht.reduceStepTsDb(seek)
+			continue
+		}
+		v := val[8:]
+		return v, true, nil
 	}
-	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
-	v := val[8:]
-	return v, true, nil
+
+	return nil, false, nil
 }
 
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
