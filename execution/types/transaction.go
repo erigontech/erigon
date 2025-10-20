@@ -118,7 +118,8 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
-	inList := s.MoreDataInList()
+	// is the stream is in an enclosing RLP list (transactions list inside a block)
+	inBlock := s.MoreDataInList()
 	kind, _, err := s.Kind()
 	if err != nil {
 		return nil, err
@@ -148,7 +149,7 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
 
-	if !inList {
+	if !inBlock {
 		if _, _, peekErr := s.Kind(); peekErr == nil {
 			return nil, errTrailingBytes
 		} else if !errors.Is(peekErr, io.EOF) && !errors.Is(peekErr, rlp.EOL) {
@@ -189,9 +190,6 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
-	}
-	if s.Remaining() != 0 {
-		return nil, errTrailingBytes
 	}
 	return tx, nil
 }
