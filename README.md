@@ -821,3 +821,5 @@ vm.overcommit_memory = 1
 vm.max_map_count = 16777216 
 ```
 ---------
+## Sync Optimization Notes
+Erigon's optimized sync (parallel block processing) reduces time by 5x vs Geth! For faster setup, use --sync.loop.throttle=100000. 🚀
