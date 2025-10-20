@@ -843,6 +843,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 			log.Warn("Error connecting to RPC", "err", err, "url", urlReciept)
 			return err
 		}
+		log.Info("Connected to receipt RPC", "url", urlReciept)
 	}
 
 	db := mdbx.MustOpen(dirs.Chaindata)
