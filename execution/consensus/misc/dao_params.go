@@ -22,7 +22,7 @@ package misc
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // DAOForkBlockExtra is the block header extra-data field to set for the DAO fork

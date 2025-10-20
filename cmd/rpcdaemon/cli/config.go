@@ -37,18 +37,16 @@ import (
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -58,23 +56,29 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig/features"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -84,13 +88,10 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/services"
 
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 )
 
 var rootCmd = &cobra.Command{
@@ -181,6 +182,9 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketSubscribeLogsChannelSize, utils.WSSubscribeLogsChannelSize.Name, utils.WSSubscribeLogsChannelSize.Value, utils.WSSubscribeLogsChannelSize.Usage)
+
+	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBStepSize, utils.ErigonDBStepSizeFlag.Name, utils.ErigonDBStepSizeFlag.Value, utils.ErigonDBStepSizeFlag.Usage)
+	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBStepsInFrozenFile, utils.ErigonDBStepsInFrozenFileFlag.Name, utils.ErigonDBStepsInFrozenFileFlag.Value, utils.ErigonDBStepsInFrozenFileFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -427,10 +431,23 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).Open(ctx, rawDB)
+
+		if cfg.ErigonDBStepSize == config3.DefaultStepSize {
+			logger.Info("Using default step size", "size", cfg.ErigonDBStepSize)
+		} else {
+			logger.Warn("OVERRIDING STEP SIZE; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "size", cfg.ErigonDBStepSize, "default", config3.DefaultStepSize)
+		}
+		if cfg.ErigonDBStepsInFrozenFile == config3.DefaultStepsInFrozenFile {
+			logger.Info("Using default number of steps in frozen files", "steps", cfg.ErigonDBStepsInFrozenFile)
+		} else {
+			logger.Warn("OVERRIDING NUMBER OF STEPS IN FROZEN FILES; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", cfg.ErigonDBStepsInFrozenFile, "default", config3.DefaultStepsInFrozenFile)
+		}
+
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).StepSize(cfg.ErigonDBStepSize).StepsInFrozenFile(cfg.ErigonDBStepsInFrozenFile).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 

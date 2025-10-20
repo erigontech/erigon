@@ -23,10 +23,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/turbo/privateapi"
+	"github.com/erigontech/erigon/node/privateapi"
 )
 
 type MiningService struct {

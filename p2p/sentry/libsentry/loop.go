@@ -27,8 +27,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )

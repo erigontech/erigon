@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/enode"

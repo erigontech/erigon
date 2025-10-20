@@ -449,7 +449,6 @@ FAQ
 
 ```
 # please use git branch name (or commit hash). don't use git tags
-go mod edit -replace github.com/erigontech/erigon-lib=github.com/erigontech/erigon/erigon-lib@5498f854e44df5c8f0804ff4f0747c0dec3caad5
 go get github.com/erigontech/erigon@main
 go mod tidy
 ```
@@ -575,6 +574,12 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - don't add `admin` in `--http.api` list
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
+
+### Why doesn't my full node have earlier blocks data?
+
+- `prune.mode=full` no longer downloads pre-merge blocks (see [partial history expiry](https://blog.ethereum.org/2025/07/08/partial-history-exp)).
+   Now it only stores post-merge blocks data (i.e. blocks and transactions)
+- To include pre-merge blocks data, use `--prune.mode=blocks` (all blocks data + only recent state data) or `--prune.mode=archive` (all data)
 
 ### RaspberryPI
 

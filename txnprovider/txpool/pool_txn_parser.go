@@ -30,11 +30,11 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -201,6 +201,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		proofsPerBlob := 1
 		_, dataLen, err = rlp.ParseString(payload, p)
 		if err == nil && dataLen == 1 {
+			if payload[p] != 0x01 { // Validate wrapper_version == 1 for EIP-7594
+				return 0, fmt.Errorf("%w: invalid wrapper version: expected 1, got %d", ErrParseTxn, payload[p])
+			}
 			p = p + 1
 			proofsPerBlob = int(params.CellsPerExtBlob)
 		}

@@ -33,7 +33,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )

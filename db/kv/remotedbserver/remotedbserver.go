@@ -30,9 +30,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -769,6 +769,32 @@ func (s *KvServer) HistoryStartFrom(_ context.Context, req *remoteproto.HistoryS
 	reply = &remoteproto.HistoryStartFromReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		reply.StartFrom = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return reply, nil
+}
+
+func (s *KvServer) CurrentDomainVersion(_ context.Context, req *remoteproto.CurrentDomainVersionReq) (reply *remoteproto.CurrentDomainVersionReply, err error) {
+	reply = &remoteproto.CurrentDomainVersionReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		version := tx.Debug().CurrentDomainVersion(kv.Domain(req.Domain))
+		reply.Major = version.Major
+		reply.Minor = version.Minor
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return reply, nil
+}
+
+func (s *KvServer) StepSize(_ context.Context, req *remoteproto.StepSizeReq) (reply *remoteproto.StepSizeReply, err error) {
+	reply = &remoteproto.StepSizeReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		reply.Step = tx.Debug().StepSize()
 		return nil
 	}); err != nil {
 		return nil, err

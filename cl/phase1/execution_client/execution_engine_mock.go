@@ -14,9 +14,9 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
-	hexutil "github.com/erigontech/erigon-lib/common/hexutil"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	common "github.com/erigontech/erigon/common"
+	hexutil "github.com/erigontech/erigon/common/hexutil"
 	engine_types "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	types "github.com/erigontech/erigon/execution/types"
 	typesproto "github.com/erigontech/erigon/node/gointerfaces/typesproto"

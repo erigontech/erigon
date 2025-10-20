@@ -6,19 +6,18 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/seg"
 )
 
-func BenchmarkBpsTreeNext(t *testing.B) {
+func BenchmarkBpsTreeSeek(t *testing.B) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 12_000_000, 256
 	t.Logf("N: %d, M: %d skip since shard <= %d", keyCount, M, DefaultBtreeStartSkip)
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
-	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
@@ -34,10 +33,9 @@ func BenchmarkBpsTreeNext(t *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
 	getter.Reset(0)
 
-	t.ResetTimer()
 	t.ReportAllocs()
 	//r := rand.New(rand.NewSource(0))
-	for i := 0; i < t.N; i++ {
+	for t.Loop() {
 		if !getter.HasNext() {
 			getter.Reset(0)
 		}
@@ -49,90 +47,4 @@ func BenchmarkBpsTreeNext(t *testing.B) {
 		c.Close()
 	}
 	t.ReportAllocs()
-}
-
-func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression) (*seg.Decompressor, *BtIndex, [][]byte, string) {
-	b.Helper()
-
-	logger := log.New()
-	tmp := b.TempDir()
-	b.Cleanup(func() { dir.RemoveAll(tmp) })
-
-	dataPath := generateKV(b, tmp, 52, 10, 1_000_000, logger, compression)
-	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
-
-	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
-
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
-	require.NoError(b, err)
-	b.Cleanup(func() { bt.Close() })
-	b.Cleanup(func() { kv.Close() })
-
-	keys, err := pivotKeysFromKV(dataPath)
-	require.NoError(b, err)
-	return kv, bt, keys, dataPath
-}
-
-func Benchmark_BTree_Seek(b *testing.B) {
-	M := uint64(1024)
-	compress := seg.CompressKeys
-	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
-
-	//b.Run("seek_only", func(b *testing.B) {
-	//	b.ReportAllocs()
-	//	for i := 0; i < b.N; i++ {
-	//		for _, k := range keys {
-	//			cur, _ := bt.Seek(getter, k)
-	//			cur.Close()
-	//		}
-	//	}
-	//})
-
-	b.Run("get_only", func(b *testing.B) {
-		b.ReportAllocs()
-		getter := seg.NewReader(kv.MakeGetter(), compress)
-		for i := 0; i < b.N; i++ {
-			k, v, _, _, _ := bt.Get(keys[8], getter)
-			if len(k) > 0 {
-				_, _ = k[0], k[len(k)-1]
-			}
-			if len(v) > 0 {
-				_, _ = v[0], v[len(v)-1]
-			}
-		}
-	})
-
-	//rnd := newRnd(uint64(0))
-	//b.Run("seek_then_next", func(b *testing.B) {
-	//	for i := 0; i < b.N; i++ {
-	//		p := rnd.IntN(len(keys))
-	//
-	//		cur, err := bt.Seek(getter, keys[p])
-	//		require.NoError(b, err)
-	//
-	//		require.Equal(b, keys[p], cur.key)
-	//
-	//		prevKey := common.Copy(keys[p])
-	//		ntimer := time.Duration(0)
-	//		nextKeys := 5000
-	//		for j := 0; j < nextKeys; j++ {
-	//			ntime := time.Now()
-	//
-	//			if !cur.Next() {
-	//				break
-	//			}
-	//			ntimer += time.Since(ntime)
-	//
-	//			nk := cur.Key()
-	//			if bytes.Compare(prevKey, nk) > 0 {
-	//				b.Fatalf("prev %s cur %s, next key should be greater", prevKey, nk)
-	//			}
-	//			prevKey = nk
-	//		}
-	//		if i%1000 == 0 {
-	//			fmt.Printf("next_access_last[of %d keys] %v\n", nextKeys, ntimer/time.Duration(nextKeys))
-	//		}
-	//		cur.Close()
-	//	}
-	//})
 }

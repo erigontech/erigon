@@ -28,29 +28,30 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/cmp"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/exec"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/cmp"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
-	"golang.org/x/sync/errgroup"
 )
 
 // Cases:
@@ -119,7 +120,8 @@ func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum 
 }
 
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg,
+	doms *dbstate.SharedDomains, rwTx kv.TemporalRwTx,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
@@ -127,21 +129,13 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) (execErr error) {
-	inMemExec := txc.Doms != nil
+	inMemExec := doms != nil
 
-	useExternalTx := txc.Tx != nil
+	useExternalTx := rwTx != nil
 	var applyTx kv.TemporalRwTx
 
 	if useExternalTx {
-		var ok bool
-		applyTx, ok = txc.Tx.(kv.TemporalRwTx)
-		if !ok {
-			applyTx, ok = txc.Ttx.(kv.TemporalRwTx)
-
-			if !ok {
-				return errors.New("txc.Tx is not a temporal tx")
-			}
-		}
+		applyTx = rwTx
 	} else {
 		var err error
 		temporalDb, ok := cfg.db.(kv.TemporalRwDB)
@@ -152,7 +146,7 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		defer func() { // need callback - because tx may be committed
+		defer func() {
 			applyTx.Rollback()
 		}()
 	}
@@ -167,10 +161,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	var err error
-	var doms *dbstate.SharedDomains
-	if inMemExec {
-		doms = txc.Doms
-	} else {
+	if !inMemExec {
 		var err error
 		doms, err = dbstate.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
@@ -194,7 +185,9 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	agg.BuildFilesInBackground(doms.TxNum())
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		agg.BuildFilesInBackground(doms.TxNum())
+	}
 
 	var (
 		inputTxNum               uint64
@@ -238,10 +231,7 @@ func ExecV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	if parallel {
-	}
-
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx)
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 	blockNum = doms.BlockNum()
 
 	if maxBlockNum < blockNum {
@@ -268,6 +258,13 @@ func ExecV3(ctx context.Context,
 	var lastCommittedBlockNum uint64
 
 	if parallel {
+		if !inMemExec {
+			// this is becuase for parallel execution the shared domain needs to
+			// be co-ordinated between exec and unwind - otherwise unwound state
+			// is not visible to parallel workers
+			// TODO return fmt.Errorf("parallel exec only supports inmem exec")
+		}
+
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
 				cfg:                   cfg,
@@ -328,23 +325,19 @@ func ExecV3(ctx context.Context,
 
 		if u != nil && !u.HasUnwindPoint() {
 			if lastHeader != nil {
-				if execErr != nil {
-					if errors.Is(execErr, ErrWrongTrieRoot) {
-						execErr = handleIncorrectRootHashError(
-							lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, maxBlockNum, logger, u)
-					}
-				} else {
+				switch {
+				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
 					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 					if err != nil {
 						return err
 					}
 
 					se.lastCommittedBlockNum = lastHeader.Number.Uint64()
-					committedTransactions := inputTxNum - se.lastCommittedTxNum
-					se.lastCommittedTxNum = inputTxNum
+					committedTransactions := se.domains().TxNum() - se.lastCommittedTxNum
+					se.lastCommittedTxNum = se.domains().TxNum()
 
 					commitStart := time.Now()
-					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx)
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 					applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
 					if err != nil {
 						return err
@@ -353,11 +346,21 @@ func ExecV3(ctx context.Context,
 					if !useExternalTx {
 						se.LogCommitted(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
+				case errors.Is(execErr, ErrWrongTrieRoot):
+					execErr = handleIncorrectRootHashError(
+						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, maxBlockNum, logger, u)
+				default:
+					return execErr
 				}
 			} else {
 				if execErr != nil {
-					if errors.Is(execErr, ErrWrongTrieRoot) {
+					switch {
+					case errors.Is(execErr, ErrWrongTrieRoot):
 						return fmt.Errorf("can't handle incorrect root err: %w", execErr)
+					case errors.Is(execErr, &ErrLoopExhausted{}):
+						break
+					default:
+						return execErr
 					}
 				} else {
 					return fmt.Errorf("last processed block unexpectedly nil")
@@ -390,7 +393,9 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	agg.BuildFilesInBackground(doms.TxNum())
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		agg.BuildFilesInBackground(doms.TxNum())
+	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isMining && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
@@ -563,7 +568,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint64, maxBlockNum uint64, initialTxNum uint64, readAhead chan uint64, applyResults chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
 	inputTxNum, _, offsetFromBlockBeginning, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
 
 	if err != nil {
@@ -585,7 +590,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			}
 		}()
 
-		for ; blockNum <= maxBlockNum; blockNum++ {
+		lastFrozenStep := tx.StepsInFiles(kv.CommitmentDomain)
+
+		for blockNum := startBlockNum; blockNum <= maxBlockNum; blockNum++ {
 			select {
 			case readAhead <- blockNum:
 			default:
@@ -664,6 +671,16 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 				// after history execution no offset will be required
 				offsetFromBlockBeginning = 0
 			}
+
+			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
+
+			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
+			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
+			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
+				if blockLimit > 0 && startBlockNum-blockNum+1 >= blockLimit {
+					return &ErrLoopExhausted{From: blockNum, To: blockNum, Reason: "block limit reached"}
+				}
+			}
 		}
 
 		return nil
@@ -716,7 +733,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 		return nil, t2, err
 	}
 
-	if !useExternalTx {
+	if !useExternalTx && execStage.SyncMode() == stages.ModeApplyingBlocks {
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 

@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -22,16 +22,20 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 )
+
+var randSrc = rand.New(rand.NewSource(42)) // fixed seed
+var randMu sync.Mutex
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Parallel()
@@ -1856,9 +1860,11 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefix []byte, keyL
 		if constPrefix != nil {
 			copy(key, constPrefix)
 		}
-		rand.Read(key[len(constPrefix):])
+		randMu.Lock()
+		randSrc.Read(key[len(constPrefix):])
+		randMu.Unlock()
 
-		hashed := KeyToHexNibbleHash(key)
+		hashed := KeyToNibblizedHash(key)
 		if len(plainKeys) == 0 {
 			plainKeys = append(plainKeys, key)
 			hashedKeys = append(hashedKeys, hashed)
@@ -1905,7 +1911,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
-	//t.Parallel()
+	// t.Parallel()
 
 	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, addrToWitness []byte) {
 		t.Helper()
@@ -2006,13 +2012,16 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	})
 
 	t.Run("StorageSubtrieWithCommonPrefix", func(t *testing.T) {
-		t.Skip("flaky test with partially fixed edge case")
-		t.Logf("StorageSubtrieWithCommonPrefix")
+		t.Logf("StorageSubtrieWithCommonPrefix\n")
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
 
 		addrWithSingleton := common.Copy(plainKeysList[0])
 		// generate 2 storage slots HAVING common prefix of len >=4
-		storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+		storageKeysList, storageHashedKeys := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+
+		for i := 0; i < len(storageHashedKeys); i++ {
+			fmt.Printf("storageHashedKeys[%d] = %x\n", i, storageHashedKeys[i])
+		}
 
 		builder := NewUpdateBuilder()
 		for i := 0; i < len(plainKeysList); i++ {

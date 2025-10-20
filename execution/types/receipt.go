@@ -28,9 +28,9 @@ import (
 	"math/big"
 	"slices"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -215,7 +215,7 @@ func (r *Receipt) decodeTyped(b []byte) error {
 		return errShortTypedReceipt
 	}
 	switch b[0] {
-	case DynamicFeeTxType, AccessListTxType, BlobTxType:
+	case DynamicFeeTxType, AccessListTxType, BlobTxType, SetCodeTxType:
 		var data receiptRLP
 		err := rlp.DecodeBytes(b[1:], &data)
 		if err != nil {
