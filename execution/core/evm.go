@@ -205,6 +205,7 @@ func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount uint25
 	balance, err := db.GetBalance(addr)
 
 	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr) {
+		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
 			if !can {
 				fmt.Printf("%d (%d.%d) Can't transfer %d from %x: %d\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount, addr, &balance)

@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// CallContext provides a basic interface for the EVM calling conventions. The EVM
+// CallerContext provides a basic interface for the EVM calling conventions. The EVM
 // depends on this context being implemented for doing subcalls and initialising new EVM contracts.
-type CallContext interface {
+type CallerContext interface {
 	// Call another contract
 	Call(env *EVM, me common.Address, addr common.Address, data []byte, gas, value *big.Int) ([]byte, error)
 	// Take another's contract code and execute within our own context

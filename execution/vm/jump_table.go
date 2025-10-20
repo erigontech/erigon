@@ -22,16 +22,15 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/params"
 )
 
 type (
-	executionFunc func(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error)
-	gasFunc       func(*EVM, common.Address, uint64, *Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
+	executionFunc func(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error)
+	gasFunc       func(*EVM, *CallContext, uint64, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
-	memorySizeFunc func(*Stack) (size uint64, overflow bool)
-	stringer       func(pc uint64, callContext *ScopeContext) string
+	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
+	stringer       func(pc uint64, callContext *CallContext) string
 )
 
 type operation struct {

@@ -99,7 +99,7 @@ func NewContract(caller common.Address, callerAddress common.Address, addr commo
 
 // First result tells us if the destination is valid
 // Second result tells us if the code bitmap was used
-func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
+func (c *Contract) validJumpdest(dest uint256.Int) (bool, bool) {
 	udest, overflow := dest.Uint64WithOverflow()
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.

@@ -177,7 +177,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
-	scope := &vm.ScopeContext{
+	scope := &vm.CallContext{
 		Contract: *vm.NewContract(common.Address{}, common.Address{}, common.Address{}, uint256.Int{}, c),
 	}
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil), common.Address{})
@@ -271,7 +271,7 @@ func TestEnterExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &vm.ScopeContext{
+	scope := &vm.CallContext{
 		Contract: *vm.NewContract(common.Address{}, common.Address{}, common.Address{}, uint256.Int{}, c),
 	}
 	tracer.OnEnter(1, byte(vm.CALL), scope.Contract.Caller(), scope.Contract.Address(), false, []byte{}, 1000, uint256.Int{}, []byte{})

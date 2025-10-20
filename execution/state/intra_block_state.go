@@ -454,7 +454,7 @@ func (sdb *IntraBlockState) getBalance(addr common.Address) (uint256.Int, bool, 
 		return *u256.Num0, false, nil
 	}
 
-	balance, source, _, err := versionedRead(sdb, addr, BalancePath, common.Hash{}, false, *u256.Num0,
+	balance, source, _, err := versionedRead(sdb, addr, BalancePath, common.Hash{}, false, uint256.Int{},
 		func(v uint256.Int) uint256.Int {
 			return v
 		},
@@ -757,7 +757,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 			if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 				// TODO: discuss if we should ignore error
 				prev := new(uint256.Int)
-
+				amount := amount
 				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr)) {
 					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 				}
@@ -775,7 +775,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
 			}
 
-			bi.increase.Add(&bi.increase, &amount)
+			bi.increase = u256.Add(bi.increase, amount)
 			bi.count++
 			return nil
 		}
@@ -805,6 +805,8 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 	if sdb.trace || dbg.TraceAccount(addr) {
 		defer func() {
 			bal, _ := sdb.GetBalance(addr)
+			prev := prev     // avoid capture allocation unless we're tracing
+			amount := amount // avoid capture allocation unless we're tracing
 			expected := (&uint256.Int{}).Add(&prev, &amount)
 			if bal.Cmp(expected) != 0 {
 				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
@@ -813,14 +815,14 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, 
 		}()
 	}
 
-	update := new(uint256.Int).Add(&prev, &amount)
+	update := u256.Add(prev, amount)
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
-	stateObject.SetBalance(*update, wasCommited, reason)
-	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
+	stateObject.SetBalance(update, wasCommited, reason)
+	sdb.versionWritten(addr, BalancePath, common.Hash{}, update)
 	return nil
 }
 
@@ -949,6 +951,8 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, 
 	if sdb.trace || dbg.TraceAccount(addr) {
 		defer func() {
 			bal, _ := sdb.GetBalance(addr)
+			prev := prev     // avoid capture allocation unless we're tracing
+			amount := amount // avoid capture allocation unless we're tracing
 			fmt.Printf("%d (%d.%d) SubBalance %x, %d-%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
 		}()
 	}
@@ -957,10 +961,10 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, 
 	if err != nil {
 		return err
 	}
-	update := new(uint256.Int).Sub(&prev, &amount)
-	stateObject.SetBalance(*update, wasCommited, reason)
+	update := u256.Sub(prev, amount)
+	stateObject.SetBalance(update, wasCommited, reason)
 	if sdb.versionMap != nil {
-		sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
+		sdb.versionWritten(addr, BalancePath, common.Hash{}, update)
 	}
 	return nil
 }
@@ -968,6 +972,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || dbg.TraceAccount(addr) {
+		amount := amount
 		fmt.Printf("%d (%d.%d) SetBalance %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &amount)
 	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
@@ -1303,7 +1308,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (*stateObject, e
 
 func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObject) {
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
-		object.data.Balance.Add(&object.data.Balance, &bi.increase)
+		object.data.Balance = u256.Add(object.data.Balance, bi.increase)
 		bi.transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
