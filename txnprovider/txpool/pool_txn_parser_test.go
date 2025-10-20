@@ -534,7 +534,8 @@ func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
 
 	// Commitments > blobs.
 	moreCommitmentsWrapper := *baseWrapper
-	moreCommitmentsWrapper.Commitments = append(types.BlobKzgs{}, baseWrapper.Commitments...)
+	moreCommitmentsWrapper.Commitments = make(types.BlobKzgs, len(baseWrapper.Commitments))
+	copy(moreCommitmentsWrapper.Commitments, baseWrapper.Commitments)
 	moreCommitmentsWrapper.Commitments = append(moreCommitmentsWrapper.Commitments, types.KZGCommitment{})
 
 	moreBuf := &bytes.Buffer{}
@@ -547,7 +548,8 @@ func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
 
 	// Commitments < blobs.
 	fewerCommitmentsWrapper := *baseWrapper
-	fewerCommitmentsWrapper.Commitments = append(types.BlobKzgs{}, baseWrapper.Commitments[:1]...)
+	fewerCommitmentsWrapper.Commitments = make(types.BlobKzgs, len(baseWrapper.Commitments)-1)
+	copy(fewerCommitmentsWrapper.Commitments, baseWrapper.Commitments[:len(baseWrapper.Commitments)-1])
 
 	fewerBuf := &bytes.Buffer{}
 	require.NoError(t, fewerCommitmentsWrapper.MarshalBinaryWrapped(fewerBuf))

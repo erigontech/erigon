@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -279,7 +280,12 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (txnSlot *txp
 
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("panic while parsing transaction: %v", r)
+			stack := string(debug.Stack())
+			if recErr, ok := r.(error); ok {
+				err = fmt.Errorf("panic while parsing transaction: %w; stack=%s", recErr, stack)
+			} else {
+				err = fmt.Errorf("panic while parsing transaction: %v; stack=%s", r, stack)
+			}
 			txnSlot = nil
 			sender = common.Address{}
 		}
