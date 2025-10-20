@@ -461,6 +461,7 @@ func (s *simulator) simulateBlock(
 	}
 	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
 	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
+	intraBlockState.SoftFinalise()
 
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
