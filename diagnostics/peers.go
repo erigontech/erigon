@@ -22,8 +22,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/turbo/node"
 )
 
 type PeerNetworkInfo struct {

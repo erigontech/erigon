@@ -19,7 +19,6 @@ package main
 import (
 	"cmp"
 	"fmt"
-	"github.com/erigontech/erigon/core/syscheck"
 	"net/http"
 	"os"
 
@@ -27,15 +26,16 @@ import (
 	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/cmd/erigon/node"
+	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics"
-	erigonapp "github.com/erigontech/erigon/turbo/app"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/diagnostics/syscheck"
+	erigoncli "github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 func main() {

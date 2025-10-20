@@ -30,8 +30,6 @@ import (
 	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -40,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -118,10 +118,10 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, error) {
-	// filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
-	// if err != nil {
-	// 	return nil, pid, err
-	// }
+	_, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	if err != nil {
+		return nil, pid, err
+	}
 
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
@@ -129,7 +129,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRootProtocolV1, data)
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
 	if err != nil {
 		return nil, pid, err
 	}

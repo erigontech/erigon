@@ -7,16 +7,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 var (
@@ -581,21 +580,6 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
 		}
 
-		blockCount := te.blockExecMetrics.BlockCount.Load()
-		blockExecDur := time.Duration(te.blockExecMetrics.Duration.Load())
-
-		curBlockCount := blockCount - p.prevBlockCount
-		curBlockExecDur := blockExecDur - p.prevBlockDuration
-
-		p.prevBlockCount = blockCount
-		p.prevBlockDuration = blockExecDur
-
-		var avgBlockDur time.Duration
-
-		if curBlockCount > 0 {
-			avgBlockDur = curBlockExecDur / time.Duration(curBlockCount)
-		}
-
 		curReadCount := int64(readCount - p.prevReadCount)
 		curWriteCount := int64(writeCount - p.prevWriteCount)
 
@@ -611,7 +595,6 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 		mxExecGasPerTxn.Set(float64(avgTaskGas))
 		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
 		mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
-		mxExecBlockDuration.Set(float64(avgBlockDur))
 
 		execVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
@@ -623,7 +606,6 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"tdur", common.Round(avgTaskDur, 0).String(),
 			"exec", fmt.Sprintf("%v(%.2f%%)", common.Round(avgExecDur, 0), execRatio),
 			"read", fmt.Sprintf("%v(%.2f%%),a=%v,s=%v,c=%v", common.Round(avgReadDur, 0), readRatio, common.Round(avgAccountReadDur, 0), common.Round(avgStorageReadDur, 0), common.Round(avgCodeReadDur, 0)),
-			"bdur", common.Round(avgBlockDur, 0),
 			"rd", fmt.Sprintf("%s,a=%s,s=%s,c=%s", common.PrettyCounter(curReadCount), common.PrettyCounter(curAccountReadCount),
 				common.PrettyCounter(curStorageReadCount), common.PrettyCounter(curCodeReadCount)),
 			"wrt", common.PrettyCounter(curWriteCount),
@@ -655,6 +637,23 @@ func (p *Progress) LogExecuted(rs *state.StateV3, ex executor) {
 			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
 		}
 	}
+
+	blockCount := te.blockExecMetrics.BlockCount.Load()
+	blockExecDur := time.Duration(te.blockExecMetrics.Duration.Load())
+
+	curBlockCount := blockCount - p.prevBlockCount
+	curBlockExecDur := blockExecDur - p.prevBlockDuration
+
+	p.prevBlockCount = blockCount
+	p.prevBlockDuration = blockExecDur
+
+	var avgBlockDur time.Duration
+
+	if curBlockCount > 0 {
+		avgBlockDur = curBlockExecDur / time.Duration(curBlockCount)
+	}
+	mxExecBlockDuration.Set(float64(avgBlockDur))
+	execVals = append(execVals, "bdur", common.Round(avgBlockDur, 0))
 
 	executedGasSec := uint64(float64(te.executedGas.Load()-p.prevExecutedGas) / seconds)
 
@@ -849,7 +848,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	if stepsInDb > 0 {
 		vals = append(vals, []interface{}{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
-			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(config3.DefaultStepSize)),
+			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(te.agg.StepSize())),
 		}...)
 	}
 
