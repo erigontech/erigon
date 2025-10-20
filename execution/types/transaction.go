@@ -118,7 +118,7 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
-	// is the stream is in an enclosing RLP list (transactions list inside a block)
+	// if the stream is in an enclosing RLP list (transactions list inside a block)
 	inBlock := s.MoreDataInList()
 	kind, _, err := s.Kind()
 	if err != nil {
