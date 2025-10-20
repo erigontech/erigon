@@ -14,7 +14,7 @@
 ##   Using "make" (see Makefile for defaults)
 ##   4. make docker
 ##
-##   5. make docker DOCKER_BINARIES='erigon downloader evm'
+##   5. DOCKER_BINARIES='erigon downloader rpcdaemon' make docker
 
 ARG BUILDER_IMAGE="golang:1.24-bookworm" \
     TARGET_BASE_IMAGE="debian:12-slim" \

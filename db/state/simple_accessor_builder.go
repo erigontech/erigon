@@ -3,9 +3,9 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
@@ -43,15 +43,21 @@ type AccessorArgs struct {
 	BucketSize int
 	LeafSize   uint16
 
+	// data file settings
+	ValuesOnCompressedPage int
+	StepSize               int
+
 	// other config options for recsplit
 }
 
-func NewAccessorArgs(enums, lessFalsePositives bool) *AccessorArgs {
+func NewAccessorArgs(enums, lessFalsePositives bool, valuesOnCompressedPage int, stepSize uint64) *AccessorArgs {
 	return &AccessorArgs{
-		Enums:              enums,
-		LessFalsePositives: lessFalsePositives,
-		BucketSize:         recsplit.DefaultBucketSize,
-		LeafSize:           recsplit.DefaultLeafSize,
+		Enums:                  enums,
+		LessFalsePositives:     lessFalsePositives,
+		BucketSize:             recsplit.DefaultBucketSize,
+		LeafSize:               recsplit.DefaultLeafSize,
+		ValuesOnCompressedPage: valuesOnCompressedPage,
+		StepSize:               int(stepSize),
 	}
 }
 
@@ -67,18 +73,21 @@ type SimpleAccessorBuilder struct {
 	parser   SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
-	logger   log.Logger
+
+	tmpDir string
+	logger log.Logger
 }
 
 type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, tmpDir string, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
 		parser: Registry.SnapshotConfig(id).Schema,
+		tmpDir: tmpDir,
 		logger: logger,
 	}
 
@@ -92,10 +101,14 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logg
 
 	if b.fetcher == nil {
 		// assume rootnum and num is same
-		logger.Debug("using default first entity num fetcher for %s", id)
+		logger.Debug("using default first entity num fetcher", "id", id)
 		b.fetcher = func(from, to RootNum, seg *seg.Decompressor) Num {
 			return Num(from)
 		}
+	}
+
+	if b.indexPos >= uint64(len(b.parser.IndexTags())) {
+		panic("indexPos greater than indexFileTag length")
 	}
 
 	return b
@@ -105,9 +118,6 @@ type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 
 func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
-		if int(s.indexPos) >= len(Registry.IndexFileTag(s.id)) {
-			panic("indexPos greater than indexFileTag length")
-		}
 		s.indexPos = indexPos
 	}
 }
@@ -122,38 +132,40 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-// TODO: this is supposed to go away once we start storing first entity num in the snapshot
-func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumFetcher) {
-	s.fetcher = fetcher
+func (s *SimpleAccessorBuilder) GetInputDataQuery(decomp *seg.Decompressor, compressionUsed bool) (*DecompressorIndexInputDataQuery, error) {
+	//sgname := s.parser.DataFile(version.V1_0, from, to)
+	//decomp, _ := seg.NewDecompressorWithMetadata(sgname, true)
+	reader := seg.NewPagedReader(decomp.MakeGetter(), s.args.ValuesOnCompressedPage, compressionUsed)
+	return NewDecompressorIndexInputDataQuery(reader)
 }
 
-func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := s.parser.DataFile(version.V1_0, from, to)
-	decomp, _ := seg.NewDecompressor(sgname)
-	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
+func (s *SimpleAccessorBuilder) isCompressionUsed(from, to RootNum) bool {
+	return uint64(to-from) > uint64(s.args.StepSize)
 }
 
 func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 	s.kf = factory
 }
 
-func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
-	return s.args.Enums
-}
-
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompressor, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%s: at=%d-%d, %v, %s", Registry.IndexFileTag(s.id)[s.indexPos], from, to, rec, dbg.Stack())
+			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.parser.IndexTags()[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
-	iidq := s.GetInputDataQuery(from, to)
+
+	iidq, err := s.GetInputDataQuery(decomp, s.isCompressionUsed(from, to))
+	if err != nil {
+		return nil, err
+	}
 	defer iidq.Close()
+	meta := iidq.Metadata()
 	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
 
-	keyCount := iidq.GetCount()
+	keyCount := iidq.Count()
 	if p != nil {
-		p.Name.Store(&idxFile)
+		baseFileName := filepath.Base(idxFile)
+		p.Name.Store(&baseFileName)
 		p.Total.Store(keyCount)
 	}
 	salt, err := Registry.Salt(s.id)
@@ -169,20 +181,20 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		IndexFile:          idxFile,
 		Salt:               &salt,
 		NoFsync:            s.args.Nofsync,
-		TmpDir:             Registry.Dirs(s.id).Tmp,
+		TmpDir:             s.tmpDir,
 		LessFalsePositives: s.args.LessFalsePositives,
-		BaseDataID:         iidq.GetBaseDataId(),
+		BaseDataID:         uint64(meta.First),
 	}, s.logger)
 	if err != nil {
 		return nil, err
 	}
 	defer rs.Close()
+	rs.LogLvl(log.LvlTrace)
 
 	s.kf.Refresh()
 	defer s.kf.Close()
 
-	defer iidq.decomp.MadvSequential().DisableReadAhead()
-
+	defer iidq.reader.MadvNormal().DisableReadAhead()
 	for {
 		stream := iidq.GetStream(ctx)
 		defer stream.Close()
@@ -207,9 +219,10 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 		}
 		stream.Close()
 		if err = rs.Build(ctx); err != nil {
-			p.Processed.CompareAndSwap(p.Processed.Load(), 0)
 			// collision handling
-			if errors.Is(err, recsplit.ErrCollision) {
+			if rs.Collision() {
+				p.Processed.Store(0)
+				s.logger.Debug("found collision, trying again", "file", filepath.Base(idxFile), "salt", rs.Salt(), "err", err)
 				rs.ResetNextSalt()
 				continue
 			}
@@ -220,68 +233,101 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	}
 
 	return recsplit.OpenIndex(idxFile)
-
 }
 
 type DecompressorIndexInputDataQuery struct {
-	decomp     *seg.Decompressor
-	baseDataId uint64
+	reader *seg.PagedReader
+	m      NumMetadata
+}
+
+func NewDecompressorIndexInputDataQuery(reader *seg.PagedReader) (*DecompressorIndexInputDataQuery, error) {
+	d := &DecompressorIndexInputDataQuery{reader: reader}
+	d.m = NumMetadata{}
+	if err := d.m.Unmarshal(reader.GetMetadata()); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // return trio: word, index, offset,
 func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] {
 	// open seg if not yet
-	return &seg_stream{ctx: ctx, g: d.decomp.MakeGetter(), word: make([]byte, 0, 4096)}
+	pds := &pagedSegDataStream{
+		ctx:    ctx,
+		reader: d.reader,
+		word:   make([]byte, 0, 4096),
+		meta:   d.m,
+		i:      d.m.First.Uint64(),
+	}
+	pds.pageSize = uint64(d.reader.PageSize())
+	return pds
 }
 
-func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
-	// discuss: adding base data id to snapshotfile?
-	// or might need to add callback to get first basedataid...
-	return d.baseDataId
-	//return d.from
+func (d *DecompressorIndexInputDataQuery) Count() uint64 {
+	return uint64(d.reader.Count())
 }
 
-func (d *DecompressorIndexInputDataQuery) GetCount() uint64 {
-	return uint64(d.decomp.Count())
+func (d *DecompressorIndexInputDataQuery) Metadata() NumMetadata {
+	return d.m
 }
 
 func (d *DecompressorIndexInputDataQuery) Close() {
-	d.decomp.Close()
-	d.decomp = nil
+	d.reader = nil
 }
 
-type seg_stream struct {
-	g         *seg.Getter
+// this can handle case where key is stored (pageSize > 1)
+// or when keys are sequential uints
+// case where neither key is stored, nor keys are sequential
+// require a ef file. Which will be done separately.
+type pagedSegDataStream struct {
+	reader    *seg.PagedReader
+	meta      NumMetadata
 	i, offset uint64
+	pageSize  uint64
 	ctx       context.Context
 	word      []byte
 }
 
-func (s *seg_stream) Next() (word []byte, index uint64, offset uint64, err error) {
+func (s *pagedSegDataStream) Next() (word []byte, index uint64, offset uint64, err error) {
 	// check if ctx is done...
-	if s.g.HasNext() {
-		word, nextPos := s.g.Next(s.word[:0])
+	var pageOffset uint64
+	var k []byte
+	if s.reader.HasNext() {
+		//for
+		k, word, s.word, pageOffset = s.reader.Next2(s.word[:0])
 		defer func() {
-			s.offset = nextPos
 			s.i++
+			s.offset = pageOffset
+			for s.reader.HasNextOnPage() {
+				s.reader.Skip()
+				s.i++
+			}
 		}()
-		return word, s.i, s.offset, nil
+
+		if s.pageSize <= 1 {
+			index = s.i
+		} else {
+			// keys are present
+			s.offset = pageOffset
+			index = binary.BigEndian.Uint64(k)
+		}
+		return word, index, s.offset, nil
 	}
 	return nil, 0, 0, io.EOF
 }
 
-func (s *seg_stream) HasNext() bool {
-	return s.g.HasNext()
+func (s *pagedSegDataStream) HasNext() bool {
+	return s.reader.HasNext()
 }
 
-func (s *seg_stream) Close() {
-	if s.g == nil {
+func (s *pagedSegDataStream) Close() {
+	if s.reader == nil {
 		return
 	}
-	s.g = nil
+	s.reader = nil
 }
 
-// index key factory "manufacturing" index keys only
+// index key factory "manufacturing" index key uint64 -> big endian bytes
 type SimpleIndexKeyFactory struct {
 	num []byte
 }
@@ -297,9 +343,8 @@ func (n *SimpleIndexKeyFactory) Make(_ []byte, index uint64) []byte {
 		panic("index key factory closed or not initialized properly")
 	}
 
-	// everywhere except heimdall indexes, which use BigIndian format
-	nm := binary.PutUvarint(n.num, index)
-	return n.num[:nm]
+	binary.BigEndian.PutUint64(n.num, index)
+	return n.num[:8]
 }
 
 func (n *SimpleIndexKeyFactory) Close() {

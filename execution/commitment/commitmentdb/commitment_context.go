@@ -21,9 +21,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/trie"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	witnesstypes "github.com/erigontech/erigon/execution/types/witness"
 )
 
 var (
@@ -482,27 +482,30 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, st
 			if err != nil {
 				return enc, 0, fmt.Errorf("readDomain(GetAsOf) %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
 			}
-			return enc, 0, nil
+			return enc, kv.Step(sdc.limitReadAsOfTxNum / sdc.stepSize), nil
 		} else {
 			var ok bool
 			// reading from domain files this way will dereference domain key correctly,
 			// rotx.GetAsOf itself does not dereference keys in commitment domain values
-			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
-			if !ok {
-				enc = nil
-			}
+			var endTxNum uint64
+			enc, ok, _, endTxNum, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if err != nil {
 				return nil, 0, fmt.Errorf("readDomain %q: (limitTxNum=%d): %w", d, sdc.limitReadAsOfTxNum, err)
+			}
+
+			if !ok {
+				enc = nil
+			} else {
+				step = kv.Step(endTxNum / sdc.stepSize)
 			}
 		}
 	}
 
 	if enc == nil {
 		enc, step, err = sdc.getter.GetLatest(d, plainKey)
-	}
-
-	if err != nil {
-		return nil, 0, fmt.Errorf("readDomain %q: %w", d, err)
+		if err != nil {
+			return nil, 0, fmt.Errorf("readDomain %q: %w", d, err)
+		}
 	}
 	return enc, step, nil
 }
@@ -535,7 +538,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash
 	}
 
-	if assert.Enable {
+	if assert.Enable { // verify code hash from account encoding matches stored code
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err
