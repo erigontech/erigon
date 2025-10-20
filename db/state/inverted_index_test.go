@@ -31,9 +31,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -62,9 +62,9 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, Version: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
-	ii, err := NewInvertedIndex(cfg, aggStep, dirs, logger)
+	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(ii.Close)
 	ii.salt.Store(&salt)
@@ -534,7 +534,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			var found bool
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
-			maxSpan := ii.stepSize * config3.StepsInFrozenFile
+			maxSpan := ii.stepSize * config3.DefaultStepsInFrozenFile
 
 			for {
 				if stop := func() bool {
@@ -623,7 +623,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	cfg := ii.InvIdxCfg
 
 	var err error
-	ii, err = NewInvertedIndex(cfg, 16, ii.dirs, logger)
+	ii, err = NewInvertedIndex(cfg, 16, config3.DefaultStepsInFrozenFile, ii.dirs, logger)
 	require.NoError(err)
 	defer ii.Close()
 	ii.salt.Store(&salt)

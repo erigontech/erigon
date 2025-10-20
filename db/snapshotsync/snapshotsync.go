@@ -27,8 +27,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -36,8 +35,8 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
@@ -218,6 +217,7 @@ func getMinimumBlocksToDownload(
 	blockReader blockReader,
 	maxStateStep uint64,
 	historyPruneTo uint64,
+	stepSize uint64,
 ) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
 	started := time.Now()
 	var iterations int64
@@ -230,7 +230,7 @@ func getMinimumBlocksToDownload(
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	minStateStepToDownload = uint64(math.MaxUint32)
-	stateTxNum := maxStateStep * config3.DefaultStepSize
+	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
 			if ctx.Err() != nil {
@@ -239,8 +239,8 @@ func getMinimumBlocksToDownload(
 		}
 		iterations++
 		if blockNum == historyPruneTo {
-			minStateStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
-			if baseTxNum < (config3.DefaultStepSize - 1) {
+			minStateStepToDownload = (baseTxNum - (stepSize - 1)) / stepSize
+			if baseTxNum < (stepSize - 1) {
 				minStateStepToDownload = 0
 			}
 		}
@@ -309,7 +309,7 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 }
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
-func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem) bool {
+func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
@@ -328,7 +328,7 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 		log.Crit("Failed to get minimum transaction number", "err", err)
 		return false
 	}
-	minStep := minTxNum / config3.DefaultStepSize
+	minStep := minTxNum / stepSize
 	return s.From < minStep
 }
 
@@ -356,6 +356,7 @@ func SyncSnapshots(
 	cc *chain.Config,
 	snapshotDownloader downloaderproto.DownloaderClient,
 	syncCfg ethconfig.Sync,
+	stepSize uint64,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
@@ -391,7 +392,7 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
-			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune)
+			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune, stepSize)
 			if err != nil {
 				return err
 			}
@@ -409,7 +410,7 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
-			toStep = toTxNum / uint64(config3.DefaultStepSize)
+			toStep = toTxNum / stepSize
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
@@ -468,7 +469,7 @@ func SyncSnapshots(
 				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
 
-			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p) {
+			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
 				continue
 			}
 

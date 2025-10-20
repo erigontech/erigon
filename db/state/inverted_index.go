@@ -32,17 +32,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -64,7 +62,8 @@ type InvertedIndex struct {
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	stepSize uint64 // amount of transactions inside single aggregation step
+	stepSize          uint64 // amount of transactions inside single aggregation step
+	stepsInFrozenFile uint64 // starting from this number of steps, the file is considered frozen
 
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
@@ -91,7 +90,7 @@ type iiVisible struct {
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
+func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -112,16 +111,17 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs
 		_visible:   newIIVisible(cfg.FilenameBase, []visibleFile{}),
 		logger:     logger,
 
-		stepSize: stepSize,
+		stepSize:          stepSize,
+		stepsInFrozenFile: stepsInFrozenFile,
 	}
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
 
-	if ii.Version.DataEF.IsZero() {
+	if ii.FileVersion.DataEF.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", ii.Name))
 	}
-	if ii.Version.AccessorEFI.IsZero() {
+	if ii.FileVersion.AccessorEFI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", ii.Name))
 	}
 
@@ -132,13 +132,13 @@ func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep kv.Step) string 
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.Version.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.FileVersion.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efNewFilePath(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
 	}
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.Version.DataEF.String(), ii.FilenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.FileVersion.DataEF.String(), ii.FilenameBase, fromStep, toStep))
 }
 
 func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string {
@@ -208,7 +208,7 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.FilenameBase, "ef", ii.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.stepsInFrozenFile, ii.FilenameBase, "ef", ii.logger) {
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
 			ii.dirtyFiles.Set(dirtyFile)
 		}
@@ -251,10 +251,10 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 }
 
 func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
+	fromStep, toStep := item.StepRange(ii.stepSize)
 	if item.decompressor == nil {
-		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.FilenameBase, item.startTxNum/ii.stepSize, item.endTxNum/ii.stepSize)
+		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.FilenameBase, fromStep, toStep)
 	}
-	fromStep, toStep := kv.Step(item.startTxNum/ii.stepSize), kv.Step(item.endTxNum/ii.stepSize)
 	return ii.buildMapAccessor(ctx, fromStep, toStep, ii.dataReader(item.decompressor), ps)
 }
 func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
@@ -282,7 +282,6 @@ func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, iiFiles *MissedAccessorIIFiles) {
 	for _, item := range iiFiles.missedMapAccessors() {
-		item := item
 		g.Go(func() error {
 			return ii.buildEfAccessor(ctx, item, ps)
 		})
@@ -442,12 +441,13 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		}
 	}
 	return &InvertedIndexRoTx{
-		ii:       ii,
-		visible:  ii._visible,
-		files:    files,
-		stepSize: ii.stepSize,
-		name:     ii.Name,
-		salt:     ii.salt.Load(),
+		ii:                ii,
+		visible:           ii._visible,
+		files:             files,
+		stepSize:          ii.stepSize,
+		stepsInFrozenFile: ii.stepsInFrozenFile,
+		name:              ii.Name,
+		salt:              ii.salt.Load(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -516,8 +516,9 @@ type InvertedIndexRoTx struct {
 
 	// TODO: retrofit recent optimization in main and reenable the next line
 	// ef *multiencseq.SequenceBuilder // re-usable
-	salt     *uint32
-	stepSize uint64
+	salt              *uint32
+	stepSize          uint64
+	stepsInFrozenFile uint64
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -1186,7 +1187,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
-	if !ii.Version.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
+	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
 		versionOfRs = 1
 	}
 	cfg := recsplit.RecSplitArgs{
@@ -1239,7 +1240,7 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
-	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize)
+	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize, ii.stepsInFrozenFile)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence

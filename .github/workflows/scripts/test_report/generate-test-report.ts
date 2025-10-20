@@ -20,6 +20,7 @@ const acceptedWorkflows = [
     '.github/workflows/qa-tip-tracking-gnosis.yml',
     '.github/workflows/qa-tip-tracking-polygon.yml',
     '.github/workflows/qa-tip-tracking.yml',
+    '.github/workflows/qa-tip-tracking-with-load.yml',
     '.github/workflows/qa-txpool-performance-test.yml',
     '.github/workflows/test-all-erigon-race.yml',
     //'.github/workflows/test-all-erigon.yml',

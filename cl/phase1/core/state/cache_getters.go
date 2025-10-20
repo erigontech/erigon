@@ -16,7 +16,7 @@
 
 package state
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 func (b *CachingBeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool) {
 	val, ok := b.publicKeyIndicies[key]

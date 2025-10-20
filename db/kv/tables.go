@@ -820,6 +820,13 @@ func String2Domain(in string) (Domain, error) {
 	}
 }
 
+func String2Forkable(in string) (ForkableId, error) {
+	switch in {
+	default:
+		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
+	}
+}
+
 const MaxUint16 uint16 = 1<<16 - 1
 
 // --- Deprecated
@@ -903,7 +910,7 @@ const (
 	   1. what is smallest block number >= X where account A changed
 	   2. get last shard of A - to append there new block numbers
 
-	   Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
+	   Task 1. is part of "get historical state" operation (see `db/state:DomainGetAsOf`):
 	   If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
 
 	   	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)

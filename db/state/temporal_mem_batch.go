@@ -26,7 +26,7 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
@@ -54,8 +54,9 @@ type TemporalMemBatch struct {
 	domains         [kv.DomainLen]map[string]dataWithPrevStep
 	storage         *btree2.Map[string, dataWithPrevStep] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
-	domainWriters [kv.DomainLen]*DomainBufferedWriter
-	iiWriters     []*InvertedIndexBufferedWriter
+	domainWriters   [kv.DomainLen]*DomainBufferedWriter
+	iiWriters       []*InvertedIndexBufferedWriter
+	forkableWriters map[ForkableId]kv.BufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
@@ -79,6 +80,11 @@ func newTemporalMemBatch(tx kv.TemporalTx, metrics *DomainMetrics) *TemporalMemB
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
+	}
+
+	sd.forkableWriters = make(map[ForkableId]kv.BufferedWriter)
+	for _, id := range tx.Debug().AllForkableIds() {
+		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter()
 	}
 
 	return sd
@@ -256,6 +262,9 @@ func (sd *TemporalMemBatch) Close() {
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()
 	}
+	for _, fWriter := range sd.forkableWriters {
+		fWriter.Close()
+	}
 }
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
@@ -300,6 +309,15 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		w.close()
+	}
+	for _, w := range sd.forkableWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+		w.Close()
 	}
 	return nil
 }

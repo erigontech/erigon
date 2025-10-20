@@ -24,18 +24,17 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/eth/ethutils"
-	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/core"
+	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -329,11 +328,11 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil2.EncodeBig(blockReward.ToBig())
-	ret.UncleReward = hexutil2.EncodeBig(uncleReward.ToBig())
+	ret.BlockReward = hexutil.EncodeBig(blockReward.ToBig())
+	ret.UncleReward = hexutil.EncodeBig(uncleReward.ToBig())
 
 	blockReward.Add(blockReward, uncleReward)
-	ret.Issuance = hexutil2.EncodeBig(blockReward.ToBig())
+	ret.Issuance = hexutil.EncodeBig(blockReward.ToBig())
 	return ret, nil
 }
 

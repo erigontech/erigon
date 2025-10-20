@@ -23,8 +23,6 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -33,8 +31,10 @@ import (
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/cmd/utils"
+	sentinelapp "github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/mem"
-	sentinelapp "github.com/erigontech/erigon/turbo/app"
 )
 
 func main() {

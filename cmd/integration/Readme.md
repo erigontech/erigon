@@ -158,6 +158,7 @@ erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
     BEGIN { pagesize = 4096 }
     /^  Pagesize:/ { pagesize = $2 }
     /^Status of/ { table = $3 }
+    /^Garbage Collection/ { table = "GarbageCollection" }
     /Branch pages:/ { branch = $3 }
     /Leaf pages:/ { leaf = $3 }
     /Overflow pages:/ { overflow = $3 }
