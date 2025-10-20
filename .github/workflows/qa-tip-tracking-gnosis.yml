@@ -266,8 +266,13 @@ jobs:
     - name: Action for Not Success
       if: ${{ always() }}
       run: |
+        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during upgrade & tip-tracking test"
+        fi
+        if [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
+          echo "::error::Error detected during downgrade & tip-tracking test"
+        fi
         if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]] || \
            [[ "${{ steps.downgrade_test_step.outputs.TEST_RESULT }}" != "success" ]]; then
-          echo "::error::Error detected during tests"
           exit 1
         fi

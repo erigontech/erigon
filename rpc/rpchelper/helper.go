@@ -20,15 +20,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -59,7 +59,7 @@ func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberO
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
-	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
+	// Due to the changed semantics of `latest` block in RPC request, it is now distinct
 	// from the block number corresponding to the plain state
 	var plainStateBlockNumber uint64
 	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {

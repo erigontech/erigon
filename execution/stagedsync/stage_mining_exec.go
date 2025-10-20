@@ -26,26 +26,25 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/aa"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/core"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
@@ -94,7 +93,7 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, ctx context.Context, logger log.Logger, u Unwinder) error {
+func SpawnMiningExecStage(s *StageState, sd *dbstate.SharedDomains, tx kv.TemporalRwTx, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, ctx context.Context, logger log.Logger, u Unwinder) (err error) {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
@@ -104,7 +103,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	var (
 		stateReader state.StateReader
 	)
-	stateReader = state.NewReaderV3(txc.Doms.AsGetter(txc.Ttx))
+	stateReader = state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
@@ -114,20 +113,24 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		if execCfg.blockReader == nil {
-			return rawdb.ReadHeader(txc.Tx, hash, number), nil
+			return rawdb.ReadHeader(tx, hash, number), nil
 		}
-		return execCfg.blockReader.Header(ctx, txc.Tx, hash, number)
+		return execCfg.blockReader.Header(ctx, tx, hash, number)
 	}
 
-	mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
+	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
 	defer mb.Close()
-	sd, err := dbstate.NewSharedDomains(mb, logger)
+	simSd, err := dbstate.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
 	}
-	defer sd.Close()
+	defer simSd.Close()
+
+	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}
 
 	txNum := sd.TxNum()
+
+	core.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
 
 	if len(preparedTxns) > 0 {
 		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, cfg.miningState.MiningConfig.Etherbase, ibs, cfg.interrupt, cfg.payloadId, logger)
@@ -141,10 +144,10 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		var simStateReader state.StateReader
 		var simStateWriter state.StateWriter
 
-		simStateWriter = state.NewWriter(sd.AsPutDel(txc.Ttx), nil, txNum)
-		simStateReader = state.NewReaderV3(sd.AsGetter(txc.Ttx))
+		simStateWriter = state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
+		simStateReader = state.NewReaderV3(simSd.AsGetter(tx))
 
-		executionAt, err := s.ExecutionAt(mb)
+		executionAt, err := s.ExecutionAt(tx)
 		if err != nil {
 			return err
 		}
@@ -195,7 +198,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if current.Receipts == nil {
 		current.Receipts = types.Receipts{}
 	}
-	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}
 
 	if err := cfg.engine.Prepare(chainReader, current.Header, ibs); err != nil {
 		return err
@@ -208,43 +210,43 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	}
 
 	// Simulate the block execution to get the final state root
-	if err = rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
+	if err = rawdb.WriteHeader(tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)
 	}
 	blockHeight := block.NumberU64()
 
-	if err = rawdb.WriteCanonicalHash(txc.Tx, block.Hash(), blockHeight); err != nil {
+	if err = rawdb.WriteCanonicalHash(tx, block.Hash(), blockHeight); err != nil {
 		return fmt.Errorf("cannot write canonical hash: %s", err)
 	}
-	if err = rawdb.WriteHeadHeaderHash(txc.Tx, block.Hash()); err != nil {
+	if err = rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return err
 	}
-	if _, err = rawdb.WriteRawBodyIfNotExists(txc.Tx, block.Hash(), blockHeight, block.RawBody()); err != nil {
+	if _, err = rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), blockHeight, block.RawBody()); err != nil {
 		return fmt.Errorf("cannot write body: %s", err)
 	}
-	if err = rawdb.AppendCanonicalTxNums(txc.Tx, blockHeight); err != nil {
+	if err = rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
 		return err
 	}
-	if err = stages.SaveStageProgress(txc.Tx, kv.Headers, blockHeight); err != nil {
+	if err = stages.SaveStageProgress(tx, kv.Headers, blockHeight); err != nil {
 		return err
 	}
-	if err = stages.SaveStageProgress(txc.Tx, stages.Bodies, blockHeight); err != nil {
+	if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
 		return err
 	}
 	senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
-	if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, txc.Tx, blockHeight, ctx, logger); err != nil {
+	if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, tx, blockHeight, ctx, logger); err != nil {
 		return err
 	}
 
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger, true); err != nil {
+	if err = ExecBlockV3(execS, u, sd, tx, blockHeight, context.Background(), execCfg, false, logger, true); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err
 	}
 
-	rh, err := txc.Doms.ComputeCommitment(ctx, true, blockHeight, txNum, s.LogPrefix())
+	rh, err := sd.ComputeCommitment(ctx, tx, true, blockHeight, txNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}

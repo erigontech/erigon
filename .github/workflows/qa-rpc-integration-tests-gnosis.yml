@@ -161,7 +161,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: ${{ env.TEST_RESULT_DIR }}
+          path: |
+            ${{ env.TEST_RESULT_DIR }}
+            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

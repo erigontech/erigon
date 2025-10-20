@@ -20,6 +20,7 @@ const acceptedWorkflows = [
     '.github/workflows/qa-tip-tracking-gnosis.yml',
     '.github/workflows/qa-tip-tracking-polygon.yml',
     '.github/workflows/qa-tip-tracking.yml',
+    '.github/workflows/qa-tip-tracking-with-load.yml',
     '.github/workflows/qa-txpool-performance-test.yml',
     '.github/workflows/test-all-erigon-race.yml',
     //'.github/workflows/test-all-erigon.yml',
@@ -149,6 +150,7 @@ function mapChain(chain: string | null): string {
     if (chainLowerCaseString.includes('ethereum')) return '⬢ ethereum';
     if (chainLowerCaseString.includes('sepolia')) return '🔹 sepolia';
     if (chainLowerCaseString.includes('holesky')) return '🔸 holesky';
+    if (chainLowerCaseString.includes('hoodi')) return '🔸 hoodi';
     if (chainLowerCaseString.includes('amoy')) return '🟣 amoy';
     if (chainLowerCaseString.includes('chiado')) return '🟢 chiado';
     if (chainLowerCaseString.includes('lighthouse, gnosis')) return '🟢 gnosis / lighthouse';
@@ -165,6 +167,7 @@ function cleanJobName(jobName: string): string {
         .replace(/\s*\(Mainnet\)/i, '')
         .replace(/\s*\(Ethereum\)/i, '')
         .replace(/\s*\(Holesky\)/i, '')
+        .replace(/\s*\(Hoodi\)/i, '')
         .replace(/\s*\(Sepolia\)/i, '')
         .replace(/\s*\(Amoy\)/i, '')
         .replace(/\s*\(Chiado\)/i, '')
