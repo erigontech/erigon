@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math/big"
@@ -1688,6 +1689,25 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 func (tx *ArbitrumSubmitRetryableTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	//TODO implement me
 	panic("implement me")
+}
+
+func (tx *ArbitrumSubmitRetryableTx) PrintMe() {
+	fmt.Printf("Tx Type: %d\n", ArbitrumSubmitRetryableTxType)
+	fmt.Printf("ChainId: %s\n", tx.ChainId.String())
+	fmt.Printf("RequestId: %s\n", tx.RequestId.String())
+	fmt.Printf("From: %s\n", tx.From.String())
+	fmt.Printf("L1BaseFee: %s\n", tx.L1BaseFee.String())
+	fmt.Printf("DepositValue: %s\n", tx.DepositValue.String())
+	fmt.Printf("GasFeeCap: %s\n", tx.GasFeeCap.String())
+	fmt.Printf("Gas: %d\n", tx.Gas)
+	if tx.RetryTo != nil {
+		fmt.Printf("RetryTo: %s\n", tx.RetryTo.String())
+	}
+	fmt.Printf("RetryValue: %s\n", tx.RetryValue.String())
+	fmt.Printf("Beneficiary: %s\n", tx.Beneficiary.String())
+	fmt.Printf("MaxSubmissionFee: %s\n", tx.MaxSubmissionFee.String())
+	fmt.Printf("FeeRefundAddr: %s\n", tx.FeeRefundAddr.String())
+	fmt.Printf("RetryData: 0x%s\n", hex.EncodeToString(tx.RetryData))
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Hash() common.Hash {

@@ -781,6 +781,14 @@ func GetBlockByNumber(client, receiptClient *rpc.Client, blockNumber *big.Int, v
 	// Derive the TxHash from the decoded transactions.
 	txHash := types.DeriveSha(txs)
 	if verify && txHash != block.TxHash {
+		log.Error("transactionHash mismatch", "expected", block.TxHash, "got", txHash, "num", blockNumber)
+		for i, tx := range txs {
+			log.Error("tx", "index", i, "hash", tx.Hash())
+			if tx.Type() == types.ArbitrumSubmitRetryableTxType {
+				srtx := tx.(*types.ArbitrumSubmitRetryableTx)
+				srtx.PrintMe()
+			}
+		}
 		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", block.TxHash, txHash, blockNumber)
 	}
 	blk := types.NewBlockFromNetwork(&types.Header{
